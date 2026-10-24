@@ -124,6 +124,110 @@ public class PlumbingTests
     }
 
     [Fact]
+    public async Task Log_events_carry_tenant_and_user_from_claims()
+    {
+        var sink = new CapturingSink();
+        await using var app = await TestHost.StartAsync(sink: sink);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/test/whoami");
+        request.Headers.Add("X-Test-Tenant", "acme");
+        request.Headers.Add("X-Test-User", "user-7");
+        (await app.GetTestClient().SendAsync(request, Ct)).EnsureSuccessStatusCode();
+
+        var warning = sink.Events.Single(e => e.RenderMessage() == "whoami-event");
+        warning.Properties["TenantId"].ToString().ShouldBe("\"acme\"");
+        warning.Properties["UserId"].ToString().ShouldBe("\"user-7\"");
+    }
+
+    [Theory]
+    [InlineData("has space")]
+    [InlineData("bad/chars?<script>")]
+    [InlineData("lineé")]
+    public async Task Unsafe_correlation_id_is_replaced(string supplied)
+    {
+        await using var app = await TestHost.StartAsync();
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/test/ping");
+        request.Headers.TryAddWithoutValidation("X-Correlation-Id", supplied);
+        var response = await app.GetTestClient().SendAsync(request, Ct);
+
+        var id = response.Headers.GetValues("X-Correlation-Id").Single();
+        id.ShouldNotBe(supplied);
+        id.ShouldMatch("^[A-Za-z0-9._-]+$");
+    }
+
+    [Fact]
+    public async Task Oversized_correlation_id_is_replaced()
+    {
+        await using var app = await TestHost.StartAsync();
+        var supplied = new string('a', 129);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/test/ping");
+        request.Headers.Add("X-Correlation-Id", supplied);
+        var response = await app.GetTestClient().SendAsync(request, Ct);
+
+        var id = response.Headers.GetValues("X-Correlation-Id").Single();
+        id.ShouldNotBe(supplied);
+        id.ShouldMatch("^[A-Za-z0-9._-]{1,128}$");
+    }
+
+    [Fact]
+    public async Task Unknown_route_returns_problem_details_404()
+    {
+        await using var app = await TestHost.StartAsync();
+
+        var response = await app.GetTestClient().GetAsync("/nope", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+    }
+
+    [Fact]
+    public async Task Unhandled_exception_returns_generic_500_without_details()
+    {
+        await using var app = await TestHost.StartAsync();
+
+        var response = await app.GetTestClient().GetAsync("/api/v1/test/crash", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        body.ShouldNotContain("secret-internal-detail");
+        body.ShouldNotContain("InvalidOperationException");
+        body.ShouldNotContain(" at ");
+    }
+
+    [Fact]
+    public async Task Handled_domain_exception_is_not_logged_as_unhandled()
+    {
+        var sink = new CapturingSink();
+        await using var app = await TestHost.StartAsync(sink: sink);
+
+        await app.GetTestClient().GetAsync("/api/v1/test/domain-error", Ct);
+
+        sink.Events.ShouldNotContain(e => e.Level >= Serilog.Events.LogEventLevel.Error);
+    }
+
+    [Fact]
+    public async Task Console_sink_is_used_when_there_is_no_serilog_section()
+    {
+        var original = Console.Out;
+        using var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            await using var app = await TestHost.StartAsync();
+            (await app.GetTestClient().GetAsync("/api/v1/test/log", Ct)).EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        captured.ToString().ShouldContain("warning-event");
+    }
+
+    [Fact]
     public async Task Invalid_options_fail_at_startup()
     {
         await Should.ThrowAsync<OptionsValidationException>(
@@ -173,6 +277,8 @@ public class PlumbingTests
         context.Request.Headers["X-Api-Key"] = "secret-key";
         context.Request.Headers["Authorization"] = "Bearer abc";
         context.Request.Headers["Cookie"] = "session=1";
+        context.Request.Headers["Set-Cookie"] = "s=2";
+        context.Request.Headers["Proxy-Authorization"] = "Basic xyz";
         context.Request.Headers["Accept"] = "application/json";
 
         var sink = new CapturingSink();
@@ -186,6 +292,8 @@ public class PlumbingTests
         rendered.ShouldNotContain("secret-key");
         rendered.ShouldNotContain("Bearer abc");
         rendered.ShouldNotContain("session=1");
+        rendered.ShouldNotContain("s=2");
+        rendered.ShouldNotContain("Basic xyz");
         rendered.ShouldContain("application/json");
         rendered.ShouldContain(HeaderMaskingPolicy.Mask);
     }

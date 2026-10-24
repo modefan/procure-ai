@@ -17,6 +17,16 @@ public sealed class TestController(ILogger<TestController> logger) : ControllerB
     [HttpGet("domain-error")]
     public IActionResult DomainError() => throw new DomainException("Budget exceeded");
 
+    [HttpGet("crash")]
+    public IActionResult Crash() => throw new InvalidOperationException("secret-internal-detail");
+
+    [HttpGet("whoami")]
+    public IActionResult WhoAmI()
+    {
+        logger.LogWarning("whoami-event");
+        return Ok();
+    }
+
     [HttpGet("log")]
     public IActionResult Log()
     {

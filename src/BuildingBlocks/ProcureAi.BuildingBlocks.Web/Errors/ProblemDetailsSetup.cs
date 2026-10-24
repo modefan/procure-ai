@@ -1,4 +1,7 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using ProcureAi.BuildingBlocks.Domain;
 
 namespace ProcureAi.BuildingBlocks.Web.Errors;
 
@@ -12,6 +15,10 @@ internal static class ProblemDetailsSetup
     {
         services.AddProblemDetails();
         services.AddExceptionHandler<DomainExceptionHandler>();
+        // A DomainException our handler dealt with is an expected outcome, not an unhandled error to log.
+        services.Configure<ExceptionHandlerOptions>(options =>
+            options.SuppressDiagnosticsCallback = context =>
+                context.ExceptionHandledBy == ExceptionHandledType.ExceptionHandlerService && context.Exception is DomainException);
         return services;
     }
 }

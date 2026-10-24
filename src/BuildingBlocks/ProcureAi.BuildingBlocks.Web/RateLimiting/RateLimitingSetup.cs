@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-namespace ProcureAi.BuildingBlocks.Web.Options;
+namespace ProcureAi.BuildingBlocks.Web.RateLimiting;
 
 internal static class RateLimitingSetup
 {

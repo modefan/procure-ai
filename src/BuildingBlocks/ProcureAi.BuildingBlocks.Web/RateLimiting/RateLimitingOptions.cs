@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace ProcureAi.BuildingBlocks.Web.Options;
+namespace ProcureAi.BuildingBlocks.Web.RateLimiting;
 
 /// <summary>The <c>RateLimiting</c> configuration section (fixed window).</summary>
 public sealed class RateLimitingOptions

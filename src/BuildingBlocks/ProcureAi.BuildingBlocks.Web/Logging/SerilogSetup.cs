@@ -16,12 +16,22 @@ internal static class SerilogSetup
     public static WebApplicationBuilder AddProcureAiSerilog(this WebApplicationBuilder builder, string serviceName)
     {
         builder.Services.AddHttpContextAccessor();
-        builder.Services.AddSerilog((services, logger) => logger
-            .ReadFrom.Configuration(services.GetRequiredService<IConfiguration>())
-            .ReadFrom.Services(services)
-            .Enrich.FromLogContext()
-            .Enrich.With(new LogContextEnricher(serviceName, services.GetRequiredService<IHttpContextAccessor>()))
-            .Destructure.With<HeaderMaskingPolicy>());
+        builder.Services.AddSerilog((services, logger) =>
+        {
+            var configuration = services.GetRequiredService<IConfiguration>();
+            logger
+                .ReadFrom.Configuration(configuration)
+                .ReadFrom.Services(services)
+                .Enrich.FromLogContext()
+                .Enrich.With(new LogContextEnricher(serviceName, services.GetRequiredService<IHttpContextAccessor>()))
+                .Destructure.With<HeaderMaskingPolicy>();
+
+            // A service without a Serilog section must never log nothing at all.
+            if (!configuration.GetSection("Serilog").Exists())
+            {
+                logger.WriteTo.Console();
+            }
+        });
         return builder;
     }
 }

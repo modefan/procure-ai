@@ -39,6 +39,20 @@ public static class TestHost
         builder.Services.AddControllers().AddApplicationPart(typeof(TestController).Assembly);
 
         var app = builder.Build();
+        // Stands in for authentication (Task 5): the test supplies the user through headers.
+        app.Use((context, next) =>
+        {
+            if (context.Request.Headers.TryGetValue("X-Test-Tenant", out var tenant))
+            {
+                context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [
+                    new System.Security.Claims.Claim("tenant", tenant.ToString()),
+                    new System.Security.Claims.Claim("sub", context.Request.Headers["X-Test-User"].ToString()),
+                ], "test"));
+            }
+
+            return next(context);
+        });
         app.UseProcureAiWeb();
         await app.StartAsync();
         return app;

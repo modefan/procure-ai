@@ -8,7 +8,7 @@ namespace ProcureAi.BuildingBlocks.Web.Logging;
 /// <summary>Adds service name, trace ID, tenant and user ID (IDs only, never personal data) to every log event.</summary>
 internal sealed class LogContextEnricher(string serviceName, IHttpContextAccessor accessor) : ILogEventEnricher
 {
-    private const string TenantClaim = "tenant_id";
+    private const string TenantClaim = "tenant";
     private const string UserClaim = "sub";
 
     public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)

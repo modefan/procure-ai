@@ -10,7 +10,7 @@ public sealed class HeaderMaskingPolicy : IDestructuringPolicy
     public const string Mask = "***";
 
     private static readonly HashSet<string> Sensitive =
-        new(["X-Api-Key", "Authorization", "Cookie"], StringComparer.OrdinalIgnoreCase);
+        new(["X-Api-Key", "Authorization", "Cookie", "Set-Cookie", "Proxy-Authorization"], StringComparer.OrdinalIgnoreCase);
 
     public bool TryDestructure(
         object value, ILogEventPropertyValueFactory propertyValueFactory, out LogEventPropertyValue result)

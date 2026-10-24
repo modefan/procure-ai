@@ -6,6 +6,7 @@ using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Logging;
 using ProcureAi.BuildingBlocks.Web.OpenApi;
 using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.RateLimiting;
 using ProcureAi.BuildingBlocks.Web.Versioning;
 
 namespace ProcureAi.BuildingBlocks.Web;
@@ -38,6 +39,7 @@ public static class WebExtensions
     {
         app.UseMiddleware<CorrelationIdMiddleware>();
         app.UseExceptionHandler();
+        app.UseStatusCodePages();
         app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
