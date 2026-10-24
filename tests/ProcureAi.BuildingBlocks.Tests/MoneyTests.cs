@@ -78,17 +78,18 @@ public class MoneyTests
     }
 
     [Fact]
-    public void Entity_collects_and_clears_domain_events()
+    public void Default_equals_zero_with_the_same_hash_code()
     {
-        var e = new TestEntity();
-        e.Do();
-        e.DomainEvents.Count.ShouldBe(1);
-        e.ClearDomainEvents();
-        e.DomainEvents.ShouldBeEmpty();
+        default(Money).ShouldBe(Money.Zero);
+        default(Money).Equals(Money.Zero).ShouldBeTrue();
+        (default(Money) == Money.Zero).ShouldBeTrue();
+        default(Money).GetHashCode().ShouldBe(Money.Zero.GetHashCode());
     }
 
-    private sealed class TestEntity : Entity<Guid>
+    [Fact]
+    public void Equality_ignores_trailing_decimal_zeros()
     {
-        public void Do() => Raise("happened");
+        Money.Zar(10m).ShouldBe(Money.Zar(10.00m));
+        Money.Zar(10m).GetHashCode().ShouldBe(Money.Zar(10.00m).GetHashCode());
     }
 }

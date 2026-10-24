@@ -6,7 +6,7 @@ public abstract class Entity<TId>
 
     public TId Id { get; protected set; } = default!;
 
-    public IReadOnlyList<object> DomainEvents => _domainEvents;
+    public IReadOnlyList<object> DomainEvents => _domainEvents.AsReadOnly();
 
     protected void Raise(object @event) => _domainEvents.Add(@event);
 

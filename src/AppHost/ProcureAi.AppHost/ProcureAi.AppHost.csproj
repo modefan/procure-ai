@@ -3,6 +3,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <UserSecretsId>procure-ai-apphost</UserSecretsId>
+    <!-- ASPIRE010: AspireUseCliBundle defaults to false (orchestration comes from NuGet packages). Enabling it needs the separately installed Aspire CLI bundle, which we do not use. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

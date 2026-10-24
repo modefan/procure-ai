@@ -8,7 +8,7 @@ namespace ProcureAi.BuildingBlocks.Domain;
 /// (so it can be detected), but any arithmetic, VAT or display on it throws <see cref="DomainException"/>.
 /// A default(Money) is ZAR zero.
 /// </summary>
-public readonly record struct Money
+public readonly record struct Money : IEquatable<Money>
 {
     public const string ZarCurrency = "ZAR";
 
@@ -24,6 +24,10 @@ public readonly record struct Money
     public decimal Amount { get; }
 
     public string Currency => _currency ?? ZarCurrency;
+
+    public bool Equals(Money other) => Amount == other.Amount && Currency == other.Currency;
+
+    public override int GetHashCode() => HashCode.Combine(Amount, Currency);
 
     public static Money Zero => new(0m, ZarCurrency);
 
