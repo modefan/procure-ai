@@ -1,0 +1,11 @@
+{
+  "Resources": {
+    "Postgres": { "MemoryMb": 768, "Cpus": 1 },
+    "Mongo": { "MemoryMb": 512, "Cpus": 1 },
+    "Keycloak": { "MemoryMb": 768, "Cpus": 1 },
+    "Debezium": { "MemoryMb": 512, "Cpus": 1 },
+    "RabbitMq": { "MemoryMb": 384, "Cpus": 1 },
+    "Redis": { "MemoryMb": 192, "Cpus": 1 },
+    "Mailpit": { "MemoryMb": 64, "Cpus": 1 }
+  }
+}
