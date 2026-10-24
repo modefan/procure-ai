@@ -1,5 +1,6 @@
-using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ProcureAi.AppHost;
 
 var builder = DistributedApplication.CreateBuilder(args);
@@ -56,23 +57,21 @@ var rabbitmq = builder.AddRabbitMQ(ResourceNames.RabbitMq)
     // Set through an Erlang argument: copying a conf.d file in made RabbitMQ intermittently fail to read its cookie (eacces).
     .WithEnvironment("RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS", $"-rabbit vm_memory_high_watermark {{absolute,\"{limits.RabbitMq.VmMemoryHighWatermarkAbsolute}\"}}")
     .WithContainerLimits(limits.RabbitMq);
-// Debezium's RabbitMQ sink only publishes; the topic exchange it targets must already exist.
-// (Declared here, before dependent resources start, rather than via load_definitions, which would also
-// require users and a password hash in a file.)
-builder.Eventing.Subscribe<ResourceReadyEvent>(rabbitmq.Resource, async (@event, ct) =>
-{
-    var management = rabbitmq.GetEndpoint("management");
-    var user = await rabbitmq.Resource.UserNameReference.GetValueAsync(ct);
-    var password = await rabbitmq.Resource.PasswordParameter.GetValueAsync(ct);
-    using var http = new HttpClient { BaseAddress = new Uri($"http://{management.Host}:{management.Port}") };
-    http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
-        "Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{user}:{password}")));
-    using var response = await http.PutAsJsonAsync(
-        $"/api/exchanges/%2F/{ResourceNames.CdcExchange}",
-        new { type = "topic", durable = true, auto_delete = false, @internal = false },
-        ct);
-    response.EnsureSuccessStatusCode();
-});
+// Debezium's RabbitMQ sink only publishes; the topic exchange it targets must already exist. A health check on
+// rabbitmq declares it, so WaitFor(rabbitmq) (documented to wait for all health checks to be Healthy) guarantees
+// the order and a failure shows as rabbitmq Unhealthy. (Not load_definitions: that would also need users and a
+// password hash in a file.)
+var rabbitManagement = rabbitmq.GetEndpoint("management");
+builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
+    CdcExchangeHealthCheck.Name,
+    sp => new CdcExchangeHealthCheck(
+        rabbitManagement,
+        rabbitmq.Resource,
+        ResourceNames.CdcExchange,
+        sp.GetRequiredService<ResourceLoggerService>().GetLogger(rabbitmq.Resource)),
+    failureStatus: null,
+    tags: null));
+rabbitmq.WithHealthCheck(CdcExchangeHealthCheck.Name);
 var keycloak = builder.AddContainer(ResourceNames.Keycloak, "quay.io/keycloak/keycloak", "26.8.1")
     .WithHttpEndpoint(targetPort: 8080, name: "http")
     .WithHttpEndpoint(targetPort: 9000, name: "management")
@@ -108,9 +107,3 @@ if (useDataVolumes)
 }
 
 builder.Build().Run();
-
-
-
-
-
-

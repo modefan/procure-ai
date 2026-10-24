@@ -31,9 +31,9 @@ public sealed class ResourcesOptions
             .AddOptions<ResourcesOptions>()
             .Bind(configuration.GetSection(SectionName))
             .ValidateDataAnnotations()
-            .ValidateOnStart()
             .Services.BuildServiceProvider();
 
+        // Reading .Value runs the validation right here (no host, so ValidateOnStart would not apply).
         return provider.GetRequiredService<IOptions<ResourcesOptions>>().Value;
     }
 }
@@ -87,4 +87,3 @@ public sealed class AngularLimits
 {
     [Required] public string NodeOptions { get; set; } = null!;
 }
-

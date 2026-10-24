@@ -25,8 +25,7 @@
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\testcontainers.settings.json" Link="testcontainers.settings.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\AppHost\ProcureAi.AppHost\appsettings.json" Link="apphost.appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
-
-

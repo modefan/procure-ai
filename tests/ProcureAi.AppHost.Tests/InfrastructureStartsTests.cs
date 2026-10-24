@@ -1,6 +1,8 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using System.Text.Json;
 using MongoDB.Bson;
@@ -116,6 +118,26 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
         doc.RootElement.GetProperty("status").GetString().ShouldBe("UP");
     }
 
+    [Fact]
+    public async Task Cdc_exchange_exists_before_rabbitmq_reports_healthy()
+    {
+        await fixture.WaitHealthyAsync("rabbitmq");
+        var rabbitmq = fixture.App.Services.GetRequiredService<DistributedApplicationModel>()
+            .Resources.OfType<RabbitMQServerResource>().Single();
+        var user = await rabbitmq.UserNameReference.GetValueAsync(TestContext.Current.CancellationToken);
+        var password = await rabbitmq.PasswordParameter.GetValueAsync(TestContext.Current.CancellationToken);
+
+        using var http = fixture.App.CreateHttpClient("rabbitmq", "management");
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{user}:{password}")));
+        using var response = await http.GetAsync("/api/exchanges/%2F/cdc", TestContext.Current.CancellationToken);
+
+        response.IsSuccessStatusCode.ShouldBeTrue($"GET exchange cdc returned {(int)response.StatusCode}");
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        doc.RootElement.GetProperty("type").GetString().ShouldBe("topic");
+        doc.RootElement.GetProperty("durable").GetBoolean().ShouldBeTrue();
+    }
+
     private static async Task<(long Memory, long NanoCpus)> InspectAsync(string containerId)
     {
         var psi = new ProcessStartInfo("docker", ["inspect", "--format", "{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}", containerId])
@@ -129,6 +151,3 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
         return (long.Parse(output[0]), long.Parse(output[1]));
     }
 }
-
-
-

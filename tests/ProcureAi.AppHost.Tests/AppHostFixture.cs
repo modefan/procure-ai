@@ -15,7 +15,7 @@ public sealed class AppHostFixture : IAsyncLifetime
 
     public DistributedApplication App => _app ?? throw new InvalidOperationException("AppHost not started.");
 
-    /// <summary>Memory and CPU caps from tests/testcontainers.settings.json.</summary>
+    /// <summary>Resource caps from tests/testcontainers.settings.json (same values as the AppHost Resources section).</summary>
     public IConfigurationSection Limits { get; } = new ConfigurationBuilder()
         .AddJsonFile("testcontainers.settings.json", optional: false)
         .Build()

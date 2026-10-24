@@ -14,4 +14,3 @@ public static class ResourceNames
     public const string Debezium = "debezium";
     public const string CdcExchange = "cdc";
 }
-

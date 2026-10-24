@@ -1,11 +1,14 @@
 {
+  "_comment": "Same values as the Resources section of src/AppHost/ProcureAi.AppHost/appsettings.json (ResourceSettingsTests checks this).",
   "Resources": {
-    "Postgres": { "MemoryMb": 768, "Cpus": 1 },
-    "Mongo": { "MemoryMb": 512, "Cpus": 1 },
-    "Keycloak": { "MemoryMb": 768, "Cpus": 1 },
-    "Debezium": { "MemoryMb": 512, "Cpus": 1 },
-    "RabbitMq": { "MemoryMb": 384, "Cpus": 1 },
-    "Redis": { "MemoryMb": 192, "Cpus": 1 },
-    "Mailpit": { "MemoryMb": 64, "Cpus": 1 }
+    "Postgres": { "MemoryMb": 768, "Cpus": 1, "SharedBuffers": "128MB", "WorkMem": "4MB" },
+    "Mongo": { "MemoryMb": 512, "Cpus": 1, "WiredTigerCacheGb": 0.25 },
+    "Keycloak": { "MemoryMb": 768, "Cpus": 1, "JavaHeapOpts": "-Xms256m -Xmx512m" },
+    "Debezium": { "MemoryMb": 512, "Cpus": 1, "JavaOpts": "-Xmx256m" },
+    "RabbitMq": { "MemoryMb": 384, "Cpus": 1, "VmMemoryHighWatermarkAbsolute": "256MiB" },
+    "Redis": { "MemoryMb": 192, "Cpus": 1, "MaxMemory": "128mb", "MaxMemoryPolicy": "volatile-lru" },
+    "Mailpit": { "MemoryMb": 64, "Cpus": 1 },
+    "DotNet": { "GcServer": 0, "GcConserveMemory": 5, "GcHeapHardLimit": "0x10000000" },
+    "Angular": { "NodeOptions": "--max-old-space-size=1024" }
   }
 }
