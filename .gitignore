@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 node_modules/
 .angular/
 playwright-report/
+
+# playwright-cli output (screenshots, snapshots, traces from testing)
+.playwright-cli/
