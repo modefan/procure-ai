@@ -203,6 +203,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         var delivery = new DeliveryOptions();
         delivery.Headers[CallerHeaders.UserId] = "tom";
         delivery.Headers[CallerHeaders.TenantId] = tenant;
+        delivery.Headers[CallerHeaders.CallingService] = "approvals-api";
 
         var created = await app.Bus.InvokeAsync<RequestDto>(NewCreate(), delivery);
 
@@ -214,7 +215,8 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         audit.UserId.ShouldBe("tom");
         audit.ActorId.ShouldBe("service:requests-api");
         audit.TenantId.ShouldBe(tenant);
-        audit.CallingService.ShouldBeNull();
+        // A consumer reads the sender of the message as the calling service.
+        audit.CallingService.ShouldBe("approvals-api");
     }
 
     [Fact]

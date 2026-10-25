@@ -17,6 +17,7 @@ public sealed class AuthTestController(ICurrentUser user) : ControllerBase
         user.UserId,
         user.TenantId,
         user.IsAdminApiKey,
+        user.IsServiceAccount,
         user.CallingService,
         user.OnBehalfOfUser,
         Roles = user.Roles.Order().ToArray(),

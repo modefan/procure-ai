@@ -15,12 +15,12 @@ public sealed record ContinueChain(Guid Marker);
 
 public static class ChainHandlers
 {
-    public static ConcurrentDictionary<Guid, (string UserId, string ActorId, string? TenantId, IReadOnlyDictionary<string, string?> Headers)> Seen { get; } = new();
+    public static ConcurrentDictionary<Guid, (string UserId, string ActorId, string? TenantId, string? CallingService, IReadOnlyDictionary<string, string?> Headers)> Seen { get; } = new();
 
     public static ContinueChain Handle(StartChain message) => new(message.Marker);
 
     public static void Handle(ContinueChain message, ICallerContext caller, Envelope envelope) =>
-        Seen[message.Marker] = (caller.UserId, caller.ActorId, caller.TenantId, new Dictionary<string, string?>(envelope.Headers));
+        Seen[message.Marker] = (caller.UserId, caller.ActorId, caller.TenantId, caller.CallingService, new Dictionary<string, string?>(envelope.Headers));
 }
 
 public sealed class CallerPropagationTests
@@ -40,6 +40,8 @@ public sealed class CallerPropagationTests
         var delivery = new DeliveryOptions();
         delivery.Headers[CallerHeaders.UserId] = "tom";
         delivery.Headers[CallerHeaders.TenantId] = "acme";
+        // A copied or forged sender must not survive: the second message names the service that really sent it.
+        delivery.Headers[CallerHeaders.CallingService] = "approvals-api";
 
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
             .ExecuteAndWaitAsync(c => c.SendAsync(new StartChain(marker), delivery));
@@ -49,6 +51,8 @@ public sealed class CallerPropagationTests
         seen.Headers[CallerHeaders.UserId].ShouldBe("tom");
         seen.Headers[CallerHeaders.TenantId].ShouldBe("acme");
         seen.Headers.Values.ShouldNotContain(v => v != null && v.Contains("service:", StringComparison.Ordinal));
+        seen.Headers[CallerHeaders.CallingService].ShouldBe("test-service");
+        seen.CallingService.ShouldBe("test-service");
         seen.UserId.ShouldBe("tom");
         seen.TenantId.ShouldBe("acme");
         seen.ActorId.ShouldBe("service:test-service");

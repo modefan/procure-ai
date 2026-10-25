@@ -254,6 +254,85 @@ public class AuthTests
         body.GetProperty("onBehalfOfUser").ValueKind.ShouldBe(JsonValueKind.Null);
     }
 
+    private const string InternalClient = "procure-internal";
+
+    private static readonly (string Name, string Value)[] ForgedHeaders =
+    [
+        ("X-Calling-Service", "approvals-api"), ("X-On-Behalf-Of-User", "tom"), ("X-Tenant-Id", "globex"),
+    ];
+
+    private static async Task<JsonElement> MeAsync(
+        string? internalClientId, string? azp, params (string Name, string Value)[] headers)
+    {
+        var config = internalClientId is null ? null : new Dictionary<string, string?> { ["Auth:InternalClientId"] = internalClientId };
+        await using var app = await TestHost.StartAsync(config);
+        var claims = azp is null ? null : new Dictionary<string, object> { ["azp"] = azp };
+        var token = TestAuth.CreateToken("svc-account", "acme", claims, "requester");
+        var response = await app.GetTestClient().SendAsync(Request(HttpMethod.Get, Me, bearer: token, headers: headers), Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+    }
+
+    private static void ShouldReadNothing(JsonElement body)
+    {
+        body.GetProperty("isServiceAccount").GetBoolean().ShouldBeFalse();
+        body.GetProperty("callingService").ValueKind.ShouldBe(JsonValueKind.Null);
+        body.GetProperty("onBehalfOfUser").ValueKind.ShouldBe(JsonValueKind.Null);
+        body.GetProperty("tenantId").GetString().ShouldBe("acme");
+    }
+
+    [Fact]
+    public async Task Normal_user_jwt_cannot_set_calling_service_on_behalf_of_or_tenant_by_header()
+    {
+        // Even with an internal client configured: this token's azp is not it.
+        ShouldReadNothing(await MeAsync(InternalClient, "procure-web", ForgedHeaders));
+        ShouldReadNothing(await MeAsync(InternalClient, null, ForgedHeaders));
+    }
+
+    [Fact]
+    public async Task Service_account_token_reads_calling_service_on_behalf_of_and_tenant_headers()
+    {
+        var body = await MeAsync(InternalClient, InternalClient, ForgedHeaders);
+
+        body.GetProperty("isServiceAccount").GetBoolean().ShouldBeTrue();
+        body.GetProperty("isAdminApiKey").GetBoolean().ShouldBeFalse();
+        body.GetProperty("callingService").GetString().ShouldBe("approvals-api");
+        body.GetProperty("onBehalfOfUser").GetString().ShouldBe("tom");
+        body.GetProperty("tenantId").GetString().ShouldBe("globex");
+    }
+
+    [Fact]
+    public async Task Token_with_a_different_azp_is_not_a_service_account()
+    {
+        ShouldReadNothing(await MeAsync(InternalClient, "some-other-client", ForgedHeaders));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Without_an_internal_client_id_no_token_is_a_service_account(string? internalClientId)
+    {
+        // An empty setting must not match a token without azp or with an empty one.
+        ShouldReadNothing(await MeAsync(internalClientId, "", ForgedHeaders));
+        ShouldReadNothing(await MeAsync(internalClientId, InternalClient, ForgedHeaders));
+    }
+
+    [Theory]
+    [InlineData("bad value<script>")]
+    [InlineData("has space")]
+    [InlineData("tooLong-0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789")]
+    public async Task Service_account_header_values_failing_the_check_are_rejected(string value)
+    {
+        var body = await MeAsync(InternalClient, InternalClient,
+            ("X-Calling-Service", value), ("X-On-Behalf-Of-User", value), ("X-Tenant-Id", value));
+
+        body.GetProperty("isServiceAccount").GetBoolean().ShouldBeTrue();
+        body.GetProperty("callingService").ValueKind.ShouldBe(JsonValueKind.Null);
+        body.GetProperty("onBehalfOfUser").ValueKind.ShouldBe(JsonValueKind.Null);
+        // A service account takes its tenant from the header only; a rejected header means no tenant, never the token's claim.
+        body.GetProperty("tenantId").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
     [Fact]
     public async Task Jwt_tenant_claim_with_unsafe_characters_is_treated_as_no_tenant()
     {

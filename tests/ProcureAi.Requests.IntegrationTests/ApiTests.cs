@@ -176,8 +176,35 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         var headers = await probe.TakeHeadersAsync(queue);
         headers["x-tenant-id"].ShouldBe(tenant);
         headers["x-user-id"].ShouldBe("claude-admin");
+        headers["x-calling-service"].ShouldBe("requests-api");
         headers["x-correlation-id"].ShouldBe(correlationId);
         headers.Keys.ShouldNotContain(k => k.Contains("authorization", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Published_message_names_requests_api_as_sender_whoever_called(bool adminKeyClaimingAnotherService)
+    {
+        var tenant = NewTenant("sender");
+        var created = await CreateAsync(tenant);
+        var probe = new RabbitProbe(infra.RabbitConnectionString);
+        var queue = await probe.BindQueueAsync("requests");
+        var user = TestAuth.CreateToken("alice", tenant, "requester");
+        var request = adminKeyClaimingAnotherService
+            ? Req(HttpMethod.Post, $"{Requests}/{created.Id}/submit", null, tenant, ifMatch: ETagOf(created), idempotencyKey: Guid.NewGuid().ToString())
+            : Req(HttpMethod.Post, $"{Requests}/{created.Id}/submit", null, bearer: user, ifMatch: ETagOf(created), idempotencyKey: Guid.NewGuid().ToString());
+        if (adminKeyClaimingAnotherService)
+        {
+            request.Headers.Add("X-Calling-Service", "approvals-api");
+        }
+
+        (await _client.SendAsync(request, Ct)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+
+        await probe.WaitForCountAsync(queue, 1, TimeSpan.FromSeconds(30));
+        var headers = await probe.TakeHeadersAsync(queue);
+        // The sender is this service, not the HTTP caller's claim (a normal user has none; the key may claim any).
+        headers["x-calling-service"].ShouldBe("requests-api");
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using Serilog.Context;
 using Wolverine;
+using Wolverine.Runtime;
 
 namespace ProcureAi.BuildingBlocks.Messaging;
 
@@ -38,7 +39,11 @@ public static class CallerPropagationExtensions
     }
 }
 
-/// <summary>Stamps the caller of the current HTTP request (or of the message being handled) on every outgoing envelope.</summary>
+/// <summary>
+/// Stamps the caller of the current HTTP request (or of the message being handled) on every outgoing envelope.
+/// <c>x-calling-service</c> is always the sending service's own name, never copied or taken from the HTTP caller,
+/// so a message cannot claim to come from a service that did not send it.
+/// </summary>
 internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelopeRule
 {
     public void Modify(Envelope envelope) => StampFromHttp(envelope);
@@ -51,7 +56,7 @@ internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelo
         {
             foreach (var name in CallerHeaders.All)
             {
-                if (incoming.Headers.TryGetValue(name, out var value))
+                if (name != CallerHeaders.CallingService && incoming.Headers.TryGetValue(name, out var value))
                 {
                     Set(outgoing, name, value);
                 }
@@ -59,6 +64,8 @@ internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelo
         }
 
         StampFromHttp(outgoing);
+        var sender = (originator as MessageContext)?.Runtime.Services.GetService<ServiceIdentity>();
+        Set(outgoing, CallerHeaders.CallingService, sender?.Name);
     }
 
     private void StampFromHttp(Envelope envelope)
@@ -73,8 +80,9 @@ internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelo
         {
             Set(envelope, CallerHeaders.UserId, caller.UserId);
             Set(envelope, CallerHeaders.TenantId, caller.TenantId);
-            Set(envelope, CallerHeaders.CallingService, caller.CallingService);
         }
+
+        Set(envelope, CallerHeaders.CallingService, http.RequestServices.GetService<ServiceIdentity>()?.Name);
 
         Set(envelope, CallerHeaders.CorrelationId, http.Items[CorrelationIdMiddleware.ItemKey] as string);
     }
