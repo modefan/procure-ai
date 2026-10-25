@@ -4,6 +4,8 @@ using System.Text.RegularExpressions;
 using ArchUnitNET.Domain;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnitV3;
+using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using Shouldly;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
@@ -28,7 +30,8 @@ public sealed class LayerRulesTests
         .ToArray();
 
     // Loaded together with the layers so that dependencies on them resolve to real types, not stubs.
-    private static readonly Assembly[] Supporting = [typeof(IAuditContextSource).Assembly];
+    private static readonly Assembly[] Supporting =
+        [typeof(IAuditContextSource).Assembly, typeof(ICallerContext).Assembly, typeof(CallerContext).Assembly];
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies([.. LayerAssemblies, .. Supporting.Except(LayerAssemblies)])
@@ -87,6 +90,10 @@ public sealed class LayerRulesTests
             .ResideInNamespaceMatching(@"^ProcureAi\.\w+\.(Infrastructure|Api)(\..*)?$")
             .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
                 @"^(Microsoft\.AspNetCore|Npgsql|StackExchange|ZiggyCreatures|MongoDB)(\..*)?$")
+            // The caller reaches Application as ICallerContext (BuildingBlocks.Application); the web, messaging and persistence
+            // building blocks are for the outer layers.
+            .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
+                @"^ProcureAi\.BuildingBlocks\.(Web|Messaging|Persistence)(\..*)?$")
             .Check(Architecture);
     }
 
@@ -154,7 +161,7 @@ public sealed class LayerRulesTests
     [Fact]
     public void Every_DbContext_provides_the_audit_context()
     {
-        // AuditSaveChangesInterceptor reads user and tenant through IAuditContextSource; a DbContext without it would
+        // AuditSaveChangesInterceptor reads the caller through IAuditContextSource; a DbContext without it would
         // silently record every change as "system".
         var infrastructure = Layer("Infrastructure");
         Classes().That().ResideInAssembly(infrastructure[0], infrastructure[1..])

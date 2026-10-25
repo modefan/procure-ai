@@ -2,7 +2,9 @@
   <Folder Name="/src/">
     <Project Path="src/AppHost/ProcureAi.AppHost/ProcureAi.AppHost.csproj" />
     <Project Path="src/Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
+    <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
+    <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Messaging/ProcureAi.BuildingBlocks.Messaging.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
     <Project Path="src/Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />

@@ -20,6 +20,8 @@ public static class ModelBuilderExtensions
             entry.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
             entry.Property(e => e.TenantId).HasColumnName("tenant_id").HasMaxLength(100);
             entry.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(100).IsRequired();
+            entry.Property(e => e.ActorId).HasColumnName("actor_id").HasMaxLength(100).IsRequired();
+            entry.Property(e => e.CallingService).HasColumnName("calling_service").HasMaxLength(100);
             entry.Property(e => e.CorrelationId).HasColumnName("correlation_id").HasMaxLength(128);
             entry.Property(e => e.TransactionId).HasColumnName("transaction_id")
                 .HasDefaultValueSql(TransactionIdSql).ValueGeneratedOnAdd();

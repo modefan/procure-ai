@@ -1,6 +1,10 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Requests.Application.Commands;
@@ -15,6 +19,11 @@ namespace ProcureAi.Requests.IntegrationTests;
 public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
 {
     private static readonly TimeSpan CdcTimeout = TimeSpan.FromSeconds(30);
+
+    private static readonly JsonSerializerOptions ResponseJson = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     private RequestsHost _app = null!;
 
@@ -33,6 +42,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
     {
         _app.Caller.TenantId = tenant;
         _app.Caller.UserId = user;
+        _app.Caller.ActorId = user;
         return await _app.Bus.InvokeAsync<RequestDto>(NewCreate());
     }
 
@@ -56,6 +66,8 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
 
         var update = (await AuditOfAsync(created.Id)).Where(e => e.Operation == AuditOperation.Update).ShouldHaveSingleItem();
         update.UserId.ShouldBe("alice");
+        update.ActorId.ShouldBe("alice");
+        update.CallingService.ShouldBeNull();
         update.TenantId.ShouldBe("audit-update");
         update.PrimaryKey.ShouldBe(created.Id.ToString());
         update.TransactionId.ShouldBeGreaterThan(0);
@@ -68,6 +80,38 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         // The create is audited too, as an insert with every column.
         var insert = (await AuditOfAsync(created.Id)).Where(e => e.Operation == AuditOperation.Insert).ShouldHaveSingleItem();
         JsonDocument.Parse(insert.Changes).RootElement.EnumerateArray().Select(c => c.GetProperty("column").GetString()).ShouldContain("status");
+    }
+
+    [Fact]
+    public async Task Api_key_on_behalf_of_user_audits_user_and_actor()
+    {
+        await using var factory = new ApiFactory(infra);
+        using var client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/requests")
+        {
+            Content = JsonContent.Create(new
+            {
+                title = "On behalf",
+                costCenterCode = "CC-100",
+                supplierId = "sup-1",
+                lines = new[] { new { sku = "LAP-1", description = "Laptop", quantity = 3, unitPriceExclVat = 25200m } },
+            }),
+        };
+        request.Headers.Add("X-Api-Key", TestAuth.ApiKey);
+        request.Headers.Add("X-Tenant-Id", "audit-actor");
+        request.Headers.Add("X-On-Behalf-Of-User", "tom");
+        request.Headers.Add("X-Calling-Service", "approvals-api");
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var created = (await response.Content.ReadFromJsonAsync<RequestDto>(ResponseJson, TestContext.Current.CancellationToken))!;
+        var insert = (await AuditOfAsync(created.Id)).ShouldHaveSingleItem();
+        insert.UserId.ShouldBe("tom");
+        insert.ActorId.ShouldBe("claude-admin");
+        insert.CallingService.ShouldBe("approvals-api");
+        insert.TenantId.ShouldBe("audit-actor");
     }
 
     [Fact]
@@ -246,11 +290,17 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
     }
 }
 
-public sealed class ProbeAudit : IAuditContext
+public sealed class ProbeCaller : ICallerContext
 {
     public string UserId => "bob";
 
+    public string ActorId => "bob";
+
     public string? TenantId => "t1";
+
+    public string? CallingService => null;
+
+    public CallerKind Kind => CallerKind.User;
 }
 
 public sealed class Probe
@@ -273,7 +323,7 @@ public sealed class Noise
 
 public sealed class ProbeDbContext(DbContextOptions<ProbeDbContext> options) : DbContext(options), IAuditContextSource
 {
-    public IAuditContext? AuditContext { get; } = new ProbeAudit();
+    public ICallerContext? Caller { get; } = new ProbeCaller();
 
     public DbSet<Probe> Probes => Set<Probe>();
 

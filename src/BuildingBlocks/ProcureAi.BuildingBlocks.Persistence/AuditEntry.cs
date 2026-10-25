@@ -15,7 +15,14 @@ public sealed class AuditEntry
 
     public string? TenantId { get; set; }
 
+    /// <summary>The person the change was made for.</summary>
     public string UserId { get; set; } = "";
+
+    /// <summary>Who performed it: the user, <c>claude-admin</c>, or <c>service:&lt;name&gt;</c>. Differs from <see cref="UserId"/> when acting on behalf of someone.</summary>
+    public string ActorId { get; set; } = "";
+
+    /// <summary>The service that made the call or sent the message, when known.</summary>
+    public string? CallingService { get; set; }
 
     public string? CorrelationId { get; set; }
 

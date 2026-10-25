@@ -9,6 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Shouldly" />
+    <PackageReference Include="WolverineFx.RuntimeCompilation" />
     <PackageReference Include="Testcontainers.Redis" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
@@ -20,6 +21,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Web\ProcureAi.BuildingBlocks.Web.csproj" />
+    <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Messaging/ProcureAi.BuildingBlocks.Messaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>

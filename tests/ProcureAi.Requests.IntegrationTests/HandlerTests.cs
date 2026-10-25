@@ -1,11 +1,15 @@
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
+using ProcureAi.BuildingBlocks.Messaging;
+using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts.Requests;
-using ProcureAi.Requests.Application;
 using ProcureAi.Requests.Application.Commands;
 using ProcureAi.Requests.Application.Dtos;
 using ProcureAi.Requests.Application.Queries;
 using ProcureAi.Requests.Domain;
+using ProcureAi.Requests.Infrastructure;
 using Shouldly;
 using Wolverine;
 using Wolverine.Tracking;
@@ -187,6 +191,30 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         var created = await Create();
 
         created.Number.ShouldBe("PR-0001");
+    }
+
+    [Fact]
+    public async Task Message_handler_audits_service_as_actor()
+    {
+        // The real caller (the API's CallerContext), not the settable test caller: user and tenant come from the headers.
+        await using var app = await RequestsHost.StartAsync(
+            infra.RequestsDbConnectionString, infra.RabbitConnectionString, useRealCaller: true);
+        var tenant = $"msg-{Guid.NewGuid():N}";
+        var delivery = new DeliveryOptions();
+        delivery.Headers[CallerHeaders.UserId] = "tom";
+        delivery.Headers[CallerHeaders.TenantId] = tenant;
+
+        var created = await app.Bus.InvokeAsync<RequestDto>(NewCreate(), delivery);
+
+        await using var db = new RequestsDbContext(
+            new DbContextOptionsBuilder<RequestsDbContext>().UseNpgsql(infra.RequestsDbConnectionString).Options);
+        var audit = await db.Set<AuditEntry>()
+            .Where(e => e.Table == "purchase_requests" && e.PrimaryKey == created.Id.ToString())
+            .SingleAsync();
+        audit.UserId.ShouldBe("tom");
+        audit.ActorId.ShouldBe("service:requests-api");
+        audit.TenantId.ShouldBe(tenant);
+        audit.CallingService.ShouldBeNull();
     }
 
     [Fact]

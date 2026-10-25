@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata;
+using ProcureAi.BuildingBlocks.Application;
 
 namespace ProcureAi.BuildingBlocks.Persistence;
 
@@ -24,7 +25,6 @@ namespace ProcureAi.BuildingBlocks.Persistence;
 public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : SaveChangesInterceptor
 {
     public const string MaskedValue = "***";
-    public const string DefaultUser = "system";
 
     /// <summary>Tag the correlation ID middleware puts on the request activity.</summary>
     public const string CorrelationTag = "correlation.id";
@@ -60,7 +60,7 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
             return;
         }
 
-        var auditContext = (context as IAuditContextSource)?.AuditContext;
+        var caller = (context as IAuditContextSource)?.Caller;
         var now = timeProvider.GetUtcNow();
         var correlationId = CurrentCorrelationId();
         foreach (var entry in changed)
@@ -80,8 +80,10 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
             context.Set<AuditEntry>().Add(new AuditEntry
             {
                 Id = Guid.CreateVersion7(),
-                TenantId = auditContext?.TenantId,
-                UserId = auditContext?.UserId ?? DefaultUser,
+                TenantId = caller?.TenantId,
+                UserId = caller?.UserId ?? SystemCaller.Id,
+                ActorId = caller?.ActorId ?? SystemCaller.Id,
+                CallingService = caller?.CallingService,
                 CorrelationId = correlationId,
                 Table = table,
                 PrimaryKey = PrimaryKeyOf(entry),

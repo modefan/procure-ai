@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Application.Dtos;

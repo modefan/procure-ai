@@ -41,7 +41,9 @@ public class CacheTagsTests
         public string UserId => "u";
         public string? TenantId => tenant;
         public IReadOnlySet<string> Roles => new HashSet<string>();
+        public bool IsAuthenticated => true;
         public bool IsAdminApiKey => false;
+        public bool IsServiceAccount => false;
         public string? CallingService => null;
         public string? OnBehalfOfUser => null;
     }

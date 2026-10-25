@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using ProcureAi.Requests.Application.Abstractions;
+using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Requests.Infrastructure;
 using Wolverine;
 
@@ -32,7 +33,9 @@ public sealed class RequestsHost : IAsyncDisposable
 
     public IMessageBus Bus => Host.MessageBus();
 
-    public static async Task<RequestsHost> StartAsync(string postgres, string rabbit, Action<WolverineOptions>? configure = null)
+    /// <param name="useRealCaller">Registers the API's own <c>CallerContext</c> (user and tenant from message headers) instead of the settable test caller.</param>
+    public static async Task<RequestsHost> StartAsync(
+        string postgres, string rabbit, Action<WolverineOptions>? configure = null, bool useRealCaller = false)
     {
         var caller = new TestCaller();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -46,8 +49,16 @@ public sealed class RequestsHost : IAsyncDisposable
             .ConfigureServices((context, services) =>
             {
                 services.AddSingleton(caller);
-                // Scoped, as in the API: a singleton here hid a captive-dependency bug in the audit interceptor.
-                services.AddScoped<ICallerContext, ScopedTestCaller>();
+                if (useRealCaller)
+                {
+                    services.AddProcureAiCaller("requests-api");
+                }
+                else
+                {
+                    // Scoped, as in the API: a singleton here hid a captive-dependency bug in the audit interceptor.
+                    services.AddScoped<ICallerContext, ScopedTestCaller>();
+                }
+
                 services.AddRequestsInfrastructure(context.Configuration);
             })
             .UseDefaultServiceProvider(o =>

@@ -28,6 +28,17 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("CallingService")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("calling_service");
+
                     b.Property<string>("Changes")
                         .IsRequired()
                         .HasColumnType("jsonb")

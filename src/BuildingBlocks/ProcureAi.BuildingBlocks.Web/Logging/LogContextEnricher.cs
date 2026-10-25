@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using Serilog.Core;
 using Serilog.Events;
@@ -7,7 +8,7 @@ using Serilog.Events;
 namespace ProcureAi.BuildingBlocks.Web.Logging;
 
 /// <summary>Adds service name, trace ID, tenant and user ID (IDs only, never personal data) to every log event.</summary>
-internal sealed class LogContextEnricher(string serviceName, IHttpContextAccessor accessor) : ILogEventEnricher
+internal sealed class LogContextEnricher(string serviceName, IHttpContextAccessor accessor, IOptions<AuthOptions> auth) : ILogEventEnricher
 {
     public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
     {
@@ -15,7 +16,7 @@ internal sealed class LogContextEnricher(string serviceName, IHttpContextAccesso
         Add(logEvent, propertyFactory, "TraceId", Activity.Current?.TraceId.ToString());
 
         // Through ICurrentUser, so admin API key calls log the tenant from X-Tenant-Id and the user claude-admin.
-        var user = new CurrentUser(accessor);
+        var user = new CurrentUser(accessor, auth);
         if (user.IsAuthenticated)
         {
             Add(logEvent, propertyFactory, "TenantId", user.TenantId);

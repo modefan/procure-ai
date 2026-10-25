@@ -18,6 +18,12 @@ public sealed class AuthOptions
     /// <summary>Require HTTPS for the authority's metadata. Turn off only for a local http Keycloak.</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
 
+    /// <summary>
+    /// Keycloak client ID (the token's <c>azp</c>) our services use to call each other. Tokens from it are service accounts,
+    /// which may name the calling service and the user they act for. Empty means no service accounts.
+    /// </summary>
+    public string InternalClientId { get; set; } = "";
+
     /// <summary>SHA-256 (64 hex characters) of the admin API key. Empty disables the API key.</summary>
     [RegularExpression(@"^([0-9a-fA-F]{64})?\z", ErrorMessage = "AdminApiKeySha256 must be 64 hexadecimal characters or empty.")]
     public string AdminApiKeySha256 { get; set; } = "";

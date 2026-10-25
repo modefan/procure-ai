@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ProcureAi.Requests.Domain/ProcureAi.Requests.Domain.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
     <ProjectReference Include="../../../Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
   </ItemGroup>

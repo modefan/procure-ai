@@ -13,7 +13,9 @@ public sealed class RequestKeyTests
         public string UserId => userId;
         public string? TenantId => tenant;
         public IReadOnlySet<string> Roles { get; } = new HashSet<string>();
+        public bool IsAuthenticated => true;
         public bool IsAdminApiKey => false;
+        public bool IsServiceAccount => false;
         public string? CallingService => null;
         public string? OnBehalfOfUser => null;
     }

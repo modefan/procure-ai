@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Application.Mapping;
 using ProcureAi.Requests.Domain;

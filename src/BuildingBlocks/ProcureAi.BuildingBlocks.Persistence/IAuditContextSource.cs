@@ -1,3 +1,5 @@
+using ProcureAi.BuildingBlocks.Application;
+
 namespace ProcureAi.BuildingBlocks.Persistence;
 
 /// <summary>
@@ -6,5 +8,5 @@ namespace ProcureAi.BuildingBlocks.Persistence;
 /// </summary>
 public interface IAuditContextSource
 {
-    IAuditContext? AuditContext { get; }
+    ICallerContext? Caller { get; }
 }

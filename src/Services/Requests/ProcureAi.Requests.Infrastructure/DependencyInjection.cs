@@ -1,16 +1,15 @@
-using JasperFx;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts.Requests;
-using ProcureAi.Requests.Application;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Application.Commands;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
-using Wolverine.Postgresql;
 using Wolverine.RabbitMQ;
 
 namespace ProcureAi.Requests.Infrastructure;
@@ -18,7 +17,7 @@ namespace ProcureAi.Requests.Infrastructure;
 public static class DependencyInjection
 {
     public const string DatabaseConnectionName = "requestsdb";
-    public const string RabbitMqConnectionName = "rabbitmq";
+    public const string RabbitMqConnectionName = MessagingSetup.RabbitMqConnectionName;
 
     /// <summary>The exchange integration events of this service are published to.</summary>
     public const string RequestsExchange = "requests";
@@ -42,22 +41,14 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// Wolverine setup: handler discovery, Postgres outbox/inbox in the requests database, EF Core transactions
-    /// around handlers, and RabbitMQ with <c>RequestSubmitted</c> going to the <c>requests</c> exchange.
+    /// Wolverine setup (shared messaging building block): handler discovery, Postgres outbox/inbox in the requests
+    /// database, EF Core transactions around handlers, RabbitMQ, and <c>RequestSubmitted</c> going to the
+    /// <c>requests</c> exchange.
     /// </summary>
     public static void ConfigureRequests(this WolverineOptions options, IConfiguration configuration)
     {
-        options.Discovery.IncludeAssembly(typeof(CreateRequest).Assembly);
-        options.PersistMessagesWithPostgresql(Required(configuration, DatabaseConnectionName));
-        // On in Development and tests; elsewhere the Api's --migrate step creates the message store, so startup never changes schema.
-        options.AutoBuildMessageStorageOnStartup =
-            configuration.GetValue("Wolverine:AutoBuildMessageStorageOnStartup", AutoCreate.None);
-        // Tells Wolverine the interface is a DbContext, so its transaction and outbox still wrap the handlers.
-        options.UseEntityFrameworkCoreTransactions().WithDbContextAbstraction<IRequestsDbContext, RequestsDbContext>();
-        options.Policies.AutoApplyTransactions();
-        options.Policies.UseDurableInboxOnAllListeners();
-        options.Policies.UseDurableOutboxOnAllSendingEndpoints();
-        options.UseRabbitMq(new Uri(Required(configuration, RabbitMqConnectionName))).AutoProvision();
+        options.UseProcureAiMessaging<IRequestsDbContext, RequestsDbContext>(
+            configuration, DatabaseConnectionName, typeof(CreateRequest).Assembly);
         options.PublishMessage<RequestSubmitted>().ToRabbitExchange(RequestsExchange);
     }
 

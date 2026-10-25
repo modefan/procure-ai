@@ -1,11 +1,11 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
+using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Web;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Health;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Requests.Application;
-using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Infrastructure;
 using Wolverine;
 using Wolverine.Runtime;
@@ -29,9 +29,7 @@ public static class RequestsApi
         var services = builder.Services;
         services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
         services.Configure<MvcOptions>(mvc => mvc.Filters.Add<RequestsExceptionFilter>());
-        // A scoped class, not a lambda: Wolverine's generated handler code constructs it from its constructor.
-        services.AddScoped<ICallerContext, ApiCallerContext>();
-        services.AddScoped<IncomingMessage>();
+        services.AddProcureAiCaller(ServiceName);
         services.AddRequestsInfrastructure(builder.Configuration);
         // Ready only while the dependencies the API cannot serve without are reachable.
         services.AddPostgresReadiness(builder.Configuration.GetConnectionString(DependencyInjection.DatabaseConnectionName)!);
@@ -41,7 +39,6 @@ public static class RequestsApi
         builder.Host.UseWolverine(options =>
         {
             options.ConfigureRequests(builder.Configuration);
-            options.AddCallerPropagation();
         });
 
         if (IsWritingOpenApiDocument())

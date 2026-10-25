@@ -422,7 +422,9 @@ public class AuthTests
         public string UserId => "u";
         public string? TenantId => "t";
         public IReadOnlySet<string> Roles { get; } = roles;
+        public bool IsAuthenticated => true;
         public bool IsAdminApiKey => false;
+        public bool IsServiceAccount => false;
         public string? CallingService => null;
         public string? OnBehalfOfUser => null;
     }

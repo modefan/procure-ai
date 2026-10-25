@@ -1,29 +1,37 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using Serilog.Context;
 using Wolverine;
 
-namespace ProcureAi.Requests.Api;
-
-/// <summary>The header names that carry the caller across messages. IDs only, never tokens.</summary>
-public static class CallerHeaders
-{
-    public const string CorrelationId = "x-correlation-id";
-    public const string TenantId = "x-tenant-id";
-    public const string UserId = "x-user-id";
-
-    internal static readonly string[] All = [UserId, TenantId, CorrelationId];
-}
+namespace ProcureAi.BuildingBlocks.Messaging;
 
 public static class CallerPropagationExtensions
 {
     /// <summary>
+    /// Registers what the caller model needs: the service's identity and the scoped <see cref="ICallerContext"/>
+    /// (<see cref="CallerContext"/>). Call it from the composition root with the service name (e.g. <c>requests-api</c>).
+    /// </summary>
+    public static IServiceCollection AddProcureAiCaller(this IServiceCollection services, string serviceName)
+    {
+        services.AddHttpContextAccessor();
+        services.TryAddScoped<ICurrentUser, CurrentUser>();
+        services.TryAddScoped<IncomingMessage>();
+        services.AddSingleton(new ServiceIdentity(serviceName));
+        services.AddScoped<ICallerContext, CallerContext>();
+        return services;
+    }
+
+    /// <summary>
     /// Outgoing messages carry the correlation, tenant and user IDs as envelope headers; handlers that consume a
-    /// message get them back in the log scope and as <see cref="Application.Abstractions.ICallerContext"/>.
+    /// message get them back in the log scope and as <see cref="ICallerContext"/>.
     /// </summary>
     public static void AddCallerPropagation(this WolverineOptions options)
     {
+        options.Services.TryAddScoped<IncomingMessage>();
         // HttpContextAccessor keeps the current request in one static AsyncLocal, so a new instance sees the same request.
         options.MetadataRules.Add(new CallerHeadersRule(new HttpContextAccessor()));
         options.Policies.AddMiddleware(typeof(RestoreCallerMiddleware));
@@ -37,7 +45,8 @@ internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelo
 
     public void ApplyCorrelation(IMessageContext originator, Envelope outgoing)
     {
-        // A message sent while handling another one passes the caller on; inside an HTTP request the request's caller wins.
+        // A message sent while handling another one passes the initiating user on (never the acting service);
+        // inside an HTTP request the request's caller wins.
         if (originator.Envelope is { } incoming)
         {
             foreach (var name in CallerHeaders.All)
@@ -59,9 +68,14 @@ internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelo
             return;
         }
 
-        var user = new CurrentUser(accessor);
-        Set(envelope, CallerHeaders.UserId, user.UserId);
-        Set(envelope, CallerHeaders.TenantId, user.TenantId);
+        // The initiating user (the person on whose behalf the call was made), not the admin key or service account.
+        if (http.RequestServices.GetService<ICallerContext>() is { } caller)
+        {
+            Set(envelope, CallerHeaders.UserId, caller.UserId);
+            Set(envelope, CallerHeaders.TenantId, caller.TenantId);
+            Set(envelope, CallerHeaders.CallingService, caller.CallingService);
+        }
+
         Set(envelope, CallerHeaders.CorrelationId, http.Items[CorrelationIdMiddleware.ItemKey] as string);
     }
 
@@ -74,23 +88,18 @@ internal sealed class CallerHeadersRule(IHttpContextAccessor accessor) : IEnvelo
     }
 }
 
-/// <summary>The envelope of the message being handled, for the scoped <see cref="ApiCallerContext"/>.</summary>
-public sealed class IncomingMessage
-{
-    public Envelope? Envelope { get; set; }
-}
-
 /// <summary>Wolverine middleware: makes the incoming message's caller headers available to the handler and its logs.</summary>
 public static class RestoreCallerMiddleware
 {
     public static IDisposable Before(Envelope envelope, IncomingMessage incoming)
     {
+        var previous = incoming.Envelope;
         incoming.Envelope = envelope;
         var scopes = new List<IDisposable>();
         Push(scopes, envelope, CallerHeaders.CorrelationId, CorrelationIdMiddleware.LogProperty);
         Push(scopes, envelope, CallerHeaders.TenantId, "TenantId");
         Push(scopes, envelope, CallerHeaders.UserId, "UserId");
-        return new Scopes(scopes);
+        return new Scopes(scopes, () => incoming.Envelope = previous);
     }
 
     public static void Finally(IDisposable scopes) => scopes.Dispose();
@@ -103,7 +112,7 @@ public static class RestoreCallerMiddleware
         }
     }
 
-    private sealed class Scopes(List<IDisposable> scopes) : IDisposable
+    private sealed class Scopes(List<IDisposable> scopes, Action restore) : IDisposable
     {
         public void Dispose()
         {
@@ -111,6 +120,8 @@ public static class RestoreCallerMiddleware
             {
                 scopes[i].Dispose();
             }
+
+            restore();
         }
     }
 }

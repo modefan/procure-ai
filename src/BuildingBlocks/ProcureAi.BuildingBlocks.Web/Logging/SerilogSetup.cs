@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Web.Auth;
 using Serilog;
 
 namespace ProcureAi.BuildingBlocks.Web.Logging;
@@ -25,7 +27,8 @@ public static class SerilogSetup
                 .ReadFrom.Configuration(configuration)
                 .ReadFrom.Services(services)
                 .Enrich.FromLogContext()
-                .Enrich.With(new LogContextEnricher(serviceName, services.GetRequiredService<IHttpContextAccessor>()))
+                .Enrich.With(new LogContextEnricher(
+                    serviceName, services.GetRequiredService<IHttpContextAccessor>(), services.GetRequiredService<IOptions<AuthOptions>>()))
                 .Destructure.With<HeaderMaskingPolicy>();
 
             // A service without a Serilog section must never log nothing at all.
