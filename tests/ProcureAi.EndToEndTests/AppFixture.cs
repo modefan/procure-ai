@@ -48,32 +48,50 @@ public sealed class AppFixture : IAsyncLifetime
             return;
         }
 
-        _app = await builder.BuildAsync();
-        await _app.StartAsync();
-
-        using var cts = new CancellationTokenSource(StartupTimeout);
-        await _app.ResourceNotifications.WaitForResourceHealthyAsync("gateway", cts.Token);
-        GatewayUrl = new Uri(_app.GetEndpoint("gateway", "https").ToString());
-        KeycloakUrl = new Uri(_app.GetEndpoint("keycloak", "http").ToString());
-
-        // Chromium is downloaded once per machine and Playwright version; this is a no-op afterwards.
+        // Fail fast, before anything expensive is started: Chromium is downloaded once per machine and Playwright
+        // version (a no-op afterwards), then launched.
         var exit = Microsoft.Playwright.Program.Main(["install", "chromium"]);
         if (exit != 0)
         {
             throw new InvalidOperationException($"playwright install chromium failed with exit code {exit}");
         }
-
         _playwright = await Playwright.CreateAsync();
         Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+
+        // xUnit does not reliably call DisposeAsync after a failed InitializeAsync, so clean up here and rethrow.
+        try
+        {
+            _app = await builder.BuildAsync();
+            await _app.StartAsync();
+
+            using var cts = new CancellationTokenSource(StartupTimeout);
+            await _app.ResourceNotifications.WaitForResourceHealthyAsync("gateway", cts.Token);
+            GatewayUrl = new Uri(_app.GetEndpoint("gateway", "https").ToString());
+            KeycloakUrl = new Uri(_app.GetEndpoint("keycloak", "http").ToString());
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
-    /// <summary>Skips the calling test (with the reason) when secrets are missing.</summary>
+    /// <summary>
+    /// Skips the calling test (with the reason) when secrets are missing, unless REQUIRE_E2E=1 (or true), in which
+    /// case a missing secret is a failure. CI sets it so that a misconfigured pipeline cannot go green by skipping.
+    /// </summary>
     public void RequireReady()
     {
-        if (_skipReason is not null)
+        if (_skipReason is null)
         {
-            Assert.Skip(_skipReason);
+            return;
         }
+        var require = Environment.GetEnvironmentVariable("REQUIRE_E2E");
+        if (require is "1" || string.Equals(require, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("REQUIRE_E2E is set but the end-to-end prerequisites are missing. " + _skipReason);
+        }
+        Assert.Skip(_skipReason);
     }
 
     /// <summary>A fresh, isolated browser context (own cookies). The gateway is https with the ASP.NET dev certificate.</summary>
@@ -116,11 +134,14 @@ public sealed class AppFixture : IAsyncLifetime
         if (Browser is not null)
         {
             await Browser.CloseAsync();
+            Browser = null!;
         }
         _playwright?.Dispose();
+        _playwright = null;
         if (_app is not null)
         {
             await _app.DisposeAsync();
+            _app = null;
         }
     }
 }

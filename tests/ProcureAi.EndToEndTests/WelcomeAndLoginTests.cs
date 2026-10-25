@@ -44,13 +44,20 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         await Assertions.Expect(page.Locator("#username")).ToBeVisibleAsync();
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // The app chunk is lazy behind canMatch(authGuard). How we know it was not requested: the anonymous visit
+        // The main evidence is the redirect itself: authGuard is a canMatch guard, so for a visitor the `app` route never
+        // matches and its chunk is never requested. The network log below backs that up but cannot prove it alone (waiting
+        // for NetworkIdle on the Keycloak page does not bound when Angular would have started a lazy load). How the log
+        // is used: the anonymous visit
         // downloaded some JavaScript (the public bundle: this proves the log works), none of that JavaScript contains
         // the text of the requests page, and no call to the requests API was made. The marker is validated the other
         // way round in Tom_logs_in_and_sees_requests_list, where the same text must appear in a downloaded chunk.
         var scripts = await log.ScriptsAsync();
         scripts.ShouldNotBeEmpty("no JavaScript was captured, so the check would pass on nothing");
-        scripts.Where(s => s.Body.Contains(AppChunkMarker, StringComparison.Ordinal)).Select(s => s.Url)
+        // An unreadable body is only tolerated for the dev server's component hot-reload probes (/@ng/component?c=<file>@<Class>),
+        // which the browser aborts when the page navigates away to Keycloak; even those must not name an app feature.
+        scripts.Where(s => s.Body is null && !IsPublicComponentProbe(s.Url)).Select(s => s.Url)
+            .ShouldBeEmpty("a script body could not be read, so it could not be checked for the app chunk");
+        scripts.Where(s => s.Body is not null && s.Body.Contains(AppChunkMarker, StringComparison.Ordinal)).Select(s => s.Url)
             .ShouldBeEmpty("the lazy app chunk was downloaded by an anonymous visitor");
         log.Urls.Where(u => u.Contains("/api/v1/requests", StringComparison.Ordinal)).ShouldBeEmpty();
     }
@@ -72,11 +79,12 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = title });
         await Assertions.Expect(row).ToBeVisibleAsync();
         await Assertions.Expect(row).ToContainTextAsync(number);
-        // 3 x R 25 200,00 excl. VAT: the amount is formatted for en-ZA (R, space as thousands separator, decimal comma).
-        await Assertions.Expect(row).ToContainTextAsync(new Regex(@"R\s?\d[\d\s ]*,\d\d"));
+        // 3 x R 25 200,00 = R 75 600,00 excl. VAT, R 86 940,00 incl. 15% VAT, formatted for en-ZA (R, space as
+        // thousands separator, decimal comma). \s also matches the non-breaking spaces .NET/ICU may use.
+        await Assertions.Expect(row).ToContainTextAsync(new Regex(@"R\s?86\s?940,00"));
 
         // Positive control for the lazy-chunk check above: once signed in, the marker text is in a downloaded chunk.
-        (await log.ScriptsAsync()).ShouldContain(s => s.Body.Contains(AppChunkMarker, StringComparison.Ordinal));
+        (await log.ScriptsAsync()).ShouldContain(s => s.Body != null && s.Body.Contains(AppChunkMarker, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -92,6 +100,11 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         await page.WaitForURLAsync(new Regex(@"/app/dashboard$"), new() { Timeout = (float)Wait.TotalMilliseconds });
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Dashboard" })).ToBeVisibleAsync();
     }
+
+    private static bool IsPublicComponentProbe(string url) =>
+        new Uri(url).AbsolutePath == "/@ng/component"
+        && !url.Contains("features%2Frequests", StringComparison.OrdinalIgnoreCase)
+        && !url.Contains("features%2Fdashboard", StringComparison.OrdinalIgnoreCase);
 
     private Regex KeycloakLogin() =>
         new("^" + Regex.Escape(fixture.KeycloakUrl.GetLeftPart(UriPartial.Authority)) + "/realms/procure/");
@@ -120,7 +133,7 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
     private sealed class NetworkLog
     {
         private readonly ConcurrentQueue<string> _urls = new();
-        private readonly ConcurrentQueue<Task<(string Url, string Body)?>> _scripts = new();
+        private readonly ConcurrentQueue<Task<(string Url, string? Body)>> _scripts = new();
 
         public NetworkLog(IPage page)
         {
@@ -136,10 +149,10 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
 
         public IReadOnlyList<string> Urls => [.. _urls];
 
-        public async Task<IReadOnlyList<(string Url, string Body)>> ScriptsAsync() =>
-            [.. (await Task.WhenAll(_scripts.ToArray())).Where(s => s is not null).Select(s => s!.Value)];
+        public async Task<IReadOnlyList<(string Url, string? Body)>> ScriptsAsync() =>
+            [.. await Task.WhenAll(_scripts.ToArray())];
 
-        private static async Task<(string Url, string Body)?> ReadAsync(IResponse response)
+        private static async Task<(string Url, string? Body)> ReadAsync(IResponse response)
         {
             try
             {
@@ -147,7 +160,7 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
             }
             catch (PlaywrightException)
             {
-                return null; // body no longer available (navigated away); not a script we can judge
+                return (response.Url, null); // reported by the caller: an unreadable script must fail the negative check
             }
         }
     }

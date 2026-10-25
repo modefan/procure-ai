@@ -35,7 +35,7 @@ public sealed class LayerRulesTests
         .Build();
 
     // DbContexts that deliberately do not carry the audit context (none today). Add the full type name here, with a reason.
-    private static readonly string[] AuditExempt = [];
+    private static readonly HashSet<string> AuditExempt = [];
 
     private static Assembly[] Layer(string layer)
     {
@@ -77,11 +77,16 @@ public sealed class LayerRulesTests
     [Fact]
     public void Application_does_not_reference_Infrastructure_or_Api()
     {
+        // Same bans as the Domain rule except Wolverine and its support library JasperFx (handlers and messages live here). Allowed on purpose:
+        // Microsoft.EntityFrameworkCore core types (IQueryable/DbSet/async LINQ behind IRequestsDbContext, the
+        // read-side abstraction; providers such as Npgsql and any concrete DbContext stay in Infrastructure),
+        // Riok.Mapperly attributes, Microsoft.Extensions abstractions (Options, Logging) and the Domain and Contracts.
         var application = Layer("Application");
         Types().That().ResideInAssembly(application[0], application[1..])
             .Should().NotDependOnAnyTypesThat()
             .ResideInNamespaceMatching(@"^ProcureAi\.\w+\.(Infrastructure|Api)(\..*)?$")
-            .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^(Microsoft\.AspNetCore|Npgsql)(\..*)?$")
+            .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
+                @"^(Microsoft\.AspNetCore|Npgsql|StackExchange|ZiggyCreatures|MongoDB)(\..*)?$")
             .Check(Architecture);
     }
 
@@ -100,6 +105,7 @@ public sealed class LayerRulesTests
     [Fact]
     public void Generated_code_is_not_referenced_by_domain()
     {
+        // A guard: today the domain has no way to reach generated code, so this stays green until someone adds it.
         // .NET side: code produced by tools at build or run time (Wolverine's pre-built handlers in Internal.Generated.*,
         // Mapperly mappers, anything marked [GeneratedCode]) may depend on the domain, never the other way round.
         // The domain stays hand-written and free of tool output. (OpenAPI documents are JSON, not code; the Angular
@@ -131,7 +137,7 @@ public sealed class LayerRulesTests
         var infrastructure = Layer("Infrastructure");
         Classes().That().ResideInAssembly(infrastructure[0], infrastructure[1..])
             .And().FollowCustomPredicate(DerivesFromDbContext, "derive from DbContext")
-            .And().DoNotHaveFullNameContaining(AuditExempt.Length == 0 ? "\u0000none" : AuditExempt[0])
+            .And().FollowCustomPredicate(t => !AuditExempt.Contains(t.FullName), "are not exempt from the audit context")
             .Should().ImplementInterface(typeof(IAuditContextSource))
             .Check(Architecture);
     }
