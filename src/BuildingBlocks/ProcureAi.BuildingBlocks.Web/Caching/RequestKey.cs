@@ -14,14 +14,23 @@ public static class RequestKey
 {
     private const string NoTenant = "~";
 
-    /// <summary>Tenant, user, route and the query string sorted by name (so parameter order does not matter).</summary>
+    /// <summary>
+    /// Tenant, user, route (case-sensitive: route values can be case-sensitive IDs) and the query pairs sorted
+    /// by name then value, so parameter order does not matter. Every name and value is its own length-prefixed part.
+    /// </summary>
     public static string ForRead(HttpContext context, ICurrentUser user)
     {
-        var query = context.Request.Query
-            .SelectMany(pair => pair.Value.Select(value => $"{pair.Key}={value}"))
-            .Order(StringComparer.Ordinal);
-        var path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
-        return Build("read", user.TenantId ?? NoTenant, user.UserId, path, string.Join('&', query));
+        var parts = new List<string> { user.TenantId ?? NoTenant, user.UserId, context.Request.Path.Value ?? string.Empty };
+        foreach (var (name, value) in context.Request.Query
+                     .SelectMany(pair => pair.Value.Select(value => (Name: pair.Key, Value: value ?? string.Empty)))
+                     .OrderBy(pair => pair.Name, StringComparer.Ordinal)
+                     .ThenBy(pair => pair.Value, StringComparer.Ordinal))
+        {
+            parts.Add(name);
+            parts.Add(value);
+        }
+
+        return Build("read", [.. parts]);
     }
 
     /// <summary>Tenant, user and the client's idempotency key.</summary>

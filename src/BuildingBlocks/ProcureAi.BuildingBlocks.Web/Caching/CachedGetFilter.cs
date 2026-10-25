@@ -11,17 +11,18 @@ namespace ProcureAi.BuildingBlocks.Web.Caching;
 /// <summary>
 /// Resource filter (runs after authorization, so a forbidden caller never reaches the cache). The first
 /// request takes a Redis lock and runs the action; the others wait for the lock, find the cached result and
-/// replay it. Only 2xx responses are cached.
+/// replay it. Only 2xx responses are cached. A failed response is shared, for a short time, only with the
+/// callers that were already waiting while it ran (on any instance); a fresh request runs again.
+/// A replayed response carries the status, body, Content-Type, Location and ETag only; other headers are not kept.
 /// </summary>
 public sealed class CachedGetFilter(
     int seconds,
     IFusionCache cache,
     IDistributedLockProvider locks,
     ICurrentUser user,
-    IOptions<CachingOptions> options) : IAsyncResourceFilter
+    IOptions<CachingOptions> options,
+    IOptions<FusionCacheSettings> cacheSettings) : IAsyncResourceFilter
 {
-    private static readonly TimeSpan DistributedGrace = TimeSpan.FromSeconds(1);
-
     public async Task OnResourceExecutionAsync(ResourceExecutingContext context, ResourceExecutionDelegate next)
     {
         var http = context.HttpContext;
@@ -32,9 +33,12 @@ public sealed class CachedGetFilter(
         }
 
         var settings = options.Value;
+        var padding = cacheSettings.Value.DistributedTtlPadding;
         var duration = TimeSpan.FromSeconds(seconds > 0 ? seconds : settings.DefaultGetSeconds);
         var key = RequestKey.ForRead(http, user);
-        var executedHere = false;
+        var failureKey = "fail:" + key;
+        var lockName = cacheSettings.Value.KeyPrefix + "lock:" + key;
+        var executed = default(ResponseCapture.Captured?);
 
         try
         {
@@ -42,47 +46,77 @@ public sealed class CachedGetFilter(
                 key,
                 async (factory, token) =>
                 {
-                    await using var handle = await locks.TryAcquireLockAsync("lock:" + key, settings.LockTimeout, token)
-                        ?? throw new TimeoutException("Timed out waiting for the same request running elsewhere.");
-
-                    // Another instance may have finished while we waited for the lock.
-                    var existing = await cache.TryGetAsync<StoredResponse>(key, token: token);
-                    if (existing.HasValue)
+                    var (handle, waited) = await LockHelper.AcquireAsync(locks, lockName, settings.LockTimeout, token);
+                    if (handle is null)
                     {
-                        var remaining = duration - (DateTimeOffset.UtcNow - existing.Value.CreatedUtc);
-                        factory.Options.Duration = remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(1);
-                        return existing.Value;
+                        throw new LockTimeoutException();
                     }
 
-                    executedHere = true;
-                    var captured = await ResponseCapture.RunAsync(context, next, requestHash: null);
-                    if (!captured.IsSuccess)
+                    await using (handle)
                     {
-                        // Errors are shared with the waiters on this instance, but never stored.
-                        factory.Options.SkipMemoryCacheWrite = true;
-                        factory.Options.SkipDistributedCacheWrite = true;
-                        factory.Options.SkipBackplaneNotifications = true;
-                    }
+                        // Another instance may have finished while we waited for the lock.
+                        var existing = await cache.TryGetAsync<StoredResponse>(key, token: token);
+                        if (existing.HasValue)
+                        {
+                            var remaining = duration - (DateTimeOffset.UtcNow - existing.Value.CreatedUtc);
+                            factory.Options.Duration = remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(1);
+                            factory.Options.SkipDistributedCacheWrite = true;
+                            factory.Options.SkipBackplaneNotifications = true;
+                            return existing.Value;
+                        }
 
-                    return captured;
+                        if (waited)
+                        {
+                            var failure = await cache.TryGetAsync<StoredResponse>(failureKey, token: token);
+                            if (failure.HasValue)
+                            {
+                                SkipAllWrites(factory.Options);
+                                return failure.Value;
+                            }
+                        }
+
+                        await cache.RemoveAsync(failureKey, token: token);
+                        var captured = await ResponseCapture.RunAsync(context, next, requestHash: null);
+                        executed = captured;
+                        if (!captured.Response.IsSuccess)
+                        {
+                            // Errors are never stored as results; the failure record is for waiters only.
+                            SkipAllWrites(factory.Options);
+                            await cache.SetAsync(
+                                failureKey,
+                                captured.Response,
+                                o => CacheEntry.ForSharedRecord(o, settings.FailureShare, padding),
+                                CancellationToken.None);
+                        }
+
+                        return captured.Response;
+                    }
                 },
-                options =>
-                {
-                    options.SetDuration(duration);
-                    // FusionCache did not write 1 s entries to Redis at all (found by the cross-instance test).
-                    // The entry carries its own logical expiry, so a longer Redis TTL never serves stale data.
-                    options.DistributedCacheDuration = duration + DistributedGrace;
-                },
+                o => CacheEntry.Apply(o, duration, padding),
                 http.RequestAborted);
 
-            if (!executedHere)
+            if (executed is { } ran)
+            {
+                if (!ran.Threw)
+                {
+                    await ResponseCapture.SendAsync(http, ran.Response);
+                }
+            }
+            else
             {
                 context.Result = response.ToResult();
             }
         }
-        catch (TimeoutException)
+        catch (LockTimeoutException)
         {
             context.Result = ResponseCapture.Busy(http, settings.RetryAfterSeconds);
         }
+    }
+
+    private static void SkipAllWrites(FusionCacheEntryOptions entry)
+    {
+        entry.SkipMemoryCacheWrite = true;
+        entry.SkipDistributedCacheWrite = true;
+        entry.SkipBackplaneNotifications = true;
     }
 }

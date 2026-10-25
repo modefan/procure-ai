@@ -18,4 +18,11 @@ public sealed class CachingOptions
     /// <summary>The <c>Retry-After</c> value, in seconds, sent with that 503.</summary>
     [Range(1, 3600)]
     public int RetryAfterSeconds { get; set; } = 1;
+
+    /// <summary>
+    /// How long a failed GET is shared with identical requests that were waiting while it ran
+    /// (on any instance). A fresh request after the failure always runs again.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
+    public TimeSpan FailureShare { get; set; } = TimeSpan.FromSeconds(5);
 }

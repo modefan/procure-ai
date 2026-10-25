@@ -37,7 +37,7 @@ public sealed class CoalescingTests(RedisFixture redis) : IAsyncLifetime
             new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Redis"] = redis.ConnectionString,
-                ["Idempotency:WaitTimeout"] = waitTimeout, 
+                ["Idempotency:WaitTimeout"] = waitTimeout,
             },
             configure: builder => builder.AddProcureAiCaching());
 
@@ -223,5 +223,59 @@ public sealed class CoalescingTests(RedisFixture redis) : IAsyncLifetime
         firstResponse.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
         waiter.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
         ExecutionCounter.Get(id).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Client_disconnect_after_the_action_ran_does_not_lose_the_stored_result()
+    {
+        var id = NewId();
+        var key = NewId();
+        var body = new CoalescingController.PostRequest(id, 1500);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        var dropped = await Should.ThrowAsync<OperationCanceledException>(
+            () => _clientA.SendAsync(Post(id, key, body), cts.Token));
+        dropped.ShouldNotBeNull();
+
+        // The action keeps running after the client left; the retry waits for it and gets its stored result.
+        using var retry = await _clientB.SendAsync(Post(id, key, body), TestContext.Current.CancellationToken);
+
+        retry.StatusCode.ShouldBe(HttpStatusCode.Created);
+        retry.Headers.ETag!.ToString().ShouldBe("\"v1\"");
+        ExecutionCounter.Get(id).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Conflict_responses_are_not_stored()
+    {
+        var id = NewId();
+        var key = NewId();
+        var body = new CoalescingController.PostRequest(id, 0, ConflictFirst: true);
+
+        using var first = await _clientA.SendAsync(Post(id, key, body), TestContext.Current.CancellationToken);
+        using var retry = await _clientB.SendAsync(Post(id, key, body), TestContext.Current.CancellationToken);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        retry.StatusCode.ShouldBe(HttpStatusCode.Created);
+        ExecutionCounter.Get(id).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Get_waiter_on_another_instance_shares_the_failure_and_a_fresh_call_runs_again()
+    {
+        var id = NewId();
+        var first = _clientA.GetAsync($"/api/v1/coalesce/fail-slow?id={id}", TestContext.Current.CancellationToken);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        using var waiter = await _clientB.GetAsync($"/api/v1/coalesce/fail-slow?id={id}", TestContext.Current.CancellationToken);
+        using var firstResponse = await first;
+
+        firstResponse.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        waiter.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        ExecutionCounter.Get(id).ShouldBe(1);
+
+        using var fresh = await _clientB.GetAsync($"/api/v1/coalesce/fail-slow?id={id}", TestContext.Current.CancellationToken);
+
+        fresh.StatusCode.ShouldBe(HttpStatusCode.OK);
+        ExecutionCounter.Get(id).ShouldBe(2);
     }
 }

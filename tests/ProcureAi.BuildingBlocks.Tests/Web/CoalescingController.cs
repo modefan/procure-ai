@@ -38,6 +38,15 @@ public sealed class CoalescingController(ICurrentUser user) : ControllerBase
         return n == 1 ? StatusCode(503) : Ok(new { n });
     }
 
+    [HttpGet("fail-slow")]
+    [CachedGet]
+    public async Task<IActionResult> FailSlow([FromQuery] string id)
+    {
+        var n = ExecutionCounter.Increment(id);
+        await Task.Delay(800);
+        return n == 1 ? StatusCode(503) : Ok(new { n });
+    }
+
     [HttpPost("post")]
     [Idempotent]
     public async Task<IActionResult> Post([FromBody] PostRequest request)
@@ -49,9 +58,15 @@ public sealed class CoalescingController(ICurrentUser user) : ControllerBase
             throw new InvalidOperationException("boom");
         }
 
+        if (request.ConflictFirst && n == 1)
+        {
+            return Conflict();
+        }
+
         Response.Headers.ETag = "\"v" + n + "\"";
         return Created("/api/v1/things/" + request.Id, new { n, Id = Guid.NewGuid() });
     }
 
-    public sealed record PostRequest(string Id, int DelayMs = 300, bool FailFirst = false, string? Payload = null);
+    public sealed record PostRequest(string Id, int DelayMs = 300, bool FailFirst = false, string? Payload = null,
+        bool ConflictFirst = false);
 }

@@ -25,4 +25,8 @@ public sealed class IdempotencyOptions
     /// </summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
     public TimeSpan FailureShare { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>The longest accepted <c>Idempotency-Key</c> header value.</summary>
+    [Range(16, 1024)]
+    public int MaxKeyLength { get; set; } = 255;
 }

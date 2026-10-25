@@ -27,12 +27,30 @@ public sealed class RequestKeyTests
     }
 
     [Fact]
-    public void Read_key_ignores_query_order_and_path_case()
+    public void Read_key_ignores_query_order()
     {
         var user = new FakeUser("u1", "acme");
 
-        RequestKey.ForRead(Context("/api/Items", "?a=1&b=2"), user)
+        RequestKey.ForRead(Context("/api/items", "?a=1&b=2"), user)
             .ShouldBe(RequestKey.ForRead(Context("/api/items", "?b=2&a=1"), user));
+    }
+
+    [Fact]
+    public void Read_key_keeps_path_case_because_route_ids_can_be_case_sensitive()
+    {
+        var user = new FakeUser("u1", "acme");
+
+        RequestKey.ForRead(Context("/suppliers/AbC", string.Empty), user)
+            .ShouldNotBe(RequestKey.ForRead(Context("/suppliers/abc", string.Empty), user));
+    }
+
+    [Fact]
+    public void Read_key_cannot_be_forged_with_encoded_query_separators()
+    {
+        var user = new FakeUser("u1", "acme");
+
+        RequestKey.ForRead(Context("/api/items", "?a=1%26b%3D2"), user)
+            .ShouldNotBe(RequestKey.ForRead(Context("/api/items", "?a=1&b=2"), user));
     }
 
     [Fact]

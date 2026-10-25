@@ -26,10 +26,10 @@ public static class CachingSetup
                 $"Connection string '{RedisConnectionName}' is required for caching, locking and idempotency.");
         }
 
-        var settings = builder.Configuration.GetSection(FusionCacheSettings.SectionName).Get<FusionCacheSettings>()
-                       ?? new FusionCacheSettings();
+        var applicationName = builder.Environment.ApplicationName;
         var services = builder.Services;
         services.AddValidatedOptions<FusionCacheSettings>(builder.Configuration, FusionCacheSettings.SectionName);
+        services.PostConfigure<FusionCacheSettings>(settings => settings.KeyPrefix ??= applicationName + ":");
         services.AddValidatedOptions<IdempotencyOptions>(builder.Configuration, IdempotencyOptions.SectionName);
 
         services.AddStackExchangeRedisCache(options => options.Configuration = redis);
@@ -42,8 +42,16 @@ public static class CachingSetup
         services.AddSingleton<IDistributedLockProvider>(provider =>
             new RedisDistributedSynchronizationProvider(provider.GetRequiredService<IConnectionMultiplexer>().GetDatabase()));
 
+        // Read once here because FusionCache is configured at registration; the same values are validated on start.
+        var settings = builder.Configuration.GetSection(FusionCacheSettings.SectionName).Get<FusionCacheSettings>()
+                       ?? new FusionCacheSettings();
         services.AddFusionCache()
-            .WithOptions(options => options.CacheKeyPrefix = settings.KeyPrefix)
+            .WithOptions(options => options.CacheKeyPrefix = settings.KeyPrefix ?? applicationName + ":")
+            .WithDefaultEntryOptions(options =>
+            {
+                options.Duration = settings.DefaultDuration;
+                options.DistributedCacheDuration = settings.DefaultDuration + settings.DistributedTtlPadding;
+            })
             .WithSystemTextJsonSerializer(new System.Text.Json.JsonSerializerOptions { IncludeFields = true })
             .WithRegisteredDistributedCache()
             .WithStackExchangeRedisBackplane(options => options.Configuration = redis);
