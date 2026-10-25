@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../ProcureAi.Requests.Application/ProcureAi.Requests.Application.csproj" />
     <ProjectReference Include="../ProcureAi.Requests.Infrastructure/ProcureAi.Requests.Infrastructure.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Hosting/ProcureAi.BuildingBlocks.Hosting.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Messaging/ProcureAi.BuildingBlocks.Messaging.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
   </ItemGroup>

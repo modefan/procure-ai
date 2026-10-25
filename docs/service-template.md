@@ -7,7 +7,7 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 1. **Projects** (`src/Services/<Name>/`): `ProcureAi.<Name>.Domain`, `.Application`, `.Infrastructure`, `.Api`, with the
    dependency rules of CLAUDE.md. Add them to `ProcureAi.slnx`; the architecture tests pick them up by name.
 2. **Api composition root** (`<Name>Api.cs`): one call to `ServiceHost.Build(args, "<name>-api", builder => ...)` from
-   `ProcureAi.BuildingBlocks.Messaging.Hosting`. The callback adds only what is the service's own: its options
+   `ProcureAi.BuildingBlocks.Hosting`. The callback adds only what is the service's own: its options
    (`AddValidatedOptions`), its infrastructure, and `builder.Host.UseWolverine(...)` (use `UseProcureAiMessaging` /
    `UseProcureAiTransport`). `ServiceHost` already adds web, caching, the exception filter (404 / 403 / 412 / 422), the
    caller model (`ServiceIdentity`, `ICallerContext`, `IncomingMessage`) and the readiness checks (Postgres, RabbitMQ, Redis).
@@ -29,7 +29,7 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 
 | Piece | Location |
 |---|---|
-| `ServiceHost`, `ServiceOptions` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Messaging/Hosting` (it needs Messaging and Web, and Messaging already references Web) |
+| `ServiceHost`, `ServiceOptions` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Hosting` (references Web, Messaging and Persistence; only `*.Api` projects may use it) |
 | `ApplicationExceptionFilter` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/Errors` |
 | OpenAPI build step | `src/Services/Directory.Build.targets` |
 | `AddProcureAiService`, `ServiceSpec`, `SharedResources` | `src/AppHost/ProcureAi.AppHost/ServiceResources.cs` |

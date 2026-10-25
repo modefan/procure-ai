@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace ProcureAi.BuildingBlocks.Messaging.Hosting;
+namespace ProcureAi.BuildingBlocks.Hosting;
 
 /// <summary>The <c>Service</c> section every service's appsettings carries: what the shared composition root cannot know.</summary>
 public sealed class ServiceOptions

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Web;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Errors;
@@ -12,7 +13,7 @@ using ProcureAi.BuildingBlocks.Web.Options;
 using Wolverine;
 using Wolverine.Runtime;
 
-namespace ProcureAi.BuildingBlocks.Messaging.Hosting;
+namespace ProcureAi.BuildingBlocks.Hosting;
 
 /// <summary>
 /// The composition root every service's <c>Program.cs</c> shares: web, caching, error mapping, the caller model and

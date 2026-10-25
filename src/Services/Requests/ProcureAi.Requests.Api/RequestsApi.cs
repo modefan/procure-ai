@@ -1,4 +1,4 @@
-using ProcureAi.BuildingBlocks.Messaging.Hosting;
+using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Requests.Application;
 using ProcureAi.Requests.Infrastructure;

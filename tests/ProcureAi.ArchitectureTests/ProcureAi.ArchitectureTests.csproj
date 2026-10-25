@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\Services\*\*\*.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Application\ProcureAi.BuildingBlocks.Application.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Domain\ProcureAi.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Hosting\ProcureAi.BuildingBlocks.Hosting.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Messaging\ProcureAi.BuildingBlocks.Messaging.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Persistence\ProcureAi.BuildingBlocks.Persistence.csproj" />
   </ItemGroup>

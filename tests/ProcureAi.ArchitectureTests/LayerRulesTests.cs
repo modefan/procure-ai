@@ -5,6 +5,7 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnitV3;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using Shouldly;
@@ -31,7 +32,7 @@ public sealed class LayerRulesTests
 
     // Loaded together with the layers so that dependencies on them resolve to real types, not stubs.
     private static readonly Assembly[] Supporting =
-        [typeof(IAuditContextSource).Assembly, typeof(ICallerContext).Assembly, typeof(CallerContext).Assembly];
+        [typeof(IAuditContextSource).Assembly, typeof(ICallerContext).Assembly, typeof(CallerContext).Assembly, typeof(ServiceHost).Assembly];
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies([.. LayerAssemblies, .. Supporting.Except(LayerAssemblies)])
@@ -93,8 +94,21 @@ public sealed class LayerRulesTests
             // The caller reaches Application as ICallerContext (BuildingBlocks.Application); the web, messaging and persistence
             // building blocks are for the outer layers.
             .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
-                @"^ProcureAi\.BuildingBlocks\.(Web|Messaging|Persistence)(\..*)?$")
+                @"^ProcureAi\.BuildingBlocks\.(Web|Messaging|Persistence|Hosting)(\..*)?$")
             .Check(Architecture);
+    }
+
+    [Fact]
+    public void Only_Api_projects_use_the_Hosting_building_block()
+    {
+        // ServiceHost is the composition root: it wires web, messaging and persistence together, which is the Api's job.
+        foreach (var layer in new[] { "Domain", "Application", "Infrastructure" })
+        {
+            var assemblies = Layer(layer);
+            Types().That().ResideInAssembly(assemblies[0], assemblies[1..])
+                .Should().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^ProcureAi\.BuildingBlocks\.Hosting(\..*)?$")
+                .Check(Architecture);
+        }
     }
 
     /// <summary>Namespaces any service may use: the shared libraries. Everything else under ProcureAi.* is a different component.</summary>
