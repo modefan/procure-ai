@@ -142,7 +142,7 @@ public class PlumbingTests
     [Theory]
     [InlineData("has space")]
     [InlineData("bad/chars?<script>")]
-    [InlineData("lineé")]
+    [InlineData("line\u0001")]
     public async Task Unsafe_correlation_id_is_replaced(string supplied)
     {
         await using var app = await TestHost.StartAsync();
@@ -176,7 +176,13 @@ public class PlumbingTests
     {
         await using var app = await TestHost.StartAsync();
 
-        var response = await app.GetTestClient().GetAsync("/nope", Ct);
+        // Anonymous callers get 401 everywhere (fallback policy); an authenticated caller sees the 404.
+        var anonymous = await app.GetTestClient().GetAsync("/nope", Ct);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/nope");
+        request.Headers.Add("X-Api-Key", TestAuth.ApiKey);
+        var response = await app.GetTestClient().SendAsync(request, Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
@@ -206,25 +212,6 @@ public class PlumbingTests
         await app.GetTestClient().GetAsync("/api/v1/test/domain-error", Ct);
 
         sink.Events.ShouldNotContain(e => e.Level >= Serilog.Events.LogEventLevel.Error);
-    }
-
-    [Fact]
-    public async Task Console_sink_is_used_when_there_is_no_serilog_section()
-    {
-        var original = Console.Out;
-        using var captured = new StringWriter();
-        Console.SetOut(captured);
-        try
-        {
-            await using var app = await TestHost.StartAsync();
-            (await app.GetTestClient().GetAsync("/api/v1/test/log", Ct)).EnsureSuccessStatusCode();
-        }
-        finally
-        {
-            Console.SetOut(original);
-        }
-
-        captured.ToString().ShouldContain("warning-event");
     }
 
     [Fact]

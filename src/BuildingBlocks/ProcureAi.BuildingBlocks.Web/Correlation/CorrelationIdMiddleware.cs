@@ -17,7 +17,7 @@ public sealed partial class CorrelationIdMiddleware(RequestDelegate next)
     /// <summary>Longest accepted incoming correlation ID.</summary>
     private const int MaxLength = 128;
 
-    [GeneratedRegex("^[A-Za-z0-9._-]+$")]
+    [GeneratedRegex("^[A-Za-z0-9._-]+\\z")]
     private static partial Regex SafeId();
 
     public async Task InvokeAsync(HttpContext context)

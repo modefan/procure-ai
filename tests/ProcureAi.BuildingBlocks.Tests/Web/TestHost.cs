@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.TestHost;
 using ProcureAi.BuildingBlocks.Web;
 using Serilog.Core;
@@ -29,7 +30,25 @@ public static class TestHost
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
-        builder.Configuration.AddInMemoryCollection(config ?? []);
+        var settings = new Dictionary<string, string?>
+        {
+            ["Auth:Authority"] = TestAuth.Issuer,
+            ["Auth:Audience"] = TestAuth.Audience,
+            ["Auth:AdminApiKeySha256"] = TestAuth.ApiKeySha256,
+        };
+        foreach (var (key, value) in config ?? [])
+        {
+            settings[key] = value;
+        }
+
+        builder.Configuration.AddInMemoryCollection(settings);
+        // Validate tokens against the local test key, without discovery documents or any network call.
+        builder.Services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+        {
+            options.Authority = null;
+            options.TokenValidationParameters.IssuerSigningKey = TestAuth.SigningKey;
+            options.TokenValidationParameters.ValidIssuer = TestAuth.Issuer;
+        });
         if (sink is not null)
         {
             builder.Services.AddSingleton<ILogEventSink>(sink);
@@ -39,7 +58,7 @@ public static class TestHost
         builder.Services.AddControllers().AddApplicationPart(typeof(TestController).Assembly);
 
         var app = builder.Build();
-        // Stands in for authentication (Task 5): the test supplies the user through headers.
+        // Lets log tests supply an authenticated user without a token: the user through headers.
         app.Use((context, next) =>
         {
             if (context.Request.Headers.TryGetValue("X-Test-Tenant", out var tenant))

@@ -31,7 +31,7 @@ internal static class SerilogSetup
             {
                 logger.WriteTo.Console();
             }
-        });
+        }, preserveStaticLogger: true);
         return builder;
     }
 }

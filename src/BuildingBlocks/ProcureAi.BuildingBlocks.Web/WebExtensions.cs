@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Logging;
@@ -28,9 +29,7 @@ public static class WebExtensions
         services.AddProcureAiVersioning();
         services.AddProcureAiRateLimiting();
 
-        // No schemes yet: Task 5 adds API key and JWT. The middleware is in place so the order is fixed.
-        services.AddAuthentication();
-        services.AddAuthorization();
+        services.AddProcureAiAuth(builder.Configuration);
 
         return builder;
     }

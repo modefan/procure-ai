@@ -82,11 +82,11 @@ public static class Extensions
         app.MapHealthChecks(ReadyPath, new HealthCheckOptions
         {
             Predicate = registration => registration.Tags.Contains(ReadyTag) || registration.Tags.Contains(LiveTag)
-        });
+        }).AllowAnonymous();
         app.MapHealthChecks(LivePath, new HealthCheckOptions
         {
             Predicate = registration => registration.Tags.Contains(LiveTag)
-        });
+        }).AllowAnonymous();
 
         return app;
     }

@@ -11,7 +11,7 @@ internal static class OpenApiSetup
     /// </summary>
     public static WebApplication MapProcureAiOpenApi(this WebApplication app)
     {
-        app.MapOpenApi().WithDocumentPerVersion();
+        app.MapOpenApi().WithDocumentPerVersion().AllowAnonymous();
         return app;
     }
 }

@@ -11,6 +11,10 @@ public sealed class RateLimitingOptions
     [Range(1, 1_000_000)]
     public int PermitLimit { get; set; } = 100;
 
+    /// <summary>Requests allowed per window for the admin API key (its own partition). Defaults to <c>PermitLimit</c>.</summary>
+    [Range(1, 1_000_000)]
+    public int? AdminApiKeyPermitLimit { get; set; }
+
     /// <summary>Window length in seconds.</summary>
     [Range(1, 3600)]
     public int WindowSeconds { get; set; } = 1;
