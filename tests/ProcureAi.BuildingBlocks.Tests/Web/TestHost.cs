@@ -64,6 +64,16 @@ public static class TestHost
         configure?.Invoke(builder);
 
         var app = builder.Build();
+        // Lets tests choose the connection address (TestServer has none), as a proxy or client would present it.
+        app.Use((context, next) =>
+        {
+            if (context.Request.Headers.TryGetValue("X-Test-Remote-Ip", out var ip))
+            {
+                context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip.ToString());
+            }
+
+            return next(context);
+        });
         // Lets log tests supply an authenticated user without a token: the user through headers.
         app.Use((context, next) =>
         {

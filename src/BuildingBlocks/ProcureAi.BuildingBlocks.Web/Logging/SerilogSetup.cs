@@ -6,7 +6,7 @@ using Serilog;
 
 namespace ProcureAi.BuildingBlocks.Web.Logging;
 
-internal static class SerilogSetup
+public static class SerilogSetup
 {
     /// <summary>
     /// Serilog configured from the <c>Serilog</c> section (levels, sinks incl. OpenTelemetry, enrichers).

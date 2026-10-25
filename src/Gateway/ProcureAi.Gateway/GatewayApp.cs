@@ -1,0 +1,92 @@
+using Microsoft.AspNetCore.Authorization;
+using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Correlation;
+using ProcureAi.BuildingBlocks.Web.Errors;
+using ProcureAi.BuildingBlocks.Web.Logging;
+using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.Proxies;
+using ProcureAi.BuildingBlocks.Web.RateLimiting;
+using ProcureAi.Gateway.Bff;
+using ProcureAi.Gateway.Configuration;
+using ProcureAi.Gateway.Swagger;
+using StackExchange.Redis;
+
+namespace ProcureAi.Gateway;
+
+/// <summary>
+/// The composition root of the gateway: the YARP reverse proxy, the BFF login with its Redis session, the
+/// rate limiter and Swagger UI. Configuration comes from appsettings, user secrets and the environment.
+/// </summary>
+public static class GatewayApp
+{
+    public const string ServiceName = "gateway";
+
+    /// <param name="args">Command line.</param>
+    /// <param name="configure">Lets the integration tests replace configuration and services.</param>
+    public static WebApplication Build(string[] args, Action<WebApplicationBuilder>? configure = null)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+        configure?.Invoke(builder);
+
+        builder.AddServiceDefaults();
+        builder.AddProcureAiSerilog(ServiceName);
+
+        var configuration = builder.Configuration;
+        var services = builder.Services;
+        services.AddValidatedOptions<OidcOptions>(configuration, OidcOptions.SectionName);
+        services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
+        services.AddValidatedOptions<RateLimitingOptions>(configuration, RateLimitingOptions.SectionName);
+        services.AddProcureAiForwardedHeaders(configuration);
+        services.AddProcureAiProblemDetails();
+        // The gateway has no API key of its own to check, and has the client IP only: behind it every user is one IP.
+        services.AddProcureAiRateLimiting(RateLimitPartitioning.ClientIp);
+        services.AddGatewaySwagger(configuration);
+
+        AddRedis(builder);
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddSingleton<IPermissionProvider, DefaultMatrixPermissionProvider>();
+        services.AddBffAuthentication();
+
+        services.AddReverseProxy()
+            .LoadFromConfig(configuration.GetSection("ReverseProxy"))
+            .AddTransforms(TokenForwardingTransform.Configure);
+
+        var app = builder.Build();
+
+        app.UseProcureAiForwardedHeaders();
+        app.UseMiddleware<CorrelationIdMiddleware>();
+        app.UseExceptionHandler();
+        app.UseStatusCodePages();
+        // By client IP, before authentication: it also protects the login endpoints.
+        app.UseRateLimiter();
+        app.UseGatewaySwagger();
+        app.UseAuthentication();
+        app.UseMiddleware<XsrfMiddleware>();
+        app.UseAuthorization();
+
+        app.MapBff();
+        app.MapDefaultEndpoints();
+        // An unknown /api path is a 404, not the web app's index page. Order: after the proxied API routes (10).
+        app.Map("/api/{**rest}", () => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found"))
+            .AllowAnonymous().WithOrder(500);
+        app.MapReverseProxy();
+        return app;
+    }
+
+    private static void AddRedis(WebApplicationBuilder builder)
+    {
+        var redis = builder.Configuration.GetConnectionString("Redis");
+        if (string.IsNullOrWhiteSpace(redis))
+        {
+            throw new InvalidOperationException("Connection string 'Redis' is required: sessions are kept in Redis.");
+        }
+
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+        {
+            var options = ConfigurationOptions.Parse(redis);
+            options.AbortOnConnectFail = false;
+            return ConnectionMultiplexer.Connect(options);
+        });
+    }
+}

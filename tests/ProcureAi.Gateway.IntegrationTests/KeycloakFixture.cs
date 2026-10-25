@@ -21,6 +21,9 @@ public sealed class KeycloakFixture : IAsyncLifetime
 
     private IContainer? _container;
 
+    /// <summary>The secret of the gateway client for this run (random; the realm file holds only a placeholder).</summary>
+    public string GatewaySecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+
     public string DemoPassword { get; } = "T" + Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 
     public string BaseUrl => $"http://{_container!.Hostname}:{_container.GetMappedPublicPort(8080)}";
@@ -48,7 +51,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
             .WithEnvironment("KC_HEALTH_ENABLED", "true")
             .WithEnvironment("JAVA_OPTS_KC_HEAP", (string)limits["JavaHeapOpts"]!)
             .WithEnvironment("KC_DEMO_PASSWORD", DemoPassword)
-            .WithEnvironment("KC_GATEWAY_SECRET", Convert.ToHexString(RandomNumberGenerator.GetBytes(24)))
+            .WithEnvironment("KC_GATEWAY_SECRET", GatewaySecret)
             .WithResourceMapping(Encoding.UTF8.GetBytes(realm.ToJsonString()), "/opt/keycloak/data/import/procure-realm.json")
             .WithCommand("start-dev", "--import-realm")
             .WithCreateParameterModifier(p =>

@@ -2,8 +2,19 @@ using System.Text.Json;
 
 namespace ProcureAi.Gateway.IntegrationTests;
 
-public sealed class RealmTests(KeycloakFixture keycloak) : IClassFixture<KeycloakFixture>
+[Collection(GatewayCollection.Name)]
+public sealed class RealmTests(KeycloakFixture keycloak)
 {
+    [Fact]
+    public async Task Access_token_carries_the_name_username_and_email_the_gateway_shows()
+    {
+        var claims = await keycloak.LoginAsync("tom@acme.test");
+
+        claims.GetProperty("name").GetString().ShouldBe("Tom Mokoena");
+        claims.GetProperty("preferred_username").GetString().ShouldBe("tom@acme.test");
+        claims.GetProperty("email").GetString().ShouldBe("tom@acme.test");
+    }
+
     [Fact]
     public async Task Tom_gets_token_with_tenant_acme_and_role_requester()
     {

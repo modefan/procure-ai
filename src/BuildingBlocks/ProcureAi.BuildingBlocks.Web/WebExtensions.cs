@@ -8,6 +8,7 @@ using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Logging;
 using ProcureAi.BuildingBlocks.Web.OpenApi;
 using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.Proxies;
 using ProcureAi.BuildingBlocks.Web.RateLimiting;
 using ProcureAi.BuildingBlocks.Web.Versioning;
 
@@ -32,6 +33,7 @@ public static class WebExtensions
         services.AddProcureAiVersioning();
         services.AddProcureAiOpenApiDescriptions();
         services.AddProcureAiRateLimiting();
+        services.AddProcureAiForwardedHeaders(builder.Configuration);
 
         services.AddProcureAiAuth(builder.Configuration);
 
@@ -40,11 +42,13 @@ public static class WebExtensions
 
     public static WebApplication UseProcureAiWeb(this WebApplication app)
     {
+        app.UseProcureAiForwardedHeaders();
         app.UseMiddleware<CorrelationIdMiddleware>();
         app.UseExceptionHandler();
         app.UseStatusCodePages();
-        app.UseRateLimiter();
+        // Authentication first: the limiter partitions signed-in callers by user and tenant.
         app.UseAuthentication();
+        app.UseRateLimiter();
         app.UseAuthorization();
 
         app.MapControllers();

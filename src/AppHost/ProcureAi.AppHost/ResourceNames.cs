@@ -15,4 +15,5 @@ public static class ResourceNames
     public const string CdcExchange = "cdc";
     public const string RequestsApi = "requests-api";
     public const string RequestsMigrate = "requests-migrate";
+    public const string Gateway = "gateway";
 }

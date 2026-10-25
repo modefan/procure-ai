@@ -5,7 +5,7 @@ using ProcureAi.BuildingBlocks.Domain;
 
 namespace ProcureAi.BuildingBlocks.Web.Errors;
 
-internal static class ProblemDetailsSetup
+public static class ProblemDetailsSetup
 {
     /// <summary>
     /// ProblemDetails for every error: DomainException becomes 422, model validation 400

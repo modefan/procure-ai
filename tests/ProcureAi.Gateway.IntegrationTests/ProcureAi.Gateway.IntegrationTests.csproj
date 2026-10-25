@@ -10,8 +10,14 @@
 
   <ItemGroup>
     <PackageReference Include="Shouldly" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Testcontainers.Redis" />
     <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,6 +27,7 @@
 
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../src/Gateway/ProcureAi.Gateway/appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../testcontainers.settings.json" Link="testcontainers.settings.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../infra/keycloak/procure-realm.json" Link="procure-realm.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

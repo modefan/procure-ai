@@ -166,4 +166,21 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
         (await http.GetAsync("/api/v1/requests", TestContext.Current.CancellationToken)).StatusCode
             .ShouldBe(System.Net.HttpStatusCode.Unauthorized);
     }
+
+    [Fact]
+    public async Task Gateway_serves_swagger_proxies_the_requests_api_and_guards_the_session()
+    {
+        await fixture.WaitHealthyAsync("gateway");
+        var ct = TestContext.Current.CancellationToken;
+        // The ASP.NET Core development certificate is not trusted inside the test run.
+        using var http = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true })
+        {
+            BaseAddress = fixture.App.GetEndpoint("gateway", "https"),
+        };
+
+        (await http.GetAsync("/swagger/index.html", ct)).IsSuccessStatusCode.ShouldBeTrue();
+        (await http.GetAsync("/openapi/requests/v1.json", ct)).IsSuccessStatusCode.ShouldBeTrue("the Requests API's document, through the gateway");
+        (await http.GetAsync("/api/v1/requests", ct)).StatusCode.ShouldBe(System.Net.HttpStatusCode.Unauthorized);
+        (await http.GetAsync("/bff/user", ct)).StatusCode.ShouldBe(System.Net.HttpStatusCode.Unauthorized);
+    }
 }

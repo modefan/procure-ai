@@ -10,17 +10,18 @@ using ProcureAi.BuildingBlocks.Web.Auth;
 
 namespace ProcureAi.BuildingBlocks.Web.RateLimiting;
 
-internal static class RateLimitingSetup
+public static class RateLimitingSetup
 {
-    private const string UnknownClient = "unknown";
     private const string HealthPrefix = "/health";
-    private const string AdminKeyPartition = "admin-api-key";
 
-    public static IServiceCollection AddProcureAiRateLimiting(this IServiceCollection services)
+    public static IServiceCollection AddProcureAiRateLimiting(
+        this IServiceCollection services, RateLimitPartitioning partitioning = RateLimitPartitioning.UserAndTenant)
     {
         services.AddRateLimiter(_ => { });
+        services.AddSingleton(sp => new RateLimitPartitionResolver(
+            partitioning, partitioning == RateLimitPartitioning.UserAndTenant ? sp.GetRequiredService<ApiKeyValidator>() : null));
         services.AddOptions<RateLimiterOptions>()
-            .Configure<IOptions<RateLimitingOptions>, ApiKeyValidator>((limiter, settings, apiKeys) =>
+            .Configure<IOptions<RateLimitingOptions>, RateLimitPartitionResolver>((limiter, settings, resolver) =>
             {
                 var rate = settings.Value;
                 limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -31,12 +32,7 @@ internal static class RateLimitingSetup
                         return RateLimitPartition.GetNoLimiter(HealthPrefix);
                     }
 
-                    // The admin API key has its own partition. Only a correct key gets it, so wrong keys
-                    // cannot use up the real key's allowance; they count against their IP like anyone else.
-                    var isAdminKey = apiKeys.IsValid(context.Request);
-                    var partition = isAdminKey
-                        ? AdminKeyPartition
-                        : context.Connection.RemoteIpAddress?.ToString() ?? UnknownClient;
+                    var (partition, isAdminKey) = resolver.Resolve(context);
                     var permitLimit = isAdminKey ? rate.AdminApiKeyPermitLimit ?? rate.PermitLimit : rate.PermitLimit;
                     return RateLimitPartition.GetFixedWindowLimiter(
                         partition,

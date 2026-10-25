@@ -44,6 +44,11 @@
     <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.53.0" />
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.53.0" />
     <PackageVersion Include="Riok.Mapperly" Version="4.3.1" />
+    <!-- Gateway: reverse proxy, OIDC login, Swagger UI, session keys -->
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.13" />
+    <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
     <!-- Tests -->
     <PackageVersion Include="Testcontainers" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.16.0" />

@@ -127,7 +127,7 @@ var requestsMigrate = builder.AddProject<Projects.ProcureAi_Requests_Api>(Resour
     .WaitFor(requestsDb)
     .WithDotNetLimits(limits.DotNet);
 
-builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsApi)
+var requestsApi = builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsApi)
     // No launchSettings.json: Aspire picks a free port, so dev runs and test runs never clash.
     .WithHttpEndpoint(name: "http")
     .WithReference(requestsDb)
@@ -152,6 +152,33 @@ builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsApi)
     .WaitFor(redis)
     .WaitForCompletion(requestsMigrate)
     .WithHttpHealthCheck("/health/ready")
+    .WithDotNetLimits(limits.DotNet);
+
+// The gateway: the only door in. Serves the Angular app (a later task wires it in; until then the 'web' cluster
+// address in the gateway's appsettings is used), signs users in against Keycloak and proxies /api to the services.
+// External HTTPS endpoint: the session cookie is __Host- prefixed and so needs https (the ASP.NET Core dev
+// certificate). Keycloak's gateway client accepts https://localhost:* callbacks.
+builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
+    .WithHttpsEndpoint(name: "https")
+    .WithExternalHttpEndpoints()
+    .WithReference(redis)
+    .WithReference(requestsApi)
+    .WithEnvironment("Oidc__Authority", keycloakAuthority)
+    // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
+    .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
+    .WithEnvironment("Oidc__ClientSecret", keycloakGatewaySecret)
+    .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
+    .WithEnvironment(context =>
+    {
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+        {
+            context.EnvironmentVariables["Serilog__WriteTo__OpenTelemetry__Args__endpoint"] = otlpEndpoint;
+        }
+    })
+    .WaitFor(keycloak)
+    .WaitFor(redis)
+    .WaitFor(requestsApi)
+    .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);
 
 builder.Build().Run();
