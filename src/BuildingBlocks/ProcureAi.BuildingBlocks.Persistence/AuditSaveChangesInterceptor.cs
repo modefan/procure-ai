@@ -12,10 +12,16 @@ namespace ProcureAi.BuildingBlocks.Persistence;
 /// <summary>
 /// Adds one <see cref="AuditEntry"/> per changed entity to the same <c>SaveChanges</c>, so the audit rows and the
 /// changes commit or roll back together, also inside a transaction Wolverine opened around a handler.
-/// Limit: keys must be known before saving (client-generated, as all our entities use); a database-generated key
-/// would still be a temporary value here.
+/// The interceptor is stateless and safe as a singleton: the caller comes from the saving DbContext
+/// (<see cref="IAuditContextSource"/>), which lives in the request's scope.
+/// <para>
+/// Not supported: database-generated keys (a temporary value at this point; all our entities use client-generated
+/// keys) and owned/complex-type properties stored as JSON or inside the owner's table without their own entry.
+/// <see cref="AuditEntry.TransactionId"/> is the 32-bit xid and wraps around after about 4 billion transactions, so a
+/// consumer (the Audit service, plan 02) should match <c>txId</c> together with a time or LSN window, not alone.
+/// </para>
 /// </summary>
-public sealed class AuditSaveChangesInterceptor(IAuditContext? auditContext, TimeProvider timeProvider) : SaveChangesInterceptor
+public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : SaveChangesInterceptor
 {
     public const string MaskedValue = "***";
     public const string DefaultUser = "system";
@@ -54,6 +60,7 @@ public sealed class AuditSaveChangesInterceptor(IAuditContext? auditContext, Tim
             return;
         }
 
+        var auditContext = (context as IAuditContextSource)?.AuditContext;
         var now = timeProvider.GetUtcNow();
         var correlationId = CurrentCorrelationId();
         foreach (var entry in changed)

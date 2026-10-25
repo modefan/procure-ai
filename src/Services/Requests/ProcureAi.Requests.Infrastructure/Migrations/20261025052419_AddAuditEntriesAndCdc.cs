@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -73,6 +73,8 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql(CaptureSql("DROP"));
+            migrationBuilder.Sql("ALTER TABLE public.purchase_requests REPLICA IDENTITY DEFAULT;");
+            migrationBuilder.Sql("ALTER TABLE public.request_lines REPLICA IDENTITY DEFAULT;");
             migrationBuilder.DropTable(
                 name: "audit_entries");
         }

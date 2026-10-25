@@ -20,7 +20,17 @@ public sealed class RequestsHost : IAsyncDisposable
 
     public TestCaller Caller { get; }
 
-    public IMessageBus Bus => Host.Services.GetRequiredService<IMessageBus>();
+    /// <summary>A new DI scope with its own caller, like one HTTP request.</summary>
+    public (IServiceScope Scope, ScopedTestCaller Caller, RequestsDbContext Db) NewScope(string userId, string tenantId)
+    {
+        var scope = Host.Services.CreateScope();
+        var caller = (ScopedTestCaller)scope.ServiceProvider.GetRequiredService<ICallerContext>();
+        caller.UserId = userId;
+        caller.TenantId = tenantId;
+        return (scope, caller, scope.ServiceProvider.GetRequiredService<RequestsDbContext>());
+    }
+
+    public IMessageBus Bus => Host.MessageBus();
 
     public static async Task<RequestsHost> StartAsync(string postgres, string rabbit)
     {
@@ -35,8 +45,14 @@ public sealed class RequestsHost : IAsyncDisposable
             .ConfigureServices((context, services) =>
             {
                 services.AddSingleton(caller);
-                services.AddSingleton<ICallerContext>(caller);
+                // Scoped, as in the API: a singleton here hid a captive-dependency bug in the audit interceptor.
+                services.AddScoped<ICallerContext, ScopedTestCaller>();
                 services.AddRequestsInfrastructure(context.Configuration);
+            })
+            .UseDefaultServiceProvider(o =>
+            {
+                o.ValidateScopes = true;
+                o.ValidateOnBuild = true;
             })
             .UseWolverine(options => options.ConfigureRequests(configuration))
             .Build();

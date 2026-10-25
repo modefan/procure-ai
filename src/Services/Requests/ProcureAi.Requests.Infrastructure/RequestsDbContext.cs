@@ -6,10 +6,13 @@ using ProcureAi.Requests.Domain;
 namespace ProcureAi.Requests.Infrastructure;
 
 public sealed class RequestsDbContext(DbContextOptions<RequestsDbContext> options, ICallerContext? caller = null)
-    : DbContext(options), IRequestsDbContext
+    : DbContext(options), IRequestsDbContext, IAuditContextSource
 {
     /// <summary>The tenant every query is limited to. Without a caller (migrations) nothing matches.</summary>
     public string CurrentTenantId => caller?.TenantId ?? "";
+
+    /// <summary>The caller of this context's scope, for the audit interceptor.</summary>
+    public IAuditContext? AuditContext => caller is null ? null : new CallerAuditContext(caller);
 
     public DbSet<PurchaseRequest> PurchaseRequests => Set<PurchaseRequest>();
 

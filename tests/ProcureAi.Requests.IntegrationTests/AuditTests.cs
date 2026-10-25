@@ -79,9 +79,21 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
 
         var options = new DbContextOptionsBuilder<RequestsDbContext>()
             .UseNpgsql(infra.RequestsDbConnectionString)
-            .AddInterceptors(new AuditSaveChangesInterceptor(new TestAuditContext("alice", tenant), TimeProvider.System))
+            .AddInterceptors(new AuditSaveChangesInterceptor(TimeProvider.System))
             .Options;
-        await using (var db = new RequestsDbContext(options))
+        var caller = new TestCaller { UserId = "alice", TenantId = tenant };
+
+        // Positive control: a valid save writes its audit row, so the empty result below really comes from the rollback.
+        var control = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(2), "alice", "Control", "CC-1", "sup-1");
+        await using (var db = new RequestsDbContext(options, caller))
+        {
+            db.PurchaseRequests.Add(control);
+            await db.SaveChangesAsync();
+        }
+
+        (await AuditOfAsync(control.Id)).ShouldHaveSingleItem();
+
+        await using (var db = new RequestsDbContext(options, caller))
         {
             db.PurchaseRequests.AddRange(first, duplicate);
             // The second row breaks the unique (tenant, number) index, so the whole save rolls back.
@@ -98,7 +110,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         var connectionString = await infra.CreateEmptyDatabaseAsync("audit_probe");
         var options = new DbContextOptionsBuilder<ProbeDbContext>()
             .UseNpgsql(connectionString)
-            .AddInterceptors(new AuditSaveChangesInterceptor(new TestAuditContext("bob", "t1"), TimeProvider.System))
+            .AddInterceptors(new AuditSaveChangesInterceptor(TimeProvider.System))
             .Options;
         var id = Guid.NewGuid();
         await using (var db = new ProbeDbContext(options))
@@ -187,17 +199,23 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
             m => m.RoutingKey == "requestsdb.public.purchase_requests"
                  && m.After.GetProperty("id").GetString() == created.Id.ToString(),
             CdcTimeout);
-        // The wolverine rows are deleted again once the message is sent; give those changes time to show up.
-        await Task.Delay(TimeSpan.FromSeconds(5));
-        try
+        // Deterministic part: only the two business tables are in the publication (wolverine.* and audit_entries are not).
+        await using (var connection = new NpgsqlConnection(infra.RequestsDbConnectionString))
         {
-            await cdc.WaitForAsync(_ => false, TimeSpan.FromSeconds(2));
-        }
-        catch (TimeoutException)
-        {
-            // Expected: just draining what is left.
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(
+                "SELECT schemaname || '.' || tablename FROM pg_publication_tables WHERE pubname = 'dbz_publication' ORDER BY 1", connection);
+            var tables = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                tables.Add(reader.GetString(0));
+            }
+
+            tables.ShouldBe(["public.purchase_requests", "public.request_lines"]);
         }
 
+        // And what Debezium actually sent for that transaction carries nothing from the wolverine schema.
         cdc.Seen.ShouldNotBeEmpty();
         cdc.Seen.ShouldAllBe(m => !m.RoutingKey.Contains("wolverine", StringComparison.OrdinalIgnoreCase));
         cdc.Seen.ShouldNotContain(m => m.RoutingKey.EndsWith("audit_entries", StringComparison.Ordinal));
@@ -205,12 +223,34 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
             key => key == "requestsdb.public.purchase_requests" || key == "requestsdb.public.request_lines");
     }
 
-    private sealed class TestAuditContext(string userId, string? tenantId) : IAuditContext
+    [Fact]
+    public async Task Audit_rows_carry_the_user_and_tenant_of_their_own_scope()
     {
-        public string UserId { get; } = userId;
+        // Two scopes alive at the same time with different callers (two concurrent requests), saved in crossed order.
+        var one = _app.NewScope("user-one", "scope-tenant-1");
+        var two = _app.NewScope("user-two", "scope-tenant-2");
+        using var scopeOne = one.Scope;
+        using var scopeTwo = two.Scope;
+        var requestOne = PurchaseRequest.CreateDraft("scope-tenant-1", RequestNumber.From(1), "user-one", "One", "CC-1", "sup-1");
+        var requestTwo = PurchaseRequest.CreateDraft("scope-tenant-2", RequestNumber.From(1), "user-two", "Two", "CC-1", "sup-1");
+        one.Db.PurchaseRequests.Add(requestOne);
+        two.Db.PurchaseRequests.Add(requestTwo);
 
-        public string? TenantId { get; } = tenantId;
+        await two.Db.SaveChangesAsync();
+        await one.Db.SaveChangesAsync();
+
+        var auditOne = (await AuditOfAsync(requestOne.Id)).ShouldHaveSingleItem();
+        var auditTwo = (await AuditOfAsync(requestTwo.Id)).ShouldHaveSingleItem();
+        (auditOne.UserId, auditOne.TenantId).ShouldBe(("user-one", "scope-tenant-1"));
+        (auditTwo.UserId, auditTwo.TenantId).ShouldBe(("user-two", "scope-tenant-2"));
     }
+}
+
+public sealed class ProbeAudit : IAuditContext
+{
+    public string UserId => "bob";
+
+    public string? TenantId => "t1";
 }
 
 public sealed class Probe
@@ -231,8 +271,10 @@ public sealed class Noise
     public string Text { get; set; } = "";
 }
 
-public sealed class ProbeDbContext(DbContextOptions<ProbeDbContext> options) : DbContext(options)
+public sealed class ProbeDbContext(DbContextOptions<ProbeDbContext> options) : DbContext(options), IAuditContextSource
 {
+    public IAuditContext? AuditContext { get; } = new ProbeAudit();
+
     public DbSet<Probe> Probes => Set<Probe>();
 
     public DbSet<Noise> Noise => Set<Noise>();

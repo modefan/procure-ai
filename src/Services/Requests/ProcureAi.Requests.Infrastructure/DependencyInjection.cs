@@ -31,9 +31,8 @@ public static class DependencyInjection
     {
         var connectionString = Required(configuration, DatabaseConnectionName);
         services.AddValidatedOptions<PagingOptions>(configuration, PagingOptions.SectionName);
-        // The audit interceptor is scoped (it needs the caller), so the options are built from the scope's provider.
-        services.AddScoped<IAuditContext, CallerAuditContext>();
-        services.AddScoped<AuditSaveChangesInterceptor>();
+        // Options (and so the interceptor) are shared app-wide; the interceptor reads the caller from the saving DbContext.
+        services.TryAddSingleton<AuditSaveChangesInterceptor>();
         services.AddDbContextWithWolverineIntegration<RequestsDbContext>(
             (sp, options) => options.UseNpgsql(connectionString).AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>()));
         // Forwards to the same scoped DbContext instance (a factory, not AddScoped<,>, which would create a second one).
