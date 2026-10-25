@@ -1,12 +1,10 @@
 using ProcureAi.BuildingBlocks.Domain;
-using ProcureAi.Contracts.Requests;
 
 namespace ProcureAi.Requests.Domain;
 
 public sealed class PurchaseRequest : Entity<Guid>
 {
     private readonly List<RequestLine> _lines = [];
-    private int _lastLineNo;
 
     private PurchaseRequest()
     {
@@ -28,6 +26,9 @@ public sealed class PurchaseRequest : Entity<Guid>
 
     public DateTimeOffset? SubmittedAt { get; private set; }
 
+    /// <summary>Optimistic concurrency token (the Postgres <c>xmin</c> system column), set by the database on every write.</summary>
+    public uint Version { get; private set; }
+
     public IReadOnlyList<RequestLine> Lines => _lines.AsReadOnly();
 
     public Money TotalExclVat => _lines.Aggregate(Money.Zero, (sum, line) => sum + line.TotalExclVat);
@@ -45,6 +46,10 @@ public sealed class PurchaseRequest : Entity<Guid>
         RequireText(costCenterCode, "Cost center");
         RequireText(supplierId, "Supplier");
         RequireText(title, "Title");
+        if (number.Sequence <= 0)
+        {
+            throw new DomainException("A request number is required.");
+        }
 
         return new PurchaseRequest
         {
@@ -75,12 +80,17 @@ public sealed class PurchaseRequest : Entity<Guid>
             throw new DomainException("Quantity must be positive.");
         }
 
+        if (unitPriceExclVat.Currency != Money.ZarCurrency)
+        {
+            throw new DomainException($"Only {Money.ZarCurrency} is supported, got {unitPriceExclVat.Currency}.");
+        }
+
         if (unitPriceExclVat.Amount < 0)
         {
             throw new DomainException("Unit price cannot be negative.");
         }
 
-        _lines.Add(new RequestLine(++_lastLineNo, sku, description, quantity, unitPriceExclVat));
+        _lines.Add(new RequestLine(NextLineNo(), sku, description, quantity, unitPriceExclVat));
     }
 
     public void RemoveLine(int lineNo)
@@ -105,8 +115,11 @@ public sealed class PurchaseRequest : Entity<Guid>
 
         Status = RequestStatus.Submitted;
         SubmittedAt = now;
-        Raise(new RequestSubmitted(Id, TenantId, Number.ToString(), RequesterId, CostCenterCode, TotalInclVat.Amount, now));
+        Raise(new PurchaseRequestSubmitted(Id, TenantId, Number.ToString(), RequesterId, CostCenterCode, TotalInclVat.Amount, now));
     }
+
+    // Max + 1 (not a counter) so it keeps working after the lines are reloaded from the database.
+    private int NextLineNo() => _lines.Count == 0 ? 1 : _lines.Max(l => l.LineNo) + 1;
 
     private void EnsureDraft()
     {

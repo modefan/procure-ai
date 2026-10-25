@@ -1,5 +1,4 @@
 using ProcureAi.BuildingBlocks.Domain;
-using ProcureAi.Contracts.Requests;
 using ProcureAi.Requests.Domain;
 using Shouldly;
 
@@ -42,7 +41,7 @@ public class PurchaseRequestTests
     }
 
     [Fact]
-    public void Submit_raises_RequestSubmitted_with_total_incl_vat()
+    public void Submit_raises_PurchaseRequestSubmitted_with_total_incl_vat()
     {
         var request = DraftWithLines();
         var now = new DateTimeOffset(2026, 10, 24, 8, 0, 0, TimeSpan.Zero);
@@ -51,7 +50,7 @@ public class PurchaseRequestTests
 
         request.Status.ShouldBe(RequestStatus.Submitted);
         request.SubmittedAt.ShouldBe(now);
-        var evt = request.DomainEvents.ShouldHaveSingleItem().ShouldBeOfType<RequestSubmitted>();
+        var evt = request.DomainEvents.ShouldHaveSingleItem().ShouldBeOfType<PurchaseRequestSubmitted>();
         evt.RequestId.ShouldBe(request.Id);
         evt.TenantId.ShouldBe("acme");
         evt.Number.ShouldBe("PR-0001");
@@ -84,6 +83,15 @@ public class PurchaseRequestTests
 
         Should.Throw<DomainException>(() => request.Submit(DateTimeOffset.UtcNow));
     }
+
+    [Fact]
+    public void CreateDraft_rejects_default_request_number() =>
+        Should.Throw<DomainException>(() =>
+            PurchaseRequest.CreateDraft("acme", default, "user-1", "Laptops", "CC-100", "sup-1"));
+
+    [Fact]
+    public void AddLine_rejects_non_zar_money() =>
+        Should.Throw<DomainException>(() => NewDraft().AddLine("A", "a", 1, new Money(5m, "USD")));
 
     [Theory]
     [InlineData(0)]

@@ -5,11 +5,14 @@
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
     <Project Path="src/Services/Requests/ProcureAi.Requests.Domain/ProcureAi.Requests.Domain.csproj" />
+    <Project Path="src/Services/Requests/ProcureAi.Requests.Application/ProcureAi.Requests.Application.csproj" />
+    <Project Path="src/Services/Requests/ProcureAi.Requests.Infrastructure/ProcureAi.Requests.Infrastructure.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ProcureAi.BuildingBlocks.Tests/ProcureAi.BuildingBlocks.Tests.csproj" />
     <Project Path="tests/ProcureAi.Requests.Tests/ProcureAi.Requests.Tests.csproj" />
+    <Project Path="tests/ProcureAi.Requests.IntegrationTests/ProcureAi.Requests.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
   </Folder>
 </Solution>

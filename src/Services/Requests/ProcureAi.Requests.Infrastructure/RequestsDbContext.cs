@@ -1,0 +1,32 @@
+using Microsoft.EntityFrameworkCore;
+using ProcureAi.Requests.Application.Abstractions;
+using ProcureAi.Requests.Domain;
+
+namespace ProcureAi.Requests.Infrastructure;
+
+public sealed class RequestsDbContext(DbContextOptions<RequestsDbContext> options, ICallerContext? caller = null)
+    : DbContext(options), IRequestsDbContext
+{
+    /// <summary>The tenant every query is limited to. Without a caller (migrations) nothing matches.</summary>
+    public string CurrentTenantId => caller?.TenantId ?? "";
+
+    public DbSet<PurchaseRequest> PurchaseRequests => Set<PurchaseRequest>();
+
+    public DbSet<RequestNumberCounter> RequestNumberCounters => Set<RequestNumberCounter>();
+
+    public void MarkModified(PurchaseRequest request) => Entry(request).State = EntityState.Modified;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(RequestsDbContext).Assembly);
+        modelBuilder.Entity<PurchaseRequest>().HasQueryFilter(r => r.TenantId == CurrentTenantId);
+    }
+}
+
+/// <summary>Last request number handed out per tenant (one row per tenant).</summary>
+public sealed class RequestNumberCounter
+{
+    public string TenantId { get; set; } = "";
+
+    public int LastValue { get; set; }
+}
