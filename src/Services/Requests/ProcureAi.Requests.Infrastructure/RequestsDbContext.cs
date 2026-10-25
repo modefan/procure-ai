@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Domain;
 
@@ -20,6 +21,8 @@ public sealed class RequestsDbContext(DbContextOptions<RequestsDbContext> option
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(RequestsDbContext).Assembly);
         modelBuilder.Entity<PurchaseRequest>().HasQueryFilter(r => r.TenantId == CurrentTenantId);
+        // Written by AuditSaveChangesInterceptor, registered in DependencyInjection.
+        modelBuilder.AddAuditEntries();
     }
 }
 

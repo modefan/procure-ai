@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Contracts.Requests;
 using ProcureAi.Requests.Application;
@@ -30,7 +31,11 @@ public static class DependencyInjection
     {
         var connectionString = Required(configuration, DatabaseConnectionName);
         services.AddValidatedOptions<PagingOptions>(configuration, PagingOptions.SectionName);
-        services.AddDbContextWithWolverineIntegration<RequestsDbContext>(options => options.UseNpgsql(connectionString));
+        // The audit interceptor is scoped (it needs the caller), so the options are built from the scope's provider.
+        services.AddScoped<IAuditContext, CallerAuditContext>();
+        services.AddScoped<AuditSaveChangesInterceptor>();
+        services.AddDbContextWithWolverineIntegration<RequestsDbContext>(
+            (sp, options) => options.UseNpgsql(connectionString).AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>()));
         // Forwards to the same scoped DbContext instance (a factory, not AddScoped<,>, which would create a second one).
         services.AddScoped<IRequestsDbContext>(sp => sp.GetRequiredService<RequestsDbContext>());
         services.AddScoped<IRequestNumberGenerator, RequestNumberGenerator>();
