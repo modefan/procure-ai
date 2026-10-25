@@ -1,6 +1,6 @@
 using RabbitMQ.Client;
 
-namespace ProcureAi.Requests.IntegrationTests;
+namespace ProcureAi.Testing;
 
 /// <summary>Binds a throwaway queue to an exchange and reads what arrives, headers included.</summary>
 public sealed class RabbitProbe(string connectionString)

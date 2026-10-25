@@ -1,3 +1,5 @@
+using ProcureAi.BuildingBlocks.Domain;
+
 namespace ProcureAi.BuildingBlocks.Web.Auth;
 
 /// <summary>The default role to permission matrix of spec 4.2, in code. The admin API key gets every permission.</summary>

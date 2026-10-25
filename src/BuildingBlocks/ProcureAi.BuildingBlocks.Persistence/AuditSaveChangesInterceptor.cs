@@ -115,7 +115,7 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
 
             var oldValue = entry.State == EntityState.Added ? null : Provider(metadata, property.OriginalValue);
             var newValue = entry.State == EntityState.Deleted ? null : Provider(metadata, property.CurrentValue);
-            if (entry.State == EntityState.Modified && Equals(oldValue, newValue))
+            if (entry.State == EntityState.Modified && SameValue(oldValue, newValue))
             {
                 continue;
             }
@@ -131,6 +131,13 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
 
         return changes;
     }
+
+    // Scalars compare by value; a primitive collection (text[] column) by its items, since the snapshot and the current
+    // value are different collection objects that never compare equal by reference.
+    private static bool SameValue(object? oldValue, object? newValue) =>
+        oldValue is System.Collections.IEnumerable and not string && newValue is System.Collections.IEnumerable and not string
+            ? ((System.Collections.IEnumerable)oldValue).Cast<object?>().SequenceEqual(((System.Collections.IEnumerable)newValue).Cast<object?>())
+            : Equals(oldValue, newValue);
 
     // The value as stored (enums as text, value objects as their column value), not the CLR object.
     private static object? Provider(IProperty property, object? value)

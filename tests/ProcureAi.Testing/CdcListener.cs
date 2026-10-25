@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using RabbitMQ.Client;
 
-namespace ProcureAi.Requests.IntegrationTests;
+namespace ProcureAi.Testing;
 
 /// <summary>A message Debezium published to the <c>cdc</c> exchange.</summary>
 public sealed record CdcMessage(string RoutingKey, JsonElement Envelope)

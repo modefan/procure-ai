@@ -1,6 +1,6 @@
-namespace ProcureAi.BuildingBlocks.Web.Auth;
+namespace ProcureAi.BuildingBlocks.Domain;
 
-/// <summary>The permissions of the whole system (spec 4.2). Code checks permissions, never role names.</summary>
+/// <summary>The permissions of the whole system (spec 4.2). Code checks permissions, never role names. Lives in Domain so a service domain (Access) can validate against the catalog.</summary>
 public static class Permissions
 {
     public const string RequestsRead = "requests.read";
