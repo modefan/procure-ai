@@ -23,15 +23,20 @@ public static class BffSchemes
     public const string SessionCookieName = "__Host-procure";
     public const string ApiKeyHeader = "X-Api-Key";
 
+    /// <summary>
+    /// True when the call brings its own credentials and is not carried by the session cookie. Applies to proxied API
+    /// calls only: the /bff endpoints work on the session alone, whatever headers come with them. An explicit
+    /// <c>Authorization: Bearer</c> header wins over a session (Swagger UI tests with its own OAuth2 token on the
+    /// gateway origin; a custom header cannot be forged by another site), so such a call is not cookie-authenticated.
+    /// </summary>
     public static bool UsesPassThrough(HttpRequest request)
     {
-        if (request.Headers.ContainsKey(ApiKeyHeader))
+        if (request.Path.StartsWithSegments("/bff"))
         {
-            return true;
+            return false;
         }
 
-        // A bearer token counts only when there is no session: a browser with a session always uses the session.
-        return !request.Cookies.ContainsKey(SessionCookieName)
-               && request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+        return request.Headers.ContainsKey(ApiKeyHeader)
+               || request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
     }
 }

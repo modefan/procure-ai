@@ -113,7 +113,11 @@ internal static class BffAuthSetup
         {
             OnTokenValidated = context =>
             {
-                CopyAccessTokenClaims(context);
+                if (context.Principal?.Identity is ClaimsIdentity identity && context.TokenEndpointResponse?.AccessToken is { Length: > 0 } token)
+                {
+                    AccessTokenClaims.Apply(identity, token);
+                }
+
                 return Task.CompletedTask;
             },
             OnRedirectToIdentityProvider = context =>
@@ -135,36 +139,5 @@ internal static class BffAuthSetup
                 return Task.CompletedTask;
             },
         };
-    }
-
-    /// <summary>
-    /// The tenant and roles live in the access token (that is what the services read). They are copied onto the
-    /// session's identity once, at sign-in, so the gateway can answer /bff/user and compute permissions from them.
-    /// The token comes straight from the provider's token endpoint; it is read here, not trusted from a client.
-    /// </summary>
-    private static void CopyAccessTokenClaims(TokenValidatedContext context)
-    {
-        var accessToken = context.TokenEndpointResponse?.AccessToken;
-        if (string.IsNullOrEmpty(accessToken) || context.Principal?.Identity is not ClaimsIdentity identity)
-        {
-            return;
-        }
-
-        var token = new JsonWebTokenHandler().ReadJsonWebToken(accessToken);
-        foreach (var existing in identity.FindAll("tenant").ToList())
-        {
-            identity.RemoveClaim(existing);
-        }
-
-        if (token.TryGetClaim("tenant", out var tenant))
-        {
-            identity.AddClaim(new Claim("tenant", tenant.Value));
-        }
-
-        var known = identity.FindAll("roles").Select(c => c.Value).ToHashSet(StringComparer.Ordinal);
-        foreach (var role in token.Claims.Where(c => c.Type == "roles" && known.Add(c.Value)))
-        {
-            identity.AddClaim(new Claim("roles", role.Value));
-        }
     }
 }

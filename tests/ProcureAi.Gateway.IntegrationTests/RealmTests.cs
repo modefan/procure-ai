@@ -6,13 +6,14 @@ namespace ProcureAi.Gateway.IntegrationTests;
 public sealed class RealmTests(KeycloakFixture keycloak)
 {
     [Fact]
-    public async Task Access_token_carries_the_name_username_and_email_the_gateway_shows()
+    public async Task Access_token_carries_the_username_but_no_name_or_email()
     {
         var claims = await keycloak.LoginAsync("tom@acme.test");
 
-        claims.GetProperty("name").GetString().ShouldBe("Tom Mokoena");
         claims.GetProperty("preferred_username").GetString().ShouldBe("tom@acme.test");
-        claims.GetProperty("email").GetString().ShouldBe("tom@acme.test");
+        // Personal data goes to the ID token (the gateway reads it there), not to the tokens services receive.
+        claims.TryGetProperty("name", out _).ShouldBeFalse();
+        claims.TryGetProperty("email", out _).ShouldBeFalse();
     }
 
     [Fact]

@@ -37,13 +37,14 @@ public sealed class RedisTicketStore : ITicketStore
     public async Task<string> StoreAsync(AuthenticationTicket ticket, CancellationToken cancellationToken)
     {
         var id = Guid.NewGuid().ToString("N");
-        await WriteAsync(id, ticket);
+        await WriteAsync(id, ticket, onlyIfExists: false);
         return id;
     }
 
     public Task<string> StoreAsync(AuthenticationTicket ticket) => StoreAsync(ticket, CancellationToken.None);
 
-    public Task RenewAsync(string key, AuthenticationTicket ticket, CancellationToken cancellationToken) => WriteAsync(key, ticket);
+    public Task RenewAsync(string key, AuthenticationTicket ticket, CancellationToken cancellationToken) =>
+        WriteAsync(key, ticket, onlyIfExists: true);
 
     public Task RenewAsync(string key, AuthenticationTicket ticket) => RenewAsync(key, ticket, CancellationToken.None);
 
@@ -101,33 +102,44 @@ public sealed class RedisTicketStore : ITicketStore
         return removed;
     }
 
-    private async Task WriteAsync(string id, AuthenticationTicket ticket)
+    /// <param name="onlyIfExists">
+    /// Renewals write only while the session still exists, in one transaction with the check. A request that was in
+    /// flight while the session was revoked (logout, logout-all) must not bring it back.
+    /// </param>
+    private async Task WriteAsync(string id, AuthenticationTicket ticket, bool onlyIfExists)
     {
         var subject = ticket.Principal.FindFirst("sub")?.Value;
-        var db = _redis.GetDatabase();
         var sessionKey = SessionKey(id);
         var lifetime = Lifetime(ticket);
 
-        var batch = db.CreateBatch();
+        var transaction = _redis.GetDatabase().CreateTransaction();
+        if (onlyIfExists)
+        {
+            transaction.AddCondition(Condition.KeyExists(sessionKey));
+        }
+
         var tasks = new List<Task>
         {
-            batch.HashSetAsync(sessionKey,
+            transaction.HashSetAsync(sessionKey,
             [
                 new HashEntry(TicketField, _protector.Protect(_serializer.Serialize(ticket))),
                 new HashEntry(SubjectField, subject ?? ""),
             ]),
-            batch.KeyExpireAsync(sessionKey, lifetime),
+            transaction.KeyExpireAsync(sessionKey, lifetime),
         };
         if (!string.IsNullOrEmpty(subject))
         {
             var userKey = UserKey(subject);
-            tasks.Add(batch.SetAddAsync(userKey, id));
+            tasks.Add(transaction.SetAddAsync(userKey, id));
             // The index lives as long as the longest session could.
-            tasks.Add(batch.KeyExpireAsync(userKey, TimeSpan.FromMinutes(_options.IdleTimeoutMinutes) + TimeSpan.FromMinutes(1)));
+            tasks.Add(transaction.KeyExpireAsync(userKey, TimeSpan.FromMinutes(_options.IdleTimeoutMinutes) + TimeSpan.FromMinutes(1)));
         }
 
-        batch.Execute();
-        await Task.WhenAll(tasks);
+        // False when the condition failed: the session is gone and stays gone (the next RetrieveAsync returns null).
+        if (await transaction.ExecuteAsync())
+        {
+            await Task.WhenAll(tasks);
+        }
     }
 
     /// <summary>Until the ticket's expiry (the cookie's sliding expiry), plus a little so the cookie ages out first.</summary>
@@ -137,10 +149,8 @@ public sealed class RedisTicketStore : ITicketStore
         if (ticket.Properties.ExpiresUtc is { } expires)
         {
             var remaining = expires - _time.GetUtcNow();
-            if (remaining > TimeSpan.Zero)
-            {
-                return remaining + TimeSpan.FromMinutes(1);
-            }
+            // Already expired: keep it for a moment only, never a full idle timeout.
+            return remaining > TimeSpan.Zero ? remaining + TimeSpan.FromMinutes(1) : TimeSpan.FromSeconds(1);
         }
 
         return fallback;

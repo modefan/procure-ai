@@ -253,7 +253,7 @@
           "protocolMapper": "oidc-full-name-mapper",
           "config": {
             "id.token.claim": "true",
-            "access.token.claim": "true",
+            "access.token.claim": "false",
             "userinfo.token.claim": "true",
             "introspection.token.claim": "true"
           }
@@ -267,7 +267,7 @@
             "claim.name": "email",
             "jsonType.label": "String",
             "id.token.claim": "true",
-            "access.token.claim": "true",
+            "access.token.claim": "false",
             "userinfo.token.claim": "true",
             "introspection.token.claim": "true"
           }

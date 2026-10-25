@@ -20,11 +20,16 @@ public sealed partial class LoginDriver : IDisposable
         _keycloakBrowser = new HttpClient(new CookieJarHandler(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }, stripSecure: true));
     }
 
+    /// <summary>A browser follows 301, 302, 303, 307 and 308 alike.</summary>
+    public static bool IsRedirect(HttpStatusCode status) =>
+        status is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect or HttpStatusCode.RedirectMethod
+            or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
+
     /// <summary>Starts at the gateway; returns the Keycloak URL it redirects to.</summary>
     public static async Task<Uri> StartAsync(HttpClient gateway, string path)
     {
         using var response = await gateway.GetAsync(path);
-        response.StatusCode.ShouldBe(HttpStatusCode.Redirect);
+        IsRedirect(response.StatusCode).ShouldBeTrue();
         return response.Headers.Location!;
     }
 
@@ -34,7 +39,7 @@ public sealed partial class LoginDriver : IDisposable
         // Keycloak answers the authorize URL with a redirect to its login page; a redirect out of Keycloak means
         // its single sign-on session was still alive and the form was skipped.
         var response = await _keycloakBrowser.GetAsync(authorizeUrl);
-        for (var hop = 0; hop < 6 && response.StatusCode == HttpStatusCode.Redirect; hop++)
+        for (var hop = 0; hop < 6 && IsRedirect(response.StatusCode); hop++)
         {
             var location = response.Headers.Location!;
             if (location.IsAbsoluteUri && location.Authority != new Uri(_keycloak.BaseUrl).Authority)
@@ -91,7 +96,7 @@ public sealed partial class LoginDriver : IDisposable
                 ["password"] = password,
                 ["credentialId"] = "",
             }));
-            if (response.StatusCode == HttpStatusCode.Redirect)
+            if (IsRedirect(response.StatusCode))
             {
                 return await FollowToGatewayAsync(response, "login");
             }
@@ -114,7 +119,7 @@ public sealed partial class LoginDriver : IDisposable
     {
         for (var hop = 0; hop < 6; hop++)
         {
-            if (response.StatusCode != HttpStatusCode.Redirect)
+            if (!IsRedirect(response.StatusCode))
             {
                 var html = await response.Content.ReadAsStringAsync();
                 throw new InvalidOperationException(
@@ -143,7 +148,7 @@ public sealed partial class LoginDriver : IDisposable
         var callback = redirect ?? await SubmitCredentialsAsync(
             formAction ?? throw new InvalidOperationException("No login form on Keycloak's page."), user, _keycloak.DemoPassword);
         using var done = await gateway.GetAsync(callback);
-        done.StatusCode.ShouldBe(HttpStatusCode.Redirect, "Gateway callback failed: " + await done.Content.ReadAsStringAsync());
+        IsRedirect(done.StatusCode).ShouldBeTrue("Gateway callback failed: " + await done.Content.ReadAsStringAsync());
         return done.Headers.Location!;
     }
 

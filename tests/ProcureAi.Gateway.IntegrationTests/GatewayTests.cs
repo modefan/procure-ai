@@ -239,11 +239,11 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         var browser = await SignedInAsync();
 
         using var response = await browser.SendAsync(
-            Request(HttpMethod.Get, Api, headers: [("Authorization", "Bearer forged"), ("Cookie", "other=1")]), Ct);
+            Request(HttpMethod.Get, Api, headers: [("Authorization", "Basic forged"), ("Cookie", "other=1")]), Ct);
 
         await ExpectOkAsync(response);
         var seen = _gateway.Stub.Last;
-        seen.Header("Authorization").ShouldNotBe("Bearer forged");
+        seen.Header("Authorization").ShouldNotBe("Basic forged");
         Bearer(seen).GetClaim("tenant").Value.ShouldBe("acme");
         seen.Header("Cookie").ShouldBeNull("the session cookie must never reach a service");
     }
@@ -270,6 +270,73 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
 
         await ExpectOkAsync(response);
         _gateway.Stub.Last.Header("Authorization").ShouldBe("Bearer swagger-token");
+    }
+
+    [Fact]
+    public async Task Explicit_bearer_header_wins_over_the_session_and_needs_no_xsrf_token()
+    {
+        // Swagger UI on the gateway origin sends its own OAuth2 token; the session token is not attached.
+        var browser = await SignedInAsync();
+
+        using var response = await browser.SendAsync(Request(HttpMethod.Post, Api, headers: ("Authorization", "Bearer swagger-token")), Ct);
+
+        await ExpectOkAsync(response);
+        _gateway.Stub.Last.Header("Authorization").ShouldBe("Bearer swagger-token");
+        _gateway.Stub.Last.Header("Cookie").ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("/bff/logout")]
+    [InlineData("/bff/logout-all")]
+    public async Task Api_key_header_does_not_skip_xsrf_on_bff_endpoints(string path)
+    {
+        var browser = await SignedInAsync();
+
+        using var response = await browser.SendAsync(Request(HttpMethod.Post, path, headers: ("X-Api-Key", "key-value")), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await browser.GetAsync("/bff/user", Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_session_revoked_while_a_request_was_in_flight_is_not_renewed_back_to_life()
+    {
+        var browser = await SignedInAsync();
+        var id = SessionIds().Single();
+        var store = _gateway.App.Services.GetRequiredService<RedisTicketStore>();
+        var ticket = (await store.RetrieveAsync(id, Ct))!;
+        // The renewal of a request that read the ticket before logout-all removed it.
+        (await store.RevokeAllForUserAsync(ticket.Principal.FindFirst("sub")!.Value, Ct)).ShouldBe(1);
+
+        await store.RenewAsync(id, ticket, Ct);
+
+        SessionKeys().ShouldBeEmpty();
+        (await store.RetrieveAsync(id, Ct)).ShouldBeNull();
+        (await browser.GetAsync("/bff/user", Ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Tenant_and_roles_are_taken_from_the_new_token_when_it_is_refreshed()
+    {
+        var browser = await SignedInAsync();
+        var id = SessionIds().Single();
+        var store = _gateway.App.Services.GetRequiredService<RedisTicketStore>();
+        var ticket = (await store.RetrieveAsync(id, Ct))!;
+        var identity = (System.Security.Claims.ClaimsIdentity)ticket.Principal.Identity!;
+        foreach (var stale in identity.FindAll("tenant").Concat(identity.FindAll("roles")).ToList())
+        {
+            identity.RemoveClaim(stale);
+        }
+
+        identity.AddClaim(new System.Security.Claims.Claim("tenant", "stale-tenant"));
+        await store.RenewAsync(id, ticket, Ct);
+        (await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct)).GetProperty("tenantId").GetString().ShouldBe("stale-tenant");
+
+        _gateway.Clock.Advance(TimeSpan.FromHours(1));
+        var user = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+
+        user.GetProperty("tenantId").GetString().ShouldBe("acme");
+        user.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ShouldContain("requester");
     }
 
     [Fact]

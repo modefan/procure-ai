@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Extensions.Options;
@@ -58,6 +59,13 @@ public sealed class SessionCookieEvents(
 
         context.Properties.UpdateTokenValue(
             "expires_at", time.GetUtcNow().Add(tokens.ExpiresIn).ToString("o", CultureInfo.InvariantCulture));
+        // Tenant and roles may have changed at the provider since sign-in.
+        if (context.Principal?.Identity is ClaimsIdentity identity)
+        {
+            AccessTokenClaims.Apply(identity, tokens.AccessToken);
+            context.ReplacePrincipal(context.Principal);
+        }
+
         // Stores the updated ticket in Redis.
         context.ShouldRenew = true;
     }
