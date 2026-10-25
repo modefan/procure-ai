@@ -45,6 +45,7 @@
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.53.0" />
     <PackageVersion Include="Riok.Mapperly" Version="4.3.1" />
     <!-- Tests -->
+    <PackageVersion Include="Testcontainers" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.16.0" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />

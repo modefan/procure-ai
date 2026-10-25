@@ -1,4 +1,330 @@
 {
   "realm": "procure",
-  "enabled": true
+  "enabled": true,
+  "displayName": "Procure AI",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "sslRequired": "external",
+  "organizationsEnabled": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "requester",
+        "description": "Procurement role: requester"
+      },
+      {
+        "name": "manager",
+        "description": "Procurement role: manager"
+      },
+      {
+        "name": "department-head",
+        "description": "Procurement role: department-head"
+      },
+      {
+        "name": "finance",
+        "description": "Procurement role: finance"
+      },
+      {
+        "name": "admin",
+        "description": "Procurement role: admin"
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-procure",
+    "description": "New users are requesters",
+    "composite": true,
+    "composites": {
+      "realm": [
+        "offline_access",
+        "uma_authorization",
+        "requester"
+      ]
+    }
+  },
+  "organizations": [
+    {
+      "name": "Acme Corp",
+      "alias": "acme",
+      "enabled": true,
+      "domains": [
+        {
+          "name": "acme.test",
+          "verified": false
+        }
+      ],
+      "members": [
+        {
+          "username": "tom@acme.test"
+        },
+        {
+          "username": "maria@acme.test"
+        },
+        {
+          "username": "dept@acme.test"
+        },
+        {
+          "username": "thandi@acme.test"
+        },
+        {
+          "username": "admin@acme.test"
+        }
+      ]
+    },
+    {
+      "name": "Globex",
+      "alias": "globex",
+      "enabled": true,
+      "domains": [
+        {
+          "name": "globex.test",
+          "verified": false
+        }
+      ],
+      "members": [
+        {
+          "username": "ben@globex.test"
+        }
+      ]
+    },
+    {
+      "name": "Demo",
+      "alias": "demo",
+      "enabled": true,
+      "domains": [
+        {
+          "name": "demo.test",
+          "verified": false
+        }
+      ],
+      "members": []
+    }
+  ],
+  "users": [
+    {
+      "username": "tom@acme.test",
+      "email": "tom@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Tom",
+      "lastName": "Mokoena",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "requester"
+      ]
+    },
+    {
+      "username": "maria@acme.test",
+      "email": "maria@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Maria",
+      "lastName": "Naidoo",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "manager"
+      ]
+    },
+    {
+      "username": "dept@acme.test",
+      "email": "dept@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Dept",
+      "lastName": "Head",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "department-head"
+      ]
+    },
+    {
+      "username": "thandi@acme.test",
+      "email": "thandi@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Thandi",
+      "lastName": "Dlamini",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "finance"
+      ]
+    },
+    {
+      "username": "admin@acme.test",
+      "email": "admin@acme.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin"
+      ]
+    },
+    {
+      "username": "ben@globex.test",
+      "email": "ben@globex.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Ben",
+      "lastName": "Smit",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "manager"
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "procure-api",
+      "description": "Audience, tenant and roles claims for the procurement APIs",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "procure-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "procure-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "tenant",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-organization-membership-mapper",
+          "config": {
+            "claim.name": "tenant",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "addOrganizationId": "false",
+            "addOrganizationAttributes": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "procure-gateway",
+      "name": "Procure gateway (BFF)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KC_GATEWAY_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://localhost:*",
+        "http://localhost:*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://localhost:*##http://localhost:*"
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "procure-api"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ]
+    },
+    {
+      "clientId": "procure-swagger",
+      "name": "Swagger UI",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "https://localhost:*",
+        "http://localhost:*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "procure-api"
+      ]
+    }
+  ]
 }

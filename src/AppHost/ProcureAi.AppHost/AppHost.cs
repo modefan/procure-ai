@@ -11,6 +11,10 @@ var useDataVolumes = builder.Configuration.GetValue("Persistence:UseDataVolumes"
 // Parameters. Secrets come from AppHost user secrets (never the repo); see DEMO PASSWORDS.txt.
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
+// Substituted by Keycloak into the ${KC_DEMO_PASSWORD} / ${KC_GATEWAY_SECRET} placeholders of the realm import,
+// so the committed realm file holds no passwords or secrets.
+var keycloakDemoPassword = builder.AddParameter("keycloak-demo-password", secret: true);
+var keycloakGatewaySecret = builder.AddParameter("keycloak-gateway-secret", secret: true);
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
@@ -78,6 +82,8 @@ var keycloak = builder.AddContainer(ResourceNames.Keycloak, "quay.io/keycloak/ke
     .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", keycloakAdmin)
     .WithEnvironment("KC_BOOTSTRAP_ADMIN_PASSWORD", keycloakAdminPassword)
     .WithEnvironment("KC_HEALTH_ENABLED", "true")
+    .WithEnvironment("KC_DEMO_PASSWORD", keycloakDemoPassword)
+    .WithEnvironment("KC_GATEWAY_SECRET", keycloakGatewaySecret)
     .WithEnvironment("JAVA_OPTS_KC_HEAP", limits.Keycloak.JavaHeapOpts)
     .WithBindMount("../../../infra/keycloak", "/opt/keycloak/data/import", isReadOnly: true)
     .WithArgs("start-dev", "--import-realm")
