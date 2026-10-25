@@ -14,6 +14,12 @@ namespace ProcureAi.Requests.IntegrationTests;
 /// <summary>Captures Serilog events in memory (registered in DI, so <c>ReadFrom.Services</c> picks it up).</summary>
 public sealed class CapturingSink : ILogEventSink
 {
+    /// <summary>
+    /// Every factory on the same infrastructure writes here: a locally sent message may be handled by any running
+    /// instance (they share the durable inbox), so a per-factory sink would miss the handler's log event.
+    /// </summary>
+    public static CapturingSink Shared { get; } = new();
+
     private readonly List<LogEvent> _events = [];
 
     public IReadOnlyList<LogEvent> Events
@@ -80,10 +86,7 @@ public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null) :
             services.Remove(original);
             services.AddSingleton<ICacheInvalidator>(sp => new HookedInvalidator(
                 (ICacheInvalidator)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!), Hook));
-            if (sink is not null)
-            {
-                services.AddSingleton<ILogEventSink>(sink);
-            }
+            services.AddSingleton<ILogEventSink>(sink ?? CapturingSink.Shared);
 
             // The test assembly's own message handlers (see TestHandlers.cs).
             services.ConfigureWolverine(options => options.Discovery.IncludeAssembly(typeof(ApiFactory).Assembly));

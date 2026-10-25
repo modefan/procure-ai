@@ -24,7 +24,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
 
     private const string Requests = "/api/v1/requests";
 
-    private readonly CapturingSink _sink = new();
+    private readonly CapturingSink _sink = CapturingSink.Shared;
     private ApiFactory _factory = null!;
     private HttpClient _client = null!;
 
