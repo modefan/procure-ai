@@ -9,6 +9,7 @@ using Shouldly;
 
 namespace ProcureAi.BuildingBlocks.Tests.Web;
 
+[Collection(GlobalStateCollection.Name)]
 public class PlumbingTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

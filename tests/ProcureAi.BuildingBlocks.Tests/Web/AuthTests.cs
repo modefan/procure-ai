@@ -12,6 +12,7 @@ using Shouldly;
 
 namespace ProcureAi.BuildingBlocks.Tests.Web;
 
+[Collection(GlobalStateCollection.Name)]
 public class AuthTests
 {
     private const string Me = "/api/v1/auth-test/me";
@@ -227,6 +228,41 @@ public class AuthTests
         body.GetProperty("tenantId").GetString().ShouldBe("globex");
         body.GetProperty("isAdminApiKey").GetBoolean().ShouldBeFalse();
         body.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ShouldBe(["manager", "requester"]);
+    }
+
+    [Fact]
+    public async Task Jwt_cannot_forge_the_api_key_identity()
+    {
+        await using var app = await TestHost.StartAsync();
+        var forged = new Dictionary<string, object>
+        {
+            ["auth_method"] = "api_key",
+            ["calling_service"] = "evil",
+            ["on_behalf_of"] = "someone",
+        };
+        var token = TestAuth.CreateToken("user-1", "acme", forged, "requester");
+
+        var approve = await app.GetTestClient().SendAsync(Request(HttpMethod.Post, Approve, bearer: token), Ct);
+        approve.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var me = await app.GetTestClient().SendAsync(
+            Request(HttpMethod.Get, Me, bearer: token, headers: ("X-Tenant-Id", "globex")), Ct);
+        var body = await me.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("isAdminApiKey").GetBoolean().ShouldBeFalse();
+        body.GetProperty("tenantId").GetString().ShouldBe("acme");
+        body.GetProperty("callingService").ValueKind.ShouldBe(JsonValueKind.Null);
+        body.GetProperty("onBehalfOfUser").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Jwt_tenant_claim_with_unsafe_characters_is_treated_as_no_tenant()
+    {
+        await using var app = await TestHost.StartAsync();
+        var token = TestAuth.CreateToken("user-1", "bad tenant<script>", "requester");
+
+        var response = await app.GetTestClient().SendAsync(Request(HttpMethod.Get, TenantEndpoint, bearer: token), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]

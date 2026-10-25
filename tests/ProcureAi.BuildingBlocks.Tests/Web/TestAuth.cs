@@ -19,12 +19,21 @@ public static class TestAuth
     public static string Hash(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value)));
 
-    public static string CreateToken(string subject, string? tenant, params string[] roles)
+    public static string CreateToken(string subject, string? tenant, params string[] roles) =>
+        CreateToken(subject, tenant, null, roles);
+
+    public static string CreateToken(
+        string subject, string? tenant, Dictionary<string, object>? extraClaims, params string[] roles)
     {
         var claims = new Dictionary<string, object> { ["sub"] = subject, ["roles"] = roles };
         if (tenant is not null)
         {
             claims["tenant"] = tenant;
+        }
+
+        foreach (var (name, value) in extraClaims ?? [])
+        {
+            claims[name] = value;
         }
 
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor

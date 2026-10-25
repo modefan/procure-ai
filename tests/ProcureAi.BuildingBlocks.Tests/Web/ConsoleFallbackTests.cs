@@ -3,14 +3,17 @@ using Shouldly;
 
 namespace ProcureAi.BuildingBlocks.Tests.Web;
 
-/// <summary>Swaps the process-wide Console.Out, so it must never run in parallel with other tests.</summary>
+/// <summary>
+/// Tests that touch process-wide state (Console.Out, the static Serilog Log.Logger that every web host replaces)
+/// and so must never run in parallel with other tests.
+/// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class ConsoleOutCollection
+public sealed class GlobalStateCollection
 {
-    public const string Name = "Console.Out swapping tests";
+    public const string Name = "Process-wide state tests";
 }
 
-[Collection(ConsoleOutCollection.Name)]
+[Collection(GlobalStateCollection.Name)]
 public class ConsoleFallbackTests
 {
     [Fact]

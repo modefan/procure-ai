@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
 namespace ProcureAi.BuildingBlocks.Web.Auth;
@@ -28,13 +29,15 @@ public sealed class PermissionPolicyProvider(IOptions<AuthorizationOptions> opti
     }
 }
 
-internal sealed class PermissionAuthorizationHandler(ICurrentUser user, IPermissionProvider provider)
+internal sealed class PermissionAuthorizationHandler(
+    ICurrentUser user, IPermissionProvider provider, IHttpContextAccessor accessor)
     : AuthorizationHandler<PermissionRequirement>
 {
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context, PermissionRequirement requirement)
     {
-        var permissions = await provider.GetPermissionsAsync(user, CancellationToken.None);
+        var permissions = await provider.GetPermissionsAsync(
+            user, accessor.HttpContext?.RequestAborted ?? CancellationToken.None);
         if (permissions.Contains(requirement.Permission))
         {
             context.Succeed(requirement);
