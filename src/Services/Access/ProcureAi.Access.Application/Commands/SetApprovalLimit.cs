@@ -22,21 +22,10 @@ public static class SetApprovalLimitHandler
     {
         var user = await db.TenantUsers.SingleOrDefaultAsync(u => u.UserId == command.UserId, cancellationToken)
             ?? throw new NotFoundException($"User {command.UserId} was not found.");
-        if (user.Version != command.ExpectedVersion)
-        {
-            throw new ConcurrencyConflictException(
-                $"User {command.UserId} was changed by someone else (version {user.Version}, expected {command.ExpectedVersion}).");
-        }
+        OptimisticConcurrency.EnsureVersion($"User {command.UserId}", user.Version, command.ExpectedVersion);
 
         user.SetApprovalLimit(Money.Zar(command.Amount));
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException exception)
-        {
-            throw new ConcurrencyConflictException($"The user was changed by someone else. {exception.Message}");
-        }
+        await OptimisticConcurrency.SaveOrConflictAsync(db.SaveChangesAsync, "The user", cancellationToken);
 
         await bus.PublishAsync(new AccessChanged(
             caller.TenantId ?? throw new DomainException("A tenant is required."), UserKind, user.UserId, time.GetUtcNow()));

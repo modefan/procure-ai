@@ -159,43 +159,39 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     [Fact]
     public async Task Setting_matrix_publishes_AccessChanged_through_outbox()
     {
+        var tenant = await infra.CreateTenantAsync();
         var probe = new RabbitProbe(infra.RabbitConnectionString);
         var queue = await probe.BindQueueAsync(Exchanges.Access);
-        var matrix = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(Demo)), Ct));
+        var matrix = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(tenant)), Ct));
 
         var put = await _client.SendAsync(
-            Request(HttpMethod.Put, $"{Base}/matrix/roles/requester", AdminToken(Demo), ifMatch: ETag(matrix.Version),
+            Request(HttpMethod.Put, $"{Base}/matrix/roles/requester", AdminToken(tenant), ifMatch: ETag(matrix.Version),
                 body: new { permissions = new[] { "requests.read", "requests.create" } }), Ct);
 
         put.StatusCode.ShouldBe(HttpStatusCode.OK, await put.Content.ReadAsStringAsync(Ct));
-        await probe.WaitForCountAsync(queue, 1, TimeSpan.FromSeconds(20));
-        var message = await TakeBodyAsync(queue);
-        message.GetProperty("tenantId").GetString().ShouldBe(Demo);
+        var message = await probe.WaitForMessageAsync(
+            queue, m => m.GetProperty("tenantId").GetString() == tenant && m.GetProperty("kind").GetString() == "Matrix", TimeSpan.FromSeconds(20));
+        message.GetProperty("tenantId").GetString().ShouldBe(tenant);
         message.GetProperty("kind").GetString().ShouldBe("Matrix");
     }
 
     [Fact]
     public async Task Matrix_read_right_after_a_change_is_fresh_and_the_version_moves()
     {
-        var before = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(Globex)), Ct));
+        var tenant = await infra.CreateTenantAsync();
+        var before = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(tenant)), Ct));
         before.Roles.Single(r => r.Role == "manager").Permissions.ShouldContain("requests.approve");
 
         var put = await _client.SendAsync(
-            Request(HttpMethod.Put, $"{Base}/matrix/roles/manager", AdminToken(Globex), ifMatch: ETag(before.Version),
+            Request(HttpMethod.Put, $"{Base}/matrix/roles/manager", AdminToken(tenant), ifMatch: ETag(before.Version),
                 body: new { permissions = new[] { "requests.read", "requests.create" } }), Ct);
         var updated = await ReadAsync<MatrixDto>(put);
-        var after = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(Globex)), Ct));
+        var after = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(tenant)), Ct));
 
         after.Roles.Single(r => r.Role == "manager").Permissions.ShouldBe(["requests.create", "requests.read"], ignoreOrder: true);
         after.Version.ShouldNotBe(before.Version);
         updated.Version.ShouldBe(after.Version);
         put.Headers.ETag!.Tag.ShouldBe(ETag(after.Version));
-
-        // Give globex's manager the default permissions back (other tests read them).
-        var restore = await _client.SendAsync(
-            Request(HttpMethod.Put, $"{Base}/matrix/roles/manager", AdminToken(Globex), ifMatch: ETag(after.Version),
-                body: new { permissions = before.Roles.Single(r => r.Role == "manager").Permissions }), Ct);
-        restore.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -240,13 +236,14 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     [Fact]
     public async Task A_matrix_change_takes_effect_for_the_very_next_request()
     {
+        var tenant = await infra.CreateTenantAsync();
         // Access's own permission provider reads its database: dropping admin.users from a custom role is enforced at once.
-        var matrix = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(Demo)), Ct));
-        var auditor = TestAuth.CreateToken(DemoUsers.Admin, Demo, "auditor");
+        var matrix = await ReadAsync<MatrixDto>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/matrix", AdminToken(tenant)), Ct));
+        var auditor = TestAuth.CreateToken(DemoUsers.Admin, tenant, "auditor");
         (await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/users", auditor), Ct)).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
         var grant = await _client.SendAsync(
-            Request(HttpMethod.Put, $"{Base}/matrix/roles/auditor", AdminToken(Demo), ifMatch: ETag(matrix.Version),
+            Request(HttpMethod.Put, $"{Base}/matrix/roles/auditor", AdminToken(tenant), ifMatch: ETag(matrix.Version),
                 body: new { permissions = new[] { "admin.users" } }), Ct);
         grant.StatusCode.ShouldBe(HttpStatusCode.OK, await grant.Content.ReadAsStringAsync(Ct));
 
@@ -256,27 +253,29 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     [Fact]
     public async Task Approval_limit_change_is_visible_in_the_next_read_and_publishes_a_user_event()
     {
+        var tenant = await infra.CreateTenantAsync();
         var probe = new RabbitProbe(infra.RabbitConnectionString);
         var queue = await probe.BindQueueAsync(Exchanges.Access);
-        var users = await ReadAsync<List<UserDto>>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/users", AdminToken(Globex)), Ct));
-        var ben = users.ShouldHaveSingleItem();
-        ben.UserId.ShouldBe(DemoUsers.Ben);
-        ben.ApprovalLimit.ShouldBe(100_000m);
+        var users = await ReadAsync<List<UserDto>>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/users", AdminToken(tenant)), Ct));
+        var maria = users.ShouldHaveSingleItem();
+        maria.UserId.ShouldBe(DemoUsers.Maria);
+        maria.ApprovalLimit.ShouldBe(200_000m);
 
         var put = await _client.SendAsync(
-            Request(HttpMethod.Put, $"{Base}/users/{DemoUsers.Ben}/approval-limit", AdminToken(Globex), ifMatch: ETag(ben.Version),
+            Request(HttpMethod.Put, $"{Base}/users/{DemoUsers.Maria}/approval-limit", AdminToken(tenant), ifMatch: ETag(maria.Version),
                 body: new { amount = 150_000m }), Ct);
         var updated = await ReadAsync<UserDto>(put);
-        var after = (await ReadAsync<List<UserDto>>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/users", AdminToken(Globex)), Ct))).Single();
+        var after = (await ReadAsync<List<UserDto>>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/users", AdminToken(tenant)), Ct))).Single();
 
         updated.ApprovalLimit.ShouldBe(150_000m);
         after.ApprovalLimit.ShouldBe(150_000m, "the read right after the write must not be served from the 1 s cache");
-        after.Version.ShouldNotBe(ben.Version);
-        await probe.WaitForCountAsync(queue, 1, TimeSpan.FromSeconds(20));
-        var message = await TakeBodyAsync(queue);
+        after.Version.ShouldNotBe(maria.Version);
+        var message = await probe.WaitForMessageAsync(
+            queue, m => m.GetProperty("tenantId").GetString() == tenant && m.GetProperty("kind").GetString() == "User"
+                         && m.GetProperty("userId").GetString() == DemoUsers.Maria, TimeSpan.FromSeconds(20));
         message.GetProperty("kind").GetString().ShouldBe("User");
-        message.GetProperty("userId").GetString().ShouldBe(DemoUsers.Ben);
-        message.GetProperty("tenantId").GetString().ShouldBe(Globex);
+        message.GetProperty("userId").GetString().ShouldBe(DemoUsers.Maria);
+        message.GetProperty("tenantId").GetString().ShouldBe(tenant);
     }
 
     [Fact]
@@ -321,11 +320,4 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
 
     private static string ETag(uint version) => $"\"{version}\"";
 
-    private async Task<JsonElement> TakeBodyAsync(string queue)
-    {
-        await using var connection = await new RabbitMQ.Client.ConnectionFactory { Uri = new Uri(infra.RabbitConnectionString) }.CreateConnectionAsync();
-        await using var channel = await connection.CreateChannelAsync();
-        var message = await channel.BasicGetAsync(queue, autoAck: true) ?? throw new InvalidOperationException($"'{queue}' is empty.");
-        return JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(message.Body.Span)).RootElement.Clone();
-    }
 }

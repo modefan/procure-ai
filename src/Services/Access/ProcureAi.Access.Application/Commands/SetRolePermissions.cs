@@ -23,21 +23,10 @@ public static class SetRolePermissionsHandler
     {
         var matrix = await db.PermissionMatrices.Include(m => m.Grants).SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("This tenant has no permission matrix.");
-        if (matrix.Version != command.ExpectedVersion)
-        {
-            throw new ConcurrencyConflictException(
-                $"The matrix was changed by someone else (version {matrix.Version}, expected {command.ExpectedVersion}).");
-        }
+        OptimisticConcurrency.EnsureVersion("The matrix", matrix.Version, command.ExpectedVersion);
 
         matrix.SetRolePermissions(command.Role, command.Permissions, time.GetUtcNow());
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException exception)
-        {
-            throw new ConcurrencyConflictException($"The matrix was changed by someone else. {exception.Message}");
-        }
+        await OptimisticConcurrency.SaveOrConflictAsync(db.SaveChangesAsync, "The matrix", cancellationToken);
 
         await bus.PublishAsync(new AccessChanged(
             caller.TenantId ?? throw new DomainException("A tenant is required."), MatrixKind, null, time.GetUtcNow()));

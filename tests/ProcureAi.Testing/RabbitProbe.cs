@@ -49,4 +49,37 @@ public sealed class RabbitProbe(string connectionString)
     }
 
     private ConnectionFactory Factory() => new() { Uri = new Uri(connectionString) };
+
+    /// <summary>
+    /// Waits for the first message (as JSON) that matches, discarding the others. Messages from earlier work (the outbox delivers
+    /// after the commit) may arrive first, so a test must name what it waits for: tenant, kind, user.
+    /// </summary>
+    public async Task<System.Text.Json.JsonElement> WaitForMessageAsync(
+        string queue, Func<System.Text.Json.JsonElement, bool> match, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        var seen = new List<string>();
+        await using var connection = await Factory().CreateConnectionAsync();
+        await using var channel = await connection.CreateChannelAsync();
+        while (DateTime.UtcNow < deadline)
+        {
+            var result = await channel.BasicGetAsync(queue, autoAck: true);
+            if (result is null)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+                continue;
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(result.Body.Span);
+            var body = System.Text.Json.JsonDocument.Parse(text).RootElement.Clone();
+            if (match(body))
+            {
+                return body;
+            }
+
+            seen.Add(text);
+        }
+
+        throw new TimeoutException($"No matching message arrived on '{queue}' within {timeout}. Seen: {string.Join(" | ", seen)}");
+    }
 }

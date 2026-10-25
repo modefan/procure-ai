@@ -41,11 +41,7 @@ internal static class RequestsDbContextExtensions
     {
         var request = await db.PurchaseRequests.Include(r => r.Lines).FirstOrDefaultAsync(r => r.Id == id, cancellationToken)
             ?? throw new NotFoundException($"Request {id} was not found.");
-        if (request.Version != expectedVersion)
-        {
-            throw new ConcurrencyConflictException(
-                $"Request {id} was changed by someone else (version {request.Version}, expected {expectedVersion}).");
-        }
+        OptimisticConcurrency.EnsureVersion($"Request {id}", request.Version, expectedVersion);
 
         return request;
     }
@@ -53,13 +49,6 @@ internal static class RequestsDbContextExtensions
     /// <summary>Saves; a write that lost a race on the version column surfaces as a <see cref="ConcurrencyConflictException"/>.</summary>
     public static async Task SaveOrConflictAsync(this IRequestsDbContext db, CancellationToken cancellationToken)
     {
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException exception)
-        {
-            throw new ConcurrencyConflictException($"The request was changed by someone else. {exception.Message}");
-        }
+        await OptimisticConcurrency.SaveOrConflictAsync(db.SaveChangesAsync, "The request", cancellationToken);
     }
 }

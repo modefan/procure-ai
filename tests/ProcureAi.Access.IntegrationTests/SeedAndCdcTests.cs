@@ -68,7 +68,8 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         await using var factory = new AccessApiFactory(infra);
         using var client = factory.CreateClient();
         await using var cdc = await CdcListener.StartAsync(infra.RabbitConnectionString);
-        var admin = TestAuth.CreateToken(DemoUsers.Admin, "acme", "admin");
+        var tenant = await infra.CreateTenantAsync();
+        var admin = TestAuth.CreateToken(DemoUsers.Admin, tenant, "admin");
 
         var list = new HttpRequestMessage(HttpMethod.Get, "/api/v1/access/users");
         list.Headers.Authorization = new AuthenticationHeaderValue("Bearer", admin);
@@ -83,18 +84,18 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         (await client.SendAsync(put, Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
 
         var message = await cdc.WaitForAsync(
-            m => m.RoutingKey == "accessdb.public.tenant_users" && m.Operation == "u"
+            m => m.RoutingKey == "accessdb.public.tenant_users" && m.Operation == "u" && m.After.GetProperty("tenant_id").GetString() == tenant
                  && m.After.GetProperty("user_id").GetString() == DemoUsers.Maria,
             CdcTimeout);
         message.After.GetProperty("approval_limit").ValueKind.ShouldNotBe(System.Text.Json.JsonValueKind.Null);
         await using var db = new Infrastructure.AccessDbContext(
             new DbContextOptionsBuilder<Infrastructure.AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options);
         var audit = await db.Set<AuditEntry>()
-            .Where(e => e.Table == "tenant_users" && e.PrimaryKey == "acme," + DemoUsers.Maria && e.Operation == AuditOperation.Update)
+            .Where(e => e.Table == "tenant_users" && e.PrimaryKey == tenant + "," + DemoUsers.Maria && e.Operation == AuditOperation.Update)
             .OrderByDescending(e => e.OccurredAt).FirstAsync(Ct);
         audit.TransactionId.ShouldBe(message.TransactionId, "the interceptor row and the change share a transaction");
         audit.UserId.ShouldBe(DemoUsers.Admin);
-        audit.TenantId.ShouldBe("acme");
+        audit.TenantId.ShouldBe(tenant);
         audit.Changes.ShouldContain("approval_limit");
         audit.Changes.ShouldNotContain("cost_center_codes", Case.Sensitive, "unchanged text[] columns are not reported as changed");
         audit.Changes.ShouldNotContain("\"roles\"", Case.Sensitive, "unchanged text[] columns are not reported as changed");

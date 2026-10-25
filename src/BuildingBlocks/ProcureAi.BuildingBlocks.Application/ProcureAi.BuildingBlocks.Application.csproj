@@ -4,4 +4,9 @@
     <RootNamespace>ProcureAi.BuildingBlocks.Application</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Only for DbUpdateConcurrencyException (OptimisticConcurrency); no provider and no DbContext here. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+
 </Project>
