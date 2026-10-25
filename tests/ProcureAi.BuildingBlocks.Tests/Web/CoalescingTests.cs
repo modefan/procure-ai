@@ -38,6 +38,8 @@ public sealed class CoalescingTests(RedisFixture redis) : IAsyncLifetime
             {
                 ["ConnectionStrings:Redis"] = redis.ConnectionString,
                 ["Idempotency:WaitTimeout"] = waitTimeout,
+                // These tests fire hundreds of requests as one caller; the default limit (100 per second) would turn a fast run into 429s.
+                ["RateLimiting:PermitLimit"] = "100000",
             },
             configure: builder => builder.AddProcureAiCaching());
 
