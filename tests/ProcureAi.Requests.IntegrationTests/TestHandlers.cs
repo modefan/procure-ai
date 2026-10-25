@@ -5,6 +5,7 @@ using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Application.Mapping;
 using ProcureAi.Requests.Domain;
 using Wolverine;
+using Wolverine.Runtime;
 
 namespace ProcureAi.Requests.IntegrationTests;
 
@@ -38,8 +39,12 @@ public static class WhoAmIHandler
 {
     public static ConcurrentDictionary<Guid, (string UserId, string? TenantId)> Seen { get; } = new();
 
-    public static void Handle(WhoAmI message, ICallerContext caller, ILogger<WhoAmI> logger)
+    /// <summary>Which Wolverine runtime (host) handled the message (diagnostics for the log test).</summary>
+    public static ConcurrentDictionary<Guid, int> HandledBy { get; } = new();
+
+    public static void Handle(WhoAmI message, ICallerContext caller, ILogger<WhoAmI> logger, IWolverineRuntime runtime)
     {
+        HandledBy[message.Marker] = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(runtime);
         Seen[message.Marker] = (caller.UserId, caller.TenantId);
         logger.LogWarning("WhoAmI handled {Marker}", message.Marker);
     }

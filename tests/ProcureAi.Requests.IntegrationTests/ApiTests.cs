@@ -209,7 +209,9 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
             }
         }
         logged.ShouldNotBeNull($"no 'WhoAmI handled' log event for {marker}; the sink holds {_sink.Events.Count} events, "
-                               + $"of which {_sink.Events.Count(e => e.MessageTemplate.Text.StartsWith("WhoAmI", StringComparison.Ordinal))} are WhoAmI");
+                               + $"of which {_sink.Events.Count(e => e.MessageTemplate.Text.StartsWith("WhoAmI", StringComparison.Ordinal))} are WhoAmI. "
+                               + $"Handled by runtime {WhoAmIHandler.HandledBy.GetValueOrDefault(marker)}; this test's runtime is {System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(host.Services.GetRequiredService<Wolverine.Runtime.IWolverineRuntime>())}. "
+                               + $"Newest templates: {string.Join(" | ", _sink.Events.TakeLast(8).Select(e => e.MessageTemplate.Text))}");
         logged.Properties["CorrelationId"].ToString().ShouldBe("\"corr-77\"");
         logged.Properties["TenantId"].ToString().ShouldBe("\"acme\"");
         logged.Properties["UserId"].ToString().ShouldBe("\"user-77\"");
