@@ -74,12 +74,21 @@ public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null)
 public sealed class CancelAfterCommit
 {
     public CancellationTokenSource? Client { get; set; }
+
+    /// <summary>Every tag that reached <c>RemoveByTagAsync</c> (what was actually evicted).</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<string> Evicted { get; } = new();
 }
 
 public sealed class HookedInvalidator(MessageCacheInvalidator inner, CancelAfterCommit hook) : ICacheInvalidator
 {
     public async Task RemoveByTagAsync(IEnumerable<string> tags, CancellationToken cancellationToken = default)
     {
+        tags = [.. tags];
+        foreach (var tag in tags)
+        {
+            hook.Evicted.Enqueue(tag);
+        }
+
         if (hook.Client is { } client)
         {
             hook.Client = null;

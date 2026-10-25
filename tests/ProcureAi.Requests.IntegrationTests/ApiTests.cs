@@ -301,12 +301,17 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
             Req(HttpMethod.Post, Requests, NewBody(), tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct)).Content
             .ReadFromJsonAsync<RequestDto>(Json, Ct))!;
         var before = await ReadAsync(client, created.Id, tenant);
+        // The create call above evicted this request's tags itself; only evictions after this point count.
+        factory.Services.GetRequiredService<CancelAfterCommit>().Evicted.Clear();
 
         var host = factory.Services.GetRequiredService<IHost>();
         await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30)).DoNotAssertOnExceptionsDetected()
             .ExecuteAndWaitAsync(c => c.SendAsync(new RenameViaMessage(created.Id, "Never committed", true), HeadersFor(tenant)));
 
         (await ReadAsync(client, created.Id, tenant)).ShouldBe(before);
+        // The row did not change, so the read above cannot tell an eviction from none: check what was evicted.
+        factory.Services.GetRequiredService<CancelAfterCommit>().Evicted
+            .Where(tag => tag.Contains(created.Id.ToString("D"), StringComparison.Ordinal)).ShouldBeEmpty();
     }
 
     [Fact]
