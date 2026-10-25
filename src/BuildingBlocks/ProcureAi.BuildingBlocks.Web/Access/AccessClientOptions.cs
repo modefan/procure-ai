@@ -22,6 +22,10 @@ public sealed class AccessClientOptions
     [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
     public TimeSpan FailSafeThrottleDuration { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>How long "no such cost center" is remembered (it is never served from fail-safe).</summary>
+    [Range(typeof(TimeSpan), "00:00:01", "00:05:00")]
+    public TimeSpan NotFoundCacheDuration { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <summary>Retries of a failed call, on top of the first attempt (the resilience pipeline needs at least one).</summary>
     [Range(1, 5)]
     public int RetryCount { get; set; } = 1;

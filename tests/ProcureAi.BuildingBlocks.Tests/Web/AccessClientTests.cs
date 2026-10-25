@@ -183,7 +183,8 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
         (await PermissionsAsync(b, tenant)).ShouldNotContain(Permissions.RequestsCreate, "still cached");
 
         await AccessChangedHandler.Handle(
-            new AccessChanged(tenant, "Matrix", null, DateTimeOffset.UtcNow), a.Services.GetRequiredService<ICacheInvalidator>());
+            new AccessChanged(tenant, "Matrix", null, DateTimeOffset.UtcNow),
+            a.Services.GetRequiredService<AccessCacheGeneration>(), a.Services.GetRequiredService<ICacheInvalidator>());
 
         (await PermissionsAsync(a, tenant)).ShouldContain(Permissions.RequestsCreate);
         await EventuallyAsync(async () => (await PermissionsAsync(b, tenant)).Contains(Permissions.RequestsCreate));
@@ -248,10 +249,76 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
         var second = await access.GetApproversAsync("CC-100", tenant, Ct);
 
         first.CostCenterCode.ShouldBe("CC-100");
-        first.Manager.ShouldNotBeNull().UserId.ShouldBe("mia");
+        first.Manager.ShouldNotBeNull().UserId.ShouldBe($"{tenant}/CC-100");
         first.DepartmentHead.ShouldBeNull();
         second.ShouldBe(first);
         _access.Calls.Count(c => c.Tenant == tenant).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task AccessChanged_makes_the_tenants_cached_answers_unreachable_even_while_access_is_down()
+    {
+        var a = await StartAsync();
+        var b = await StartAsync();
+        var tenant = NewTenant();
+        var other = NewTenant();
+        await PermissionsAsync(a, tenant);
+        await PermissionsAsync(b, tenant);
+        await PermissionsAsync(a, other);
+        await AccessChangedHandler.Handle(
+            new AccessChanged(tenant, "Matrix", null, DateTimeOffset.UtcNow),
+            a.Services.GetRequiredService<AccessCacheGeneration>(), a.Services.GetRequiredService<ICacheInvalidator>());
+
+        _access.Down = true;
+
+        // Nothing cached any more for the changed tenant: denied, on the instance that heard it and on the other one,
+        // not served from fail-safe as last good. Another tenant keeps its last good value (fail-safe still works).
+        (await PermissionsAsync(a, tenant)).ShouldBeEmpty();
+        await EventuallyAsync(async () => (await PermissionsAsync(b, tenant)).Count == 0);
+        (await PermissionsAsync(a, other)).ShouldContain(Permissions.RequestsCreate);
+    }
+
+    [Fact]
+    public async Task Cache_keys_cannot_collide_across_tenants_users_or_roles()
+    {
+        var host = await StartAsync();
+        var n = NewTenant();
+        var access = host.Services.GetRequiredService<IAccessDirectory>();
+
+        // tenant "n:b" + cost center "c"  versus  tenant "n" + cost center "b:c"
+        var first = await access.GetApproversAsync("c", $"{n}:b", Ct);
+        var second = await access.GetApproversAsync("b:c", n, Ct);
+        first.Manager.ShouldNotBeNull().UserId.ShouldBe($"{n}:b/c");
+        second.Manager.ShouldNotBeNull().UserId.ShouldBe($"{n}/b:c");
+
+        // tenant "n:b" + user "c"  versus  tenant "n" + user "b:c": one Access call each
+        await access.GetEffectiveAccessAsync("c", ["requester"], $"{n}:b", Ct);
+        await access.GetEffectiveAccessAsync("b:c", ["requester"], n, Ct);
+        // roles ["x,y"]  versus  ["x", "y"]
+        await access.GetEffectiveAccessAsync("u", ["x,y"], n, Ct);
+        await access.GetEffectiveAccessAsync("u", ["x", "y"], n, Ct);
+
+        _access.Calls.Count(c => c.Path.EndsWith("/effective", StringComparison.Ordinal)).ShouldBe(4);
+    }
+
+    [Fact]
+    public async Task An_unknown_cost_center_is_not_found_briefly_cached_and_never_answered_from_stale()
+    {
+        var host = await StartAsync(new() { ["AccessClient:CacheDuration"] = "00:00:01", ["AccessClient:NotFoundCacheDuration"] = "00:00:01" });
+        var tenant = NewTenant();
+        var access = host.Services.GetRequiredService<IAccessDirectory>();
+        await access.GetApproversAsync("CC-9", tenant, Ct); // a good answer is cached (and would be the fail-safe value)
+        _access.MissingCostCenters["CC-9"] = true;
+        await Task.Delay(TimeSpan.FromMilliseconds(1300), Ct);
+
+        await Should.ThrowAsync<NotFoundException>(async () => await access.GetApproversAsync("CC-9", tenant, Ct));
+        var calls = _access.Calls.Count(c => c.Tenant == tenant);
+        await Should.ThrowAsync<NotFoundException>(async () => await access.GetApproversAsync("CC-9", tenant, Ct));
+
+        _access.Calls.Count(c => c.Tenant == tenant).ShouldBe(calls, "the 404 is cached briefly");
+        await Task.Delay(TimeSpan.FromMilliseconds(1300), Ct);
+        _access.MissingCostCenters.Clear();
+        (await access.GetApproversAsync("CC-9", tenant, Ct)).CostCenterCode.ShouldBe("CC-9");
     }
 
     private static async Task EventuallyAsync(Func<Task<bool>> condition)

@@ -26,6 +26,7 @@ public static class AccessClientSetup
         this IServiceCollection services, IConfiguration configuration, string serviceName)
     {
         services.AddValidatedOptions<AccessClientOptions>(configuration, AccessClientOptions.SectionName);
+        services.TryAddSingleton<AccessCacheGeneration>();
         // A host without messaging (the gateway) acts as itself; hosts with messaging registered the real ones already.
         services.TryAddSingleton(new ServiceIdentity(serviceName));
         services.TryAddSingleton<ICallerContextAccessor, SystemCallerContextAccessor>();

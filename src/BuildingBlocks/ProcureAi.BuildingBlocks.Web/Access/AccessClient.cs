@@ -1,5 +1,7 @@
+using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Web.Http;
 using ZiggyCreatures.Caching.Fusion;
@@ -9,11 +11,13 @@ namespace ProcureAi.BuildingBlocks.Web.Access;
 /// <summary>
 /// Asks the Access service (as this service, with its client-credentials token) and caches the answers in FusionCache:
 /// identical concurrent lookups share one call, the last good answer is served while Access is unreachable (fail-safe),
-/// and every entry carries the tenant's tag so <c>AccessChanged</c> can evict it. The tenant is always the argument, never
-/// the caller's, because system work (a saga timeout) has none. A failed call is not cached; it throws.
+/// and every entry carries the tenant's tag and generation (see <see cref="AccessCacheGeneration"/>) so <c>AccessChanged</c>
+/// can drop them. The tenant is always the argument, never the caller's, because system work (a saga timeout) has none.
+/// A failed call is not cached; it throws.
 /// </summary>
 public sealed class AccessClient(
-    HttpClient http, IFusionCache cache, IOptions<AccessClientOptions> options) : IAccessDirectory
+    HttpClient http, IFusionCache cache, AccessCacheGeneration generations, IOptions<AccessClientOptions> options)
+    : IAccessDirectory
 {
     private const string EffectivePath = "api/v1/access/internal/effective";
 
@@ -24,9 +28,11 @@ public sealed class AccessClient(
         var sorted = roles.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var query = string.Concat(sorted.Select(role => $"&roles={Uri.EscapeDataString(role)}"));
         var url = $"{EffectivePath}?userId={Uri.EscapeDataString(userId)}{query}";
+        var generation = await generations.GetAsync(tenantId, cancellationToken);
         return await cache.GetOrSetAsync<EffectiveAccess>(
-            $"access:eff:{tenantId}:{userId}:{string.Join(',', sorted)}",
-            async (_, token) => await GetAsync<EffectiveAccess>(url, tenantId, token),
+            Key("eff", tenantId, generation, userId, string.Join(',', sorted.Select(Uri.EscapeDataString))),
+            async (_, token) => await GetAsync<EffectiveAccess>(url, tenantId, token)
+                ?? throw new InvalidOperationException("The Access service returned an empty response."),
             options: EntryOptions(),
             tags: [AccessCacheTag.Tenant(tenantId)],
             token: cancellationToken);
@@ -36,13 +42,31 @@ public sealed class AccessClient(
         string costCenterCode, string tenantId, CancellationToken cancellationToken)
     {
         var url = $"api/v1/access/internal/cost-centers/{Uri.EscapeDataString(costCenterCode)}/approvers";
-        return await cache.GetOrSetAsync<CostCenterApprovers>(
-            $"access:appr:{tenantId}:{costCenterCode}",
-            async (_, token) => await GetAsync<CostCenterApprovers>(url, tenantId, token),
+        var generation = await generations.GetAsync(tenantId, cancellationToken);
+        var found = await cache.GetOrSetAsync<CostCenterApprovers?>(
+            Key("appr", tenantId, generation, costCenterCode),
+            async (context, token) =>
+            {
+                var approvers = await GetAsync<CostCenterApprovers>(url, tenantId, token, allowNotFound: true);
+                if (approvers is null)
+                {
+                    // "No such cost center" is an answer, not a failure: kept only briefly, and never replaced by stale approvers.
+                    context.Options.Duration = options.Value.NotFoundCacheDuration;
+                    context.Options.DistributedCacheDuration = options.Value.NotFoundCacheDuration;
+                    context.Options.IsFailSafeEnabled = false;
+                }
+
+                return approvers;
+            },
             options: EntryOptions(),
             tags: [AccessCacheTag.Tenant(tenantId)],
             token: cancellationToken);
+        return found ?? throw new NotFoundException($"Cost center '{costCenterCode}' does not exist.");
     }
+
+    // Every part is escaped, so no value can contain the separator and make two different lookups share a key.
+    private static string Key(string kind, string tenantId, string generation, params string[] parts) =>
+        $"access:{kind}:{Uri.EscapeDataString(tenantId)}:{generation}:{string.Join(':', parts.Select(Uri.EscapeDataString))}";
 
     private FusionCacheEntryOptions EntryOptions() => new()
     {
@@ -54,11 +78,17 @@ public sealed class AccessClient(
         FailSafeThrottleDuration = options.Value.FailSafeThrottleDuration,
     };
 
-    private async Task<T> GetAsync<T>(string url, string tenantId, CancellationToken cancellationToken)
+    private async Task<T?> GetAsync<T>(string url, string tenantId, CancellationToken cancellationToken, bool allowNotFound = false)
+        where T : class
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Options.Set(ServiceTokenHandler.TenantOption, tenantId);
         using var response = await http.SendAsync(request, cancellationToken);
+        if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<T>(cancellationToken)
             ?? throw new InvalidOperationException("The Access service returned an empty response.");

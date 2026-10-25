@@ -58,6 +58,9 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>Makes each effective-access answer slow, so concurrent callers overlap.</summary>
     public TimeSpan Delay { get; set; }
 
+    /// <summary>Cost center codes the stub answers 404 for.</summary>
+    public ConcurrentDictionary<string, bool> MissingCostCenters { get; } = new(StringComparer.Ordinal);
+
     public int EffectiveCalls => Volatile.Read(ref _effectiveCalls);
 
     public int ApproverCalls => Volatile.Read(ref _approverCalls);
@@ -114,11 +117,17 @@ public sealed class StubAccessServer : IAsyncDisposable
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
 
+            if (stub.MissingCostCenters.ContainsKey(code))
+            {
+                return Results.NotFound();
+            }
+
+            // The manager's ID names the tenant and the code, so a test can tell whose answer it got.
             return Results.Json(new
             {
                 costCenterCode = code,
                 departmentCode = "IT",
-                manager = new { userId = "mia", displayName = "Mia Manager", approvalLimit = 50000m, canApprove = true },
+                manager = new { userId = $"{http.Request.Headers["X-Tenant-Id"]}/{code}", displayName = "Mia Manager", approvalLimit = 50000m, canApprove = true },
                 departmentHead = (object?)null,
                 finance = Array.Empty<object>(),
             });
