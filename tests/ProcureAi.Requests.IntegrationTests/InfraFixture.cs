@@ -1,11 +1,7 @@
 using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Configurations;
-using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
-using Npgsql;
 using ProcureAi.Requests.Infrastructure;
 using RabbitMQ.Client;
-using Testcontainers.RabbitMq;
 
 namespace ProcureAi.Requests.IntegrationTests;
 
@@ -18,16 +14,14 @@ public sealed class InfraFixture : IAsyncLifetime
 {
     private const string RequestsDb = "requestsdb";
 
-    private const string DebeziumImage = "quay.io/debezium/server:3.7.0.Final";
     private const string CdcExchange = "cdc";
-    private const string DebeziumSlot = "debezium_requests";
 
     private readonly SemaphoreSlim _debeziumLock = new(1, 1);
     private INetwork? _network;
     private PostgresFixture? _postgres;
     private RabbitFixture? _rabbit;
     private RedisFixture? _redis;
-    private IContainer? _debezium;
+    private DebeziumFixture? _debezium;
 
     public string RequestsDbConnectionString { get; private set; } = "";
 
@@ -46,14 +40,15 @@ public sealed class InfraFixture : IAsyncLifetime
         _redis = new RedisFixture();
         await Task.WhenAll(_postgres.InitializeAsync().AsTask(), _rabbit.InitializeAsync().AsTask(), _redis.InitializeAsync().AsTask());
 
-        RequestsDbConnectionString = _postgres.ConnectionString(RequestsDb);
+        // The init script only creates the debezium role; the database (as in the AppHost, where Aspire creates it) comes here.
+        RequestsDbConnectionString = await _postgres.CreateDatabaseAsync(RequestsDb);
         await DeclareCdcExchangeAsync();
         await RequestsDatabase.MigrateAsync(RequestsDbConnectionString);
     }
 
     /// <summary>
-    /// Starts Debezium Server (once) with the real infra/debezium/application.properties, reading the requests database
-    /// and publishing to the <c>cdc</c> exchange. Returns when its replication slot is active, so no later change is missed.
+    /// Starts Debezium Server (once, see <see cref="DebeziumFixture"/>) for the requests database, publishing to the
+    /// <c>cdc</c> exchange. Returns when its replication slot is active, so no later change is missed.
     /// </summary>
     public async Task EnsureDebeziumAsync()
     {
@@ -65,24 +60,9 @@ public sealed class InfraFixture : IAsyncLifetime
                 return;
             }
 
-            var dbz = TestLimits.Section("Debezium");
-            var container = new ContainerBuilder(DebeziumImage)
-                .WithNetwork(_network)
-                .WithBindMount(
-                    Path.Combine(PostgresFixture.RepoRoot(), "infra", "debezium", "application.properties"),
-                    "/debezium/config/application.properties",
-                    AccessMode.ReadOnly)
-                .WithEnvironment("JAVA_OPTS", dbz["JavaOpts"])
-                .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_PASSWORD", PostgresFixture.DebeziumTestPassword)
-                .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", RabbitMqBuilder.DefaultUsername)
-                .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", RabbitMqBuilder.DefaultPassword)
-                .WithPortBinding(8080, true)
-                .WithCreateParameterModifier(p => TestLimits.Apply(p, "Debezium"))
-                .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPath("/q/health").ForPort(8080)))
-                .Build();
-            _debezium = container;
-            await container.StartAsync();
-            await WaitForReplicationSlotAsync();
+            var debezium = new DebeziumFixture(_network!, _postgres!);
+            await debezium.StartAsync(RequestsDb, "purchase_requests", "request_lines", "audit_entries");
+            _debezium = debezium;
         }
         finally
         {
@@ -99,29 +79,6 @@ public sealed class InfraFixture : IAsyncLifetime
         await using var connection = await new ConnectionFactory { Uri = new Uri(RabbitConnectionString) }.CreateConnectionAsync();
         await using var channel = await connection.CreateChannelAsync();
         await channel.ExchangeDeclareAsync(CdcExchange, ExchangeType.Topic, durable: true);
-    }
-
-    private async Task WaitForReplicationSlotAsync()
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(60);
-        while (true)
-        {
-            await using var connection = new NpgsqlConnection(RequestsDbConnectionString);
-            await connection.OpenAsync();
-            await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_replication_slots WHERE slot_name = @slot AND active", connection);
-            command.Parameters.AddWithValue("slot", DebeziumSlot);
-            if ((long)(await command.ExecuteScalarAsync())! > 0)
-            {
-                return;
-            }
-
-            if (DateTime.UtcNow > deadline)
-            {
-                throw new TimeoutException("Debezium did not start streaming within 60 s.");
-            }
-
-            await Task.Delay(500);
-        }
     }
 
     /// <summary>A fresh, migrated database, so a test can have its own Wolverine message store.</summary>

@@ -1,5 +1,6 @@
 using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using ProcureAi.BuildingBlocks.Persistence;
 
 #nullable disable
 
@@ -8,6 +9,8 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
     /// <inheritdoc />
     public partial class AddAuditEntriesAndCdc : Migration
     {
+        private static readonly string[] CapturedTables = ["purchase_requests", "request_lines", "audit_entries"];
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -41,40 +44,18 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                 table: "audit_entries",
                 column: "transaction_id");
 
-            // Change data capture: Debezium reads the Postgres WAL through the publication dbz_publication (created
-            // empty by infra/postgres/initdb/01-debezium.sh, owned by the superuser). The business tables join it here.
-            // audit_entries and the wolverine schema are deliberately NOT added: they are internal, not business data.
-            // Needs the publication's owner (ALTER PUBLICATION) who also owns the tables: the role that migrates is the
-            // database superuser in the AppHost and in the tests. A plain database without the publication skips this.
-            // REPLICA IDENTITY FULL puts the complete old row in every update/delete event, so a change made outside the
-            // app shows what it overwrote.
-            migrationBuilder.Sql(CaptureSql("ADD"));
-            migrationBuilder.Sql("ALTER TABLE public.purchase_requests REPLICA IDENTITY FULL;");
-            migrationBuilder.Sql("ALTER TABLE public.request_lines REPLICA IDENTITY FULL;");
+            // Change data capture: Debezium Server reads this database through the publication dbz_publication. EnableCdc
+            // creates it if missing and adds the tables with REPLICA IDENTITY FULL and the debezium grants (idempotent; it
+            // fails if the debezium role is missing). The audit_entries rows are captured too (they reach the Audit service
+            // through Debezium, with the same transaction ID as the business change); the wolverine schema is not. Needs the
+            // role that owns the tables: the database superuser in the AppHost and in the tests.
+            migrationBuilder.EnableCdc(CapturedTables);
         }
-
-        // Idempotent: only touches tables that are (not) yet in the publication.
-        private static string CaptureSql(string action) => $$"""
-            DO $$
-            DECLARE t text;
-            BEGIN
-                IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'dbz_publication') THEN
-                    FOREACH t IN ARRAY ARRAY['purchase_requests', 'request_lines'] LOOP
-                        IF {{(action == "ADD" ? "NOT " : "")}}EXISTS (SELECT 1 FROM pg_publication_tables
-                                    WHERE pubname = 'dbz_publication' AND schemaname = 'public' AND tablename = t) THEN
-                            EXECUTE format('ALTER PUBLICATION dbz_publication {{action}} TABLE public.%I', t);
-                        END IF;
-                    END LOOP;
-                END IF;
-            END $$;
-            """;
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(CaptureSql("DROP"));
-            migrationBuilder.Sql("ALTER TABLE public.purchase_requests REPLICA IDENTITY DEFAULT;");
-            migrationBuilder.Sql("ALTER TABLE public.request_lines REPLICA IDENTITY DEFAULT;");
+            migrationBuilder.DisableCdc(CapturedTables);
             migrationBuilder.DropTable(
                 name: "audit_entries");
         }

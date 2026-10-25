@@ -49,10 +49,34 @@ public sealed class ServiceResourcesTests
         api.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
     }
 
+    [Fact]
+    public async Task Captured_database_gets_its_own_debezium_server_after_the_migration()
+    {
+        var model = await BuildModelAsync();
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-migrate");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-requestsdb");
+
+        var env = await EnvironmentOfAsync(debezium);
+
+        env.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_DBNAME", "requestsdb");
+        env.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_TOPIC_PREFIX", "requestsdb");
+        env.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_SLOT_NAME", "debezium_requestsdb");
+        env.ShouldContainKeyAndValue(
+            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", "public.purchase_requests,public.request_lines,public.audit_entries");
+        env.ShouldContainKey("JAVA_OPTS");
+        env.ShouldContainKey("DEBEZIUM_SOURCE_DATABASE_PASSWORD");
+        // The publication is created by the migration, so Debezium waits for it to finish.
+        debezium.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        debezium.Annotations.OfType<ContainerMountAnnotation>()
+            .ShouldContain(m => m.Target == "/debezium/data" && m.Source == "debezium-requestsdb-data");
+        debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/config/application.properties");
+    }
+
     private static async Task<DistributedApplicationModel> BuildModelAsync()
     {
         var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(
-            ["Persistence:UseDataVolumes=false"]);
+            []);
         var app = await builder.BuildAsync();
         return app.Services.GetRequiredService<DistributedApplicationModel>();
     }

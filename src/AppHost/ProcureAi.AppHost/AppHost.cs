@@ -99,31 +99,11 @@ builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
-    postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, InternalClientSecret: null, otlpEndpoint, limits);
+    postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, InternalClientSecret: null, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
 
 var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
-    new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: [], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
+    new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
     shared);
-// The database resource the helper created, for Debezium to wait on (replaced by AddDebeziumFor).
-var requestsDb = builder.CreateResourceBuilder(
-    builder.Resources.OfType<PostgresDatabaseResource>().Single(r => r.Name == ResourceNames.RequestsDb));
-
-var debezium = builder.AddContainer(ResourceNames.Debezium, "quay.io/debezium/server", "3.7.0.Final")
-    .WithHttpEndpoint(targetPort: 8080, name: "http")
-    .WithBindMount("../../../infra/debezium/application.properties", "/debezium/config/application.properties", isReadOnly: true)
-    .WithEnvironment("JAVA_OPTS", limits.Debezium.JavaOpts)
-    .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_PASSWORD", debeziumPassword)
-    .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", rabbitmq.Resource.UserNameReference)
-    .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", rabbitmq.Resource.PasswordParameter)
-    .WithHttpHealthCheck("/q/health")
-    .WaitFor(requestsDb)
-    .WaitFor(rabbitmq)
-    .WithContainerLimits(limits.Debezium);
-if (useDataVolumes)
-{
-    debezium.WithVolume("debezium-data", "/debezium/data");
-}
-
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).

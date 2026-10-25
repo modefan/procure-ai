@@ -11,7 +11,6 @@ public static class ResourceNames
     public const string RabbitMq = "rabbitmq";
     public const string Keycloak = "keycloak";
     public const string Mailpit = "mailpit";
-    public const string Debezium = "debezium";
     public const string CdcExchange = "cdc";
     public const string Gateway = "gateway";
     public const string Web = "web";

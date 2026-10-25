@@ -12,6 +12,8 @@ public sealed record ServiceSpec(string Name, string Database, string[] Captured
 
 /// <summary>The infrastructure and settings every service resource is wired to.</summary>
 /// <param name="InternalClientSecret">Secret of the Keycloak client services use to call each other; <c>null</c> until a service needs it.</param>
+/// <param name="DebeziumPassword">Password of the Postgres <c>debezium</c> role (secret parameter), for every Debezium Server.</param>
+/// <param name="UseDataVolumes">Whether containers keep their data in named volumes (offsets of Debezium).</param>
 /// <param name="OtlpEndpoint">The Aspire dashboard's OTLP endpoint (the Serilog OpenTelemetry sink has no environment fallback).</param>
 public sealed record SharedResources(
     IResourceBuilder<PostgresServerResource> Postgres,
@@ -22,12 +24,19 @@ public sealed record SharedResources(
     ParameterResource AdminApiKeySha256,
     ParameterResource? InternalClientSecret,
     string? OtlpEndpoint,
-    ResourcesOptions Limits);
+    ResourcesOptions Limits,
+    ParameterResource DebeziumPassword,
+    bool UseDataVolumes);
 
 public static class ServiceResources
 {
     public const string MigrateSuffix = "-migrate";
     public const string ApiSuffix = "-api";
+
+    private const string DebeziumPrefix = "debezium-";
+    private const string DebeziumImage = "quay.io/debezium/server";
+    private const string DebeziumTag = "3.7.0.Final";
+    private const int DebeziumHttpPort = 8080;
 
     /// <summary>
     /// Adds a service the one way every service is added: its database, a short-lived <c>&lt;name&gt;-migrate</c> resource
@@ -41,8 +50,8 @@ public static class ServiceResources
         this IDistributedApplicationBuilder builder, ServiceSpec spec, SharedResources shared)
         where TProject : IProjectMetadata, new()
     {
-        // The init script of the Postgres image already creates the requests database (and its publication) on first
-        // start; AddDatabase registers it as a resource others can reference.
+        // Aspire creates the database on the server. The Postgres init script only creates the debezium role; the
+        // migration creates the publication and grants (CdcMigrations.EnableCdc).
         var database = shared.Postgres.AddDatabase(spec.Database);
 
         var migrate = builder.AddProject<TProject>(spec.Name + MigrateSuffix)
@@ -74,12 +83,55 @@ public static class ServiceResources
             .WithHttpHealthCheck("/health/ready")
             .WithDotNetLimits(shared.Limits.DotNet);
 
+        if (spec.CapturedTables.Length > 0)
+        {
+            builder.AddDebeziumFor(spec.Database, spec.CapturedTables, migrate, shared);
+        }
+
         if (shared.InternalClientSecret is { } secret)
         {
             api.WithEnvironment("Auth__InternalClientSecret", secret);
         }
 
         return api;
+    }
+
+    /// <summary>
+    /// Adds the Debezium Server for one database: change data capture from the Postgres WAL to the <c>cdc</c> exchange.
+    /// Debezium Server runs exactly one source connector per instance, so every captured database gets its own container
+    /// <c>debezium-&lt;database&gt;</c> (Java heap capped, limits from <c>Resources:Debezium</c>) from the one shared
+    /// <c>application.properties</c>, plus per-database environment variables. It starts after the service's migrate
+    /// resource finished (which created the publication) and after RabbitMQ (which declares the exchange).
+    /// Routing keys are <c>&lt;database&gt;.public.&lt;table&gt;</c>.
+    /// </summary>
+    public static IResourceBuilder<ContainerResource> AddDebeziumFor(
+        this IDistributedApplicationBuilder builder,
+        string database,
+        string[] tables,
+        IResourceBuilder<ProjectResource> migrate,
+        SharedResources shared)
+    {
+        var debezium = builder.AddContainer(DebeziumPrefix + database, DebeziumImage, DebeziumTag)
+            .WithHttpEndpoint(targetPort: DebeziumHttpPort, name: "http")
+            .WithBindMount("../../../infra/debezium/application.properties", "/debezium/config/application.properties", isReadOnly: true)
+            .WithEnvironment("JAVA_OPTS", shared.Limits.Debezium.JavaOpts)
+            .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_PASSWORD", shared.DebeziumPassword)
+            .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_DBNAME", database)
+            .WithEnvironment("DEBEZIUM_SOURCE_TOPIC_PREFIX", database)
+            .WithEnvironment("DEBEZIUM_SOURCE_SLOT_NAME", "debezium_" + database)
+            .WithEnvironment("DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", string.Join(',', tables.Select(t => "public." + t)))
+            .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", shared.RabbitMq.Resource.UserNameReference)
+            .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", shared.RabbitMq.Resource.PasswordParameter)
+            .WithHttpHealthCheck("/q/health")
+            .WaitForCompletion(migrate)
+            .WaitFor(shared.RabbitMq)
+            .WithContainerLimits(shared.Limits.Debezium);
+        if (shared.UseDataVolumes)
+        {
+            debezium.WithVolume($"{DebeziumPrefix}{database}-data", "/debezium/data");
+        }
+
+        return debezium;
     }
 
     /// <summary>The Serilog OpenTelemetry sink has no environment-variable fallback, so it is pointed at the dashboard here.</summary>

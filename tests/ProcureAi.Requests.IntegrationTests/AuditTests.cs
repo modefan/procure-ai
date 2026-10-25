@@ -205,6 +205,30 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Captures_purchase_requests_and_audit_entries()
+    {
+        await using var cdc = await CdcListener.StartAsync(infra.RabbitConnectionString);
+        var created = await CreateAsync("cdc-both");
+
+        // The two messages arrive in either order (one transaction): wait until both are among the messages seen.
+        var id = created.Id.ToString();
+        bool IsRequest(CdcMessage m) =>
+            m.RoutingKey == "requestsdb.public.purchase_requests" && m.Operation == "c" && m.After.GetProperty("id").GetString() == id;
+        bool IsAudit(CdcMessage m) =>
+            m.RoutingKey == "requestsdb.public.audit_entries" && m.Operation == "c"
+            && m.After.GetProperty("table_name").GetString() == "purchase_requests"
+            && m.After.GetProperty("primary_key").GetString() == id;
+        await cdc.WaitForAsync(m => cdc.Seen.Any(IsRequest) && cdc.Seen.Any(IsAudit), CdcTimeout);
+        var requestMessage = cdc.Seen.First(IsRequest);
+        var auditMessage = cdc.Seen.First(IsAudit);
+
+        // The interceptor row and the business change share the transaction, so Audit can match them by transaction ID.
+        auditMessage.TransactionId.ShouldBe(requestMessage.TransactionId);
+        auditMessage.After.GetProperty("table_name").GetString().ShouldBe("purchase_requests");
+        auditMessage.After.GetProperty("tenant_id").GetString().ShouldBe("cdc-both");
+    }
+
+    [Fact]
     public async Task Direct_sql_update_produces_cdc_event_without_audit_entry()
     {
         var created = await CreateAsync("cdc-direct");
@@ -243,7 +267,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
             m => m.RoutingKey == "requestsdb.public.purchase_requests"
                  && m.After.GetProperty("id").GetString() == created.Id.ToString(),
             CdcTimeout);
-        // Deterministic part: only the two business tables are in the publication (wolverine.* and audit_entries are not).
+        // Deterministic part: only the business tables and audit_entries are in the publication (wolverine.* is not).
         await using (var connection = new NpgsqlConnection(infra.RequestsDbConnectionString))
         {
             await connection.OpenAsync();
@@ -256,15 +280,16 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
                 tables.Add(reader.GetString(0));
             }
 
-            tables.ShouldBe(["public.purchase_requests", "public.request_lines"]);
+            tables.ShouldBe(["public.audit_entries", "public.purchase_requests", "public.request_lines"]);
         }
 
         // And what Debezium actually sent for that transaction carries nothing from the wolverine schema.
         cdc.Seen.ShouldNotBeEmpty();
         cdc.Seen.ShouldAllBe(m => !m.RoutingKey.Contains("wolverine", StringComparison.OrdinalIgnoreCase));
-        cdc.Seen.ShouldNotContain(m => m.RoutingKey.EndsWith("audit_entries", StringComparison.Ordinal));
         cdc.Seen.Select(m => m.RoutingKey).Distinct().ShouldAllBe(
-            key => key == "requestsdb.public.purchase_requests" || key == "requestsdb.public.request_lines");
+            key => key == "requestsdb.public.purchase_requests"
+                   || key == "requestsdb.public.request_lines"
+                   || key == "requestsdb.public.audit_entries");
     }
 
     [Fact]

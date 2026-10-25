@@ -14,8 +14,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     // A throwaway test value for the image's init script (it needs some password for the debezium role). Not a secret.
     public const string DebeziumTestPassword = "test-only-debezium";
 
-    // The image's init script creates this database (and the debezium role) once the server first accepts connections.
-    private const string InitScriptDatabase = "requestsdb";
+    // The image's init script creates the debezium role; the server only accepts TCP connections once the script is done.
     private const string ImageName = "procureai-test-postgres:latest";
 
     private static readonly TimeSpan InitScriptTimeout = TimeSpan.FromSeconds(90);
@@ -100,9 +99,20 @@ public sealed class PostgresFixture : IAsyncLifetime
         {
             try
             {
-                await using var connection = new NpgsqlConnection(ConnectionString(InitScriptDatabase));
+                await using var connection = new NpgsqlConnection(AdminConnectionString);
                 await connection.OpenAsync();
-                return;
+                await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_roles WHERE rolname = 'debezium'", connection);
+                if ((long)(await command.ExecuteScalarAsync())! > 0)
+                {
+                    return;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException("The Postgres init script did not create the debezium role in time.");
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
             }
             catch (Exception) when (DateTime.UtcNow < deadline)
             {

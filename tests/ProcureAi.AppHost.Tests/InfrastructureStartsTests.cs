@@ -26,7 +26,7 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
         ["rabbitmq"] = "RabbitMq",
         ["keycloak"] = "Keycloak",
         ["mailpit"] = "Mailpit",
-        ["debezium"] = "Debezium",
+        ["debezium-requestsdb"] = "Debezium",
     };
 
     [Fact]
@@ -110,8 +110,8 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
     [Fact]
     public async Task Debezium_is_healthy()
     {
-        await fixture.WaitHealthyAsync("debezium");
-        using var http = fixture.App.CreateHttpClient("debezium", "http");
+        await fixture.WaitHealthyAsync("debezium-requestsdb");
+        using var http = fixture.App.CreateHttpClient("debezium-requestsdb", "http");
         using var response = await http.GetAsync("/q/health", TestContext.Current.CancellationToken);
         response.IsSuccessStatusCode.ShouldBeTrue();
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
