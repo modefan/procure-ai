@@ -1,0 +1,52 @@
+using Microsoft.AspNetCore.Mvc;
+using ProcureAi.BuildingBlocks.Web;
+using ProcureAi.BuildingBlocks.Web.Caching;
+using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.Requests.Application;
+using ProcureAi.Requests.Application.Abstractions;
+using ProcureAi.Requests.Infrastructure;
+using Wolverine;
+using Wolverine.Runtime;
+
+namespace ProcureAi.Requests.Api;
+
+/// <summary>The composition root of the Requests API.</summary>
+public static class RequestsApi
+{
+    public const string ServiceName = "requests-api";
+
+    /// <summary><c>ProcureAi.Requests.Api --migrate</c> migrates the databases and exits.</summary>
+    public const string MigrateFlag = "--migrate";
+
+    public static WebApplication Build(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+        builder.AddProcureAiWeb(ServiceName);
+        builder.AddProcureAiCaching();
+
+        var services = builder.Services;
+        services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
+        services.Configure<MvcOptions>(mvc => mvc.Filters.Add<RequestsExceptionFilter>());
+        // A scoped class, not a lambda: Wolverine's generated handler code constructs it from its constructor.
+        services.AddScoped<ICallerContext, ApiCallerContext>();
+        services.AddScoped<IncomingMessage>();
+        services.AddRequestsInfrastructure(builder.Configuration);
+
+        builder.Host.UseWolverine(options =>
+        {
+            options.ConfigureRequests(builder.Configuration);
+            options.AddCallerPropagation();
+        });
+
+        var app = builder.Build();
+        app.UseProcureAiWeb();
+        return app;
+    }
+
+    /// <summary>The database schema (EF Core migrations) and Wolverine's message store (outbox/inbox tables).</summary>
+    public static async Task MigrateAsync(WebApplication app, CancellationToken cancellationToken = default)
+    {
+        await app.Services.MigrateRequestsDatabaseAsync(cancellationToken);
+        await app.Services.GetRequiredService<IWolverineRuntime>().Storage.Admin.MigrateAsync();
+    }
+}

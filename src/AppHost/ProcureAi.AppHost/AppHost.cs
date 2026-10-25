@@ -12,8 +12,8 @@ var useDataVolumes = builder.Configuration.GetValue("Persistence:UseDataVolumes"
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
-// SHA-256 (hex) of the one admin API key; services compare in constant time. Consumed from Task 3 on.
-builder.AddParameter("admin-api-key-sha256", secret: true);
+// SHA-256 (hex) of the one admin API key; services compare in constant time.
+var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
 
 // Postgres: custom image (pgvector + pgaudit), logical WAL for Debezium CDC.
 var postgres = builder.AddPostgres(ResourceNames.Postgres)
@@ -105,5 +105,45 @@ if (useDataVolumes)
 {
     debezium.WithVolume("debezium-data", "/debezium/data");
 }
+
+// Requests service. The migration runs first, as its own short-lived resource from the same project
+// (`--migrate` migrates the database and Wolverine's message store and exits); the API waits for it to
+// finish. A separate resource is the simplest ordering Aspire offers (WaitForCompletion), it mirrors the
+// Kubernetes job / Argo CD PreSync hook of the later deployment, and the API itself never changes schema at startup.
+var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
+var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
+
+var requestsMigrate = builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsMigrate)
+    .WithArgs("--migrate")
+    .WithReference(requestsDb)
+    .WithReference(rabbitmq)
+    .WithReference(redis)
+    .WaitFor(requestsDb)
+    .WithDotNetLimits(limits.DotNet);
+
+builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsApi)
+    // No launchSettings.json: Aspire picks a free port, so dev runs and test runs never clash.
+    .WithHttpEndpoint(name: "http")
+    .WithReference(requestsDb)
+    .WithReference(rabbitmq)
+    .WithReference(redis)
+    .WithEnvironment("Auth__Authority", keycloakAuthority)
+    // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
+    .WithEnvironment("Auth__RequireHttpsMetadata", "false")
+    .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
+    // The Serilog OpenTelemetry sink has no environment-variable fallback, so it is pointed at the dashboard here.
+    .WithEnvironment(context =>
+    {
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+        {
+            context.EnvironmentVariables["Serilog__WriteTo__1__Args__endpoint"] = otlpEndpoint;
+        }
+    })
+    .WaitFor(keycloak)
+    .WaitFor(rabbitmq)
+    .WaitFor(redis)
+    .WaitForCompletion(requestsMigrate)
+    .WithHttpHealthCheck("/health/ready")
+    .WithDotNetLimits(limits.DotNet);
 
 builder.Build().Run();

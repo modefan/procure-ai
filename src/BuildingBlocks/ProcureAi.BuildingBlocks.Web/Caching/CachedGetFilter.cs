@@ -17,6 +17,7 @@ namespace ProcureAi.BuildingBlocks.Web.Caching;
 /// </summary>
 public sealed class CachedGetFilter(
     int seconds,
+    string[] tagTemplates,
     IFusionCache cache,
     IDistributedLockProvider locks,
     ICurrentUser user,
@@ -36,6 +37,7 @@ public sealed class CachedGetFilter(
         var padding = cacheSettings.Value.DistributedTtlPadding;
         var duration = TimeSpan.FromSeconds(seconds > 0 ? seconds : settings.DefaultGetSeconds);
         var key = RequestKey.ForRead(http, user);
+        var tags = CacheTags.Resolve(tagTemplates, http, user);
         var failureKey = "fail:" + key;
         var lockName = cacheSettings.Value.KeyPrefix + "lock:" + key;
         var executed = default(ResponseCapture.Captured?);
@@ -86,6 +88,7 @@ public sealed class CachedGetFilter(
                                 key,
                                 captured.Response,
                                 o => CacheEntry.Apply(o, duration, padding),
+                                tags,
                                 CancellationToken.None);
                             SkipAllWrites(factory.Options);
                         }
@@ -104,6 +107,7 @@ public sealed class CachedGetFilter(
                     }
                 },
                 o => CacheEntry.Apply(o, duration, padding),
+                tags,
                 http.RequestAborted);
 
             if (executed is { } ran)

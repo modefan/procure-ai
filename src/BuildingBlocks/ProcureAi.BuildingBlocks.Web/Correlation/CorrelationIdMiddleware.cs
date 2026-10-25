@@ -14,6 +14,9 @@ public sealed partial class CorrelationIdMiddleware(RequestDelegate next)
     public const string HeaderName = "X-Correlation-Id";
     public const string LogProperty = "CorrelationId";
 
+    /// <summary><see cref="HttpContext.Items"/> key holding the correlation ID, for code that sends messages.</summary>
+    public const string ItemKey = "ProcureAi.CorrelationId";
+
     /// <summary>Longest accepted incoming correlation ID.</summary>
     private const int MaxLength = 128;
 
@@ -33,6 +36,7 @@ public sealed partial class CorrelationIdMiddleware(RequestDelegate next)
             context.Response.Headers[HeaderName] = correlationId;
             return Task.CompletedTask;
         });
+        context.Items[ItemKey] = correlationId;
         Activity.Current?.SetTag("correlation.id", correlationId);
 
         using (LogContext.PushProperty(LogProperty, correlationId))

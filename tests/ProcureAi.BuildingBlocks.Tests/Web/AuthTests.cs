@@ -262,7 +262,8 @@ public class AuthTests
 
         var response = await app.GetTestClient().SendAsync(Request(HttpMethod.Get, TenantEndpoint, bearer: token), Ct);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        // A user token cannot supply X-Tenant-Id, so a token without a usable tenant is forbidden (the API key gets 400).
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -24,9 +25,12 @@ public static class WebExtensions
         services.AddValidatedOptions<CachingOptions>(builder.Configuration, CachingOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(builder.Configuration, RateLimitingOptions.SectionName);
 
-        services.AddControllers();
+        // Enums travel as names ("Draft"), in responses, query strings and the OpenAPI document alike.
+        services.AddControllers().AddJsonOptions(json => json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+        services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         services.AddProcureAiProblemDetails();
         services.AddProcureAiVersioning();
+        services.AddProcureAiOpenApiDescriptions();
         services.AddProcureAiRateLimiting();
 
         services.AddProcureAiAuth(builder.Configuration);

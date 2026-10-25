@@ -1,9 +1,9 @@
+using JasperFx;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.BuildingBlocks.Persistence;
-using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Contracts.Requests;
 using ProcureAi.Requests.Application;
 using ProcureAi.Requests.Application.Abstractions;
@@ -24,13 +24,12 @@ public static class DependencyInjection
     public const string RequestsExchange = "requests";
 
     /// <summary>
-    /// Registers the DbContext (Wolverine-integrated, so its changes and outgoing messages commit together), the
-    /// number generator and options. The caller registers <see cref="ICallerContext"/>.
+    /// Registers the DbContext (Wolverine-integrated, so its changes and outgoing messages commit together) and the
+    /// number generator. The caller registers <see cref="ICallerContext"/> and the <c>Paging</c> options.
     /// </summary>
     public static IServiceCollection AddRequestsInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = Required(configuration, DatabaseConnectionName);
-        services.AddValidatedOptions<PagingOptions>(configuration, PagingOptions.SectionName);
         // Options (and so the interceptor) are shared app-wide; the interceptor reads the caller from the saving DbContext.
         services.TryAddSingleton<AuditSaveChangesInterceptor>();
         services.AddDbContextWithWolverineIntegration<RequestsDbContext>(
@@ -50,6 +49,9 @@ public static class DependencyInjection
     {
         options.Discovery.IncludeAssembly(typeof(CreateRequest).Assembly);
         options.PersistMessagesWithPostgresql(Required(configuration, DatabaseConnectionName));
+        // On in Development and tests; elsewhere the Api's --migrate step creates the message store, so startup never changes schema.
+        options.AutoBuildMessageStorageOnStartup =
+            configuration.GetValue("Wolverine:AutoBuildMessageStorageOnStartup", AutoCreate.None);
         // Tells Wolverine the interface is a DbContext, so its transaction and outbox still wrap the handlers.
         options.UseEntityFrameworkCoreTransactions().WithDbContextAbstraction<IRequestsDbContext, RequestsDbContext>();
         options.Policies.AutoApplyTransactions();

@@ -14,8 +14,8 @@ namespace ProcureAi.BuildingBlocks.Web.Caching;
 /// Resource filter (after authorization). Per tenant + user + <c>Idempotency-Key</c>: the first call takes a
 /// Redis lock and runs; duplicates wait for the lock and then get the stored response. The hash of method, path,
 /// query and body guards against reusing a key for a different request. 5xx results are never stored;
-/// duplicates that were waiting on a failed call get the same error, a later retry runs again. 409 and 412
-/// (conflicts the client resolves and retries with the same key) are not stored either. The result is stored
+/// duplicates that were waiting on a failed call get the same error, a later retry runs again. 409, 412 and 428
+/// (conflicts and missing preconditions the client resolves and retries with the same key) are not stored either. The result is stored
 /// before it is sent, so a client that disconnects can still retry and get it.
 /// A replayed response carries the status, body, Content-Type, Location and ETag only; other headers are not kept.
 /// </summary>
@@ -86,7 +86,7 @@ public sealed class IdempotencyFilter(
                     failureKey, captured.Response, o => CacheEntry.ForSharedRecord(o, settings.FailureShare, padding),
                     CancellationToken.None);
             }
-            else if (status is not (StatusCodes.Status409Conflict or StatusCodes.Status412PreconditionFailed))
+            else if (status is not (StatusCodes.Status409Conflict or StatusCodes.Status412PreconditionFailed or StatusCodes.Status428PreconditionRequired))
             {
                 await cache.SetAsync(
                     storedKey, captured.Response, o => CacheEntry.ForSharedRecord(o, settings.Retention, padding),

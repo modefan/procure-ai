@@ -150,4 +150,20 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
         process.ExitCode.ShouldBe(0);
         return (long.Parse(output[0]), long.Parse(output[1]));
     }
+
+    [Fact]
+    public async Task Requests_api_starts_after_its_migration_has_finished()
+    {
+        using var cts = new CancellationTokenSource(AppHostFixture.StartupTimeout);
+        var finished = await fixture.App.ResourceNotifications.WaitForResourceAsync(
+            "requests-migrate", e => e.Snapshot.State?.Text is { } state && KnownResourceStates.TerminalStates.Contains(state), cts.Token);
+        finished.Snapshot.ExitCode.ShouldBe(0, "requests-migrate must exit cleanly");
+
+        await fixture.WaitHealthyAsync("requests-api");
+        using var http = fixture.App.CreateHttpClient("requests-api", "http");
+        (await http.GetAsync("/health/ready", TestContext.Current.CancellationToken)).IsSuccessStatusCode.ShouldBeTrue();
+        (await http.GetAsync("/openapi/v1.json", TestContext.Current.CancellationToken)).IsSuccessStatusCode.ShouldBeTrue();
+        (await http.GetAsync("/api/v1/requests", TestContext.Current.CancellationToken)).StatusCode
+            .ShouldBe(System.Net.HttpStatusCode.Unauthorized);
+    }
 }

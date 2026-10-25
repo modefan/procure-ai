@@ -11,7 +11,7 @@ namespace ProcureAi.Requests.Infrastructure;
 /// row lock, so numbers are distinct; because the upsert shares the request's transaction, a failed create gives
 /// its number back (no gaps).
 /// </summary>
-public sealed class RequestNumberGenerator(IRequestsDbContext db) : IRequestNumberGenerator
+public sealed class RequestNumberGenerator(RequestsDbContext db) : IRequestNumberGenerator
 {
     private const string UpsertSql =
         """

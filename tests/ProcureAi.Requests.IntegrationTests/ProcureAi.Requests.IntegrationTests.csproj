@@ -9,9 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Testcontainers.RabbitMq" />
+    <PackageReference Include="Testcontainers.Redis" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
 
@@ -22,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
     <ProjectReference Include="../../src/Services/Requests/ProcureAi.Requests.Infrastructure/ProcureAi.Requests.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Requests/ProcureAi.Requests.Api/ProcureAi.Requests.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>

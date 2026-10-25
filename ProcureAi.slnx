@@ -6,6 +6,7 @@
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
     <Project Path="src/Services/Requests/ProcureAi.Requests.Domain/ProcureAi.Requests.Domain.csproj" />
+    <Project Path="src/Services/Requests/ProcureAi.Requests.Api/ProcureAi.Requests.Api.csproj" />
     <Project Path="src/Services/Requests/ProcureAi.Requests.Application/ProcureAi.Requests.Application.csproj" />
     <Project Path="src/Services/Requests/ProcureAi.Requests.Infrastructure/ProcureAi.Requests.Infrastructure.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />

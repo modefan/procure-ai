@@ -143,7 +143,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         var page2 = await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(2, 2, null));
         var submitted = await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 10, RequestStatus.Submitted));
 
-        page1.TotalCount.ShouldBe(3);
+        page1.Total.ShouldBe(3);
         page1.Items.Select(i => i.Title).ShouldBe(["three", "two"]);
         page2.Items.Select(i => i.Title).ShouldBe(["one"]);
         submitted.Items.ShouldHaveSingleItem().Id.ShouldBe(first.Id);

@@ -32,13 +32,14 @@ public sealed class RequestsHost : IAsyncDisposable
 
     public IMessageBus Bus => Host.MessageBus();
 
-    public static async Task<RequestsHost> StartAsync(string postgres, string rabbit)
+    public static async Task<RequestsHost> StartAsync(string postgres, string rabbit, Action<WolverineOptions>? configure = null)
     {
         var caller = new TestCaller();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:requestsdb"] = postgres,
             ["ConnectionStrings:rabbitmq"] = rabbit,
+            ["Wolverine:AutoBuildMessageStorageOnStartup"] = "CreateOrUpdate",
         }).Build();
         var host = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration(c => c.AddConfiguration(configuration))
@@ -54,7 +55,11 @@ public sealed class RequestsHost : IAsyncDisposable
                 o.ValidateScopes = true;
                 o.ValidateOnBuild = true;
             })
-            .UseWolverine(options => options.ConfigureRequests(configuration))
+            .UseWolverine(options =>
+            {
+                options.ConfigureRequests(configuration);
+                configure?.Invoke(options);
+            })
             .Build();
         await host.StartAsync();
         return new RequestsHost(host, caller);

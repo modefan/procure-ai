@@ -45,6 +45,7 @@ public static class CachingSetup
         // Read once here because FusionCache is configured at registration; the same values are validated on start.
         var settings = builder.Configuration.GetSection(FusionCacheSettings.SectionName).Get<FusionCacheSettings>()
                        ?? new FusionCacheSettings();
+        services.AddSingleton<ICacheInvalidator, FusionCacheInvalidator>();
         services.AddFusionCache()
             .WithOptions(options => options.CacheKeyPrefix = settings.KeyPrefix ?? applicationName + ":")
             .WithDefaultEntryOptions(options =>

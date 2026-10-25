@@ -9,6 +9,7 @@ using RabbitMQ.Client;
 using ProcureAi.Requests.Infrastructure;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
+using Testcontainers.Redis;
 
 namespace ProcureAi.Requests.IntegrationTests;
 
@@ -40,11 +41,14 @@ public sealed class InfraFixture : IAsyncLifetime
     private INetwork? _network;
     private PostgreSqlContainer? _postgres;
     private RabbitMqContainer? _rabbit;
+    private RedisContainer? _redis;
     private IContainer? _debezium;
 
     public string RequestsDbConnectionString { get; private set; } = "";
 
     public string RabbitConnectionString => _rabbit!.GetConnectionString();
+
+    public string RedisConnectionString => _redis!.GetConnectionString();
 
     public async ValueTask InitializeAsync()
     {
@@ -81,7 +85,13 @@ public sealed class InfraFixture : IAsyncLifetime
             .WithCreateParameterModifier(p => ApplyLimits(p, rq))
             .Build();
 
-        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync());
+        var redis = Limits.GetSection("Redis");
+        _redis = new RedisBuilder("redis:7-alpine")
+            .WithCreateParameterModifier(p => ApplyLimits(p, redis))
+            .WithCommand("--maxmemory", redis["MaxMemory"]!, "--maxmemory-policy", redis["MaxMemoryPolicy"]!)
+            .Build();
+
+        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync(), _redis.StartAsync());
 
         RequestsDbConnectionString = new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString())
         {
@@ -204,6 +214,11 @@ public sealed class InfraFixture : IAsyncLifetime
         if (_rabbit is not null)
         {
             await _rabbit.DisposeAsync();
+        }
+
+        if (_redis is not null)
+        {
+            await _redis.DisposeAsync();
         }
 
         if (_network is not null)
