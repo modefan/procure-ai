@@ -16,6 +16,8 @@ public static class SerilogSetup
     public static WebApplicationBuilder AddProcureAiSerilog(this WebApplicationBuilder builder, string serviceName)
     {
         builder.Services.AddHttpContextAccessor();
+        // preserveStaticLogger: the host keeps its own logger and never assigns (or, at shutdown, closes) the process-wide
+        // Log.Logger. Otherwise a host that is still shutting down silences the logger of the next host in the same process.
         builder.Services.AddSerilog((services, logger) =>
         {
             var configuration = services.GetRequiredService<IConfiguration>();
@@ -31,7 +33,7 @@ public static class SerilogSetup
             {
                 logger.WriteTo.Console();
             }
-        });
+        }, preserveStaticLogger: true);
         return builder;
     }
 }
