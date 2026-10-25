@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Known high/critical advisories (NU1903, NU1904) stay errors. Low/moderate ones (NU1901, NU1902) are published
+         against transitive packages we cannot always fix at once, so they stay visible warnings and never break the build. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902</WarningsNotAsErrors>
   </PropertyGroup>
 
 </Project>

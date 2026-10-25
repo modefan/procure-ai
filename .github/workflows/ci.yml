@@ -19,7 +19,7 @@ env:
 jobs:
   dotnet:
     name: Build and test (.NET)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +78,7 @@ jobs:
 
   web:
     name: Angular build, test and client drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -114,12 +114,21 @@ jobs:
 
       - name: Fail on client drift
         working-directory: .
-        run: git diff --exit-code -- src/Services/Requests/ProcureAi.Requests.Api/openapi src/Web/procure-ai-web/src/app/api
+        run: |
+          paths="src/Services/Requests/ProcureAi.Requests.Api/openapi src/Web/procure-ai-web/src/app/api"
+          # git status also lists new untracked files, which git diff would miss.
+          drift="$(git status --porcelain -- $paths)"
+          if [ -n "$drift" ]; then
+            echo "::error::Generated OpenAPI document or API client differs from what is committed. Regenerate and commit."
+            echo "$drift"
+            git diff -- $paths | head -200
+            exit 1
+          fi
 
   e2e:
     name: End-to-end (Playwright)
     needs: [dotnet, web]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       REQUIRE_E2E: "1"

@@ -482,9 +482,13 @@ $RECYCLE.BIN/
 *.swp
 
 # Frontend and test output
-node_modules/
 .angular/
 playwright-report/
 
 # playwright-cli output (screenshots, snapshots, traces from testing)
 .playwright-cli/
+
+# Coverage, build output and local secrets
+coverage/
+dist/
+*.secrets.json

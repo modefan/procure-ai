@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -18,8 +19,13 @@ public static class Extensions
     public const string LivePath = "/health/live";
     public const string ReadyPath = "/health/ready";
 
+    /// <summary>The name of both the ActivitySource and the Meter of Wolverine.</summary>
+    public const string WolverineTelemetryName = "Wolverine";
+
+    /// <summary>Health checks with this tag decide <c>/health/ready</c> (dependencies); services add theirs.</summary>
+    public const string ReadyTag = "ready";
+
     private const string LiveTag = "live";
-    private const string ReadyTag = "ready";
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -49,7 +55,11 @@ public static class Extensions
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
-                .AddRuntimeInstrumentation())
+                .AddRuntimeInstrumentation()
+                // Registering a meter or source for a library a service does not use is harmless: it just never emits.
+                .AddMeter(WolverineTelemetryName)
+                .AddNpgsqlInstrumentation()
+                .AddFusionCacheInstrumentation())
             .WithTracing(tracing => tracing
                 .AddSource(builder.Environment.ApplicationName)
                 .AddAspNetCoreInstrumentation(options =>
@@ -57,7 +67,14 @@ public static class Extensions
                     options.Filter = context =>
                         !context.Request.Path.StartsWithSegments(LivePath)
                         && !context.Request.Path.StartsWithSegments(ReadyPath))
-                .AddHttpClientInstrumentation());
+                .AddHttpClientInstrumentation()
+                // Handled messages, outbox sends and transport hops, linked to the trace of the request that caused them.
+                .AddSource(WolverineTelemetryName)
+                .AddNpgsql()
+                // EF Core has no ActivitySource of its own; its SQL shows as Npgsql command spans.
+                // Resolves the IConnectionMultiplexer from DI when one is registered, and does nothing otherwise.
+                .AddRedisInstrumentation()
+                .AddFusionCacheInstrumentation());
 
         // The OTLP exporter is switched on by configuration (OTEL_EXPORTER_OTLP_ENDPOINT), which Aspire sets.
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))

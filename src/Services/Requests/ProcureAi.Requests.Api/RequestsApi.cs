@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using ProcureAi.BuildingBlocks.Web;
 using ProcureAi.BuildingBlocks.Web.Caching;
+using ProcureAi.BuildingBlocks.Web.Health;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Requests.Application;
 using ProcureAi.Requests.Application.Abstractions;
@@ -32,6 +33,10 @@ public static class RequestsApi
         services.AddScoped<ICallerContext, ApiCallerContext>();
         services.AddScoped<IncomingMessage>();
         services.AddRequestsInfrastructure(builder.Configuration);
+        // Ready only while the dependencies the API cannot serve without are reachable.
+        services.AddPostgresReadiness(builder.Configuration.GetConnectionString(DependencyInjection.DatabaseConnectionName)!);
+        services.AddRabbitMqReadiness(builder.Configuration.GetConnectionString(DependencyInjection.RabbitMqConnectionName)!);
+        services.AddRedisReadiness();
 
         builder.Host.UseWolverine(options =>
         {

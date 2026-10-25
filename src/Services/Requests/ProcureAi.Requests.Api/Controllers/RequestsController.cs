@@ -60,9 +60,28 @@ public sealed class RequestsController(
         [FromQuery] int page = 1,
         [FromQuery] int? pageSize = null,
         [FromQuery] RequestStatus? status = null,
-        CancellationToken cancellationToken = default) =>
-        await bus.InvokeAsync<PagedResult<RequestDto>>(
-            new ListRequests(page, pageSize ?? paging.Value.DefaultPageSize, status), cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        // Bad query input is a 400 validation problem (like a bad body), not a 422 business-rule failure.
+        // The limit comes from configuration (Paging), so it cannot be an attribute.
+        var size = pageSize ?? paging.Value.DefaultPageSize;
+        if (page < 1)
+        {
+            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
+        }
+
+        if (size < 1 || size > paging.Value.MaxPageSize)
+        {
+            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        return await bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(page, size, status), cancellationToken);
+    }
 
     [HttpPut("{id:guid}", Name = "UpdateRequest")]
     [RequirePermission(Permissions.RequestsCreate)]

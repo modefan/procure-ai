@@ -5,6 +5,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Web.Caching;
+using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.Proxies;
+using ProcureAi.BuildingBlocks.Web.RateLimiting;
 using ProcureAi.Requests.Application.Dtos;
 using ProcureAi.Requests.Domain;
 using Shouldly;
@@ -420,8 +425,51 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         page.Total.ShouldBe(3);
         submitted!.Items.ShouldHaveSingleItem().Id.ShouldBe(first.Id);
         defaults!.PageSize.ShouldBe(25);
-        (await _client.SendAsync(Req(HttpMethod.Get, $"{Requests}?pageSize=100000", tenant: tenant), Ct))
-            .StatusCode.ShouldBe((HttpStatusCode)422);
+    }
+
+    [Theory]
+    [InlineData("pageSize=100000", "pageSize")]
+    [InlineData("pageSize=0", "pageSize")]
+    [InlineData("page=0", "page")]
+    [InlineData("page=-3", "page")]
+    public async Task Invalid_paging_is_a_400_validation_problem(string query, string field)
+    {
+        using var response = await _client.SendAsync(Req(HttpMethod.Get, $"{Requests}?{query}", tenant: NewTenant("paging")), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("errors").TryGetProperty(field, out _).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Visible_appsettings_sections_equal_the_code_defaults()
+    {
+        // appsettings.json lists the defaults so they are visible per environment; they must not drift from the code.
+        var sp = _factory.Services;
+        T Bound<T>() where T : class => sp.GetRequiredService<IOptions<T>>().Value;
+
+        Bound<CachingOptions>().ShouldBeEquivalentTo(new CachingOptions());
+        var idempotency = Bound<IdempotencyOptions>();
+        idempotency.Retention.ShouldBe(new IdempotencyOptions().Retention); // WaitTimeout is raised by this factory
+        idempotency.FailureShare.ShouldBe(new IdempotencyOptions().FailureShare);
+        idempotency.MaxKeyLength.ShouldBe(new IdempotencyOptions().MaxKeyLength);
+        idempotency.RetryAfterSeconds.ShouldBe(new IdempotencyOptions().RetryAfterSeconds);
+        var fusion = Bound<FusionCacheSettings>();
+        fusion.DefaultDuration.ShouldBe(new FusionCacheSettings().DefaultDuration);
+        fusion.DistributedTtlPadding.ShouldBe(new FusionCacheSettings().DistributedTtlPadding);
+        Bound<RateLimitingOptions>().ShouldBeEquivalentTo(new RateLimitingOptions());
+        var forwarded = Bound<ForwardedHeadersSettings>();
+        forwarded.ForwardLimit.ShouldBe(new ForwardedHeadersSettings().ForwardLimit);
+        forwarded.HasTrustedProxies.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Health_ready_is_200_while_postgres_rabbitmq_and_redis_are_up()
+    {
+        using var response = await _client.GetAsync("/health/ready", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]

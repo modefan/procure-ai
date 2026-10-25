@@ -47,7 +47,13 @@ public static class CachingSetup
                        ?? new FusionCacheSettings();
         services.AddSingleton<ICacheInvalidator, FusionCacheInvalidator>();
         services.AddFusionCache()
-            .WithOptions(options => options.CacheKeyPrefix = settings.KeyPrefix ?? applicationName + ":")
+            .WithOptions(options =>
+            {
+                // The Redis backplane channel is "<prefix>:<cache name>"-style; the prefix keeps services' channels apart.
+                // (The cache itself keeps FusionCache's default name so plain IFusionCache injection keeps working.)
+                options.BackplaneChannelPrefix = settings.CacheName ?? applicationName;
+                options.CacheKeyPrefix = settings.KeyPrefix ?? applicationName + ":";
+            })
             .WithDefaultEntryOptions(options =>
             {
                 options.Duration = settings.DefaultDuration;

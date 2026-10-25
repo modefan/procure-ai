@@ -90,6 +90,28 @@ public sealed class LayerRulesTests
             .Check(Architecture);
     }
 
+    /// <summary>Namespaces any service may use: the shared libraries. Everything else under ProcureAi.* is a different component.</summary>
+    private static readonly string[] SharedRoots = ["BuildingBlocks", "Contracts", "ServiceDefaults"];
+
+    [Fact]
+    public void A_service_depends_only_on_itself_and_the_shared_libraries()
+    {
+        // Services talk through events (Contracts) and HTTP, never by referencing each other's code, so each can be
+        // built, tested and deployed alone. The Gateway and AppHost are not services, so a service may not use them either.
+        var services = LayerAssemblies.Select(a => LayerAssembly.Match(Name(a)).Groups["service"].Value)
+            .Where(s => !SharedRoots.Contains(s)).Distinct().ToList();
+        services.ShouldNotBeEmpty();
+        foreach (var service in services)
+        {
+            var own = LayerAssemblies.Where(a => LayerAssembly.Match(Name(a)).Groups["service"].Value == service).ToArray();
+            var allowed = string.Join('|', SharedRoots.Append(Regex.Escape(service)));
+            Types().That().ResideInAssembly(own[0], own[1..])
+                .Should().NotDependOnAnyTypesThat()
+                .ResideInNamespaceMatching($@"^ProcureAi\.(?!({allowed})(\.|$))\w+(\..*)?$")
+                .Check(Architecture);
+        }
+    }
+
     [Fact]
     public void Controllers_do_not_use_DbContext()
     {

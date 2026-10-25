@@ -16,6 +16,10 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.20.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.20.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.1" />
+    <!-- No stable release of the Redis instrumentation exists yet. -->
+    <PackageVersion Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.20.1-beta.1" />
+    <PackageVersion Include="Npgsql.OpenTelemetry" Version="10.0.3" />
+    <PackageVersion Include="ZiggyCreatures.FusionCache.OpenTelemetry" Version="2.9.0" />
     <!-- Data drivers used by the AppHost and its tests -->
     <PackageVersion Include="MongoDB.Driver" Version="3.13.0" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
@@ -27,6 +31,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.13" />
+    <PackageVersion Include="RabbitMQ.Client" Version="7.2.2" />
     <PackageVersion Include="StackExchange.Redis" Version="3.4.20" />
     <PackageVersion Include="ZiggyCreatures.FusionCache" Version="2.9.0" />
     <PackageVersion Include="ZiggyCreatures.FusionCache.Backplane.StackExchangeRedis" Version="2.9.0" />

@@ -94,9 +94,22 @@ public sealed class AppFixture : IAsyncLifetime
         Assert.Skip(_skipReason);
     }
 
-    /// <summary>A fresh, isolated browser context (own cookies). The gateway is https with the ASP.NET dev certificate.</summary>
-    public Task<IBrowserContext> NewContextAsync() =>
-        Browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 1280, Height = 800 } });
+    /// <summary>Where traces and screenshots go; the CI workflow uploads this folder when the run fails.</summary>
+    public static readonly string ArtifactsDirectory = Path.Combine(AppContext.BaseDirectory, "playwright-artifacts");
+
+    /// <summary>
+    /// A fresh, isolated browser context (own cookies) that records a Playwright trace. On dispose it saves the trace
+    /// (<c>&lt;test&gt;.zip</c>) and a screenshot of every open page (<c>&lt;test&gt;-pageN.png</c>) into <see cref="ArtifactsDirectory"/>.
+    /// A test that fails inside <c>await using</c> disposes while unwinding, so the screenshot shows the failing state.
+    /// The gateway is https with the ASP.NET dev certificate.
+    /// </summary>
+    public async Task<TracedContext> NewContextAsync([System.Runtime.CompilerServices.CallerMemberName] string testName = "test")
+    {
+        var context = await Browser.NewContextAsync(
+            new BrowserNewContextOptions { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 1280, Height = 800 } });
+        await context.Tracing.StartAsync(new TracingStartOptions { Screenshots = true, Snapshots = true, Sources = false });
+        return new TracedContext(context, testName);
+    }
 
     /// <summary>Creates a purchase request through the gateway with the admin API key; returns its number.</summary>
     public async Task<string> SeedRequestAsync(string title)
@@ -150,4 +163,32 @@ public sealed class AppFixture : IAsyncLifetime
 public sealed class EndToEndCollection : ICollectionFixture<AppFixture>
 {
     public const string Name = "end-to-end";
+}
+
+/// <summary>A browser context that writes its trace and final screenshots to <see cref="AppFixture.ArtifactsDirectory"/> when disposed.</summary>
+public sealed class TracedContext(IBrowserContext context, string testName) : IAsyncDisposable
+{
+    public Task<IPage> NewPageAsync() => context.NewPageAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppFixture.ArtifactsDirectory);
+            var index = 0;
+            foreach (var page in context.Pages)
+            {
+                await page.ScreenshotAsync(new PageScreenshotOptions
+                {
+                    Path = Path.Combine(AppFixture.ArtifactsDirectory, $"{testName}-page{++index}.png"),
+                });
+            }
+            await context.Tracing.StopAsync(new TracingStopOptions { Path = Path.Combine(AppFixture.ArtifactsDirectory, $"{testName}.zip") });
+        }
+        catch (PlaywrightException)
+        {
+            // Diagnostics must never turn a passing test into a failing one (or hide the real failure).
+        }
+        await context.CloseAsync();
+    }
 }

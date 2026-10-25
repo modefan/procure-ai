@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using ProcureAi.BuildingBlocks.Web.Errors;
+using ProcureAi.BuildingBlocks.Web.Health;
 using ProcureAi.BuildingBlocks.Web.Logging;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.BuildingBlocks.Web.Proxies;
@@ -37,12 +38,14 @@ public static class GatewayApp
         services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(configuration, RateLimitingOptions.SectionName);
         services.AddProcureAiForwardedHeaders(configuration);
+        services.AddProcureAiCorrelationPropagation();
         services.AddProcureAiProblemDetails();
         // The gateway has no API key of its own to check, and has the client IP only: behind it every user is one IP.
         services.AddProcureAiRateLimiting(RateLimitPartitioning.ClientIp);
         services.AddGatewaySwagger(configuration);
 
         AddRedis(builder);
+        services.AddRedisReadiness();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddSingleton<IPermissionProvider, DefaultMatrixPermissionProvider>();

@@ -50,6 +50,8 @@ if (useDataVolumes)
 {
     mongo.WithDataVolume();
 }
+// Eviction policy volatile-ttl (not volatile-lru): when Redis is full, drop the keys closest to expiry first, i.e. the
+// 1 s cache entries, and keep the long-lived 24 h idempotency records and BFF session tickets (config: Resources:Redis).
 var redis = builder.AddRedis(ResourceNames.Redis)
     .WithArgs(
         "--maxmemory", limits.Redis.MaxMemory,

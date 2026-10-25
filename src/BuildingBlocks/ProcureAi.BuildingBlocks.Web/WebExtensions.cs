@@ -38,6 +38,7 @@ public static class WebExtensions
             json.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
             json.SerializerOptions.NumberHandling = JsonNumberHandling.Strict;
         });
+        services.AddProcureAiCorrelationPropagation();
         services.AddProcureAiProblemDetails();
         services.AddProcureAiVersioning();
         services.AddProcureAiOpenApiDescriptions(serviceName);
