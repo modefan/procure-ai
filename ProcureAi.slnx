@@ -1,12 +1,15 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AppHost/ProcureAi.AppHost/ProcureAi.AppHost.csproj" />
+    <Project Path="src/Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
     <Project Path="src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
+    <Project Path="src/Services/Requests/ProcureAi.Requests.Domain/ProcureAi.Requests.Domain.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ProcureAi.BuildingBlocks.Tests/ProcureAi.BuildingBlocks.Tests.csproj" />
+    <Project Path="tests/ProcureAi.Requests.Tests/ProcureAi.Requests.Tests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
   </Folder>
 </Solution>
