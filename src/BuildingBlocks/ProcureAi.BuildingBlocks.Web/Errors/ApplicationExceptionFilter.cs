@@ -5,14 +5,14 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 
-namespace ProcureAi.Requests.Api;
+namespace ProcureAi.BuildingBlocks.Web.Errors;
 
 /// <summary>
 /// Turns the application's expected outcomes into problem details inside the MVC pipeline, so [Idempotent] and
 /// [CachedGet] see an ordinary response (and share it with waiting callers) instead of an exception:
 /// not found (or another tenant's) 404, forbidden 403, stale version 412, broken business rule 422.
 /// </summary>
-public sealed class RequestsExceptionFilter(ProblemDetailsFactory problems) : IExceptionFilter
+public sealed class ApplicationExceptionFilter(ProblemDetailsFactory problems) : IExceptionFilter
 {
     public void OnException(ExceptionContext context)
     {

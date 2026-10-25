@@ -1,9 +1,6 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using Serilog.Core;
 using Serilog.Events;
@@ -46,41 +43,18 @@ public sealed class CapturingSink : ILogEventSink
 /// The real Requests API (its Program) on a test server, against the shared Postgres, RabbitMQ and Redis.
 /// Several factories on the same infrastructure stand in for several instances of the service.
 /// </summary>
-public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null) : WebApplicationFactory<Program>
+public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null)
+    : ServiceApiFactory<Program>("requestsdb", infra.RequestsDbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
-    public const string OpenApiAuthorizationUrl = "https://login.test/tenant/oauth2/v2.0/authorize";
-    public const string OpenApiTokenUrl = "https://login.test/tenant/oauth2/v2.0/token";
-
     /// <summary>Lets a test cancel the client request right after the write committed, while the controller invalidates the cache.</summary>
     public CancelAfterCommit Hook { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
-        // UseSetting, not ConfigureAppConfiguration: the composition root reads some settings while it builds.
-        builder.UseSetting("ConnectionStrings:requestsdb", infra.RequestsDbConnectionString);
-        builder.UseSetting("ConnectionStrings:rabbitmq", infra.RabbitConnectionString);
-        builder.UseSetting("ConnectionStrings:Redis", infra.RedisConnectionString);
-        builder.UseSetting("Auth:Authority", TestAuth.Issuer);
-        builder.UseSetting("Auth:Audience", TestAuth.Audience);
-        builder.UseSetting("Auth:RequireHttpsMetadata", "false");
-        builder.UseSetting("Auth:AdminApiKeySha256", TestAuth.ApiKeySha256);
-        builder.UseSetting("Auth:OpenApi:AuthorizationUrl", OpenApiAuthorizationUrl);
-        builder.UseSetting("Auth:OpenApi:TokenUrl", OpenApiTokenUrl);
-        builder.UseSetting("Auth:OpenApi:Scopes:openid", "OpenID Connect");
-        builder.UseSetting("Auth:OpenApi:Scopes:email", "Email address");
-        builder.UseSetting("Wolverine:AutoBuildMessageStorageOnStartup", "CreateOrUpdate");
-        builder.UseSetting("Idempotency:WaitTimeout", "00:00:20");
+        base.ConfigureWebHost(builder);
 
         builder.ConfigureTestServices(services =>
         {
-            // Validate tokens against the local test key, without discovery documents or any network call.
-            services.PostConfigure<JwtBearerOptions>(ApiKeyDefaults.BearerScheme, options =>
-            {
-                options.Authority = null;
-                options.TokenValidationParameters.IssuerSigningKey = TestAuth.SigningKey;
-                options.TokenValidationParameters.ValidIssuer = TestAuth.Issuer;
-            });
             // Wrap the real invalidator: it is the first step after the commit, so the hook can abort the client there.
             var original = services.Single(d => d.ServiceType == typeof(ICacheInvalidator));
             services.Remove(original);

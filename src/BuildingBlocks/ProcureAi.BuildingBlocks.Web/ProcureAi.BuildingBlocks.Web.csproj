@@ -9,6 +9,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
     <ProjectReference Include="../ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
     <ProjectReference Include="../../ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </ItemGroup>

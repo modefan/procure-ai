@@ -13,31 +13,12 @@
     <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" GeneratePathProperty="true">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
-
-  <!--
-    The OpenAPI document is written on every build and committed: the Angular client is generated from it.
-    The tool builds the host (it never starts it), and the composition root insists on its settings, so the tool
-    is run by hand here with placeholder settings as environment variables. Nothing connects to them; none is a
-    real address or secret. (The package's own build step is switched off because it cannot set variables.)
-  -->
+  <!-- The OpenAPI document is written on every build and committed (see ../../Directory.Build.targets). -->
   <PropertyGroup>
-    <OpenApiGenerateDocumentsOnBuild>false</OpenApiGenerateDocumentsOnBuild>
-    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/openapi</OpenApiDocumentsDirectory>
-    <OpenApiPlaceholderSettings>ConnectionStrings__requestsdb=Host=openapi.invalid;ConnectionStrings__rabbitmq=amqp://openapi.invalid;ConnectionStrings__Redis=openapi.invalid:6379</OpenApiPlaceholderSettings>
-    <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__Authority=https://openapi.invalid/realms/x;Auth__Audience=openapi;Auth__AdminApiKeySha256=0000000000000000000000000000000000000000000000000000000000000000</OpenApiPlaceholderSettings>
-    <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__OpenApi__AuthorizationUrl=https://openapi.invalid/auth;Auth__OpenApi__TokenUrl=https://openapi.invalid/token;Auth__OpenApi__Scopes__openid=OpenID Connect;Auth__OpenApi__Scopes__email=Email address</OpenApiPlaceholderSettings>
+    <OpenApiDocumentName>requests-v1</OpenApiDocumentName>
+    <OpenApiDatabaseConnectionName>requestsdb</OpenApiDatabaseConnectionName>
   </PropertyGroup>
 
-  <Target Name="WriteOpenApiDocument" AfterTargets="Build">
-    <Exec EnvironmentVariables="$(OpenApiPlaceholderSettings)" LogStandardErrorAsError="true"
-          Command="dotnet &quot;$(PkgMicrosoft_Extensions_ApiDescription_Server)/tools/dotnet-getdocument.dll&quot; --assembly &quot;$(TargetPath)&quot; --file-list &quot;$(IntermediateOutputPath)$(MSBuildProjectName).OpenApiFiles.cache&quot; --framework &quot;$(TargetFrameworkMoniker)&quot; --output &quot;$(OpenApiDocumentsDirectory)&quot; --project &quot;$(MSBuildProjectName)&quot; --assets-file &quot;$(ProjectAssetsFile)&quot; --platform AnyCPU --document-name v1 --file-name requests-v1" />
-  </Target>
   <ItemGroup>
     <InternalsVisibleTo Include="ProcureAi.Requests.IntegrationTests" />
   </ItemGroup>

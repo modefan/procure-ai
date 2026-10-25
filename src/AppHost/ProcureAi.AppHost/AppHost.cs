@@ -34,10 +34,6 @@ if (useDataVolumes)
 {
     postgres.WithDataVolume();
 }
-// The init script in the image already creates this database (and its publication) on first start;
-// AddDatabase registers it as a resource others can reference.
-var requestsDb = postgres.AddDatabase(ResourceNames.RequestsDb);
-
 // MongoDB: single-node replica set (needed for change streams / CDC). Aspire's WithReplicaSet generates the
 // key file, initiates the set and only reports the server healthy once it is PRIMARY.
 #pragma warning disable ASPIREMONGODB001 // experimental Aspire API; replaces ~30 lines of hand-rolled key file and rs.initiate
@@ -98,6 +94,20 @@ builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
     .WithHttpHealthCheck("/livez")
     .WithContainerLimits(limits.Mailpit);
 
+// Requests service, added the way every service is: database, `requests-migrate` (`--migrate`: schema, Wolverine message
+// store, demo seed; runs first) and `requests-api` (waits for the migration). See ServiceResources.cs.
+var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
+var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
+var shared = new SharedResources(
+    postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, InternalClientSecret: null, otlpEndpoint, limits);
+
+var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
+    new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: [], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
+    shared);
+// The database resource the helper created, for Debezium to wait on (replaced by AddDebeziumFor).
+var requestsDb = builder.CreateResourceBuilder(
+    builder.Resources.OfType<PostgresDatabaseResource>().Single(r => r.Name == ResourceNames.RequestsDb));
+
 var debezium = builder.AddContainer(ResourceNames.Debezium, "quay.io/debezium/server", "3.7.0.Final")
     .WithHttpEndpoint(targetPort: 8080, name: "http")
     .WithBindMount("../../../infra/debezium/application.properties", "/debezium/config/application.properties", isReadOnly: true)
@@ -113,48 +123,6 @@ if (useDataVolumes)
 {
     debezium.WithVolume("debezium-data", "/debezium/data");
 }
-
-// Requests service. The migration runs first, as its own short-lived resource from the same project
-// (`--migrate` migrates the database and Wolverine's message store and exits); the API waits for it to
-// finish. A separate resource is the simplest ordering Aspire offers (WaitForCompletion), it mirrors the
-// Kubernetes job / Argo CD PreSync hook of the later deployment, and the API itself never changes schema at startup.
-var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
-var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
-
-var requestsMigrate = builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsMigrate)
-    .WithArgs("--migrate")
-    .WithReference(requestsDb)
-    .WithReference(rabbitmq)
-    .WithReference(redis)
-    .WaitFor(requestsDb)
-    .WithDotNetLimits(limits.DotNet);
-
-var requestsApi = builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsApi)
-    // No launchSettings.json: Aspire picks a free port, so dev runs and test runs never clash.
-    .WithHttpEndpoint(name: "http")
-    .WithReference(requestsDb)
-    .WithReference(rabbitmq)
-    .WithReference(redis)
-    .WithEnvironment("Auth__Authority", keycloakAuthority)
-    // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
-    .WithEnvironment("Auth__RequireHttpsMetadata", "false")
-    .WithEnvironment("Auth__OpenApi__AuthorizationUrl", ReferenceExpression.Create($"{keycloakAuthority}/protocol/openid-connect/auth"))
-    .WithEnvironment("Auth__OpenApi__TokenUrl", ReferenceExpression.Create($"{keycloakAuthority}/protocol/openid-connect/token"))
-    .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
-    // The Serilog OpenTelemetry sink has no environment-variable fallback, so it is pointed at the dashboard here.
-    .WithEnvironment(context =>
-    {
-        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-        {
-            context.EnvironmentVariables["Serilog__WriteTo__OpenTelemetry__Args__endpoint"] = otlpEndpoint;
-        }
-    })
-    .WaitFor(keycloak)
-    .WaitFor(rabbitmq)
-    .WaitFor(redis)
-    .WaitForCompletion(requestsMigrate)
-    .WithHttpHealthCheck("/health/ready")
-    .WithDotNetLimits(limits.DotNet);
 
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
@@ -185,13 +153,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithEnvironment("Oidc__ClientSecret", keycloakGatewaySecret)
     .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
-    .WithEnvironment(context =>
-    {
-        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-        {
-            context.EnvironmentVariables["Serilog__WriteTo__OpenTelemetry__Args__endpoint"] = otlpEndpoint;
-        }
-    })
+    .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
     .WaitFor(redis)
     .WaitFor(requestsApi)

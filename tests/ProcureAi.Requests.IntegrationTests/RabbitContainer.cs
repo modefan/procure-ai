@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using Microsoft.Extensions.Configuration;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 
@@ -18,17 +17,10 @@ public sealed class RabbitContainer : IAsyncDisposable
 
     public static async Task<RabbitContainer> StartAsync()
     {
-        var limits = new ConfigurationBuilder().AddJsonFile("testcontainers.settings.json").Build().GetSection("Resources:RabbitMq");
         var container = new RabbitMqBuilder("rabbitmq:4.3-management")
             // A fixed host port, so the same connection string works again after a restart.
             .WithPortBinding(FreePort(), 5672)
-            .WithCreateParameterModifier(p =>
-            {
-                var host = p.HostConfig!;
-                host.Memory = long.Parse(limits["MemoryMb"]!) * 1024 * 1024;
-                host.MemorySwap = host.Memory;
-                host.NanoCPUs = long.Parse(limits["Cpus"]!) * 1_000_000_000L;
-            })
+            .WithCreateParameterModifier(p => TestLimits.Apply(p, "RabbitMq"))
             .Build();
         await container.StartAsync();
         return new RabbitContainer(container);
