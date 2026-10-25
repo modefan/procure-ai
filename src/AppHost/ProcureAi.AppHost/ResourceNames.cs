@@ -5,6 +5,7 @@ public static class ResourceNames
 {
     public const string Postgres = "postgres";
     public const string RequestsDb = "requestsdb";
+    public const string AccessDb = "accessdb";
     public const string Mongo = "mongo";
     public const string MongoReplicaSet = "rs0";
     public const string Redis = "redis";

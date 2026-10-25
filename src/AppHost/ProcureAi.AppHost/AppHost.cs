@@ -110,6 +110,9 @@ var shared = new SharedResources(
 var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
     shared);
+var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
+    new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),
+    shared);
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).
@@ -133,16 +136,19 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithExternalHttpEndpoints()
     .WithReference(redis)
     .WithReference(requestsApi)
+    .WithReference(accessApi)
     .WithEnvironment("Oidc__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
     .WithEnvironment("Oidc__ClientSecret", keycloakGatewaySecret)
     .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__access__Destinations__d1__Address", accessApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
     .WaitFor(redis)
     .WaitFor(requestsApi)
+    .WaitFor(accessApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);

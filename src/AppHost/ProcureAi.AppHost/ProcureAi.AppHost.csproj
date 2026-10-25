@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Services/Requests/ProcureAi.Requests.Api/ProcureAi.Requests.Api.csproj" />
+    <ProjectReference Include="../../Services/Access/ProcureAi.Access.Api/ProcureAi.Access.Api.csproj" />
     <ProjectReference Include="../../Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />
   </ItemGroup>
 

@@ -54,6 +54,29 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Access_service_gets_its_database_migrate_api_and_debezium()
+    {
+        var model = await BuildModelAsync();
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "access-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "access-api");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-accessdb");
+
+        var migrateEnv = await EnvironmentOfAsync(migrate);
+        var apiEnv = await EnvironmentOfAsync(api);
+        var debeziumEnv = await EnvironmentOfAsync(debezium);
+
+        apiEnv.ShouldContainKey("ConnectionStrings__accessdb");
+        migrateEnv.ShouldContainKeyAndValue("DemoSeed__Enabled", "true");
+        debeziumEnv.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_DBNAME", "accessdb");
+        debeziumEnv.ShouldContainKeyAndValue(
+            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST",
+            "public.permission_matrices,public.permission_grants,public.departments,public.cost_centers,public.tenant_users,public.audit_entries");
+        api.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+    }
+
+    [Fact]
     public async Task Keycloak_gets_the_client_secrets_and_only_keycloak_gets_the_access_admin_secret()
     {
         var model = await BuildModelAsync();
