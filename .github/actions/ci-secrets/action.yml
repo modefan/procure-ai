@@ -1,0 +1,24 @@
+name: Ephemeral AppHost parameters
+description: >
+  Generates random, masked, per-run values for every AppHost parameter and the admin API key, and exports them as
+  environment variables for the following steps. Nothing is stored; no repository secrets are involved.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        gen() { openssl rand -hex 24; }
+        set_param() { # name, value
+          echo "::add-mask::$2"
+          printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"
+        }
+        api_key="$(openssl rand -hex 32)"
+        api_key_sha="$(printf '%s' "$api_key" | openssl dgst -sha256 -hex | awk '{print $NF}')"
+        echo "::add-mask::$api_key"
+        echo "::add-mask::$api_key_sha"
+        set_param DEMO_ADMIN_API_KEY "$api_key"
+        set_param "Parameters__admin-api-key-sha256" "$api_key_sha"
+        set_param "Parameters__keycloak-admin-password" "$(gen)"
+        set_param "Parameters__keycloak-demo-password" "$(gen)"
+        set_param "Parameters__keycloak-gateway-secret" "$(gen)"
+        set_param "Parameters__debezium-password" "$(gen)"

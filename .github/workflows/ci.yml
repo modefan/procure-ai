@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  dotnet:
+    name: Build and test (.NET)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Docker Hub login (avoids pull rate limits)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: ./.github/actions/ci-secrets
+
+      - name: Build
+        run: dotnet build ProcureAi.slnx -c Release -warnaserror -m:4
+
+      # One project at a time: the container-based suites must never run concurrently.
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          for project in tests/*/; do
+            name="$(basename "$project")"
+            if [ "$name" = "ProcureAi.EndToEndTests" ]; then continue; fi
+            echo "::group::$name"
+            dotnet test --project "$project" -c Release --no-build \
+              --report-xunit-trx --results-directory "$RUNNER_TEMP/trx" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: ${{ runner.temp }}/trx
+          if-no-files-found: ignore
+
+  web:
+    name: Angular build, test and client drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: src/Web/procure-ai-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/Web/procure-ai-web/package-lock.json
+
+      # .NET is needed only to regenerate the OpenAPI document (written when the Requests API is built).
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - run: npm ci
+      - run: npx ng build
+      - run: npx ng test --watch=false
+
+      - name: Regenerate OpenAPI document and API client
+        run: |
+          dotnet build ../../Services/Requests/ProcureAi.Requests.Api -c Release
+          npm run generate:api
+
+      - name: Fail on client drift
+        working-directory: .
+        run: git diff --exit-code -- src/Services/Requests/ProcureAi.Requests.Api/openapi src/Web/procure-ai-web/src/app/api
+
+  e2e:
+    name: End-to-end (Playwright)
+    needs: [dotnet, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REQUIRE_E2E: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/Web/procure-ai-web/package-lock.json
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: ./.github/actions/ci-secrets
+
+      - name: Build
+        run: dotnet build tests/ProcureAi.EndToEndTests -c Release -warnaserror -m:4
+
+      - name: Install Playwright browser and OS dependencies
+        shell: pwsh
+        run: ./tests/ProcureAi.EndToEndTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: End-to-end tests
+        run: >
+          dotnet test --project tests/ProcureAi.EndToEndTests -c Release --no-build
+          --report-xunit-trx --results-directory "$RUNNER_TEMP/trx-e2e"
+
+      - name: Upload test results and Playwright output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            ${{ runner.temp }}/trx-e2e
+            tests/ProcureAi.EndToEndTests/bin/Release/net10.0/playwright-artifacts
+          if-no-files-found: ignore
