@@ -60,6 +60,8 @@ jobs:
           status=0
           for project in tests/*/; do
             name="$(basename "$project")"
+            # Only test projects (*Tests); shared libraries such as ProcureAi.Testing have no tests.
+            case "$name" in *Tests) ;; *) continue ;; esac
             if [ "$name" = "ProcureAi.EndToEndTests" ]; then continue; fi
             echo "::group::$name"
             dotnet test --project "$project" -c Release --no-build \
