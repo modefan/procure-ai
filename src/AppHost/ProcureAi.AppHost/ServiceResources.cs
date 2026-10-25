@@ -85,7 +85,10 @@ public static class ServiceResources
 
         if (spec.CapturedTables.Length > 0)
         {
-            builder.AddDebeziumFor(spec.Database, spec.CapturedTables, migrate, shared);
+            // Debezium starts with snapshot.mode=no_data, so it only sees changes made after its slot exists. The API
+            // therefore waits for Debezium to be healthy: no change made through the app can precede the capture.
+            // (The demo seed written by --migrate runs before Debezium starts and is deliberately not captured.)
+            api.WaitFor(builder.AddDebeziumFor(spec.Database, spec.CapturedTables, migrate, shared));
         }
 
         if (shared.InternalClientSecret is { } secret)

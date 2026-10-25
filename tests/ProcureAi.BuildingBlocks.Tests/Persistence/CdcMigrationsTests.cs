@@ -111,10 +111,30 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
     }
 
     [Fact]
+    public async Task Drops_an_inactive_legacy_replication_slot_and_keeps_others()
+    {
+        var db = await postgres.CreateDatabaseAsync("cdc_slots");
+        await ExecuteAsync(
+            db,
+            "SELECT pg_create_logical_replication_slot('debezium_requests', 'pgoutput');",
+            "SELECT pg_create_logical_replication_slot('debezium_other', 'pgoutput');");
+
+        await ExecuteAsync(db, Sql(b => b.DropInactiveReplicationSlot("debezium_requests")));
+
+        (await QueryAsync(db, "SELECT slot_name FROM pg_replication_slots WHERE slot_name LIKE 'debezium_%' AND database = 'cdc_slots' ORDER BY 1"))
+            .ShouldBe(["debezium_other"]);
+        // Nothing to drop is not an error.
+        await ExecuteAsync(db, Sql(b => b.DropInactiveReplicationSlot("debezium_requests")));
+        await ExecuteAsync(db, "SELECT pg_drop_replication_slot('debezium_other');");
+    }
+
+    [Fact]
     public async Task Fails_without_debezium_role()
     {
         // A plain server: no init script, so no debezium role.
-        await using var plain = new PostgreSqlBuilder(PlainPostgresImage).Build();
+        await using var plain = new PostgreSqlBuilder(PlainPostgresImage)
+            .WithCreateParameterModifier(p => TestLimits.Apply(p, "Postgres"))
+            .Build();
         await plain.StartAsync(TestContext.Current.CancellationToken);
         var connectionString = plain.GetConnectionString();
         await ExecuteAsync(connectionString, "CREATE TABLE orders (id int PRIMARY KEY);");

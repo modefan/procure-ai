@@ -65,6 +65,19 @@ public static class CdcMigrations
         return migrationBuilder;
     }
 
+    /// <summary>
+    /// Drops the logical replication slot <paramref name="slotName"/> of the current database when it exists and no consumer
+    /// is connected to it. An unused slot keeps Postgres from recycling WAL, so a slot left behind by a renamed Debezium
+    /// instance would grow the disk without limit. An active slot is never touched.
+    /// </summary>
+    public static MigrationBuilder DropInactiveReplicationSlot(this MigrationBuilder migrationBuilder, string slotName)
+    {
+        migrationBuilder.Sql(
+            "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots " +
+            $"WHERE slot_name = '{slotName.Replace("'", "''", StringComparison.Ordinal)}' AND NOT active AND database = current_database();");
+        return migrationBuilder;
+    }
+
     private static string TableArray(string[] tables) =>
         "ARRAY[" + string.Join(", ", tables.Select(t => "'" + t.Replace("'", "''", StringComparison.Ordinal) + "'")) + "]::text[]";
 }

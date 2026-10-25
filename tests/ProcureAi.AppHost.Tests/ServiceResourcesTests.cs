@@ -55,6 +55,7 @@ public sealed class ServiceResourcesTests
         var model = await BuildModelAsync();
         var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-migrate");
         var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-requestsdb");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-api");
 
         var env = await EnvironmentOfAsync(debezium);
 
@@ -68,6 +69,9 @@ public sealed class ServiceResourcesTests
         // The publication is created by the migration, so Debezium waits for it to finish.
         debezium.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        // The API starts only once Debezium is healthy, so no app change precedes the capture (snapshot.mode=no_data).
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+        debezium.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
         debezium.Annotations.OfType<ContainerMountAnnotation>()
             .ShouldContain(m => m.Target == "/debezium/data" && m.Source == "debezium-requestsdb-data");
         debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/config/application.properties");

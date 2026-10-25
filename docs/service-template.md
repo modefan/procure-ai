@@ -39,6 +39,14 @@ Every service is built the same way from shared pieces. Nothing is copied from a
   `migrationBuilder.EnableCdc("table", ...)` (and `DisableCdc` in `Down`). It creates `dbz_publication` if missing, adds the
   tables, sets `REPLICA IDENTITY FULL` and grants `SELECT` to `debezium`; idempotent, and it fails when the `debezium` role is
   missing. Always include `audit_entries`; never the Wolverine tables.
+- **Nothing precedes the capture**: Debezium runs with `snapshot.mode=no_data` (only changes after its slot exists), so the
+  `<name>-api` resource waits for `debezium-<database>` to be healthy (`/q/health`). The demo seed written by `--migrate`
+  runs before Debezium starts and is deliberately **not** captured (seed data is not a user action).
+- A renamed Debezium leaves its replication slot behind, and an unused logical slot stops WAL recycling. Use
+  `migrationBuilder.DropInactiveReplicationSlot("<old slot>")` (Requests does this for `debezium_requests` in
+  `CaptureAuditEntries`, which also adds `audit_entries` for databases created before it was captured). Dev note: an old
+  `debezium-data` Docker volume from the single-Debezium days is now unused; remove it with `docker volume rm`
+  (Aspire prefixes the name with the project, check `docker volume ls`).
 - Aspire creates the databases; the Postgres init script only creates the `debezium` role. Debezium starts after the
   service's `-migrate` resource finished.
 - Tests: `DebeziumFixture(network, postgres).StartAsync(database, tables...)` in `ProcureAi.Testing`, same mechanism.
