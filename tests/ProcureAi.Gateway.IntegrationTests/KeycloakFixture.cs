@@ -19,6 +19,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
     public const string Realm = "procure";
     public const string TestClient = "test-direct";
     public const string InternalClient = "procure-internal";
+    public const string AccessAdminClient = "procure-access-admin";
 
     private IContainer? _container;
 
@@ -27,6 +28,9 @@ public sealed class KeycloakFixture : IAsyncLifetime
 
     /// <summary>The secret of the <c>procure-internal</c> client for this run (random; the realm file holds only a placeholder).</summary>
     public string InternalSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+
+    /// <summary>The secret of the <c>procure-access-admin</c> client (Keycloak admin rights) for this run.</summary>
+    public string AccessAdminSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
 
     public string DemoPassword { get; } = "T" + Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 
@@ -57,6 +61,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
             .WithEnvironment("KC_DEMO_PASSWORD", DemoPassword)
             .WithEnvironment("KC_GATEWAY_SECRET", GatewaySecret)
             .WithEnvironment("KC_INTERNAL_SECRET", InternalSecret)
+            .WithEnvironment("KC_ACCESS_ADMIN_SECRET", AccessAdminSecret)
             .WithResourceMapping(Encoding.UTF8.GetBytes(realm.ToJsonString()), "/opt/keycloak/data/import/procure-realm.json")
             .WithCommand("start-dev", "--import-realm")
             .WithCreateParameterModifier(p =>
@@ -91,7 +96,12 @@ public sealed class KeycloakFixture : IAsyncLifetime
     }
 
     /// <summary>The raw access token of the <c>procure-internal</c> service account (client credentials grant).</summary>
-    public async Task<string> InternalTokenAsync()
+    public Task<string> InternalTokenAsync() => ClientCredentialsAsync(InternalClient, InternalSecret);
+
+    /// <summary>The raw access token of the <c>procure-access-admin</c> service account.</summary>
+    public Task<string> AccessAdminTokenAsync() => ClientCredentialsAsync(AccessAdminClient, AccessAdminSecret);
+
+    private async Task<string> ClientCredentialsAsync(string clientId, string secret)
     {
         using var http = new HttpClient();
         using var response = await http.PostAsync(
@@ -99,11 +109,11 @@ public sealed class KeycloakFixture : IAsyncLifetime
             new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["grant_type"] = "client_credentials",
-                ["client_id"] = InternalClient,
-                ["client_secret"] = InternalSecret,
+                ["client_id"] = clientId,
+                ["client_secret"] = secret,
             }));
         var body = await response.Content.ReadAsStringAsync();
-        response.IsSuccessStatusCode.ShouldBeTrue($"Client credentials request failed: {(int)response.StatusCode} {body}");
+        response.IsSuccessStatusCode.ShouldBeTrue($"Client credentials request for {clientId} failed: {(int)response.StatusCode} {body}");
         return JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()!;
     }
 

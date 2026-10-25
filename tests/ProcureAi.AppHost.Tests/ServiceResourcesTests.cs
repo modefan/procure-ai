@@ -30,6 +30,10 @@ public sealed class ServiceResourcesTests
         apiEnv.ShouldContainKey("Auth__RequireHttpsMetadata");
         apiEnv.ShouldContainKey("Auth__OpenApi__AuthorizationUrl");
         apiEnv.ShouldContainKey("Auth__OpenApi__TokenUrl");
+        apiEnv.ShouldContainKeyAndValue("Auth__InternalClientId", "procure-internal");
+        apiEnv.ShouldContainKeyAndValue("Auth__Internal__ClientId", "procure-internal");
+        apiEnv.ShouldContainKey("Auth__Internal__ClientSecret");
+        apiEnv.ShouldContainKey("Auth__Internal__TokenUrl");
         apiEnv.ShouldContainKey("ConnectionStrings__requestsdb");
         apiEnv.ShouldContainKey("ConnectionStrings__rabbitmq");
         apiEnv.ShouldContainKey("ConnectionStrings__Redis");
@@ -47,6 +51,26 @@ public sealed class ServiceResourcesTests
         api.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
         api.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Keycloak_gets_the_client_secrets_and_only_keycloak_gets_the_access_admin_secret()
+    {
+        var model = await BuildModelAsync();
+        var keycloak = model.Resources.Single(r => r.Name == "keycloak");
+
+        var keycloakEnv = await EnvironmentOfAsync(keycloak);
+
+        keycloakEnv.ShouldContainKey("KC_INTERNAL_SECRET");
+        keycloakEnv.ShouldContainKey("KC_ACCESS_ADMIN_SECRET");
+        // The access-admin client holds Keycloak admin rights; no service resource may be handed its secret (Access gets it in a later task).
+        var accessAdmin = (ParameterResource)keycloakEnv["KC_ACCESS_ADMIN_SECRET"];
+        foreach (var resource in model.Resources.OfType<ProjectResource>())
+        {
+            var env = await EnvironmentOfAsync(resource);
+            env.Values.ShouldNotContain(v => ReferenceEquals(v, accessAdmin), resource.Name);
+            env.Keys.ShouldNotContain(k => k.Contains("AccessAdmin", StringComparison.OrdinalIgnoreCase), resource.Name);
+        }
     }
 
     [Fact]

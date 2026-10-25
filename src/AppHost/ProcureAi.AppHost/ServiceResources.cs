@@ -12,6 +12,7 @@ public sealed record ServiceSpec(string Name, string Database, string[] Captured
 
 /// <summary>The infrastructure and settings every service resource is wired to.</summary>
 /// <param name="InternalClientSecret">Secret of the Keycloak client <c>procure-internal</c>, with which services call each other (<c>Auth:Internal:ClientSecret</c>).</param>
+/// <param name="AccessAdminClientSecret">Secret of the Keycloak client <c>procure-access-admin</c> (Keycloak admin API). Not passed to any service here: only the Access service gets it.</param>
 /// <param name="DebeziumPassword">Password of the Postgres <c>debezium</c> role (secret parameter), for every Debezium Server.</param>
 /// <param name="UseDataVolumes">Whether containers keep their data in named volumes (offsets of Debezium).</param>
 /// <param name="OtlpEndpoint">The Aspire dashboard's OTLP endpoint (the Serilog OpenTelemetry sink has no environment fallback).</param>
@@ -23,6 +24,7 @@ public sealed record SharedResources(
     ReferenceExpression KeycloakAuthority,
     ParameterResource AdminApiKeySha256,
     ParameterResource InternalClientSecret,
+    ParameterResource AccessAdminClientSecret,
     string? OtlpEndpoint,
     ResourcesOptions Limits,
     ParameterResource DebeziumPassword,

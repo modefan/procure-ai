@@ -99,6 +99,8 @@ public sealed class RealmTests(KeycloakFixture keycloak)
             .GetProperty("secret").GetString().ShouldBe("${KC_GATEWAY_SECRET}");
         clients.Single(c => c.GetProperty("clientId").GetString() == KeycloakFixture.InternalClient)
             .GetProperty("secret").GetString().ShouldBe("${KC_INTERNAL_SECRET}");
+        clients.Single(c => c.GetProperty("clientId").GetString() == KeycloakFixture.AccessAdminClient)
+            .GetProperty("secret").GetString().ShouldBe("${KC_ACCESS_ADMIN_SECRET}");
     }
 
     [Theory]
@@ -145,11 +147,11 @@ public sealed class RealmTests(KeycloakFixture keycloak)
     }
 
     [Fact]
-    public async Task Internal_service_account_can_create_a_user_and_add_it_to_an_organization()
+    public async Task Access_admin_service_account_can_create_a_user_and_add_it_to_an_organization()
     {
         // What the Access service does for a self-registered user (plan 02, task 4): join the `demo` organization.
         using var http = new HttpClient { BaseAddress = new Uri(keycloak.BaseUrl) };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await keycloak.InternalTokenAsync());
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await keycloak.AccessAdminTokenAsync());
         var admin = $"/admin/realms/{KeycloakFixture.Realm}";
 
         var users = await http.GetAsync($"{admin}/users?username=tom@acme.test&exact=true", Ct);
@@ -165,6 +167,21 @@ public sealed class RealmTests(KeycloakFixture keycloak)
         var added = await http.PostAsJsonAsync($"{admin}/organizations/{demo.GetProperty("id").GetString()}/members", userId, Ct);
 
         added.StatusCode.ShouldBe(HttpStatusCode.Created, await added.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Theory]
+    [InlineData("users")]
+    [InlineData("organizations")]
+    [InlineData("clients")]
+    public async Task Internal_client_token_gets_403_from_the_Keycloak_admin_API(string resource)
+    {
+        // The internal client is for service-to-service calls and is in every service: it must hold no admin rights.
+        using var http = new HttpClient { BaseAddress = new Uri(keycloak.BaseUrl) };
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await keycloak.InternalTokenAsync());
+
+        var response = await http.GetAsync($"/admin/realms/{KeycloakFixture.Realm}/{resource}", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

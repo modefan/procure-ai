@@ -22,4 +22,5 @@ runs:
         set_param "Parameters__keycloak-demo-password" "$(gen)"
         set_param "Parameters__keycloak-gateway-secret" "$(gen)"
         set_param "Parameters__keycloak-internal-secret" "$(gen)"
+        set_param "Parameters__keycloak-access-admin-secret" "$(gen)"
         set_param "Parameters__debezium-password" "$(gen)"

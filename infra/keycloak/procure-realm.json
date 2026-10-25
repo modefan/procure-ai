@@ -220,7 +220,12 @@
     {
       "username": "service-account-procure-internal",
       "enabled": true,
-      "serviceAccountClientId": "procure-internal",
+      "serviceAccountClientId": "procure-internal"
+    },
+    {
+      "username": "service-account-procure-access-admin",
+      "enabled": true,
+      "serviceAccountClientId": "procure-access-admin",
       "clientRoles": {
         "realm-management": [
           "manage-users",
@@ -407,6 +412,20 @@
         "roles",
         "procure-api"
       ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "procure-access-admin",
+      "name": "Procure Access service (Keycloak admin API)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KC_ACCESS_ADMIN_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [],
       "optionalClientScopes": []
     }
   ]
