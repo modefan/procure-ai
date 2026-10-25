@@ -1,5 +1,5 @@
 import { computed, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { firstValueFrom } from 'rxjs';
@@ -18,6 +18,8 @@ export interface AuthState {
   user: BffUser | null;
   /** True once /bff/user has been asked at least once (answered or failed). */
   loaded: boolean;
+  /** True when the gateway could not be asked (5xx, network): we do not know who is signed in. */
+  error: boolean;
 }
 
 /**
@@ -28,7 +30,7 @@ export interface AuthState {
  */
 export const AuthStore = signalStore(
   { providedIn: 'root' },
-  withState<AuthState>({ user: null, loaded: false }),
+  withState<AuthState>({ user: null, loaded: false, error: false }),
   withComputed(({ user }) => ({
     isLoggedIn: computed(() => user() !== null),
     permissions: computed(() => new Set(user()?.permissions ?? [])),
@@ -45,7 +47,9 @@ export const AuthStore = signalStore(
     return {
       /**
        * Asks the gateway who is signed in (once; later calls return at once, concurrent calls share one request).
-       * A 401, or any failure, means nobody: the app then shows its signed-out face.
+       * Only a 401 means nobody is signed in. Any other failure (server error, network) means we do not know:
+       * `error` is set, `loaded` stays false so a later call asks again, and the guards show the unavailable page
+       * instead of sending the browser to log in (which, with a live Keycloak session, would loop).
        */
       load(): Promise<void> {
         if (store.loaded()) {
@@ -54,9 +58,13 @@ export const AuthStore = signalStore(
         inFlight ??= (async () => {
           try {
             const user = await firstValueFrom(http.get<BffUser>('/bff/user'));
-            patchState(store, { user, loaded: true });
-          } catch {
-            patchState(store, { user: null, loaded: true });
+            patchState(store, { user, loaded: true, error: false });
+          } catch (error) {
+            if (error instanceof HttpErrorResponse && error.status === 401) {
+              patchState(store, { user: null, loaded: true, error: false });
+            } else {
+              patchState(store, { user: null, loaded: false, error: true });
+            }
           } finally {
             inFlight = null;
           }
@@ -81,6 +89,11 @@ export const AuthStore = signalStore(
           patchState(store, { user: null });
           await router.navigateByUrl('/');
         }
+      },
+
+      /** The session is over (the user declined to log in again): forget the user so the header says so. */
+      endSession(): void {
+        patchState(store, { user: null });
       },
 
       hasPermission(permission: string): boolean {

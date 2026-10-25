@@ -54,6 +54,32 @@ describe('AuthStore', () => {
     expect(store.loaded()).toBe(true);
   });
 
+  it.each([500, 503, 0])('load() with status %i is a failure, not "signed out", and can be retried', async (status) => {
+    const loading = store.load();
+    (await userRequest()).flush(null, { status, statusText: 'Server Error' });
+    await loading;
+
+    expect(store.isLoggedIn()).toBe(false);
+    expect(store.error()).toBe(true);
+    expect(store.loaded()).toBe(false);
+
+    const retry = store.load();
+    (await userRequest()).flush(tom);
+    await retry;
+    expect(store.isLoggedIn()).toBe(true);
+    expect(store.error()).toBe(false);
+  });
+
+  it('endSession() forgets the user', async () => {
+    const loading = store.load();
+    (await userRequest()).flush(tom);
+    await loading;
+
+    store.endSession();
+
+    expect(store.isLoggedIn()).toBe(false);
+  });
+
   it('load() shares one request between concurrent callers and asks only once', async () => {
     const first = store.load();
     const second = store.load();

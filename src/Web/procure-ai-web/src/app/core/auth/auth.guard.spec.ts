@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { PartialMatchRouteSnapshot, provideRouter, Route, UrlSegment, UrlTree } from '@angular/router';
+import { PartialMatchRouteSnapshot, provideRouter, Route, Router, UrlSegment, UrlTree } from '@angular/router';
 import { authGuard } from './auth.guard';
 import { AuthStore } from './auth.store';
 import { BrowserLocation } from '../browser/browser-location';
@@ -49,6 +49,16 @@ describe('authGuard', () => {
     });
 
     expect(await result).toBe(true);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it.each([500, 0])('sends the user to the unavailable page, not to login, when /bff/user fails with %i', async (status) => {
+    const result = run();
+    (await userRequest()).flush(null, { status, statusText: 'Server Error' });
+
+    const outcome = await result;
+    expect(outcome).toBeInstanceOf(UrlTree);
+    expect(TestBed.inject(Router).serializeUrl(outcome as UrlTree)).toBe('/unavailable');
     expect(assign).not.toHaveBeenCalled();
   });
 });

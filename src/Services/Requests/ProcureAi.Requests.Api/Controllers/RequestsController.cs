@@ -28,10 +28,10 @@ public sealed class RequestsController(
     private const string ItemTagTemplate = "requests:{tenant}:{id}";
     private const string ListTagTemplate = "requests:{tenant}:list";
 
-    [HttpPost]
+    [HttpPost(Name = "CreateRequest")]
     [Idempotent]
     [RequirePermission(Permissions.RequestsCreate)]
-    [ProducesResponseType<RequestDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType<RequestDto>(StatusCodes.Status201Created, "application/json")]
     public async Task<ActionResult<RequestDto>> Create(CreateRequestBody body, CancellationToken cancellationToken)
     {
         var created = await bus.InvokeAsync<RequestDto>(body.ToCommand(), cancellationToken);
@@ -40,10 +40,10 @@ public sealed class RequestsController(
         return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
     }
 
-    [HttpGet("{id:guid}")]
+    [HttpGet("{id:guid}", Name = "GetRequest")]
     [CachedGet(Tags = [ItemTagTemplate])]
     [RequirePermission(Permissions.RequestsRead)]
-    [ProducesResponseType<RequestDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<RequestDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RequestDto>> Get(Guid id, CancellationToken cancellationToken)
     {
@@ -52,10 +52,10 @@ public sealed class RequestsController(
         return request;
     }
 
-    [HttpGet]
+    [HttpGet(Name = "ListRequests")]
     [CachedGet(Tags = [ListTagTemplate])]
     [RequirePermission(Permissions.RequestsRead)]
-    [ProducesResponseType<PagedResult<RequestDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagedResult<RequestDto>>(StatusCodes.Status200OK, "application/json")]
     public async Task<ActionResult<PagedResult<RequestDto>>> List(
         [FromQuery] int page = 1,
         [FromQuery] int? pageSize = null,
@@ -64,10 +64,10 @@ public sealed class RequestsController(
         await bus.InvokeAsync<PagedResult<RequestDto>>(
             new ListRequests(page, pageSize ?? paging.Value.DefaultPageSize, status), cancellationToken);
 
-    [HttpPut("{id:guid}")]
+    [HttpPut("{id:guid}", Name = "UpdateRequest")]
     [RequirePermission(Permissions.RequestsCreate)]
     [RequireIfMatch]
-    [ProducesResponseType<RequestDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<RequestDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
     public async Task<ActionResult<RequestDto>> Update(
@@ -85,11 +85,11 @@ public sealed class RequestsController(
     }
 
     /// <summary>Submits a draft for approval. Returns the request as it is now, with its new ETag.</summary>
-    [HttpPost("{id:guid}/submit")]
+    [HttpPost("{id:guid}/submit", Name = "SubmitRequest")]
     [Idempotent]
     [RequirePermission(Permissions.RequestsCreate)]
     [RequireIfMatch]
-    [ProducesResponseType<RequestDto>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<RequestDto>(StatusCodes.Status202Accepted, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
     public async Task<ActionResult<RequestDto>> Submit(Guid id, CancellationToken cancellationToken)

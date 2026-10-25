@@ -4,6 +4,7 @@ import { guestGuard } from './core/auth/guest.guard';
 import { AuthRedirectPage } from './features/auth/auth-redirect.page';
 import { ForbiddenPage } from './features/errors/forbidden.page';
 import { NotFoundPage } from './features/errors/not-found.page';
+import { UnavailablePage } from './features/errors/unavailable.page';
 import { WelcomePage } from './features/welcome/welcome.page';
 
 export const routes: Routes = [
@@ -18,5 +19,6 @@ export const routes: Routes = [
     loadChildren: () => import('./features/app.routes').then((m) => m.APP_ROUTES),
   },
   { path: 'forbidden', title: 'No access', component: ForbiddenPage },
+  { path: 'unavailable', title: 'Unavailable', component: UnavailablePage },
   { path: '**', title: 'Not found', component: NotFoundPage },
 ];

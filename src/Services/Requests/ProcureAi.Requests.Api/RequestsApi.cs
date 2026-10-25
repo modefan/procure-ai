@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using ProcureAi.BuildingBlocks.Web;
 using ProcureAi.BuildingBlocks.Web.Caching;
@@ -38,10 +39,21 @@ public static class RequestsApi
             options.AddCallerPropagation();
         });
 
+        if (IsWritingOpenApiDocument())
+        {
+            // The build step that writes the OpenAPI document starts the host. It needs no database or broker.
+            builder.Services.DisableAllExternalWolverineTransports();
+            builder.Services.DisableAllWolverineMessagePersistence();
+        }
+
         var app = builder.Build();
         app.UseProcureAiWeb();
         return app;
     }
+
+    /// <summary>True while the <c>Microsoft.Extensions.ApiDescription.Server</c> build step runs the app to read its OpenAPI document.</summary>
+    private static bool IsWritingOpenApiDocument() =>
+        Assembly.GetEntryAssembly()?.GetName().Name == "GetDocument.Insider";
 
     /// <summary>The database schema (EF Core migrations) and Wolverine's message store (outbox/inbox tables).</summary>
     public static async Task MigrateAsync(WebApplication app, CancellationToken cancellationToken = default)

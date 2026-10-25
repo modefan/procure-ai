@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { inject, Service } from '@angular/core';
 import { AppConfigService, LOG_LEVELS, LogLevel } from '../config/app-config';
 
@@ -27,6 +28,19 @@ const MASK = '***';
 const MAX_DEPTH = 6;
 const MAX_STRING = 1000;
 const WINDOW_MS = 60_000;
+
+/** A string that is just a url or a path (no spaces). */
+const URL_LIKE = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/)\S*$/i;
+
+/** Drops the query string and fragment, which may hold personal data. */
+function stripQuery(url: string): string {
+  return url.split(/[?#]/)[0];
+}
+
+/** Only the path of a url, for failed calls: no host, no query string. */
+function urlPath(url: string): string {
+  return stripQuery(url).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
+}
 
 const rank = (level: LogLevel) => LOG_LEVELS.indexOf(level);
 
@@ -170,11 +184,17 @@ export class Logger implements ScopedLogger {
 
 /** A copy that is safe to log: secrets masked, errors flattened, depth and string length limited. */
 function sanitize(value: unknown, depth: number): unknown {
+  if (value instanceof HttpErrorResponse) {
+    // Not the generic Error branch and not Object.entries: the message, headers and body hold the full url with its
+    // query string (may carry personal data) and server details. Status and the path are enough to diagnose.
+    return { name: 'HttpErrorResponse', status: value.status, statusText: value.statusText, url: urlPath(value.url ?? '') };
+  }
   if (value instanceof Error) {
     return { name: value.name, message: value.message, stack: value.stack };
   }
   if (typeof value === 'string') {
-    return value.length > MAX_STRING ? value.slice(0, MAX_STRING) + '...' : value;
+    const text = URL_LIKE.test(value) ? stripQuery(value) : value;
+    return text.length > MAX_STRING ? text.slice(0, MAX_STRING) + '...' : text;
   }
   if (typeof value !== 'object' || value === null) {
     return typeof value === 'function' || typeof value === 'symbol' ? String(value) : value;

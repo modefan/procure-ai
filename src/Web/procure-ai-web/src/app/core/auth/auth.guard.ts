@@ -4,7 +4,7 @@ import { AuthStore } from './auth.store';
 
 /**
  * Guards the lazy `app` routes with canMatch: when it says no, the app code is not even downloaded.
- * Waits for /bff/user, then lets a signed-in user through; anyone else is sent to the gateway's login, which
+ * Waits for /bff/user, then lets a signed-in user through; if the gateway cannot answer, the unavailable page; anyone else is sent to the gateway's login, which
  * brings them back to the page they asked for. (UX only: the APIs check the token again.)
  */
 export const authGuard: CanMatchFn = async (_route, segments) => {
@@ -12,6 +12,10 @@ export const authGuard: CanMatchFn = async (_route, segments) => {
   const router = inject(Router);
 
   await auth.load();
+  if (auth.error()) {
+    // We could not ask who is signed in. Logging in could loop, so say so instead.
+    return router.createUrlTree(['/unavailable']);
+  }
   if (auth.isLoggedIn()) {
     return true;
   }

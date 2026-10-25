@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { AppConfigService, LoggerConfig } from '../config/app-config';
 import { Logger } from './logger';
 
@@ -129,6 +130,32 @@ describe('Logger', () => {
     const [entry] = sentBatch();
     expect(entry.data.message).toBe('bad thing');
     expect(entry.data.stack).toContain('bad thing');
+  });
+
+  it('logs an HttpErrorResponse as status and url path only, without query string, headers or body', () => {
+    const logger = create({ batchSize: 1 });
+    const error = new HttpErrorResponse({
+      status: 500,
+      statusText: 'Server Error',
+      url: 'https://gw.example/api/v1/requests?search=jane.doe%40acme.test&page=2',
+      headers: new HttpHeaders({ Authorization: 'Bearer abc', 'X-Other': 'value' }),
+      error: { detail: 'secret body' },
+    });
+
+    logger.error('call failed', error);
+
+    const [entry] = sentBatch();
+    expect(entry.data).toEqual({ name: 'HttpErrorResponse', status: 500, statusText: 'Server Error', url: '/api/v1/requests' });
+    expect(JSON.stringify(entry)).not.toMatch(/jane|search|Bearer|secret body|X-Other/);
+  });
+
+  it('strips the query string and fragment from any url it logs', () => {
+    const logger = create({ batchSize: 1 });
+
+    logger.warn('went', { url: '/app/requests?email=a%40b.c#top', other: 'https://x.example/p?q=1' });
+
+    const [entry] = sentBatch();
+    expect(entry.data).toEqual({ url: '/app/requests', other: 'https://x.example/p' });
   });
 
   it('rate-limits what it sends to the server', () => {
