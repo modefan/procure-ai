@@ -26,12 +26,21 @@ public static class WebExtensions
         services.AddValidatedOptions<CachingOptions>(builder.Configuration, CachingOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(builder.Configuration, RateLimitingOptions.SectionName);
 
-        // Enums travel as names ("Draft"), in responses, query strings and the OpenAPI document alike.
-        services.AddControllers().AddJsonOptions(json => json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
-        services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+        // Enums travel as names ("Draft"), in responses, query strings and the OpenAPI document alike. Numbers are
+        // numbers only (not "12" strings), so the OpenAPI schema says plain `number` and the generated clients stay simple.
+        services.AddControllers().AddJsonOptions(json =>
+        {
+            json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            json.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict;
+        });
+        services.ConfigureHttpJsonOptions(json =>
+        {
+            json.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            json.SerializerOptions.NumberHandling = JsonNumberHandling.Strict;
+        });
         services.AddProcureAiProblemDetails();
         services.AddProcureAiVersioning();
-        services.AddProcureAiOpenApiDescriptions();
+        services.AddProcureAiOpenApiDescriptions(serviceName);
         services.AddProcureAiRateLimiting();
         services.AddProcureAiForwardedHeaders(builder.Configuration);
 

@@ -16,6 +16,20 @@ public sealed class RealmTests(KeycloakFixture keycloak)
         claims.TryGetProperty("email", out _).ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("tom@acme.test")]
+    [InlineData("maria@acme.test")]
+    [InlineData("ben@globex.test")]
+    public async Task Access_token_carries_the_user_id_in_sub(string user)
+    {
+        // The services identify the caller by `sub`; without it every user is "anonymous" in the handlers.
+        var claims = await keycloak.LoginAsync(user);
+
+        var sub = claims.GetProperty("sub").GetString();
+        sub.ShouldNotBeNullOrWhiteSpace();
+        Guid.TryParse(sub, out _).ShouldBeTrue("sub is the Keycloak user id");
+    }
+
     [Fact]
     public async Task Tom_gets_token_with_tenant_acme_and_role_requester()
     {

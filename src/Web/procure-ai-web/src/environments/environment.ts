@@ -15,4 +15,6 @@ export const environment: AppConfig = {
     flushMs: 5000,
     serverMaxPerMinute: 60,
   },
+  // Rows per page in lists (the server allows at most its MaxPageSize).
+  paging: { pageSize: 20 },
 };

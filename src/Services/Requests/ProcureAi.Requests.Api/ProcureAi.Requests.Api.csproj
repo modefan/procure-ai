@@ -33,7 +33,7 @@
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__OpenApi__AuthorizationUrl=https://openapi.invalid/auth;Auth__OpenApi__TokenUrl=https://openapi.invalid/token;Auth__OpenApi__Scopes__openid=OpenID Connect;Auth__OpenApi__Scopes__email=Email address</OpenApiPlaceholderSettings>
   </PropertyGroup>
 
-  <Target Name="WriteOpenApiDocument" AfterTargets="Build" Inputs="$(TargetPath)" Outputs="$(OpenApiDocumentsDirectory)/requests-v1.json">
+  <Target Name="WriteOpenApiDocument" AfterTargets="Build">
     <Exec EnvironmentVariables="$(OpenApiPlaceholderSettings)" LogStandardErrorAsError="true"
           Command="dotnet &quot;$(PkgMicrosoft_Extensions_ApiDescription_Server)/tools/dotnet-getdocument.dll&quot; --assembly &quot;$(TargetPath)&quot; --file-list &quot;$(IntermediateOutputPath)$(MSBuildProjectName).OpenApiFiles.cache&quot; --framework &quot;$(TargetFrameworkMoniker)&quot; --output &quot;$(OpenApiDocumentsDirectory)&quot; --project &quot;$(MSBuildProjectName)&quot; --assets-file &quot;$(ProjectAssetsFile)&quot; --platform AnyCPU --document-name v1 --file-name requests-v1" />
   </Target>

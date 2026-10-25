@@ -75,15 +75,6 @@ describe('RequestsStore', () => {
     expect(store().page()).toBe(3);
   });
 
-  it('accepts numbers sent as strings (the generated model allows both)', async () => {
-    listRequests.mockResolvedValue({ items: [dto(1)], page: '2', pageSize: '20', total: '21' });
-
-    await store().load(2);
-
-    expect(store().page()).toBe(2);
-    expect(store().total()).toBe(21);
-  });
-
   it('keeps the rows it has and reports an error when the call fails', async () => {
     listRequests.mockResolvedValueOnce(page([dto(1)], 1, 1));
     await store().load(1);

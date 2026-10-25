@@ -4,7 +4,7 @@
 export interface ProblemDetails {
   detail?: (string | null);
   instance?: (string | null);
-  status?: (number | string | null);
+  status?: (number | null);
   title?: (string | null);
   type?: (string | null);
 }

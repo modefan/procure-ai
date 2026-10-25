@@ -4,7 +4,7 @@
 import { RequestDto } from '../models/request-dto';
 export interface PagedResultOfRequestDto {
   items: Array<RequestDto>;
-  page: (number | string);
-  pageSize: (number | string);
-  total: (number | string);
+  page: number;
+  pageSize: number;
+  total: number;
 }

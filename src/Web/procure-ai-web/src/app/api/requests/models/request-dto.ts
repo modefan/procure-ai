@@ -12,11 +12,11 @@ export interface RequestDto {
   submittedAt: (string | null);
   supplierId: string;
   title: string;
-  totalExclVat: (number | string);
+  totalExclVat: number;
   totalExclVatDisplay: string;
-  totalInclVat: (number | string);
+  totalInclVat: number;
   totalInclVatDisplay: string;
-  vat: (number | string);
+  vat: number;
   vatDisplay: string;
-  version: (number | string);
+  version: number;
 }

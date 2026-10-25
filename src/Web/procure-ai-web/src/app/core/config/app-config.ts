@@ -19,6 +19,7 @@ export interface AppConfig {
   /** Absolute origin of the gateway when the app is not served by it (development only); empty = same origin. */
   apiBaseUrl: string;
   logger: LoggerConfig;
+  paging: { pageSize: number };
 }
 
 /**
@@ -47,6 +48,7 @@ export class AppConfigService {
 export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const source = (isRecord(loaded) ? loaded : {}) as Record<string, unknown>;
   const logger = (isRecord(source['logger']) ? source['logger'] : {}) as Record<string, unknown>;
+  const paging = (isRecord(source['paging']) ? source['paging'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
@@ -58,6 +60,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
       flushMs: positive(logger['flushMs'], d.flushMs),
       serverMaxPerMinute: positive(logger['serverMaxPerMinute'], d.serverMaxPerMinute),
     },
+    paging: { pageSize: positive(paging['pageSize'], defaults.paging.pageSize) },
   };
 }
 

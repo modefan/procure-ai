@@ -3,11 +3,11 @@
 
 export interface RequestLineDto {
   description: string;
-  lineNo: (number | string);
-  quantity: (number | string);
+  lineNo: number;
+  quantity: number;
   sku: string;
-  totalExclVat: (number | string);
+  totalExclVat: number;
   totalExclVatDisplay: string;
-  unitPriceExclVat: (number | string);
+  unitPriceExclVat: number;
   unitPriceExclVatDisplay: string;
 }

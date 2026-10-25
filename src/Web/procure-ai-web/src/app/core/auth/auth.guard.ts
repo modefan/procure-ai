@@ -22,7 +22,9 @@ export const authGuard: CanMatchFn = async (_route, segments) => {
 
   // The full requested url, with its query string, while a navigation is running; the matched segments otherwise.
   const navigation = router.currentNavigation();
-  const requested = navigation ? router.serializeUrl(navigation.extractedUrl) : '/' + segments.map((s) => s.path).join('/');
+  const requested = navigation
+    ? router.serializeUrl(navigation.extractedUrl)
+    : '/' + segments.map((s) => s.path).join('/');
   auth.login(requested);
   return false;
 };

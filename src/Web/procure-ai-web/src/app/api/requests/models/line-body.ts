@@ -3,7 +3,7 @@
 
 export interface LineBody {
   description: string;
-  quantity: (number | string);
+  quantity: number;
   sku: string;
-  unitPriceExclVat: (number | string);
+  unitPriceExclVat: number;
 }

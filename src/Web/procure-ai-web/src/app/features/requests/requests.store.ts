@@ -3,9 +3,8 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import { setAllEntities, withEntities } from '@ngrx/signals/entities';
 import { RequestDto } from '../../api/requests/models/request-dto';
 import { RequestsService } from '../../api/requests/services/requests.service';
+import { AppConfigService } from '../../core/config/app-config';
 import { Logger } from '../../core/logging/logger';
-
-export const REQUESTS_PAGE_SIZE = 20;
 
 export interface RequestsState {
   page: number;
@@ -23,7 +22,7 @@ export interface RequestsState {
 export const RequestsStore = signalStore(
   { providedIn: 'root' },
   withEntities<RequestDto>(),
-  withState<RequestsState>({ page: 1, pageSize: REQUESTS_PAGE_SIZE, total: 0, loading: false, error: null }),
+  withState<RequestsState>(() => ({ page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0, loading: false, error: null })),
   withComputed(({ total, pageSize }) => ({
     pageCount: computed(() => Math.max(1, Math.ceil(total() / pageSize()))),
   })),
@@ -43,9 +42,9 @@ export const RequestsStore = signalStore(
             return;
           }
           patchState(store, setAllEntities(result.items), {
-            page: Number(result.page),
-            pageSize: Number(result.pageSize),
-            total: Number(result.total),
+            page: result.page,
+            pageSize: result.pageSize,
+            total: result.total,
             loading: false,
           });
         } catch (error) {

@@ -15,7 +15,7 @@ internal static class OpenApiTransformers
     public const string OAuth2Scheme = "OAuth2";
 
     /// <summary>Adds the two security schemes and the write headers to every OpenAPI document of the service.</summary>
-    public static IServiceCollection AddProcureAiOpenApiDescriptions(this IServiceCollection services)
+    public static IServiceCollection AddProcureAiOpenApiDescriptions(this IServiceCollection services, string serviceName)
     {
         services.AddSingleton<SecuritySchemeTransformer>();
         services.ConfigureAll<OpenApiOptions>(options =>
@@ -23,8 +23,26 @@ internal static class OpenApiTransformers
             options.AddDocumentTransformer<SecuritySchemeTransformer>();
             options.AddOperationTransformer(HeaderTransformer.TransformAsync);
         });
+        // After the versioning package has named the document, so the title is ours.
+        services.PostConfigureAll<OpenApiOptions>(options =>
+        {
+            options.AddDocumentTransformer((document, context, _) =>
+            {
+                // Without this the tool that writes the document at build time puts its own name in `info`.
+                document.Info.Title = ApiTitle(serviceName);
+                document.Info.Description = $"HTTP API of the {serviceName} service of the ProcureAi demo.";
+                document.Info.Version = context.DocumentName.StartsWith('v') ? context.DocumentName[1..] + ".0" : context.DocumentName;
+                return Task.CompletedTask;
+            });
+        });
+
         return services;
     }
+
+    /// <summary>"requests-api" becomes "ProcureAi Requests API".</summary>
+    internal static string ApiTitle(string serviceName) =>
+        "ProcureAi " + string.Join(' ', serviceName.Split('-').Select(word =>
+            word.Equals("api", StringComparison.OrdinalIgnoreCase) ? "API" : char.ToUpperInvariant(word[0]) + word[1..]));
 
     /// <summary>
     /// <c>ApiKey</c> (the <c>X-Api-Key</c> header, Claude's admin key) and <c>OAuth2</c> (authorization code with PKCE

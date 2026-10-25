@@ -11,8 +11,8 @@ import { PagedResultOfRequestDto } from '../../models/paged-result-of-request-dt
 import { RequestStatus } from '../../models/request-status';
 
 export interface ListRequests$Params {
-  page?: (number | string);
-  pageSize?: (number | string);
+  page?: number;
+  pageSize?: number;
   status?: RequestStatus;
 }
 
