@@ -191,8 +191,20 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         var seen = WhoAmIHandler.Seen[marker];
         seen.UserId.ShouldBe("user-77");
         seen.TenantId.ShouldBe("acme");
-        var logged = _sink.Events.Single(e => e.MessageTemplate.Text.StartsWith("WhoAmI handled", StringComparison.Ordinal)
-                                              && e.Properties["Marker"].ToString().Contains(marker.ToString()));
+        // The log event is written by the handler itself; poll briefly so a slow runner cannot make this a race.
+        Serilog.Events.LogEvent? logged = null;
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (logged is null && DateTime.UtcNow < deadline)
+        {
+            logged = _sink.Events.FirstOrDefault(e => e.MessageTemplate.Text.StartsWith("WhoAmI handled", StringComparison.Ordinal)
+                                                      && e.Properties["Marker"].ToString().Contains(marker.ToString()));
+            if (logged is null)
+            {
+                await Task.Delay(100);
+            }
+        }
+        logged.ShouldNotBeNull($"no 'WhoAmI handled' log event for {marker}; the sink holds {_sink.Events.Count} events, "
+                               + $"of which {_sink.Events.Count(e => e.MessageTemplate.Text.StartsWith("WhoAmI", StringComparison.Ordinal))} are WhoAmI");
         logged.Properties["CorrelationId"].ToString().ShouldBe("\"corr-77\"");
         logged.Properties["TenantId"].ToString().ShouldBe("\"acme\"");
         logged.Properties["UserId"].ToString().ShouldBe("\"user-77\"");

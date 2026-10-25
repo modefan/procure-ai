@@ -40,6 +40,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Trust the ASP.NET Core dev certificate (the Aspire gateway health check uses HTTPS)
+        run: |
+          dotnet dev-certs https --trust
+          echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
+
       - uses: ./.github/actions/ci-secrets
 
       - name: Build
@@ -140,6 +145,11 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Trust the ASP.NET Core dev certificate (the Aspire gateway health check uses HTTPS)
+        run: |
+          dotnet dev-certs https --trust
+          echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/ci-secrets
 
