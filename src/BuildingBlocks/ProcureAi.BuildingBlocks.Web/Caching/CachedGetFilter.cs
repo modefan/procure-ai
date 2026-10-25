@@ -67,7 +67,7 @@ public sealed class CachedGetFilter(
 
                         if (waited)
                         {
-                            var failure = await cache.TryGetAsync<StoredResponse>(failureKey, token: token);
+                            var failure = await cache.TryGetAsync<StoredResponse>(failureKey, CacheEntry.ReadSharedRecord, token: token);
                             if (failure.HasValue)
                             {
                                 SkipAllWrites(factory.Options);
@@ -78,7 +78,18 @@ public sealed class CachedGetFilter(
                         await cache.RemoveAsync(failureKey, token: token);
                         var captured = await ResponseCapture.RunAsync(context, next, requestHash: null);
                         executed = captured;
-                        if (!captured.Response.IsSuccess)
+                        if (captured.Response.IsSuccess)
+                        {
+                            // Write the result while still holding the lock: a waiter that gets the lock next
+                            // must find it. FusionCache would only write it after this factory returns.
+                            await cache.SetAsync(
+                                key,
+                                captured.Response,
+                                o => CacheEntry.Apply(o, duration, padding),
+                                CancellationToken.None);
+                            SkipAllWrites(factory.Options);
+                        }
+                        else
                         {
                             // Errors are never stored as results; the failure record is for waiters only.
                             SkipAllWrites(factory.Options);

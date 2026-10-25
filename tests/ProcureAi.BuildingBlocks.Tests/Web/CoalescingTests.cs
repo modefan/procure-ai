@@ -278,4 +278,22 @@ public sealed class CoalescingTests(RedisFixture redis) : IAsyncLifetime
         fresh.StatusCode.ShouldBe(HttpStatusCode.OK);
         ExecutionCounter.Get(id).ShouldBe(2);
     }
+
+    [Fact]
+    public async Task Fast_parallel_gets_across_two_instances_execute_once_every_time()
+    {
+        // No action delay: a waiter takes the lock the moment the runner releases it, which exposes any gap
+        // between releasing the lock and the result being readable by the other instance.
+        for (var round = 0; round < 10; round++)
+        {
+            var id = NewId();
+            var tasks = Enumerable.Range(0, 40).Select(i =>
+                (i % 2 == 0 ? _clientA : _clientB).GetStringAsync(
+                    $"/api/v1/coalesce/get?id={id}&delayMs=0", TestContext.Current.CancellationToken)).ToArray();
+            var bodies = await Task.WhenAll(tasks);
+
+            ExecutionCounter.Get(id).ShouldBe(1, $"round {round}");
+            bodies.Distinct().Count().ShouldBe(1);
+        }
+    }
 }

@@ -24,7 +24,12 @@ internal static class CacheEntry
         options.SkipBackplaneNotifications = true;
     }
 
-    public static void ReadSharedRecord(FusionCacheEntryOptions options) => options.SkipMemoryCacheRead = true;
+    /// <summary>Reads straight from Redis and does not copy the record into process memory.</summary>
+    public static void ReadSharedRecord(FusionCacheEntryOptions options)
+    {
+        options.SkipMemoryCacheRead = true;
+        options.SkipMemoryCacheWrite = true;
+    }
 }
 
 internal static class LockHelper
