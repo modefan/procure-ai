@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="TngTech.ArchUnitNET.xUnitV3" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    Every service project (Domain, Application, Infrastructure, Api) under src/Services is referenced by wildcard, so a
+    service added in a later plan is covered by the rules without touching this file.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Services\*\*\*.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Domain\ProcureAi.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Persistence\ProcureAi.BuildingBlocks.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

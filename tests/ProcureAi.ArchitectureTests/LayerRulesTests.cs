@@ -1,0 +1,138 @@
+using System.Reflection;
+using Assembly = System.Reflection.Assembly;
+using System.Text.RegularExpressions;
+using ArchUnitNET.Domain;
+using ArchUnitNET.Loader;
+using ArchUnitNET.xUnitV3;
+using ProcureAi.BuildingBlocks.Persistence;
+using Shouldly;
+using static ArchUnitNET.Fluent.ArchRuleDefinition;
+
+namespace ProcureAi.ArchitectureTests;
+
+/// <summary>
+/// The Clean Architecture rules of CLAUDE.md, enforced for every service layer assembly found next to the test
+/// (ProcureAi.&lt;Service&gt;.Domain / .Application / .Infrastructure / .Api). Library: ArchUnitNET (TngTech), because it
+/// is actively maintained (0.13.x) and can express "depends on a type that carries an attribute"; NetArchTest cannot.
+/// </summary>
+public sealed class LayerRulesTests
+{
+    // ProcureAi.Requests.Domain, ProcureAi.BuildingBlocks.Domain, ...
+    private static readonly Regex LayerAssembly = new(@"^ProcureAi\.(?<service>\w+)\.(?<layer>Domain|Application|Infrastructure|Api)$");
+
+    private static readonly Assembly[] LayerAssemblies = Directory
+        .EnumerateFiles(AppContext.BaseDirectory, "ProcureAi.*.dll")
+        .Select(Path.GetFileNameWithoutExtension)
+        .Where(name => LayerAssembly.IsMatch(name!))
+        .Select(name => Assembly.Load(name!))
+        .ToArray();
+
+    // Loaded together with the layers so that dependencies on them resolve to real types, not stubs.
+    private static readonly Assembly[] Supporting = [typeof(IAuditContextSource).Assembly];
+
+    private static readonly Architecture Architecture = new ArchLoader()
+        .LoadAssemblies([.. LayerAssemblies, .. Supporting.Except(LayerAssemblies)])
+        .Build();
+
+    // DbContexts that deliberately do not carry the audit context (none today). Add the full type name here, with a reason.
+    private static readonly string[] AuditExempt = [];
+
+    private static Assembly[] Layer(string layer)
+    {
+        var found = LayerAssemblies.Where(a => LayerAssembly.Match(a.GetName().Name!).Groups["layer"].Value == layer).ToArray();
+        // A rule over zero assemblies would pass on nothing.
+        found.ShouldNotBeEmpty($"no ProcureAi.*.{layer} assembly found");
+        return found;
+    }
+
+    private static string Name(Assembly a) => a.GetName().Name!;
+
+    [Fact]
+    public void Every_service_has_all_four_layers()
+    {
+        var services = LayerAssemblies.Select(a => LayerAssembly.Match(Name(a)).Groups["service"].Value)
+            .Where(s => s != "BuildingBlocks").Distinct().ToList();
+        services.ShouldNotBeEmpty();
+        foreach (var service in services)
+        {
+            foreach (var layer in new[] { "Domain", "Application", "Infrastructure", "Api" })
+            {
+                LayerAssemblies.Select(Name).ShouldContain($"ProcureAi.{service}.{layer}");
+            }
+        }
+    }
+
+    [Fact]
+    public void Domain_has_no_dependency_on_infrastructure_or_aspnet()
+    {
+        var domain = Layer("Domain");
+        Types().That().ResideInAssembly(domain[0], domain[1..])
+            .Should().NotDependOnAnyTypesThat()
+            .ResideInNamespaceMatching(@"^ProcureAi\.\w+\.(Application|Infrastructure|Api)(\..*)?$")
+            .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
+                @"^(Microsoft\.AspNetCore|Microsoft\.EntityFrameworkCore|Microsoft\.Extensions\.(DependencyInjection|Hosting)|Npgsql|Wolverine|JasperFx|StackExchange|ZiggyCreatures|MongoDB)(\..*)?$")
+            .Check(Architecture);
+    }
+
+    [Fact]
+    public void Application_does_not_reference_Infrastructure_or_Api()
+    {
+        var application = Layer("Application");
+        Types().That().ResideInAssembly(application[0], application[1..])
+            .Should().NotDependOnAnyTypesThat()
+            .ResideInNamespaceMatching(@"^ProcureAi\.\w+\.(Infrastructure|Api)(\..*)?$")
+            .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^(Microsoft\.AspNetCore|Npgsql)(\..*)?$")
+            .Check(Architecture);
+    }
+
+    [Fact]
+    public void Controllers_do_not_use_DbContext()
+    {
+        var api = Layer("Api");
+        Classes().That().ResideInAssembly(api[0], api[1..])
+            .And().HaveNameEndingWith("Controller")
+            .Should().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^(Microsoft\.EntityFrameworkCore|Npgsql)(\..*)?$")
+            .AndShould().NotDependOnAnyTypesThat().HaveNameMatching(@".*DbContext$")
+            .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^ProcureAi\.\w+\.Infrastructure(\..*)?$")
+            .Check(Architecture);
+    }
+
+    [Fact]
+    public void Generated_code_is_not_referenced_by_domain()
+    {
+        // .NET side: code produced by tools at build or run time (Wolverine's pre-built handlers in Internal.Generated.*,
+        // Mapperly mappers, anything marked [GeneratedCode]) may depend on the domain, never the other way round.
+        // The domain stays hand-written and free of tool output. (OpenAPI documents are JSON, not code; the Angular
+        // client rules belong to the web app.)
+        var domain = Layer("Domain");
+        Types().That().ResideInAssembly(domain[0], domain[1..])
+            .Should().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^Internal\.Generated(\..*)?$")
+            .AndShould().NotDependOnAnyTypesThat().HaveAnyAttributes(typeof(System.CodeDom.Compiler.GeneratedCodeAttribute))
+            .Check(Architecture);
+    }
+
+    private static bool DerivesFromDbContext(Class type)
+    {
+        for (var baseClass = type.BaseClass; baseClass is not null; baseClass = baseClass.BaseClass)
+        {
+            if (baseClass.FullName == "Microsoft.EntityFrameworkCore.DbContext")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [Fact]
+    public void Every_DbContext_provides_the_audit_context()
+    {
+        // AuditSaveChangesInterceptor reads user and tenant through IAuditContextSource; a DbContext without it would
+        // silently record every change as "system".
+        var infrastructure = Layer("Infrastructure");
+        Classes().That().ResideInAssembly(infrastructure[0], infrastructure[1..])
+            .And().FollowCustomPredicate(DerivesFromDbContext, "derive from DbContext")
+            .And().DoNotHaveFullNameContaining(AuditExempt.Length == 0 ? "\u0000none" : AuditExempt[0])
+            .Should().ImplementInterface(typeof(IAuditContextSource))
+            .Check(Architecture);
+    }
+}

@@ -18,5 +18,7 @@
     <Project Path="tests/ProcureAi.Requests.IntegrationTests/ProcureAi.Requests.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
+    <Project Path="tests/ProcureAi.ArchitectureTests/ProcureAi.ArchitectureTests.csproj" />
+    <Project Path="tests/ProcureAi.EndToEndTests/ProcureAi.EndToEndTests.csproj" />
   </Folder>
 </Solution>
