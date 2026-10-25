@@ -42,7 +42,9 @@ jobs:
 
       - name: Trust the ASP.NET Core dev certificate (the Aspire gateway health check uses HTTPS)
         run: |
-          dotnet dev-certs https --trust
+          # Exit code 4 only means "not trusted system-wide"; the OpenSSL trust directory below is what .NET uses on Linux.
+          dotnet dev-certs https --trust || true
+          ls "$HOME/.aspnet/dev-certs/trust"
           echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/ci-secrets
@@ -148,7 +150,9 @@ jobs:
 
       - name: Trust the ASP.NET Core dev certificate (the Aspire gateway health check uses HTTPS)
         run: |
-          dotnet dev-certs https --trust
+          # Exit code 4 only means "not trusted system-wide"; the OpenSSL trust directory below is what .NET uses on Linux.
+          dotnet dev-certs https --trust || true
+          ls "$HOME/.aspnet/dev-certs/trust"
           echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/ci-secrets
