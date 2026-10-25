@@ -31,5 +31,7 @@ public sealed class XsrfMiddleware(RequestDelegate next)
     private static bool Applies(HttpRequest request) =>
         !(HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)
           || HttpMethods.IsOptions(request.Method) || HttpMethods.IsTrace(request.Method))
-        && !BffSchemes.UsesPassThrough(request);
+        && !BffSchemes.UsesPassThrough(request)
+        // sendBeacon cannot set headers; the endpoint changes nothing for the user.
+        && !request.Path.Equals(ClientLogEndpoints.Path, StringComparison.OrdinalIgnoreCase);
 }

@@ -19,6 +19,10 @@ indent_size = 2
 [*.json]
 indent_size = 2
 
+# Angular app and CI files
+[*.{ts,html,css,yml,yaml}]
+indent_size = 2
+
 # C# files
 [*.cs]
 

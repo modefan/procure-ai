@@ -154,8 +154,22 @@ var requestsApi = builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNa
     .WithHttpHealthCheck("/health/ready")
     .WithDotNetLimits(limits.DotNet);
 
-// The gateway: the only door in. Serves the Angular app (a later task wires it in; until then the 'web' cluster
-// address in the gateway's appsettings is used), signs users in against Keycloak and proxies /api to the services.
+// The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
+// talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
+// XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).
+var web = builder.AddJavaScriptApp(ResourceNames.Web, "../../Web/procure-ai-web", "start")
+    .WithHttpEndpoint(name: "http", env: "PORT")
+    .WithNodeLimits(limits.Angular);
+web.WithArgs(context =>
+{
+    // `--` ends npm's own options: everything after it goes to `ng serve`.
+    context.Args.Add("--");
+    context.Args.Add("--port");
+    context.Args.Add(web.GetEndpoint("http").Property(EndpointProperty.Port));
+});
+
+// The gateway: the only door in. Serves the Angular app (proxied to 'web'), signs users in against Keycloak and
+// proxies /api to the services.
 // External HTTPS endpoint: the session cookie is __Host- prefixed and so needs https (the ASP.NET Core dev
 // certificate). Keycloak's gateway client accepts https://localhost:* callbacks.
 builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
@@ -168,6 +182,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
     .WithEnvironment("Oidc__ClientSecret", keycloakGatewaySecret)
     .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithEnvironment(context =>
     {
         if (!string.IsNullOrWhiteSpace(otlpEndpoint))
@@ -178,6 +193,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WaitFor(keycloak)
     .WaitFor(redis)
     .WaitFor(requestsApi)
+    .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);
 

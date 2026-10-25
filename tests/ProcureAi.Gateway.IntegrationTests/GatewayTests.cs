@@ -146,6 +146,36 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Client_logs_are_accepted_anonymously_without_xsrf_header()
+    {
+        using var response = await Browser().PostAsync(
+            "/api/client-logs", new StringContent("[{\"level\":\"warn\"}]", System.Text.Encoding.UTF8, "text/plain"), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        _gateway.Stub.Seen.ShouldBeEmpty("the stub endpoint is the gateway's own; nothing is proxied");
+    }
+
+    [Fact]
+    public async Task Client_logs_are_accepted_for_a_signed_in_user_without_xsrf_header()
+    {
+        var browser = await SignedInAsync();
+
+        using var response = await browser.PostAsync(
+            "/api/client-logs", new StringContent("[]", System.Text.Encoding.UTF8, "text/plain"), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task Client_logs_over_the_size_limit_are_413()
+    {
+        using var response = await Browser().PostAsync(
+            "/api/client-logs", new StringContent(new string('x', 70 * 1024), System.Text.Encoding.UTF8, "text/plain"), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
     public async Task Swagger_ui_lists_requests_definition()
     {
         var browser = Browser();

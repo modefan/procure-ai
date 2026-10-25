@@ -1,0 +1,11 @@
+{
+  "apiBaseUrl": "",
+  "logger": {
+    "consoleLevel": "debug",
+    "serverLevel": "warn",
+    "serverUrl": "/api/client-logs",
+    "batchSize": 10,
+    "flushMs": 5000,
+    "serverMaxPerMinute": 60
+  }
+}

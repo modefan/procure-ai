@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+
+/* Base look and the few repeated patterns. Everything else is Tailwind utility classes in the templates. */
+@layer base {
+  html {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* Keyboard focus is always visible, on every control. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-indigo-600;
+  }
+}
+
+@layer components {
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold whitespace-nowrap transition-colors;
+  }
+
+  .btn-primary {
+    @apply bg-indigo-700 text-white hover:bg-indigo-800;
+  }
+
+  .btn-secondary {
+    @apply border border-slate-300 bg-white text-slate-800 hover:bg-slate-100;
+  }
+
+  .btn-ghost {
+    @apply text-slate-700 hover:bg-slate-100;
+  }
+
+  .nav-link {
+    @apply rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900;
+  }
+
+  .nav-link.active {
+    @apply bg-indigo-50 text-indigo-800;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm;
+  }
+}

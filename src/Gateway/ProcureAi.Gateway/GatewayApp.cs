@@ -66,6 +66,7 @@ public static class GatewayApp
         app.UseAuthorization();
 
         app.MapBff();
+        app.MapClientLogs();
         app.MapDefaultEndpoints();
         // An unknown /api path is a 404, not the web app's index page. Order: after the proxied API routes (10).
         app.Map("/api/{**rest}", () => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found"))
