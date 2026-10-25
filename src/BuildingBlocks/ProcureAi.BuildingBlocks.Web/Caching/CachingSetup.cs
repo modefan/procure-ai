@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using StackExchange.Redis;
 using ZiggyCreatures.Caching.Fusion;
 
@@ -51,7 +52,7 @@ public static class CachingSetup
             {
                 // The Redis backplane channel is "<prefix>:<cache name>"-style; the prefix keeps services' channels apart.
                 // (The cache itself keeps FusionCache's default name so plain IFusionCache injection keeps working.)
-                options.BackplaneChannelPrefix = settings.CacheName ?? applicationName;
+                options.BackplaneChannelPrefix = settings.BackplaneChannelPrefix ?? applicationName;
                 options.CacheKeyPrefix = settings.KeyPrefix ?? applicationName + ":";
             })
             .WithDefaultEntryOptions(options =>

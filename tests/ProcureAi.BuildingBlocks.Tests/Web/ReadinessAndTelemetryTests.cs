@@ -64,10 +64,26 @@ public sealed class ReadinessTests(RedisFixture redis)
 
         (await ReadyAsync(app)).ShouldBe(HttpStatusCode.ServiceUnavailable);
     }
+
+    [Theory]
+    [InlineData("not a uri")]
+    [InlineData("")]
+    [InlineData("localhost:5672")]
+    public void Malformed_RabbitMq_connection_string_fails_at_startup_without_echoing_it(string connectionString)
+    {
+        // At registration, not at the first probe: a typo in the setting must stop the service from starting.
+        var exception = Should.Throw<InvalidOperationException>(
+            () => new ServiceCollection().AddRabbitMqReadiness(connectionString));
+
+        if (connectionString.Length > 0)
+        {
+            exception.Message.ShouldNotContain(connectionString, Case.Sensitive);
+        }
+    }
 }
 
 [Collection(RedisCollection.Name)]
-public sealed class TelemetryAndCacheNameTests(RedisFixture redis)
+public sealed class TelemetryAndBackplanePrefixTests(RedisFixture redis)
 {
     [Theory]
     [InlineData("Wolverine")]
@@ -83,6 +99,18 @@ public sealed class TelemetryAndCacheNameTests(RedisFixture redis)
         // The tracer provider adds a listener for every source it subscribes to; one nobody subscribed to has none.
         using var probe = new ActivitySource(source);
         probe.HasListeners().ShouldBeTrue($"no tracing subscription for '{source}'");
+    }
+
+    [Fact]
+    public async Task Redis_instrumentation_is_subscribed()
+    {
+        await using var app = await TestHost.StartAsync(
+            new() { ["ConnectionStrings:Redis"] = redis.ConnectionString }, configure: b => b.AddProcureAiCaching());
+        _ = app;
+
+        // AddRedisInstrumentation resolves the registered IConnectionMultiplexer and subscribes to its own source.
+        using var probe = new ActivitySource("OpenTelemetry.Instrumentation.StackExchangeRedis");
+        probe.HasListeners().ShouldBeTrue("no tracing subscription for Redis");
     }
 
     [Fact]
@@ -110,7 +138,7 @@ public sealed class TelemetryAndCacheNameTests(RedisFixture redis)
         await using var defaults = await TestHost.StartAsync(
             new() { ["ConnectionStrings:Redis"] = redis.ConnectionString }, configure: b => b.AddProcureAiCaching());
         await using var named = await TestHost.StartAsync(
-            new() { ["ConnectionStrings:Redis"] = redis.ConnectionString, ["FusionCache:CacheName"] = "requests-cache" },
+            new() { ["ConnectionStrings:Redis"] = redis.ConnectionString, ["FusionCache:BackplaneChannelPrefix"] = "requests-cache" },
             configure: b => b.AddProcureAiCaching());
 
         (await BackplaneChannelsAsync(defaults)).ShouldContain(channel => channel.Contains(defaults.Environment.ApplicationName));

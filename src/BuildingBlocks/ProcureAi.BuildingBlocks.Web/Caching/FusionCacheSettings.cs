@@ -15,11 +15,11 @@ public sealed class FusionCacheSettings
     public string? KeyPrefix { get; set; }
 
     /// <summary>
-    /// The name this service's cache invalidations are published under: it prefixes the Redis backplane channel, so services
-    /// that share a Redis must not share a name (they would receive each other's invalidations). When not configured it is the application name.
+    /// The prefix of this service's Redis backplane channel (cache invalidations are published on it), so services
+    /// that share a Redis must not share a prefix (they would receive each other's invalidations). When not configured it is the application name.
     /// </summary>
     [MinLength(1)]
-    public string? CacheName { get; set; }
+    public string? BackplaneChannelPrefix { get; set; }
 
     /// <summary>Memory cache duration for entries that do not set their own.</summary>
     [Range(typeof(TimeSpan), "00:00:01", "1.00:00:00")]

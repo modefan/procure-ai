@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
@@ -73,5 +74,15 @@ public class CacheTagsTests
         var tags = CacheTags.Resolve(["x:{tenant}:{id}", "x:{tenant}"], ContextWith(), new FakeUser(null));
 
         tags.ShouldBe(["x:~"]);
+    }
+
+    [Fact]
+    public void The_web_and_the_application_tag_builders_agree()
+    {
+        var id = Guid.NewGuid();
+
+        CacheTags.Format("requests:{tenant}:{id}", "acme", ("id", id.ToString().ToUpperInvariant()))
+            .ShouldBe(CacheTag.Format("requests:{tenant}:{id}", "acme", ("id", id)));
+        CacheTag.Tenant(null).ShouldBe(CacheTags.Tenant(new FakeUser(null)));
     }
 }

@@ -235,13 +235,78 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
                 await Task.Delay(100);
             }
         }
-        logged.ShouldNotBeNull($"no 'WhoAmI handled' log event for {marker}; the sink holds {_sink.Events.Count} events, "
-                               + $"of which {_sink.Events.Count(e => e.MessageTemplate.Text.StartsWith("WhoAmI", StringComparison.Ordinal))} are WhoAmI. "
-                               + $"Handled by runtime {WhoAmIHandler.HandledBy.GetValueOrDefault(marker)}; this test's runtime is {System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(host.Services.GetRequiredService<Wolverine.Runtime.IWolverineRuntime>())}. "
-                               + $"Newest templates: {string.Join(" | ", _sink.Events.TakeLast(8).Select(e => e.MessageTemplate.Text))}");
+        logged.ShouldNotBeNull($"no 'WhoAmI handled' log event for {marker}; newest templates: "
+                               + string.Join(" | ", _sink.Events.TakeLast(5).Select(e => e.MessageTemplate.Text)));
         logged.Properties["CorrelationId"].ToString().ShouldBe("\"corr-77\"");
         logged.Properties["TenantId"].ToString().ShouldBe("\"acme\"");
         logged.Properties["UserId"].ToString().ShouldBe("\"user-77\"");
+    }
+
+    private async Task<(string Title, string ETag)> ReadAsync(HttpClient client, Guid id, string tenant)
+    {
+        var response = await client.SendAsync(Req(HttpMethod.Get, $"{Requests}/{id}", tenant: tenant), Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var dto = (await response.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        return (dto.Title, response.Headers.ETag!.Tag);
+    }
+
+    private static DeliveryOptions HeadersFor(string tenant)
+    {
+        var options = new DeliveryOptions();
+        options.Headers["x-tenant-id"] = tenant;
+        options.Headers["x-user-id"] = "user-1";
+        return options;
+    }
+
+    [Fact]
+    public async Task Message_handler_write_evicts_cached_get()
+    {
+        // A 60 s GET cache: only an eviction, not expiry, can make the next read fresh.
+        await using var factory = _factory.WithWebHostBuilder(b => b.UseSetting("Caching:DefaultGetSeconds", "60"));
+        using var client = factory.CreateClient();
+        var tenant = NewTenant("msg-evict");
+        var created = (await (await client.SendAsync(
+            Req(HttpMethod.Post, Requests, NewBody(), tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct)).Content
+            .ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        var before = await ReadAsync(client, created.Id, tenant);
+        (await ReadAsync(client, created.Id, tenant)).ShouldBe(before, "the second read is served from the cache");
+
+        // A reader that arrives after the handler asked for the eviction but before its transaction commits sees (and caches)
+        // the old row. Evicting at that point would leave the old row cached; evicting after the commit does not.
+        RenameViaMessageHandler.BeforeCommit = async () => (await ReadAsync(client, created.Id, tenant)).ETag.ShouldBe(before.ETag);
+        var host = factory.Services.GetRequiredService<IHost>();
+        try
+        {
+            await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30))
+                .ExecuteAndWaitAsync(c => c.SendAsync(new RenameViaMessage(created.Id, "Renamed by message"), HeadersFor(tenant)));
+        }
+        finally
+        {
+            RenameViaMessageHandler.BeforeCommit = null;
+        }
+
+        var after = await ReadAsync(client, created.Id, tenant);
+        after.Title.ShouldBe("Renamed by message");
+        after.ETag.ShouldNotBe(before.ETag);
+    }
+
+    [Fact]
+    public async Task Message_handler_that_fails_after_asking_for_eviction_evicts_nothing()
+    {
+        // The eviction is part of the handler's outgoing messages: a rollback discards it with the write.
+        await using var factory = _factory.WithWebHostBuilder(b => b.UseSetting("Caching:DefaultGetSeconds", "60"));
+        using var client = factory.CreateClient();
+        var tenant = NewTenant("msg-fail");
+        var created = (await (await client.SendAsync(
+            Req(HttpMethod.Post, Requests, NewBody(), tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct)).Content
+            .ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        var before = await ReadAsync(client, created.Id, tenant);
+
+        var host = factory.Services.GetRequiredService<IHost>();
+        await host.TrackActivity().Timeout(TimeSpan.FromSeconds(30)).DoNotAssertOnExceptionsDetected()
+            .ExecuteAndWaitAsync(c => c.SendAsync(new RenameViaMessage(created.Id, "Never committed", true), HeadersFor(tenant)));
+
+        (await ReadAsync(client, created.Id, tenant)).ShouldBe(before);
     }
 
     [Fact]

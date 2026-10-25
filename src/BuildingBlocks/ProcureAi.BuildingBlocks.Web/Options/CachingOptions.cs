@@ -25,4 +25,11 @@ public sealed class CachingOptions
     /// </summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
     public TimeSpan FailureShare { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long evicting cached entries after a write may take before it is given up and logged. The write has already
+    /// committed by then, so a slow or failed eviction never fails it; the entries expire on their own.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "00:01:00")]
+    public TimeSpan InvalidationTimeout { get; set; } = TimeSpan.FromSeconds(2);
 }

@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using ProcureAi.BuildingBlocks.Web.Caching;
+using ProcureAi.BuildingBlocks.Application.Caching;
+using ProcureAi.BuildingBlocks.Messaging.Caching;
 using Serilog.Core;
 using Serilog.Events;
 using Wolverine;
@@ -56,10 +57,11 @@ public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null)
         builder.ConfigureTestServices(services =>
         {
             // Wrap the real invalidator: it is the first step after the commit, so the hook can abort the client there.
-            var original = services.Single(d => d.ServiceType == typeof(ICacheInvalidator));
-            services.Remove(original);
-            services.AddSingleton<ICacheInvalidator>(sp => new HookedInvalidator(
-                (ICacheInvalidator)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!), Hook));
+            // Registered by type (no factory lambdas) so that Wolverine can still build message handlers' dependencies inline.
+            services.Remove(services.Single(d => d.ServiceType == typeof(ICacheInvalidator)));
+            services.AddSingleton(Hook);
+            services.AddScoped<MessageCacheInvalidator>();
+            services.AddScoped<ICacheInvalidator, HookedInvalidator>();
             services.AddSingleton<ILogEventSink>(sink ?? CapturingSink.Shared);
 
             // The test assembly's own message handlers (see TestHandlers.cs).
@@ -74,7 +76,7 @@ public sealed class CancelAfterCommit
     public CancellationTokenSource? Client { get; set; }
 }
 
-internal sealed class HookedInvalidator(ICacheInvalidator inner, CancelAfterCommit hook) : ICacheInvalidator
+public sealed class HookedInvalidator(MessageCacheInvalidator inner, CancelAfterCommit hook) : ICacheInvalidator
 {
     public async Task RemoveByTagAsync(IEnumerable<string> tags, CancellationToken cancellationToken = default)
     {
@@ -87,4 +89,6 @@ internal sealed class HookedInvalidator(ICacheInvalidator inner, CancelAfterComm
 
         await inner.RemoveByTagAsync(tags, cancellationToken);
     }
+
+    public Task RemoveAfterCommitAsync(IEnumerable<string> tags) => inner.RemoveAfterCommitAsync(tags);
 }

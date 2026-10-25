@@ -32,7 +32,10 @@ public sealed class LayerRulesTests
 
     // Loaded together with the layers so that dependencies on them resolve to real types, not stubs.
     private static readonly Assembly[] Supporting =
-        [typeof(IAuditContextSource).Assembly, typeof(ICallerContext).Assembly, typeof(CallerContext).Assembly, typeof(ServiceHost).Assembly];
+    [
+        typeof(IAuditContextSource).Assembly, typeof(ICallerContext).Assembly, typeof(CallerContext).Assembly, typeof(ServiceHost).Assembly,
+        typeof(ProcureAi.BuildingBlocks.Web.WebExtensions).Assembly, Assembly.Load("ProcureAi.ServiceDefaults"),
+    ];
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies([.. LayerAssemblies, .. Supporting.Except(LayerAssemblies)])
@@ -182,6 +185,17 @@ public sealed class LayerRulesTests
             .And().FollowCustomPredicate(DerivesFromDbContext, "derive from DbContext")
             .And().FollowCustomPredicate(t => !AuditExempt.Contains(t.FullName), "are not exempt from the audit context")
             .Should().ImplementInterface(typeof(IAuditContextSource))
+            .Check(Architecture);
+    }
+
+    [Fact]
+    public void No_static_Serilog_Log_in_src()
+    {
+        // The hosts keep their own logger (preserveStaticLogger: true) and never touch the process-wide Serilog.Log.Logger.
+        // A static Log.* call would write to a logger nobody configured and be silent, so it is banned in our assemblies.
+        var ours = LayerAssemblies.Concat(Supporting).Distinct().ToArray();
+        Types().That().ResideInAssembly(ours[0], ours[1..])
+            .Should().NotDependOnAnyTypesThat().HaveFullName("Serilog.Log")
             .Check(Architecture);
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.Filters;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ProcureAi.BuildingBlocks.Web.Caching;

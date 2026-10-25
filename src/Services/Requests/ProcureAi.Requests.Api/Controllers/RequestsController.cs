@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
@@ -56,6 +57,7 @@ public sealed class RequestsController(
     [CachedGet(Tags = [ListTagTemplate])]
     [RequirePermission(Permissions.RequestsRead)]
     [ProducesResponseType<PagedResult<RequestDto>>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<RequestDto>>> List(
         [FromQuery] int page = 1,
         [FromQuery] int? pageSize = null,

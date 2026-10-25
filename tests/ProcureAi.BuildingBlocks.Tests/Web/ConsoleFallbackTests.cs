@@ -4,8 +4,9 @@ using Shouldly;
 namespace ProcureAi.BuildingBlocks.Tests.Web;
 
 /// <summary>
-/// Tests that touch process-wide state (Console.Out, the static Serilog Log.Logger that every web host replaces)
-/// and so must never run in parallel with other tests.
+/// Tests that touch process-wide state (Console.Out, which the host's console sink writes to) and so must never run in
+/// parallel with other tests. Serilog's static Log.Logger is not involved: hosts keep their own logger
+/// (preserveStaticLogger: true) and an architecture test bans static Log.* calls in our assemblies.
 /// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class GlobalStateCollection

@@ -9,3 +9,4 @@ export type { RequestDto } from './models/request-dto';
 export type { RequestLineDto } from './models/request-line-dto';
 export type { RequestStatus } from './models/request-status';
 export type { UpdateRequestBody } from './models/update-request-body';
+export type { ValidationProblemDetails } from './models/validation-problem-details';

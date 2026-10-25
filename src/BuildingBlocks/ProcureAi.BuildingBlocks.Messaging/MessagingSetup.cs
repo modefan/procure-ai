@@ -30,6 +30,8 @@ public static class MessagingSetup
         where TDbContext : DbContext, TAbstraction
     {
         options.Discovery.IncludeAssembly(handlers);
+        // The shared handlers (cache eviction after commit).
+        options.Discovery.IncludeAssembly(typeof(MessagingSetup).Assembly);
         options.PersistMessagesWithPostgresql(Required(configuration, databaseConnectionName));
         options.AutoBuildMessageStorageOnStartup =
             configuration.GetValue("Wolverine:AutoBuildMessageStorageOnStartup", AutoCreate.None);

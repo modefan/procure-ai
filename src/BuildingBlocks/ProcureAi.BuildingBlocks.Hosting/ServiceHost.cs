@@ -3,8 +3,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Messaging;
+using ProcureAi.BuildingBlocks.Messaging.Caching;
 using ProcureAi.BuildingBlocks.Web;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Errors;
@@ -42,6 +45,8 @@ public static class ServiceHost
         services.Configure<MvcOptions>(mvc => mvc.Filters.Add<ApplicationExceptionFilter>());
         // The service identity, the scoped caller context and the incoming-message holder.
         services.AddProcureAiCaller(serviceName);
+        // Handlers evict cached reads after their transaction commits (replaces the immediate-only invalidator of AddProcureAiCaching).
+        services.Replace(ServiceDescriptor.Scoped<ICacheInvalidator, MessageCacheInvalidator>());
 
         configure(builder);
 

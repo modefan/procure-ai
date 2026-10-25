@@ -20,9 +20,21 @@ public static class ReadinessChecks
     public static IServiceCollection AddPostgresReadiness(this IServiceCollection services, string connectionString) =>
         Add(services, "postgres", _ => new PostgresCheck(connectionString));
 
-    /// <summary>Opens an AMQP connection to RabbitMQ (<c>amqp://user:password@host:port</c>).</summary>
-    public static IServiceCollection AddRabbitMqReadiness(this IServiceCollection services, string connectionString) =>
-        Add(services, "rabbitmq", _ => new RabbitMqCheck(new Uri(connectionString)));
+    /// <summary>
+    /// Opens an AMQP connection to RabbitMQ (<c>amqp://user:password@host:port</c>). A malformed connection string throws here,
+    /// at startup, instead of turning every probe unhealthy; the message never repeats the string (it holds the password).
+    /// </summary>
+    public static IServiceCollection AddRabbitMqReadiness(this IServiceCollection services, string connectionString)
+    {
+        if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri)
+            || (uri.Scheme != "amqp" && uri.Scheme != "amqps"))
+        {
+            throw new InvalidOperationException(
+                "The RabbitMQ connection string is not a valid amqp:// or amqps:// URI (amqp://user:password@host:port).");
+        }
+
+        return Add(services, "rabbitmq", _ => new RabbitMqCheck(uri));
+    }
 
     /// <summary>Pings Redis through the registered <see cref="IConnectionMultiplexer"/>.</summary>
     public static IServiceCollection AddRedisReadiness(this IServiceCollection services) =>

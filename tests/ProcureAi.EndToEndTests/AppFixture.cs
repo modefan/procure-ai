@@ -97,14 +97,20 @@ public sealed class AppFixture : IAsyncLifetime
     /// <summary>Where traces and screenshots go; the CI workflow uploads this folder when the run fails.</summary>
     public static readonly string ArtifactsDirectory = Path.Combine(AppContext.BaseDirectory, "playwright-artifacts");
 
+    /// <summary>A file-name-safe version of a test name plus its theory arguments.</summary>
+    public static string ArtifactName(string name) => System.Text.RegularExpressions.Regex.Replace(name, @"[^\w.-]+", "_").Trim('_');
+
     /// <summary>
     /// A fresh, isolated browser context (own cookies) that records a Playwright trace. On dispose it saves the trace
-    /// (<c>&lt;test&gt;.zip</c>) and a screenshot of every open page (<c>&lt;test&gt;-pageN.png</c>) into <see cref="ArtifactsDirectory"/>.
+    /// (<c>&lt;test&gt;[-&lt;variant&gt;].zip</c>) and a screenshot of every open page (<c>&lt;test&gt;-pageN.png</c>) into <see cref="ArtifactsDirectory"/>.
     /// A test that fails inside <c>await using</c> disposes while unwinding, so the screenshot shows the failing state.
     /// The gateway is https with the ASP.NET dev certificate.
     /// </summary>
-    public async Task<TracedContext> NewContextAsync([System.Runtime.CompilerServices.CallerMemberName] string testName = "test")
+    public async Task<TracedContext> NewContextAsync(
+        string? variant = null, [System.Runtime.CompilerServices.CallerMemberName] string testName = "test")
     {
+        // Theory cases share one method name, so their traces and screenshots need the arguments in the name.
+        testName = ArtifactName(variant is null ? testName : $"{testName}-{variant}");
         var context = await Browser.NewContextAsync(
             new BrowserNewContextOptions { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 1280, Height = 800 } });
         await context.Tracing.StartAsync(new TracingStartOptions { Screenshots = true, Snapshots = true, Sources = false });
@@ -185,10 +191,15 @@ public sealed class TracedContext(IBrowserContext context, string testName) : IA
             }
             await context.Tracing.StopAsync(new TracingStopOptions { Path = Path.Combine(AppFixture.ArtifactsDirectory, $"{testName}.zip") });
         }
-        catch (PlaywrightException)
+        catch (Exception)
         {
-            // Diagnostics must never turn a passing test into a failing one (or hide the real failure).
+            // Diagnostics must never turn a passing test into a failing one (or hide the real failure): not only
+            // Playwright errors, also a full disk, a locked file or a path the file system rejects.
         }
-        await context.CloseAsync();
+        finally
+        {
+            // Always release the browser context, whatever the diagnostics did.
+            await context.CloseAsync();
+        }
     }
 }
