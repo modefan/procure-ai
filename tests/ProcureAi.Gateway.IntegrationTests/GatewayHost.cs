@@ -28,10 +28,11 @@ public sealed class GatewayHost : IAsyncDisposable
 
     private readonly TestServer _server;
 
-    private GatewayHost(WebApplication app, StubDownstream stub, ManualTimeProvider clock, string keyPrefix)
+    private GatewayHost(WebApplication app, StubDownstream stub, StubAccessServer access, ManualTimeProvider clock, string keyPrefix)
     {
         App = app;
         Stub = stub;
+        Access = access;
         Clock = clock;
         KeyPrefix = keyPrefix;
         _server = app.GetTestServer();
@@ -41,6 +42,9 @@ public sealed class GatewayHost : IAsyncDisposable
 
     public StubDownstream Stub { get; }
 
+    /// <summary>The Access service the gateway asks for permissions.</summary>
+    public StubAccessServer Access { get; }
+
     public ManualTimeProvider Clock { get; }
 
     public string KeyPrefix { get; }
@@ -49,6 +53,7 @@ public sealed class GatewayHost : IAsyncDisposable
         KeycloakFixture keycloak, RedisFixture redis, Dictionary<string, string?>? extra = null)
     {
         var stub = await StubDownstream.StartAsync();
+        var access = await StubAccessServer.StartAsync();
         var clock = new ManualTimeProvider();
         var keyPrefix = $"test-{Guid.NewGuid():N}:";
         var settings = new Dictionary<string, string?>
@@ -62,6 +67,11 @@ public sealed class GatewayHost : IAsyncDisposable
             ["ReverseProxy:Clusters:requests:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:web:Destinations:d1:Address"] = stub.Url,
         };
+        foreach (var (key, value) in access.Settings)
+        {
+            settings[key] = value;
+        }
+
         foreach (var (key, value) in extra ?? [])
         {
             settings[key] = value;
@@ -81,10 +91,11 @@ public sealed class GatewayHost : IAsyncDisposable
         catch
         {
             await stub.DisposeAsync();
+            await access.DisposeAsync();
             throw;
         }
 
-        return new GatewayHost(app, stub, clock, keyPrefix);
+        return new GatewayHost(app, stub, access, clock, keyPrefix);
     }
 
     /// <summary>A browser: its own cookie jar, does not follow redirects.</summary>
@@ -96,6 +107,7 @@ public sealed class GatewayHost : IAsyncDisposable
         await App.StopAsync();
         await App.DisposeAsync();
         await Stub.DisposeAsync();
+        await Access.DisposeAsync();
     }
 
     /// <summary>The in-memory server has no connection, so no client address; give every request one, like Kestrel would.</summary>

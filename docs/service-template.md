@@ -10,11 +10,15 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    `ProcureAi.BuildingBlocks.Hosting`. The callback adds only what is the service's own: its options
    (`AddValidatedOptions`), its infrastructure, and `builder.Host.UseWolverine(...)` (use `UseProcureAiMessaging` /
    `UseProcureAiTransport`). `ServiceHost` already adds web, caching, the exception filter (404 / 403 / 412 / 422), the
-   caller model (`ServiceIdentity`, `ICallerContext`, `IncomingMessage`) and the readiness checks (Postgres, RabbitMQ, Redis).
+   caller model (`ServiceIdentity`, `ICallerContext`, `IncomingMessage`), the readiness checks (Postgres, RabbitMQ, Redis) and
+   the **Access client**: permissions come from the Access service through `IAccessDirectory` (cached 5 min, fail-safe 1 h,
+   evicted by `AccessChanged`; Access unreachable and nothing cached means 403). Pass the service name to
+   `UseProcureAiMessaging(configuration, "<name>-api", ...)`: it binds the queue `<name>-api-access-changed` to exchange `access`.
+   Services call `IAccessDirectory.GetApproversAsync` / `GetEffectiveAccessAsync` for cost-center approvers and limits.
 3. **`Program.cs`**: `var app = <Name>Api.Build(args); await ServiceHost.RunAsync(app, args, migrate, seedDemoData);`
    `--migrate` runs the EF Core migration, Wolverine's message-store migration and (when `DemoSeed:Enabled=true`) the demo
    seed, then exits. Also `public partial class Program;` for the integration tests.
-4. **`appsettings.json`**: copy the shared sections from Requests, and set `"Service": { "DatabaseConnectionName": "<name>db" }`.
+4. **`appsettings.json`**: copy the shared sections from Requests (including `AccessClient`), and set `"Service": { "DatabaseConnectionName": "<name>db" }`.
 5. **OpenAPI document**: in the Api csproj set `OpenApiDocumentName` (e.g. `<name>-v1`) and `OpenApiDatabaseConnectionName`.
    `src/Services/Directory.Build.targets` then writes `openapi/<name>-v1.json` on every build (commit it) and references the
    `Microsoft.Extensions.ApiDescription.Server` package; the project needs nothing else.

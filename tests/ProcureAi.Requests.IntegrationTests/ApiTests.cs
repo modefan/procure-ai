@@ -6,10 +6,12 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.BuildingBlocks.Web.Proxies;
 using ProcureAi.BuildingBlocks.Web.RateLimiting;
+using ProcureAi.Contracts.Access;
 using ProcureAi.Requests.Application.Dtos;
 using ProcureAi.Requests.Domain;
 using Shouldly;
@@ -623,6 +625,54 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
 
         create.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Requester_without_requests_create_in_matrix_gets_403()
+    {
+        // The matrix lives in Access: this tenant's requesters may only read.
+        var tenant = NewTenant("matrix");
+        infra.Access.SetMatrix(tenant, new() { ["requester"] = [Permissions.RequestsRead] });
+        var requester = TestAuth.CreateToken("rita", tenant, "requester");
+
+        var create = await _client.SendAsync(
+            Req(HttpMethod.Post, Requests, NewBody(), bearer: requester, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        var list = await _client.SendAsync(Req(HttpMethod.Get, Requests, bearer: requester), Ct);
+
+        create.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        list.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task AccessChanged_on_the_access_exchange_evicts_the_cached_permissions()
+    {
+        var tenant = NewTenant("evict");
+        infra.Access.SetMatrix(tenant, new() { ["requester"] = [Permissions.RequestsRead] });
+        var requester = TestAuth.CreateToken("rita", tenant, "requester");
+        Task<HttpResponseMessage> Create() => _client.SendAsync(
+            Req(HttpMethod.Post, Requests, NewBody(), bearer: requester, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        (await Create()).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        // Access grants requests.create. The permissions are cached for minutes, so it is still 403 ...
+        infra.Access.SetMatrix(tenant, new() { ["requester"] = [Permissions.RequestsRead, Permissions.RequestsCreate] });
+        (await Create()).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        // ... until Access announces the change on its exchange, as the real Access does.
+        var bus = _factory.Services.GetRequiredService<IMessageBus>();
+        await bus.EndpointFor(new Uri("rabbitmq://exchange/access"))
+            .SendAsync(new AccessChanged(tenant, "Matrix", null, DateTimeOffset.UtcNow));
+
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        HttpStatusCode status;
+        do
+        {
+            await Task.Delay(200, Ct);
+            using var response = await Create();
+            status = response.StatusCode;
+        }
+        while (status == HttpStatusCode.Forbidden && DateTime.UtcNow < deadline);
+
+        status.ShouldBe(HttpStatusCode.Created);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using ProcureAi.BuildingBlocks.Web.Access;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using ProcureAi.BuildingBlocks.Web.Errors;
@@ -11,6 +12,7 @@ using ProcureAi.Gateway.Bff;
 using ProcureAi.Gateway.Configuration;
 using ProcureAi.Gateway.Swagger;
 using StackExchange.Redis;
+using ZiggyCreatures.Caching.Fusion;
 
 namespace ProcureAi.Gateway;
 
@@ -48,7 +50,10 @@ public static class GatewayApp
         services.AddRedisReadiness();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
-        services.AddSingleton<IPermissionProvider, DefaultMatrixPermissionProvider>();
+        // Permissions come from Access, cached in memory for AccessClient:CacheDuration (30 s): the gateway has no message bus,
+        // so it cannot hear AccessChanged and relies on the short cache instead.
+        services.AddFusionCache();
+        services.AddProcureAiAccessClient(configuration, ServiceName);
         services.AddBffAuthentication();
 
         services.AddReverseProxy()

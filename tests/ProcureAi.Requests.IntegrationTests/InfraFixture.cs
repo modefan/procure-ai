@@ -25,6 +25,12 @@ public sealed class InfraFixture : IAsyncLifetime
 
     public string RequestsDbConnectionString { get; private set; } = "";
 
+    /// <summary>
+    /// The Access service the API's permission checks ask. Every test uses a tenant of its own, so the one stub (with a matrix
+    /// per tenant) is shared safely.
+    /// </summary>
+    public StubAccessServer Access { get; private set; } = null!;
+
     public string RabbitConnectionString => _rabbit!.ConnectionString;
 
     public string RedisConnectionString => _redis!.ConnectionString;
@@ -39,6 +45,8 @@ public sealed class InfraFixture : IAsyncLifetime
         _rabbit = new RabbitFixture { Network = _network };
         _redis = new RedisFixture();
         await Task.WhenAll(_postgres.InitializeAsync().AsTask(), _rabbit.InitializeAsync().AsTask(), _redis.InitializeAsync().AsTask());
+
+        Access = await StubAccessServer.StartAsync();
 
         // The init script only creates the debezium role; the database (as in the AppHost, where Aspire creates it) comes here.
         RequestsDbConnectionString = await _postgres.CreateDatabaseAsync(RequestsDb);
@@ -91,6 +99,11 @@ public sealed class InfraFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        if (Access is not null)
+        {
+            await Access.DisposeAsync();
+        }
+
         if (_debezium is not null)
         {
             await _debezium.DisposeAsync();

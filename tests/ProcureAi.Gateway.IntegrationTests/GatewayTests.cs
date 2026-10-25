@@ -221,6 +221,35 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Bff_user_permissions_come_from_access_and_are_cached_for_a_short_time()
+    {
+        _gateway.Access.SetMatrix("acme", new() { ["manager"] = ["requests.read", "budgets.read"] });
+        var browser = await SignedInAsync("maria@acme.test");
+
+        var first = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+        var second = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+
+        first.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ShouldBe(["budgets.read", "requests.read"]);
+        second.GetProperty("permissions").GetArrayLength().ShouldBe(2);
+        _gateway.Access.EffectiveCalls.ShouldBe(1);
+        _gateway.Access.Calls.Single(c => c.Path.EndsWith("/effective", StringComparison.Ordinal)).Tenant.ShouldBe("acme");
+    }
+
+    [Fact]
+    public async Task Bff_user_has_no_permissions_but_still_answers_when_access_is_down()
+    {
+        _gateway.Access.Down = true;
+        var browser = await SignedInAsync("maria@acme.test");
+
+        using var response = await browser.GetAsync("/bff/user", Ct);
+
+        await ExpectOkAsync(response);
+        var user = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        user.GetProperty("userId").GetString().ShouldNotBeNullOrEmpty();
+        user.GetProperty("permissions").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Session_cookie_is_host_prefixed_http_only_secure_and_strict()
     {
         var browser = Browser();

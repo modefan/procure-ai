@@ -53,6 +53,10 @@ public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null)
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
+        foreach (var (key, value) in infra.Access.Settings)
+        {
+            builder.UseSetting(key, value);
+        }
 
         builder.ConfigureTestServices(services =>
         {

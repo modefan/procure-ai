@@ -141,6 +141,10 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
     .WithEnvironment("Oidc__ClientSecret", keycloakGatewaySecret)
+    // The gateway asks Access for permissions as the internal client, like the services do.
+    .WithEnvironment("Auth__Internal__ClientId", ServiceResources.InternalClientId)
+    .WithEnvironment("Auth__Internal__ClientSecret", keycloakInternalSecret)
+    .WithEnvironment("Auth__Internal__TokenUrl", ReferenceExpression.Create($"{keycloakAuthority}/protocol/openid-connect/token"))
     .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__access__Destinations__d1__Address", accessApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
