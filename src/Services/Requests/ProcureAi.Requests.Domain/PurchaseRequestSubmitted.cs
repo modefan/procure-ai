@@ -5,6 +5,7 @@ public sealed record PurchaseRequestSubmitted(
     Guid RequestId,
     string TenantId,
     string Number,
+    string Title,
     string RequesterId,
     string CostCenterCode,
     decimal TotalInclVat,

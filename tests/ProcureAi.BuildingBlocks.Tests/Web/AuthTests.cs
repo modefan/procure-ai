@@ -302,6 +302,29 @@ public class AuthTests
     }
 
     [Fact]
+    public async Task Service_account_token_passes_internal_policy_user_token_does_not()
+    {
+        const string internalEndpoint = "/api/v1/auth-test/internal";
+        await using var app = await TestHost.StartAsync(new() { ["Auth:InternalClientId"] = InternalClient });
+        var client = app.GetTestClient();
+
+        var service = await client.SendAsync(
+            Request(HttpMethod.Get, internalEndpoint, bearer: TestAuth.CreateServiceToken(InternalClient)), Ct);
+        var otherClient = await client.SendAsync(
+            Request(HttpMethod.Get, internalEndpoint, bearer: TestAuth.CreateServiceToken("some-other-client")), Ct);
+        var user = await client.SendAsync(
+            Request(HttpMethod.Get, internalEndpoint, bearer: TestAuth.CreateToken("user-1", "acme", "admin")), Ct);
+        var adminKey = await client.SendAsync(Request(HttpMethod.Get, internalEndpoint, TestAuth.ApiKey), Ct);
+        var anonymous = await client.SendAsync(Request(HttpMethod.Get, internalEndpoint), Ct);
+
+        service.StatusCode.ShouldBe(HttpStatusCode.OK);
+        adminKey.StatusCode.ShouldBe(HttpStatusCode.OK);
+        user.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        otherClient.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task Token_with_a_different_azp_is_not_a_service_account()
     {
         ShouldReadNothing(await MeAsync(InternalClient, "some-other-client", ForgedHeaders));

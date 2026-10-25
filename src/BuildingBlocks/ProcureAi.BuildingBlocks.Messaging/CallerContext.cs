@@ -4,9 +4,6 @@ using Wolverine;
 
 namespace ProcureAi.BuildingBlocks.Messaging;
 
-/// <summary>The name of the service this process runs as (from its composition root), e.g. <c>requests-api</c>.</summary>
-public sealed record ServiceIdentity(string Name);
-
 /// <summary>
 /// The envelope of the message being handled, filled by <see cref="RestoreCallerMiddleware"/>.
 /// <para>

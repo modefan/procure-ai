@@ -47,9 +47,11 @@ internal static class AuthSetup
             });
 
         services.AddAuthorizationBuilder()
-            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
+            .AddPolicy(InternalPolicy.Name, policy => policy.RequireAuthenticatedUser().AddRequirements(new InternalRequirement()));
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, InternalAuthorizationHandler>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.TryAddSingleton<IPermissionProvider, DefaultMatrixPermissionProvider>();
         return services;

@@ -11,10 +11,12 @@ var useDataVolumes = builder.Configuration.GetValue("Persistence:UseDataVolumes"
 // Parameters. Secrets come from AppHost user secrets (never the repo); see DEMO PASSWORDS.txt.
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
-// Substituted by Keycloak into the ${KC_DEMO_PASSWORD} / ${KC_GATEWAY_SECRET} placeholders of the realm import,
+// Substituted by Keycloak into the ${KC_DEMO_PASSWORD} / ${KC_GATEWAY_SECRET} / ${KC_INTERNAL_SECRET} placeholders of the realm import,
 // so the committed realm file holds no passwords or secrets.
 var keycloakDemoPassword = builder.AddParameter("keycloak-demo-password", secret: true);
 var keycloakGatewaySecret = builder.AddParameter("keycloak-gateway-secret", secret: true);
+// Secret of the confidential client `procure-internal`, with which services call each other (client credentials).
+var keycloakInternalSecret = builder.AddParameter("keycloak-internal-secret", secret: true);
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
@@ -82,6 +84,7 @@ var keycloak = builder.AddContainer(ResourceNames.Keycloak, "quay.io/keycloak/ke
     .WithEnvironment("KC_HEALTH_ENABLED", "true")
     .WithEnvironment("KC_DEMO_PASSWORD", keycloakDemoPassword)
     .WithEnvironment("KC_GATEWAY_SECRET", keycloakGatewaySecret)
+    .WithEnvironment("KC_INTERNAL_SECRET", keycloakInternalSecret)
     .WithEnvironment("JAVA_OPTS_KC_HEAP", limits.Keycloak.JavaHeapOpts)
     .WithBindMount("../../../infra/keycloak", "/opt/keycloak/data/import", isReadOnly: true)
     .WithArgs("start-dev", "--import-realm")
@@ -99,7 +102,7 @@ builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
-    postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, InternalClientSecret: null, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
+    postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
 
 var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),

@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../ProcureAi.Testing/ProcureAi.Testing.csproj" />
     <ProjectReference Include="../../src/Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />
+    <ProjectReference Include="../../src/Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -115,7 +115,7 @@ public sealed class PurchaseRequest : Entity<Guid>
 
         Status = RequestStatus.Submitted;
         SubmittedAt = now;
-        Raise(new PurchaseRequestSubmitted(Id, TenantId, Number.ToString(), RequesterId, CostCenterCode, TotalInclVat.Amount, now));
+        Raise(new PurchaseRequestSubmitted(Id, TenantId, Number.ToString(), Title, RequesterId, CostCenterCode, TotalInclVat.Amount, now));
     }
 
     // Max + 1 (not a counter) so it keeps working after the lines are reloaded from the database.

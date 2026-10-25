@@ -11,7 +11,7 @@ namespace ProcureAi.AppHost;
 public sealed record ServiceSpec(string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix);
 
 /// <summary>The infrastructure and settings every service resource is wired to.</summary>
-/// <param name="InternalClientSecret">Secret of the Keycloak client services use to call each other; <c>null</c> until a service needs it.</param>
+/// <param name="InternalClientSecret">Secret of the Keycloak client <c>procure-internal</c>, with which services call each other (<c>Auth:Internal:ClientSecret</c>).</param>
 /// <param name="DebeziumPassword">Password of the Postgres <c>debezium</c> role (secret parameter), for every Debezium Server.</param>
 /// <param name="UseDataVolumes">Whether containers keep their data in named volumes (offsets of Debezium).</param>
 /// <param name="OtlpEndpoint">The Aspire dashboard's OTLP endpoint (the Serilog OpenTelemetry sink has no environment fallback).</param>
@@ -22,7 +22,7 @@ public sealed record SharedResources(
     IResourceBuilder<ContainerResource> Keycloak,
     ReferenceExpression KeycloakAuthority,
     ParameterResource AdminApiKeySha256,
-    ParameterResource? InternalClientSecret,
+    ParameterResource InternalClientSecret,
     string? OtlpEndpoint,
     ResourcesOptions Limits,
     ParameterResource DebeziumPassword,
@@ -32,6 +32,9 @@ public static class ServiceResources
 {
     public const string MigrateSuffix = "-migrate";
     public const string ApiSuffix = "-api";
+
+    /// <summary>The Keycloak client services use to call each other (client credentials).</summary>
+    public const string InternalClientId = "procure-internal";
 
     private const string DebeziumPrefix = "debezium-";
     private const string DebeziumImage = "quay.io/debezium/server";
@@ -75,6 +78,11 @@ public static class ServiceResources
             .WithEnvironment("Auth__OpenApi__AuthorizationUrl", ReferenceExpression.Create($"{shared.KeycloakAuthority}/protocol/openid-connect/auth"))
             .WithEnvironment("Auth__OpenApi__TokenUrl", ReferenceExpression.Create($"{shared.KeycloakAuthority}/protocol/openid-connect/token"))
             .WithEnvironment("Auth__AdminApiKeySha256", shared.AdminApiKeySha256)
+            // Service to service: tokens of the internal client are service accounts, and this service logs in as that client.
+            .WithEnvironment("Auth__InternalClientId", InternalClientId)
+            .WithEnvironment("Auth__Internal__ClientId", InternalClientId)
+            .WithEnvironment("Auth__Internal__ClientSecret", shared.InternalClientSecret)
+            .WithEnvironment("Auth__Internal__TokenUrl", ReferenceExpression.Create($"{shared.KeycloakAuthority}/protocol/openid-connect/token"))
             .WithOtlpEndpoint(shared.OtlpEndpoint)
             .WaitFor(shared.Keycloak)
             .WaitFor(shared.RabbitMq)
@@ -89,11 +97,6 @@ public static class ServiceResources
             // therefore waits for Debezium to be healthy: no change made through the app can precede the capture.
             // (The demo seed written by --migrate runs before Debezium starts and is deliberately not captured.)
             api.WaitFor(builder.AddDebeziumFor(spec.Database, spec.CapturedTables, migrate, shared));
-        }
-
-        if (shared.InternalClientSecret is { } secret)
-        {
-            api.WithEnvironment("Auth__InternalClientSecret", secret);
         }
 
         return api;

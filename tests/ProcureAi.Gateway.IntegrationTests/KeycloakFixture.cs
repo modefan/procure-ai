@@ -18,11 +18,15 @@ public sealed class KeycloakFixture : IAsyncLifetime
     public const string Image = "quay.io/keycloak/keycloak:26.8.1"; // keep in step with src/AppHost AppHost.cs
     public const string Realm = "procure";
     public const string TestClient = "test-direct";
+    public const string InternalClient = "procure-internal";
 
     private IContainer? _container;
 
     /// <summary>The secret of the gateway client for this run (random; the realm file holds only a placeholder).</summary>
     public string GatewaySecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+
+    /// <summary>The secret of the <c>procure-internal</c> client for this run (random; the realm file holds only a placeholder).</summary>
+    public string InternalSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
 
     public string DemoPassword { get; } = "T" + Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 
@@ -52,6 +56,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
             .WithEnvironment("JAVA_OPTS_KC_HEAP", (string)limits["JavaHeapOpts"]!)
             .WithEnvironment("KC_DEMO_PASSWORD", DemoPassword)
             .WithEnvironment("KC_GATEWAY_SECRET", GatewaySecret)
+            .WithEnvironment("KC_INTERNAL_SECRET", InternalSecret)
             .WithResourceMapping(Encoding.UTF8.GetBytes(realm.ToJsonString()), "/opt/keycloak/data/import/procure-realm.json")
             .WithCommand("start-dev", "--import-realm")
             .WithCreateParameterModifier(p =>
@@ -84,6 +89,25 @@ public sealed class KeycloakFixture : IAsyncLifetime
         var token = JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()!;
         return DecodePayload(token);
     }
+
+    /// <summary>The raw access token of the <c>procure-internal</c> service account (client credentials grant).</summary>
+    public async Task<string> InternalTokenAsync()
+    {
+        using var http = new HttpClient();
+        using var response = await http.PostAsync(
+            $"{BaseUrl}/realms/{Realm}/protocol/openid-connect/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = InternalClient,
+                ["client_secret"] = InternalSecret,
+            }));
+        var body = await response.Content.ReadAsStringAsync();
+        response.IsSuccessStatusCode.ShouldBeTrue($"Client credentials request failed: {(int)response.StatusCode} {body}");
+        return JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()!;
+    }
+
+    public static JsonElement Payload(string jwt) => DecodePayload(jwt);
 
     private static JsonElement DecodePayload(string jwt)
     {

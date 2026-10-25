@@ -104,6 +104,7 @@
   ],
   "users": [
     {
+      "id": "00000000-0000-4000-8000-000000000001",
       "username": "tom@acme.test",
       "email": "tom@acme.test",
       "emailVerified": true,
@@ -122,6 +123,7 @@
       ]
     },
     {
+      "id": "00000000-0000-4000-8000-000000000002",
       "username": "maria@acme.test",
       "email": "maria@acme.test",
       "emailVerified": true,
@@ -140,6 +142,7 @@
       ]
     },
     {
+      "id": "00000000-0000-4000-8000-000000000003",
       "username": "dept@acme.test",
       "email": "dept@acme.test",
       "emailVerified": true,
@@ -158,6 +161,7 @@
       ]
     },
     {
+      "id": "00000000-0000-4000-8000-000000000004",
       "username": "thandi@acme.test",
       "email": "thandi@acme.test",
       "emailVerified": true,
@@ -176,6 +180,7 @@
       ]
     },
     {
+      "id": "00000000-0000-4000-8000-000000000005",
       "username": "admin@acme.test",
       "email": "admin@acme.test",
       "emailVerified": true,
@@ -194,6 +199,7 @@
       ]
     },
     {
+      "id": "00000000-0000-4000-8000-000000000006",
       "username": "ben@globex.test",
       "email": "ben@globex.test",
       "emailVerified": true,
@@ -210,6 +216,18 @@
       "realmRoles": [
         "manager"
       ]
+    },
+    {
+      "username": "service-account-procure-internal",
+      "enabled": true,
+      "serviceAccountClientId": "procure-internal",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "manage-realm"
+        ]
+      }
     }
   ],
   "clientScopes": [
@@ -372,6 +390,24 @@
         "roles",
         "procure-api"
       ]
+    },
+    {
+      "clientId": "procure-internal",
+      "name": "Procure internal (service to service)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KC_INTERNAL_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "profile",
+        "roles",
+        "procure-api"
+      ],
+      "optionalClientScopes": []
     }
   ]
 }

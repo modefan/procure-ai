@@ -23,6 +23,7 @@ public static class CallerPropagationExtensions
         services.TryAddScoped<IncomingMessage>();
         services.AddSingleton(new ServiceIdentity(serviceName));
         services.AddScoped<ICallerContext, CallerContext>();
+        services.TryAddSingleton<ICallerContextAccessor, AmbientCallerContextAccessor>();
         return services;
     }
 

@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ProcureAi.Testing/ProcureAi.Testing.csproj" />
+    <ProjectReference Include="../../src/Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Web\ProcureAi.BuildingBlocks.Web.csproj" />
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />

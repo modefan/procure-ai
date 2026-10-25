@@ -84,6 +84,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         sent.RequestId.ShouldBe(created.Id);
         sent.TenantId.ShouldBe("acme");
         sent.Number.ShouldBe(created.Number);
+        sent.Title.ShouldBe(created.Title);
         sent.TotalInclVat.ShouldBe(86940m);
         var loaded = await _app.Bus.InvokeAsync<RequestDto>(new GetRequest(created.Id));
         loaded.Status.ShouldBe(RequestStatus.Submitted);

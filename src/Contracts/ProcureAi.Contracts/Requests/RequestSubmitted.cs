@@ -5,7 +5,11 @@ public sealed record RequestSubmitted(
     Guid RequestId,
     string TenantId,
     string Number,
+    string Title,
     string RequesterId,
     string CostCenterCode,
     decimal TotalInclVat,
-    DateTimeOffset SubmittedAt);
+    DateTimeOffset SubmittedAt) : IIntegrationEvent
+{
+    public DateTimeOffset OccurredAt => SubmittedAt;
+}

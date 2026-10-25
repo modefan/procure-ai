@@ -54,6 +54,7 @@ public class PurchaseRequestTests
         evt.RequestId.ShouldBe(request.Id);
         evt.TenantId.ShouldBe("acme");
         evt.Number.ShouldBe("PR-0001");
+        evt.Title.ShouldBe(request.Title);
         evt.RequesterId.ShouldBe("user-1");
         evt.CostCenterCode.ShouldBe("CC-100");
         evt.TotalInclVat.ShouldBe(86940m);

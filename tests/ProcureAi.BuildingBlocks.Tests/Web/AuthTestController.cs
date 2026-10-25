@@ -1,4 +1,5 @@
 using Asp.Versioning;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using ProcureAi.BuildingBlocks.Web.Auth;
@@ -39,6 +40,10 @@ public sealed class AuthTestController(ICurrentUser user) : ControllerBase
         logger.LogWarning("auth-test-event");
         return Ok();
     }
+
+    [HttpGet("internal")]
+    [Authorize(Policy = InternalPolicy.Name)]
+    public IActionResult Internal() => Ok();
 
     [HttpGet("no-attribute")]
     public IActionResult NoAttribute() => Ok();

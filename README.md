@@ -36,7 +36,7 @@ Prerequisites: Docker, .NET 10 SDK, Node 24.
 
    ```powershell
    $apphost = "src/AppHost/ProcureAi.AppHost"
-   foreach ($name in "keycloak-admin-password", "keycloak-demo-password", "keycloak-gateway-secret", "debezium-password") {
+   foreach ($name in "keycloak-admin-password", "keycloak-demo-password", "keycloak-gateway-secret", "keycloak-internal-secret", "debezium-password") {
      dotnet user-secrets set "Parameters:$name" ([Convert]::ToHexString((1..24 | % { Get-Random -Max 256 }) -as [byte[]])) --project $apphost
    }
    # admin-api-key-sha256 is the SHA-256 (hex) of the one admin API key (X-Api-Key, for scripts and tests):

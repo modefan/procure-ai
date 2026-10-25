@@ -1,4 +1,8 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
+using ProcureAi.Contracts;
 
 namespace ProcureAi.Gateway.IntegrationTests;
 
@@ -82,6 +86,7 @@ public sealed class RealmTests(KeycloakFixture keycloak)
         var realm = JsonDocument.Parse(await File.ReadAllTextAsync("procure-realm.json")).RootElement;
 
         var passwords = realm.GetProperty("users").EnumerateArray()
+            .Where(u => u.TryGetProperty("credentials", out _))
             .SelectMany(u => u.GetProperty("credentials").EnumerateArray())
             .Select(c => c.GetProperty("value").GetString()!).ToArray();
         passwords.ShouldNotBeEmpty();
@@ -92,7 +97,77 @@ public sealed class RealmTests(KeycloakFixture keycloak)
         clients.Count(c => c.TryGetProperty("directAccessGrantsEnabled", out var d) && d.GetBoolean()).ShouldBe(0);
         clients.Single(c => c.GetProperty("clientId").GetString() == "procure-gateway")
             .GetProperty("secret").GetString().ShouldBe("${KC_GATEWAY_SECRET}");
+        clients.Single(c => c.GetProperty("clientId").GetString() == KeycloakFixture.InternalClient)
+            .GetProperty("secret").GetString().ShouldBe("${KC_INTERNAL_SECRET}");
     }
+
+    [Theory]
+    [InlineData("tom@acme.test", DemoUsers.Tom)]
+    [InlineData("maria@acme.test", DemoUsers.Maria)]
+    [InlineData("dept@acme.test", DemoUsers.Dept)]
+    [InlineData("thandi@acme.test", DemoUsers.Thandi)]
+    [InlineData("admin@acme.test", DemoUsers.Admin)]
+    [InlineData("ben@globex.test", DemoUsers.Ben)]
+    public async Task Demo_users_have_fixed_ids(string user, string id)
+    {
+        // Seeds in other services refer to these IDs, so the realm import must pin them.
+        var claims = await keycloak.LoginAsync(user);
+
+        claims.GetProperty("sub").GetString().ShouldBe(id);
+    }
+
+    [Fact]
+    public async Task Internal_client_issues_client_credentials_token()
+    {
+        var claims = KeycloakFixture.Payload(await keycloak.InternalTokenAsync());
+
+        claims.GetProperty("azp").GetString().ShouldBe(KeycloakFixture.InternalClient);
+        Audiences(claims).ShouldContain("procure-api");
+        claims.TryGetProperty("tenant", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Internal_client_cannot_log_a_user_in()
+    {
+        using var http = new HttpClient();
+        using var response = await http.PostAsync(
+            $"{keycloak.BaseUrl}/realms/{KeycloakFixture.Realm}/protocol/openid-connect/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["client_id"] = KeycloakFixture.InternalClient,
+                ["client_secret"] = keycloak.InternalSecret,
+                ["username"] = "tom@acme.test",
+                ["password"] = keycloak.DemoPassword,
+            }));
+
+        response.IsSuccessStatusCode.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Internal_service_account_can_create_a_user_and_add_it_to_an_organization()
+    {
+        // What the Access service does for a self-registered user (plan 02, task 4): join the `demo` organization.
+        using var http = new HttpClient { BaseAddress = new Uri(keycloak.BaseUrl) };
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await keycloak.InternalTokenAsync());
+        var admin = $"/admin/realms/{KeycloakFixture.Realm}";
+
+        var users = await http.GetAsync($"{admin}/users?username=tom@acme.test&exact=true", Ct);
+        users.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var organizationsResponse = await http.GetAsync($"{admin}/organizations?search=demo&exact=false", Ct);
+        organizationsResponse.StatusCode.ShouldBe(HttpStatusCode.OK, await organizationsResponse.Content.ReadAsStringAsync(Ct));
+        var organizations = await organizationsResponse.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        var demo = organizations.EnumerateArray().Single(o => o.GetProperty("alias").GetString() == "demo");
+
+        var created = await http.PostAsJsonAsync($"{admin}/users", new { username = "newbie@demo.test", email = "newbie@demo.test", enabled = true }, Ct);
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var userId = created.Headers.Location!.Segments[^1];
+        var added = await http.PostAsJsonAsync($"{admin}/organizations/{demo.GetProperty("id").GetString()}/members", userId, Ct);
+
+        added.StatusCode.ShouldBe(HttpStatusCode.Created, await added.Content.ReadAsStringAsync(Ct));
+    }
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static readonly string[] BusinessRoles = ["requester", "manager", "department-head", "finance", "admin"];
 
