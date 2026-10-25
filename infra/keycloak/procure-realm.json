@@ -35,13 +35,12 @@
   },
   "defaultRole": {
     "name": "default-roles-procure",
-    "description": "New users are requesters",
+    "description": "Keycloak defaults only; business roles are assigned explicitly",
     "composite": true,
     "composites": {
       "realm": [
         "offline_access",
-        "uma_authorization",
-        "requester"
+        "uma_authorization"
       ]
     }
   },

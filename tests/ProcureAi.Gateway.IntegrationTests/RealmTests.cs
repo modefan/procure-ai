@@ -28,17 +28,47 @@ public sealed class RealmTests(KeycloakFixture keycloak) : IClassFixture<Keycloa
         Strings(claims, "roles").ShouldContain(role);
     }
 
-    [Fact]
-    public async Task Committed_realm_file_has_placeholders_instead_of_secrets_and_no_test_client()
+    [Theory]
+    [InlineData("tom@acme.test", "requester")]
+    [InlineData("maria@acme.test", "manager")]
+    [InlineData("dept@acme.test", "department-head")]
+    [InlineData("thandi@acme.test", "finance")]
+    [InlineData("admin@acme.test", "admin")]
+    [InlineData("ben@globex.test", "manager")]
+    public async Task Each_demo_user_holds_exactly_their_own_business_role(string user, string role)
     {
-        var text = await File.ReadAllTextAsync("procure-realm.json");
+        var claims = await keycloak.LoginAsync(user);
 
-        text.ShouldNotContain("Demo!2026");
-        text.ShouldContain("${KC_DEMO_PASSWORD}");
-        text.ShouldContain("${KC_GATEWAY_SECRET}");
-        text.ShouldNotContain(KeycloakFixture.TestClient);
-        text.ShouldNotContain("directAccessGrantsEnabled\": true");
+        Strings(claims, "roles").Where(BusinessRoles.Contains).ShouldBe([role]);
     }
+
+    [Fact]
+    public async Task Admin_does_not_get_the_requester_role()
+    {
+        var claims = await keycloak.LoginAsync("admin@acme.test");
+
+        Strings(claims, "roles").ShouldNotContain("requester");
+    }
+
+    [Fact]
+    public async Task Committed_realm_file_has_only_placeholder_credentials_and_no_direct_access_client()
+    {
+        var realm = JsonDocument.Parse(await File.ReadAllTextAsync("procure-realm.json")).RootElement;
+
+        var passwords = realm.GetProperty("users").EnumerateArray()
+            .SelectMany(u => u.GetProperty("credentials").EnumerateArray())
+            .Select(c => c.GetProperty("value").GetString()!).ToArray();
+        passwords.ShouldNotBeEmpty();
+        passwords.ShouldAllBe(v => v.StartsWith("${") && v.EndsWith('}'));
+
+        var clients = realm.GetProperty("clients").EnumerateArray().ToArray();
+        clients.ShouldNotContain(c => c.GetProperty("clientId").GetString() == KeycloakFixture.TestClient);
+        clients.Count(c => c.TryGetProperty("directAccessGrantsEnabled", out var d) && d.GetBoolean()).ShouldBe(0);
+        clients.Single(c => c.GetProperty("clientId").GetString() == "procure-gateway")
+            .GetProperty("secret").GetString().ShouldBe("${KC_GATEWAY_SECRET}");
+    }
+
+    private static readonly string[] BusinessRoles = ["requester", "manager", "department-head", "finance", "admin"];
 
     private static string[] Strings(JsonElement claims, string name) =>
         claims.GetProperty(name).EnumerateArray().Select(e => e.GetString()!).ToArray();
