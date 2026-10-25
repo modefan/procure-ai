@@ -26,7 +26,8 @@ public sealed class CapturingSink : ILogEventSink
 public static class TestHost
 {
     public static async Task<WebApplication> StartAsync(
-        Dictionary<string, string?>? config = null, CapturingSink? sink = null)
+        Dictionary<string, string?>? config = null, CapturingSink? sink = null,
+        Action<WebApplicationBuilder>? configure = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
@@ -56,6 +57,8 @@ public static class TestHost
 
         builder.AddProcureAiWeb("test-service");
         builder.Services.AddControllers().AddApplicationPart(typeof(TestController).Assembly);
+
+        configure?.Invoke(builder);
 
         var app = builder.Build();
         // Lets log tests supply an authenticated user without a token: the user through headers.
