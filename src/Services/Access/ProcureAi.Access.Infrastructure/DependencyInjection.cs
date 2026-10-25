@@ -37,10 +37,10 @@ public static class DependencyInjection
     }
 
     /// <summary>Wolverine setup (shared messaging building block) and AccessChanged going to the access exchange.</summary>
-    public static void ConfigureAccess(this WolverineOptions options, IConfiguration configuration)
+    public static void ConfigureAccess(this WolverineOptions options, IConfiguration configuration, string serviceName)
     {
         options.UseProcureAiMessaging<IAccessDbContext, AccessDbContext>(
-            configuration, DatabaseConnectionName, typeof(SetRolePermissions).Assembly);
+            configuration, serviceName, DatabaseConnectionName, typeof(SetRolePermissions).Assembly);
         options.PublishMessage<AccessChanged>().ToRabbitExchange(Exchanges.Access);
     }
 }

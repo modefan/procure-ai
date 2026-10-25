@@ -61,6 +61,9 @@ public static class TestHost
         builder.AddProcureAiWeb("test-service");
         builder.Services.AddControllers().AddApplicationPart(typeof(TestController).Assembly);
 
+        // Tests that are not about Access use a fixed matrix; the Access client tests replace it.
+        builder.Services.AddSingleton<ProcureAi.BuildingBlocks.Web.Auth.IPermissionProvider, TestMatrixPermissionProvider>();
+
         configure?.Invoke(builder);
 
         var app = builder.Build();

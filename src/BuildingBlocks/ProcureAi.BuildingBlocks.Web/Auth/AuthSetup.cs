@@ -53,7 +53,6 @@ internal static class AuthSetup
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, InternalAuthorizationHandler>();
         services.AddScoped<ICurrentUser, CurrentUser>();
-        services.TryAddSingleton<IPermissionProvider, DefaultMatrixPermissionProvider>();
         return services;
     }
 }

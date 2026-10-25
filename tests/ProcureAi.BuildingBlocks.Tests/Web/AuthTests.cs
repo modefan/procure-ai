@@ -402,32 +402,6 @@ public class AuthTests
         Permissions.All.Count.ShouldBe(15);
     }
 
-    [Theory]
-    [InlineData("requester", Permissions.RequestsCreate, true)]
-    [InlineData("requester", Permissions.RequestsApprove, false)]
-    [InlineData("requester", Permissions.InvoicesReleasePayment, false)]
-    [InlineData("manager", Permissions.RequestsApprove, true)]
-    [InlineData("manager", Permissions.BudgetsManage, false)]
-    [InlineData("department-head", Permissions.RequestsApprove, true)]
-    [InlineData("finance", Permissions.InvoicesReleasePayment, true)]
-    [InlineData("finance", Permissions.BudgetsManage, true)]
-    [InlineData("finance", Permissions.AdminSystem, false)]
-    [InlineData("admin", Permissions.AdminUsers, true)]
-    [InlineData("admin", Permissions.BudgetsManage, true)]
-    [InlineData("admin", Permissions.RequestsRead, true)]
-    [InlineData("admin", Permissions.RequestsCreate, false)]
-    [InlineData("admin", Permissions.RequestsApprove, false)]
-    [InlineData("admin", Permissions.InvoicesReleasePayment, false)]
-    [InlineData("unknown-role", Permissions.RequestsRead, false)]
-    public async Task Default_matrix_follows_the_spec(string role, string permission, bool expected)
-    {
-        var provider = new DefaultMatrixPermissionProvider();
-
-        var permissions = await provider.GetPermissionsAsync(new FakeUser([role]), Ct);
-
-        permissions.Contains(permission).ShouldBe(expected);
-    }
-
     [Fact]
     public async Task Endpoint_without_attribute_is_401_when_anonymous()
     {
@@ -514,21 +488,5 @@ public class AuthTests
         {
             (await client.GetAsync("/api/v1/test/ping", Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
         }
-    }
-
-    private sealed class FakeUser(IReadOnlySet<string> roles) : ICurrentUser
-    {
-        public FakeUser(string[] roles) : this(roles.ToHashSet())
-        {
-        }
-
-        public string UserId => "u";
-        public string? TenantId => "t";
-        public IReadOnlySet<string> Roles { get; } = roles;
-        public bool IsAuthenticated => true;
-        public bool IsAdminApiKey => false;
-        public bool IsServiceAccount => false;
-        public string? CallingService => null;
-        public string? OnBehalfOfUser => null;
     }
 }

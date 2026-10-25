@@ -68,7 +68,7 @@ public sealed class RequestsHost : IAsyncDisposable
             })
             .UseWolverine(options =>
             {
-                options.ConfigureRequests(configuration);
+                options.ConfigureRequests(configuration, "requests-api");
                 configure?.Invoke(options);
             })
             .Build();

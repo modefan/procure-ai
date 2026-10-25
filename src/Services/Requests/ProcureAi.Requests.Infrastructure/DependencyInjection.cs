@@ -45,10 +45,10 @@ public static class DependencyInjection
     /// database, EF Core transactions around handlers, RabbitMQ, and <c>RequestSubmitted</c> going to the
     /// <c>requests</c> exchange.
     /// </summary>
-    public static void ConfigureRequests(this WolverineOptions options, IConfiguration configuration)
+    public static void ConfigureRequests(this WolverineOptions options, IConfiguration configuration, string serviceName)
     {
         options.UseProcureAiMessaging<IRequestsDbContext, RequestsDbContext>(
-            configuration, DatabaseConnectionName, typeof(CreateRequest).Assembly);
+            configuration, serviceName, DatabaseConnectionName, typeof(CreateRequest).Assembly);
         options.PublishMessage<RequestSubmitted>().ToRabbitExchange(RequestsExchange);
     }
 

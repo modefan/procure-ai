@@ -2,6 +2,8 @@ using System.Reflection;
 using JasperFx;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using ProcureAi.BuildingBlocks.Web.Access;
+using ProcureAi.Contracts;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
 using Wolverine.Postgresql;
@@ -22,11 +24,16 @@ public static class MessagingSetup
     /// <c>Wolverine:AutoBuildMessageStorageOnStartup</c> controls the message store tables: on in Development and tests;
     /// elsewhere the service's <c>--migrate</c> step creates them, so startup never changes the schema.
     /// </para>
+    /// <para>
+    /// Every service except Access also listens to <c>AccessChanged</c> on its own queue (<c>&lt;serviceName&gt;-access-changed</c>,
+    /// bound to the <c>access</c> exchange) and evicts the cached Access answers of that tenant (<see cref="AccessChangedHandler"/>).
+    /// </para>
     /// </summary>
+    /// <param name="serviceName">The service name (e.g. <c>requests-api</c>); names its queues.</param>
     /// <typeparam name="TAbstraction">The interface handlers take for data access (Wolverine is told it is the DbContext, so its transaction still wraps them).</typeparam>
     /// <typeparam name="TDbContext">The service's DbContext.</typeparam>
     public static WolverineOptions UseProcureAiMessaging<TAbstraction, TDbContext>(
-        this WolverineOptions options, IConfiguration configuration, string databaseConnectionName, Assembly handlers)
+        this WolverineOptions options, IConfiguration configuration, string serviceName, string databaseConnectionName, Assembly handlers)
         where TDbContext : DbContext, TAbstraction
     {
         options.Discovery.IncludeAssembly(handlers);
@@ -39,7 +46,25 @@ public static class MessagingSetup
         options.Policies.AutoApplyTransactions();
         options.Policies.UseDurableInboxOnAllListeners();
         options.Policies.UseDurableOutboxOnAllSendingEndpoints();
-        return options.UseProcureAiTransport(configuration);
+        options.UseProcureAiTransport(configuration);
+        ListenToAccessChanges(options, serviceName);
+        return options;
+    }
+
+    /// <summary>The queue of <paramref name="serviceName"/> that receives <c>AccessChanged</c>.</summary>
+    public static string AccessChangedQueue(string serviceName) => $"{serviceName}-access-changed";
+
+    private static void ListenToAccessChanges(WolverineOptions options, string serviceName)
+    {
+        if (serviceName == AccessClientSetup.AccessServiceName)
+        {
+            // Access publishes the event and caches nothing from itself: no queue, and no local handler to take it in-process.
+            options.Discovery.CustomizeHandlerDiscovery(
+                handlers => handlers.Excludes.WithCondition("Access does not listen to its own events", t => t == typeof(AccessChangedHandler)));
+            return;
+        }
+
+        options.ListenToRabbitQueue(AccessChangedQueue(serviceName), queue => queue.BindExchange(Exchanges.Access));
     }
 
     /// <summary>

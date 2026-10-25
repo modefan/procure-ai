@@ -18,6 +18,6 @@ public static class AccessApi
             builder.Services.AddAccessInfrastructure(builder.Configuration);
             // Access owns the matrix, so it answers permission checks from its own database instead of asking itself over HTTP.
             builder.Services.Replace(ServiceDescriptor.Scoped<IPermissionProvider, AccessPermissionProvider>());
-            builder.Host.UseWolverine(options => options.ConfigureAccess(builder.Configuration));
+            builder.Host.UseWolverine(options => options.ConfigureAccess(builder.Configuration, ServiceName));
         });
 }

@@ -9,6 +9,7 @@ using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Messaging.Caching;
 using ProcureAi.BuildingBlocks.Web;
+using ProcureAi.BuildingBlocks.Web.Access;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Health;
@@ -33,6 +34,14 @@ public static class ServiceHost
 
     private const string OpenApiToolAssembly = "GetDocument.Insider";
 
+    /// <summary>Stand-ins for the secrets the Access client needs at startup, only while the OpenAPI document is written.</summary>
+    private static readonly Dictionary<string, string?> OpenApiBuildPlaceholders = new()
+    {
+        ["Auth:Internal:TokenUrl"] = "http://localhost/openapi-build-only",
+        ["Auth:Internal:ClientId"] = "openapi-build-only",
+        ["Auth:Internal:ClientSecret"] = "openapi-build-only",
+    };
+
     public static WebApplication Build(string[] args, string serviceName, Action<WebApplicationBuilder> configure)
     {
         var builder = WebApplication.CreateBuilder(args);
@@ -47,6 +56,18 @@ public static class ServiceHost
         services.AddProcureAiCaller(serviceName);
         // Handlers evict cached reads after their transaction commits (replaces the immediate-only invalidator of AddProcureAiCaching).
         services.Replace(ServiceDescriptor.Scoped<ICacheInvalidator, MessageCacheInvalidator>());
+
+        // Every service asks Access for permissions (cached, fail-safe, evicted by AccessChanged); Access answers from its own database.
+        if (serviceName != AccessClientSetup.AccessServiceName)
+        {
+            if (IsWritingOpenApiDocument())
+            {
+                // The build step that writes the OpenAPI document never calls Access, but options are validated when the host starts.
+                builder.Configuration.AddInMemoryCollection(OpenApiBuildPlaceholders);
+            }
+
+            services.AddProcureAiAccessClient(builder.Configuration, serviceName);
+        }
 
         configure(builder);
 

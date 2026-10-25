@@ -1,9 +1,10 @@
 using ProcureAi.BuildingBlocks.Domain;
+using ProcureAi.BuildingBlocks.Web.Auth;
 
-namespace ProcureAi.BuildingBlocks.Web.Auth;
+namespace ProcureAi.BuildingBlocks.Tests.Web;
 
-/// <summary>The default role to permission matrix of spec 4.2, in code. The admin API key gets every permission.</summary>
-public sealed class DefaultMatrixPermissionProvider : IPermissionProvider
+/// <summary>A fixed role to permission matrix for tests that are not about Access. The admin API key gets every permission.</summary>
+public sealed class TestMatrixPermissionProvider : IPermissionProvider
 {
     private static readonly string[] Basics =
     [
