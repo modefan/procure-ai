@@ -1,6 +1,7 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
@@ -20,9 +21,10 @@ namespace ProcureAi.Requests.Api.Controllers;
 [Route("api/v{version:apiVersion}/requests")]
 [RequireTenant]
 public sealed class RequestsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, IOptions<PagingOptions> paging) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, IOptions<PagingOptions> paging,
+    ILogger<RequestsController> logger) : ControllerBase
 {
-    // The same two tags are dropped by InvalidateAsync after a write.
+    // Read tags and the invalidation after a write both format these templates with CacheTags.Format.
     private const string ItemTagTemplate = "requests:{tenant}:{id}";
     private const string ListTagTemplate = "requests:{tenant}:list";
 
@@ -33,7 +35,7 @@ public sealed class RequestsController(
     public async Task<ActionResult<RequestDto>> Create(CreateRequestBody body, CancellationToken cancellationToken)
     {
         var created = await bus.InvokeAsync<RequestDto>(body.ToCommand(), cancellationToken);
-        await InvalidateAsync(created.Id, cancellationToken);
+        await InvalidateAsync(created.Id);
         Response.Headers.ETag = VersionETag.Format(created.Version);
         return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
     }
@@ -77,7 +79,7 @@ public sealed class RequestsController(
         }
 
         var updated = await bus.InvokeAsync<RequestDto>(body.ToCommand(id, version), cancellationToken);
-        await InvalidateAsync(id, cancellationToken);
+        await InvalidateAsync(id);
         Response.Headers.ETag = VersionETag.Format(updated.Version);
         return updated;
     }
@@ -98,16 +100,29 @@ public sealed class RequestsController(
         }
 
         await bus.InvokeAsync(new SubmitRequest(id, version), cancellationToken);
-        await InvalidateAsync(id, cancellationToken);
-        var submitted = await bus.InvokeAsync<RequestDto>(new GetRequest(id), cancellationToken);
+        await InvalidateAsync(id);
+        // The write has committed: a client that disconnects now must not turn it into a failure (its retry would run it again).
+        var submitted = await bus.InvokeAsync<RequestDto>(new GetRequest(id), CancellationToken.None);
         Response.Headers.ETag = VersionETag.Format(submitted.Version);
         return AcceptedAtAction(nameof(Get), new { id }, submitted);
     }
 
-    /// <summary>Drops the cached reads of this request and of the tenant list, so no read after a write sees the old state.</summary>
-    private Task InvalidateAsync(Guid id, CancellationToken cancellationToken)
+    /// <summary>
+    /// Drops the cached reads of this request and of the tenant list, so no read after a write sees the old state.
+    /// Runs after the commit, so it ignores the client's cancellation, and a failure here is logged, never raised:
+    /// the cached entries expire by themselves within the cache duration.
+    /// </summary>
+    private async Task InvalidateAsync(Guid id)
     {
         var tenant = CacheTags.Tenant(user);
-        return cache.RemoveByTagAsync([$"requests:{tenant}:{id}", $"requests:{tenant}:list"], cancellationToken);
+        try
+        {
+            string?[] tags = [CacheTags.Format(ItemTagTemplate, tenant, ("id", id)), CacheTags.Format(ListTagTemplate, tenant)];
+            await cache.RemoveByTagAsync(tags.OfType<string>(), CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Cache invalidation failed for request {RequestId}; cached reads expire on their own", id);
+        }
     }
 }

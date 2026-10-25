@@ -18,6 +18,7 @@ internal static class AuthSetup
     public static IServiceCollection AddProcureAiAuth(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddValidatedOptions<AuthOptions>(configuration, AuthOptions.SectionName);
+        services.AddValidatedOptions<OpenApiAuthOptions>(configuration, OpenApiAuthOptions.SectionName);
         services.AddSingleton<ApiKeyValidator>();
 
         services.AddAuthentication(options =>

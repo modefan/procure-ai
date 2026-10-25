@@ -28,13 +28,13 @@ internal static class OpenApiTransformers
 
     /// <summary>
     /// <c>ApiKey</c> (the <c>X-Api-Key</c> header, Claude's admin key) and <c>OAuth2</c> (authorization code with PKCE
-    /// against <c>Auth:Authority</c>; the paths are Keycloak's OIDC endpoints). Either one satisfies an operation.
+    /// with the URLs and scopes of <c>Auth:OpenApi</c>). Either one satisfies an operation.
     /// </summary>
-    internal sealed class SecuritySchemeTransformer(IOptions<AuthOptions> auth) : IOpenApiDocumentTransformer
+    internal sealed class SecuritySchemeTransformer(IOptions<OpenApiAuthOptions> auth) : IOpenApiDocumentTransformer
     {
         public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
         {
-            var authority = auth.Value.Authority.TrimEnd('/');
+            var login = auth.Value;
             document.Components ??= new OpenApiComponents();
             document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
             document.Components.SecuritySchemes[ApiKeyScheme] = new OpenApiSecurityScheme
@@ -52,16 +52,16 @@ internal static class OpenApiTransformers
                 {
                     AuthorizationCode = new OpenApiOAuthFlow
                     {
-                        AuthorizationUrl = new Uri($"{authority}/protocol/openid-connect/auth"),
-                        TokenUrl = new Uri($"{authority}/protocol/openid-connect/token"),
-                        Scopes = new Dictionary<string, string> { ["openid"] = "OpenID Connect", ["profile"] = "Profile" },
+                        AuthorizationUrl = new Uri(login.AuthorizationUrl),
+                        TokenUrl = new Uri(login.TokenUrl),
+                        Scopes = new Dictionary<string, string>(login.Scopes),
                     },
                 },
             };
 
             document.Security ??= [];
             document.Security.Add(new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference(ApiKeyScheme, document)] = [] });
-            document.Security.Add(new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference(OAuth2Scheme, document)] = ["openid"] });
+            document.Security.Add(new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference(OAuth2Scheme, document)] = [.. login.Scopes.Keys] });
             return Task.CompletedTask;
         }
     }

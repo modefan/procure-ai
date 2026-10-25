@@ -22,3 +22,22 @@ public sealed class AuthOptions
     [RegularExpression(@"^([0-9a-fA-F]{64})?\z", ErrorMessage = "AdminApiKeySha256 must be 64 hexadecimal characters or empty.")]
     public string AdminApiKeySha256 { get; set; } = "";
 }
+
+/// <summary>
+/// The <c>Auth:OpenApi</c> section: where Swagger UI sends people to log in (authorization code flow with PKCE).
+/// Plain configuration, no OIDC discovery: Keycloak and Entra ID differ only in these values.
+/// </summary>
+public sealed class OpenApiAuthOptions
+{
+    public const string SectionName = "Auth:OpenApi";
+
+    [Required, Url]
+    public string AuthorizationUrl { get; set; } = "";
+
+    [Required, Url]
+    public string TokenUrl { get; set; } = "";
+
+    /// <summary>Scope name to description.</summary>
+    [Required, MinLength(1)]
+    public Dictionary<string, string> Scopes { get; set; } = [];
+}

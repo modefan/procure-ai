@@ -15,22 +15,29 @@ public static class CacheTags
     /// <summary>Resolves <c>{tenant}</c> and route values; a template that names a route value the request lacks is skipped.</summary>
     public static string[] Resolve(IReadOnlyList<string> templates, HttpContext http, ICurrentUser user)
     {
-        var tags = new List<string>(templates.Count);
-        foreach (var template in templates)
+        var values = http.Request.RouteValues.Select(v => (v.Key, v.Value)).ToArray();
+        return [.. templates.Select(t => Format(t, Tenant(user), values)).OfType<string>()];
+    }
+
+    /// <summary>
+    /// The one place a tag is built, for reads (templates) and for invalidation after a write, so the two can never drift.
+    /// GUID values are written in lower-case "D" form whatever case the URL used. Null when a placeholder has no value.
+    /// </summary>
+    public static string? Format(string template, string tenant, params (string Name, object? Value)[] values)
+    {
+        var resolved = template.Replace("{tenant}", tenant, StringComparison.Ordinal);
+        foreach (var (name, value) in values)
         {
-            var resolved = template.Replace("{tenant}", Tenant(user), StringComparison.Ordinal);
-            foreach (var (name, value) in http.Request.RouteValues)
+            var text = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            if (Guid.TryParse(text, out var guid))
             {
-                resolved = resolved.Replace("{" + name + "}", Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+                text = guid.ToString("D");
             }
 
-            if (!resolved.Contains('{', StringComparison.Ordinal))
-            {
-                tags.Add(resolved);
-            }
+            resolved = resolved.Replace("{" + name + "}", text, StringComparison.OrdinalIgnoreCase);
         }
 
-        return [.. tags];
+        return resolved.Contains('{', StringComparison.Ordinal) ? null : resolved;
     }
 }
 

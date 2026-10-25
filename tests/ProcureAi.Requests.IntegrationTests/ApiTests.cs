@@ -111,7 +111,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         var dto = (await response.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
         dto.Status.ShouldBe(RequestStatus.Draft);
         dto.Number.ShouldBe("PR-0001");
-        dto.TotalInclVatDisplay.ShouldBe("R 86 940,00");
+        dto.TotalInclVatDisplay.ShouldBe("R 86Â 940,00");
         response.Headers.ETag!.Tag.ShouldBe($"\"{dto.Version}\"");
         response.Headers.ETag.IsWeak.ShouldBeFalse();
         response.Headers.Location!.AbsolutePath.ShouldBe($"{Requests}/{dto.Id}");
@@ -196,6 +196,57 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         logged.Properties["CorrelationId"].ToString().ShouldBe("\"corr-77\"");
         logged.Properties["TenantId"].ToString().ShouldBe("\"acme\"");
         logged.Properties["UserId"].ToString().ShouldBe("\"user-77\"");
+    }
+
+    [Fact]
+    public async Task Client_that_disconnects_after_the_commit_gets_the_stored_result_on_retry()
+    {
+        var tenant = NewTenant("abort");
+        var key = Guid.NewGuid().ToString();
+        using var abort = new CancellationTokenSource();
+        _factory.Hook.Client = abort;
+
+        // The client goes away right after the request was written, while the cache is being invalidated.
+        try
+        {
+            await _client.SendAsync(Req(HttpMethod.Post, Requests, NewBody(), tenant, idempotencyKey: key), abort.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        var retry = await _client.SendAsync(Req(HttpMethod.Post, Requests, NewBody(), tenant, idempotencyKey: key), Ct);
+
+        retry.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var replayed = (await retry.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        var list = await (await _client.SendAsync(Req(HttpMethod.Get, Requests, tenant: tenant), Ct))
+            .Content.ReadFromJsonAsync<PagedResult<RequestDto>>(Json, Ct);
+        list!.Total.ShouldBe(1, "the retry must not create a second request");
+        list.Items.Single().Id.ShouldBe(replayed.Id);
+    }
+
+    [Fact]
+    public async Task Client_that_disconnects_after_the_submit_commit_gets_202_on_retry_not_412()
+    {
+        var tenant = NewTenant("abortsub");
+        var created = await CreateAsync(tenant);
+        var key = Guid.NewGuid().ToString();
+        using var abort = new CancellationTokenSource();
+        _factory.Hook.Client = abort;
+        var url = $"{Requests}/{created.Id}/submit";
+
+        try
+        {
+            await _client.SendAsync(Req(HttpMethod.Post, url, null, tenant, ifMatch: ETagOf(created), idempotencyKey: key), abort.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        var retry = await _client.SendAsync(Req(HttpMethod.Post, url, null, tenant, ifMatch: ETagOf(created), idempotencyKey: key), Ct);
+
+        retry.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        (await retry.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!.Status.ShouldBe(RequestStatus.Submitted);
     }
 
     [Fact]
@@ -468,8 +519,10 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         var oauth = schemes.GetProperty("OAuth2");
         oauth.GetProperty("type").GetString().ShouldBe("oauth2");
         var flow = oauth.GetProperty("flows").GetProperty("authorizationCode");
-        flow.GetProperty("authorizationUrl").GetString().ShouldBe($"{TestAuth.Issuer}/protocol/openid-connect/auth");
-        flow.GetProperty("tokenUrl").GetString().ShouldBe($"{TestAuth.Issuer}/protocol/openid-connect/token");
+        flow.GetProperty("authorizationUrl").GetString().ShouldBe(ApiFactory.OpenApiAuthorizationUrl);
+        flow.GetProperty("tokenUrl").GetString().ShouldBe(ApiFactory.OpenApiTokenUrl);
+        // "email" exists only in the test configuration; "openid" and "profile" come from appsettings.json, so the scopes are configuration.
+        flow.GetProperty("scopes").EnumerateObject().Select(o => o.Name).Order().ShouldBe(["email", "openid", "profile"]);
         doc.GetProperty("security").GetArrayLength().ShouldBe(2);
         // Enums are documented as names.
         doc.GetProperty("components").GetProperty("schemas").GetProperty("RequestStatus").GetProperty("enum")

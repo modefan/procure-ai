@@ -36,6 +36,9 @@ public static class TestHost
             ["Auth:Authority"] = TestAuth.Issuer,
             ["Auth:Audience"] = TestAuth.Audience,
             ["Auth:AdminApiKeySha256"] = TestAuth.ApiKeySha256,
+            ["Auth:OpenApi:AuthorizationUrl"] = TestAuth.Issuer + "/auth",
+            ["Auth:OpenApi:TokenUrl"] = TestAuth.Issuer + "/token",
+            ["Auth:OpenApi:Scopes:openid"] = "OpenID Connect",
         };
         foreach (var (key, value) in config ?? [])
         {

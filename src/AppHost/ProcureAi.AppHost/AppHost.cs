@@ -130,13 +130,15 @@ builder.AddProject<Projects.ProcureAi_Requests_Api>(ResourceNames.RequestsApi)
     .WithEnvironment("Auth__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Auth__RequireHttpsMetadata", "false")
+    .WithEnvironment("Auth__OpenApi__AuthorizationUrl", ReferenceExpression.Create($"{keycloakAuthority}/protocol/openid-connect/auth"))
+    .WithEnvironment("Auth__OpenApi__TokenUrl", ReferenceExpression.Create($"{keycloakAuthority}/protocol/openid-connect/token"))
     .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
     // The Serilog OpenTelemetry sink has no environment-variable fallback, so it is pointed at the dashboard here.
     .WithEnvironment(context =>
     {
         if (!string.IsNullOrWhiteSpace(otlpEndpoint))
         {
-            context.EnvironmentVariables["Serilog__WriteTo__1__Args__endpoint"] = otlpEndpoint;
+            context.EnvironmentVariables["Serilog__WriteTo__OpenTelemetry__Args__endpoint"] = otlpEndpoint;
         }
     })
     .WaitFor(keycloak)
