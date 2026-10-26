@@ -47,7 +47,7 @@ public static class DependencyInjection
     /// outcome events to the <c>budgets</c> exchange (one route per event type, so each is routed by its own type), and the
     /// retries for a handler that lost a race in the database: a concurrent change of the same budget row
     /// (<see cref="DbUpdateConcurrencyException"/>) or a concurrent insert of the same request marker (unique violation).
-    /// The delays come from <c>Budgets:ConcurrencyRetryDelays</c>.
+    /// Backoff, attempts and jitter come from <c>Budgets:ConcurrencyRetry</c>.
     /// </summary>
     public static void ConfigureBudgets(this WolverineOptions options, IConfiguration configuration, string serviceName)
     {
@@ -58,10 +58,9 @@ public static class DependencyInjection
         options.PublishMessage<BudgetReservationFailed>().ToRabbitExchange(Exchanges.Budgets);
         options.PublishMessage<BudgetReleased>().ToRabbitExchange(Exchanges.Budgets);
 
-        var delays = configuration.GetSection(BudgetsOptions.SectionName).Get<BudgetsOptions>()?.ConcurrencyRetryDelays
-            is { Length: > 0 } configured
-            ? configured
-            : throw new InvalidOperationException($"'{BudgetsOptions.SectionName}:{nameof(BudgetsOptions.ConcurrencyRetryDelays)}' is not configured.");
+        var retry = configuration.GetSection(BudgetsOptions.SectionName).Get<BudgetsOptions>()?.ConcurrencyRetry
+            ?? throw new InvalidOperationException($"'{BudgetsOptions.SectionName}:{nameof(BudgetsOptions.ConcurrencyRetry)}' is not configured.");
+        var delays = retry.Delays(Random.Shared);
         options.OnException<DbUpdateConcurrencyException>().RetryWithCooldown(delays);
         options.OnException<DbUpdateException>(exception => exception.InnerException is PostgresException { SqlState: UniqueViolation })
             .RetryWithCooldown(delays);

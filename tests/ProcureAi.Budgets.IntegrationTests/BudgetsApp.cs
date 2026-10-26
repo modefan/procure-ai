@@ -49,6 +49,30 @@ public sealed class BudgetsApp : IAsyncLifetime
         await _infra.DisposeAsync();
     }
 
+    /// <summary>Starts more instances of the API on the same infrastructure; they compete for the queue like replicas in a cluster.</summary>
+    public async Task<IAsyncDisposable> StartExtraInstancesAsync(int count)
+    {
+        var extra = Enumerable.Range(0, count).Select(_ => new BudgetsApiFactory(_infra, _access)).ToList();
+        foreach (var factory in extra)
+        {
+            factory.CreateClient().Dispose();
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        return new Instances(extra);
+    }
+
+    private sealed class Instances(List<BudgetsApiFactory> factories) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            foreach (var factory in factories)
+            {
+                await factory.DisposeAsync();
+            }
+        }
+    }
+
     /// <summary>
     /// Sends a command to the <c>budgets-commands</c> queue through the broker, as the approval flow does, with the tenant and user
     /// of the sender in the headers.

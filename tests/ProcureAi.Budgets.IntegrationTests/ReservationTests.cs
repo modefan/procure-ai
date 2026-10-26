@@ -105,6 +105,36 @@ public sealed class ReservationTests(BudgetsApp app)
         (await app.DeadLettersAsync()).ShouldBe(deadBefore, "every loser of a race was retried, none dead-lettered");
     }
 
+    [Theory]
+    [InlineData(10)]
+    [InlineData(40)]
+    public async Task Parallel_reservations_on_one_budget_accept_exactly_the_ones_that_fit_and_dead_letter_nothing(int contenders)
+    {
+        // Four instances compete for the queue, like replicas in a cluster.
+        await using var replicas = await app.StartExtraInstancesAsync(3);
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, CostCenter, 100_000m);
+        var deadBefore = await app.DeadLettersAsync();
+        Guid[] ids = [.. Enumerable.Range(0, contenders).Select(_ => Guid.NewGuid())];
+
+        await Task.WhenAll(ids.Select(id => app.SendAsync(Reserve(id, tenant, 30_000m), tenant)));
+
+        var outcomes = new List<BudgetEvent>();
+        foreach (var id in ids)
+        {
+            outcomes.AddRange(await app.Events.WaitForAsync(id, e => e.Count > 0, Timeout));
+        }
+
+        outcomes.Count(e => e.Kind == BudgetEventKind.Reserved).ShouldBe(3, "floor(100 000 / 30 000)");
+        var failed = outcomes.Where(e => e.Kind == BudgetEventKind.Failed).ToList();
+        failed.Count.ShouldBe(contenders - 3);
+        failed.ShouldAllBe(e => e.Reason == "Over budget");
+        var stored = await app.StoredAsync(tenant, CostCenter);
+        stored.Reserved.ShouldBe(90_000m);
+        stored.Reserved.ShouldBe(stored.Active, "the stored total equals the sum of the active reservations");
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore, "no contender ran out of retries");
+    }
+
     [Fact]
     public async Task Duplicate_ReserveBudget_message_reserves_once()
     {
