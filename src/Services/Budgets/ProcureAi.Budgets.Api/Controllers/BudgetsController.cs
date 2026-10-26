@@ -47,12 +47,16 @@ public sealed class BudgetsController(
     [CachedGet(Tags = [BudgetCacheTag.Template])]
     [RequirePermission(Permissions.RequestsCreate)]
     [ProducesResponseType<BudgetCheckDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<BudgetCheckDto>> Check(
         [MaxLength(BudgetLimits.MaxCodeLength)] string costCenter,
         [FromQuery, Range(0, BudgetLimits.MaxAmount)] decimal amount,
-        CancellationToken cancellationToken) =>
-        await bus.InvokeAsync<BudgetCheckDto>(new CheckBudget(costCenter, amount), cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        await EnsureVisibleAsync(costCenter, $"No budget for {costCenter}.", cancellationToken);
+        return await bus.InvokeAsync<BudgetCheckDto>(new CheckBudget(costCenter, amount), cancellationToken);
+    }
 
     [HttpGet("{costCenter}/{fiscalYear}", Name = "GetBudget")]
     [CachedGet(Tags = [BudgetCacheTag.Template])]
@@ -64,16 +68,21 @@ public sealed class BudgetsController(
         [MaxLength(BudgetLimits.MaxFiscalYearLength)] string fiscalYear,
         CancellationToken cancellationToken)
     {
-        // A cost center the caller may not see looks the same as one that does not exist.
-        var visible = await scope.VisibleCostCentersAsync(cancellationToken);
-        if (visible is not null && !visible.Contains(costCenter))
-        {
-            throw new NotFoundException($"No budget for {costCenter} in {fiscalYear}.");
-        }
+        await EnsureVisibleAsync(costCenter, $"No budget for {costCenter} in {fiscalYear}.", cancellationToken);
 
         var budget = await bus.InvokeAsync<BudgetDto>(new GetBudget(costCenter, fiscalYear), cancellationToken);
         Response.Headers.ETag = VersionETag.Format(budget.Version);
         return budget;
+    }
+
+    /// <summary>A cost center the caller may not see looks the same as one that does not exist.</summary>
+    private async Task EnsureVisibleAsync(string costCenter, string message, CancellationToken cancellationToken)
+    {
+        var visible = await scope.VisibleCostCentersAsync(cancellationToken);
+        if (visible is not null && !visible.Contains(costCenter))
+        {
+            throw new NotFoundException(message);
+        }
     }
 
     /// <summary>Sets the budget. Send the budget version (<c>version</c>, also the ETag of the read) in <c>If-Match</c>. It cannot go below what is reserved or spent.</summary>

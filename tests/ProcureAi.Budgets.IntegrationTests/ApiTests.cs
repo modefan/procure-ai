@@ -135,16 +135,30 @@ public sealed class ApiTests(BudgetsApp app)
         var id = Guid.NewGuid();
         await app.SendAsync(new ReserveBudget(id, tenant, "CC-A", 30_000m, DateTimeOffset.UtcNow), tenant);
         await app.Events.WaitForAsync(id, e => e.Count > 0, BudgetsApp.EventTimeout);
+        app.Access.SetCostCenters(tenant, "tom", "CC-A");
         var requester = BudgetsApp.Token(tenant, "requester", "tom");
 
         var fits = await ReadAsync<BudgetCheckDto>(await SendAsync(HttpMethod.Get, $"{Base}/CC-A/check?amount=70000", requester));
         var tooMuch = await ReadAsync<BudgetCheckDto>(await SendAsync(HttpMethod.Get, $"{Base}/CC-A/check?amount=70000.01", requester));
-        var unknown = await ReadAsync<BudgetCheckDto>(await SendAsync(HttpMethod.Get, $"{Base}/CC-Z/check?amount=1", requester));
 
         fits.ShouldBe(new BudgetCheckDto(true, 70_000m, Year));
         tooMuch.ShouldBe(new BudgetCheckDto(false, 70_000m, Year));
-        unknown.Fits.ShouldBeFalse();
-        unknown.Available.ShouldBe(0m);
+    }
+
+    [Fact]
+    public async Task Check_endpoint_refuses_foreign_cost_center()
+    {
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, "CC-A", 100_000m);
+        await app.Infra.CreateBudgetAsync(tenant, "CC-B", 50_000m);
+        app.Access.SetCostCenters(tenant, "tom", "CC-A");
+        var requester = BudgetsApp.Token(tenant, "requester", "tom");
+
+        var foreign = await SendAsync(HttpMethod.Get, $"{Base}/CC-B/check?amount=1", requester);
+        var unknown = await SendAsync(HttpMethod.Get, $"{Base}/CC-Z/check?amount=1", requester);
+
+        foreign.StatusCode.ShouldBe(HttpStatusCode.NotFound, "a cost center the caller does not act for looks like one that does not exist");
+        unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
