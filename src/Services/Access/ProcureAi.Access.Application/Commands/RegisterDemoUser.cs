@@ -49,7 +49,12 @@ public static class RegisterDemoUserHandler
         catch (DbUpdateException)
         {
             // A parallel call inserted the same user first (primary key tenant + user). Whoever lost has nothing left to do.
-            db.TenantUsers.Remove(entity);
+            // The re-check below works because Wolverine's EF middleware runs in Lightweight mode: no transaction is open during the
+            // handler. Under Eager mode the failed INSERT would abort the transaction (Postgres 25P02) and the re-check would fail too.
+            // Clear everything tracked: the audit interceptor added an AuditEntry inside the failed save, and Wolverine's middleware
+            // saves again after the handler, which would write a phantom "Insert tenant user" row. Nothing else is tracked yet
+            // (the reads above do not track, and the event is published only after the save).
+            db.ChangeTracker.Clear();
             if (await db.TenantUsers.AnyAsync(u => u.UserId == command.UserId, cancellationToken))
             {
                 return new RegistrationDto(tenant, Joined: false);

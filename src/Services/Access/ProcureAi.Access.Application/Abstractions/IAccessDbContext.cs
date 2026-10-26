@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using ProcureAi.Access.Domain;
 
 namespace ProcureAi.Access.Application.Abstractions;
@@ -14,6 +15,7 @@ public interface IAccessDbContext
 
     DbSet<TenantUser> TenantUsers { get; }
 
+    ChangeTracker ChangeTracker { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

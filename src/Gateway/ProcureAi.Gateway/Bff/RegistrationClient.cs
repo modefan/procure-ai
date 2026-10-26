@@ -23,6 +23,8 @@ public sealed class RegistrationClient(HttpClient http, IOptions<RegistrationOpt
         };
         request.Options.Set(ServiceTokenHandler.TenantOption, options.Value.DemoTenantId);
         // One key per user: parallel and repeated calls for the same user run once in Access and share its answer.
+        // With 1-day idempotency retention, a user removed from the organization within 24 h gets the stored answer (or a 422 if
+        // their profile changed) and is not re-joined.
         request.Headers.Add("Idempotency-Key", $"register-{userId}");
         using var response = await http.SendAsync(request, cancellationToken);
         return response.IsSuccessStatusCode;

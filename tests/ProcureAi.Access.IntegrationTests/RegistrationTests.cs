@@ -2,7 +2,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using ProcureAi.Access.Application.Dtos;
+using ProcureAi.Access.Infrastructure;
+using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts;
 using Shouldly;
 
@@ -138,6 +141,11 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
 
         responses.Count(r => r.StatusCode == HttpStatusCode.Created).ShouldBeGreaterThanOrEqualTo(1);
         (await UsersAsync()).Count(u => u.UserId == userId).ShouldBe(1);
+        // Losing racers must not leave an audit row of an insert that never happened.
+        await using var audit = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options);
+        (await audit.Set<AuditEntry>()
+            .Where(a => a.Table == "tenant_users" && a.Operation == AuditOperation.Insert && a.PrimaryKey.Contains(userId))
+            .CountAsync(Ct)).ShouldBe(1);
         await probe.WaitForMessageAsync(queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(20));
         await Should.ThrowAsync<TimeoutException>(() => probe.WaitForMessageAsync(
             queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(3)));
