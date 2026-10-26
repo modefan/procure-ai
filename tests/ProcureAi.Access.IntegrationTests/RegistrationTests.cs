@@ -43,14 +43,14 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         await _factory.DisposeAsync();
     }
 
-    private async Task<HttpResponseMessage> RegisterAsync(string userId, string email, string name, string? tenant = null)
+    private async Task<HttpResponseMessage> RegisterAsync(string userId, string email, string name, string? tenant = null, string? key = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, Url) { Content = JsonContent.Create(new { userId, email, displayName = name }) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateServiceToken(AccessApiFactory.InternalClientId));
         request.Headers.Add("X-Tenant-Id", tenant ?? _tenant);
         request.Headers.Add("X-Calling-Service", "gateway");
         request.Headers.Add("X-On-Behalf-Of-User", userId);
-        request.Headers.Add("Idempotency-Key", $"register-{Guid.NewGuid():N}");
+        request.Headers.Add("Idempotency-Key", key ?? $"register-{Guid.NewGuid():N}");
         return await _client.SendAsync(request, Ct);
     }
 
@@ -119,6 +119,42 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         await Should.ThrowAsync<TimeoutException>(() => probe.WaitForMessageAsync(
             queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(3)));
         (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeTrue();
+    }
+
+    private async Task RunParallelRegistrationAsync(Func<int, string?> keyFor)
+    {
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        var probe = new RabbitProbe(infra.RabbitConnectionString);
+        var queue = await probe.BindQueueAsync(Exchanges.Access);
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 4).Select(i => RegisterAsync(userId, email, "New Person", key: keyFor(i))));
+
+        foreach (var response in responses)
+        {
+            response.StatusCode.ShouldBeOneOf(HttpStatusCode.Created, HttpStatusCode.OK);
+            response.Dispose();
+        }
+
+        responses.Count(r => r.StatusCode == HttpStatusCode.Created).ShouldBeGreaterThanOrEqualTo(1);
+        (await UsersAsync()).Count(u => u.UserId == userId).ShouldBe(1);
+        await probe.WaitForMessageAsync(queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(20));
+        await Should.ThrowAsync<TimeoutException>(() => probe.WaitForMessageAsync(
+            queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(3)));
+    }
+
+    [Fact]
+    public async Task Parallel_registrations_with_the_same_key_run_once()
+    {
+        var key = $"register-{Guid.NewGuid():N}";
+        await RunParallelRegistrationAsync(_ => key);
+    }
+
+    [Fact]
+    public async Task Parallel_registrations_with_different_keys_do_not_fail_on_the_duplicate_insert()
+    {
+        // The idempotency layer is bypassed (a key per call): the handler itself must survive the unique violation.
+        await RunParallelRegistrationAsync(_ => null);
     }
 
     [Fact]

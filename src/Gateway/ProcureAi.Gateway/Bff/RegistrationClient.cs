@@ -22,8 +22,8 @@ public sealed class RegistrationClient(HttpClient http, IOptions<RegistrationOpt
             Content = JsonContent.Create(new { userId, email, displayName }),
         };
         request.Options.Set(ServiceTokenHandler.TenantOption, options.Value.DemoTenantId);
-        // One key per call: the retries of this call repeat it (Access answers them from the first result).
-        request.Headers.Add("Idempotency-Key", $"register-{Guid.NewGuid():N}");
+        // One key per user: parallel and repeated calls for the same user run once in Access and share its answer.
+        request.Headers.Add("Idempotency-Key", $"register-{userId}");
         using var response = await http.SendAsync(request, cancellationToken);
         return response.IsSuccessStatusCode;
     }

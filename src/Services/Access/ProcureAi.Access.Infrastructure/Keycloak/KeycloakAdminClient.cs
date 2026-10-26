@@ -83,7 +83,14 @@ public sealed class KeycloakAdminClient(
 
         // The body is the bare user ID as a JSON string.
         using var added = await SendAsync(HttpMethod.Post, organization, JsonContent.Create(userId), cancellationToken);
-        if (added.StatusCode != HttpStatusCode.Conflict)
+        if (added.IsSuccessStatusCode || added.StatusCode == HttpStatusCode.Conflict)
+        {
+            return;
+        }
+
+        // A parallel call may have added the user a moment ago (Keycloak answers 400 or 409 for that): look again before failing.
+        using var again = await SendAsync(HttpMethod.Get, $"{organization}/{escapedUser}", null, cancellationToken);
+        if (!again.IsSuccessStatusCode)
         {
             Ensure(added, "adding the user to the organization");
         }
@@ -98,7 +105,19 @@ public sealed class KeycloakAdminClient(
         // Mapping a role the user already has is a no-op in Keycloak (204).
         using var mapped = await SendAsync(
             HttpMethod.Post, $"{realm}/users/{escapedUser}/role-mappings/realm", JsonContent.Create(new[] { representation }), cancellationToken);
-        Ensure(mapped, "assigning the role");
+        if (mapped.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        // A parallel call may have mapped the role a moment ago and Keycloak then answers 400: look again before failing.
+        using var current = await SendAsync(HttpMethod.Get, $"{realm}/users/{escapedUser}/role-mappings/realm", null, cancellationToken);
+        Ensure(current, "reading the role mappings");
+        var roles = await current.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        if (!roles.EnumerateArray().Any(r => r.GetProperty("name").GetString() == role))
+        {
+            Ensure(mapped, "assigning the role");
+        }
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)

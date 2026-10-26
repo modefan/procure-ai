@@ -39,9 +39,24 @@ public static class RegisterDemoUserHandler
         await identities.EnsureDemoMemberAsync(command.UserId, RequesterRole, cancellationToken);
 
         var displayName = new[] { command.DisplayName, command.Email, command.UserId }.First(v => !string.IsNullOrWhiteSpace(v));
-        db.TenantUsers.Add(TenantUser.Create(
-            tenant, command.UserId, displayName, command.Email ?? "", [RequesterRole], Money.Zero, isFinanceApprover: false, []));
-        await db.SaveChangesAsync(cancellationToken);
+        var entity = TenantUser.Create(
+            tenant, command.UserId, displayName, command.Email ?? "", [RequesterRole], Money.Zero, isFinanceApprover: false, []);
+        db.TenantUsers.Add(entity);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // A parallel call inserted the same user first (primary key tenant + user). Whoever lost has nothing left to do.
+            db.TenantUsers.Remove(entity);
+            if (await db.TenantUsers.AnyAsync(u => u.UserId == command.UserId, cancellationToken))
+            {
+                return new RegistrationDto(tenant, Joined: false);
+            }
+
+            throw;
+        }
 
         await bus.PublishAsync(new AccessChanged(tenant, SetApprovalLimitHandler.UserKind, command.UserId, time.GetUtcNow()));
         return new RegistrationDto(tenant, Joined: true);

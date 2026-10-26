@@ -45,6 +45,8 @@ public static class BffEndpoints
     {
         // A user without a tenant just registered: they join the demo company (and get their new claims) on this call.
         // When that fails they are answered as before: no tenant, no permissions.
+        // "No tenant" means "not in any company": that also covers a user taken out of their organization, who is joined to
+        // demo as a requester with a R 0 limit again. Accepted for the demo.
         if (user.TenantId is null)
         {
             await registration.TryJoinAsync(http);
