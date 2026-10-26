@@ -16,35 +16,32 @@ public sealed class ConcurrencyRetryOptionsTests
     };
 
     [Fact]
-    public void Delays_grow_exponentially_are_capped_and_never_exceed_the_maximum()
+    public void Delays_grow_exponentially_and_are_capped()
     {
-        var options = Options();
+        var delays = Options().Delays();
 
-        for (var run = 0; run < 200; run++)
-        {
-            var delays = options.Delays(new Random(run));
-
-            delays.Length.ShouldBe(10);
-            delays.ShouldAllBe(d => d > TimeSpan.Zero && d <= options.MaxDelay);
-            delays[0].ShouldBeInRange(TimeSpan.FromMilliseconds(25), TimeSpan.FromMilliseconds(75), "50 ms plus or minus 50 percent");
-            delays[9].ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(1), "capped at 2 s, minus at most 50 percent");
-        }
+        delays.Select(d => d.TotalMilliseconds).ShouldBe([50, 100, 200, 400, 800, 1600, 2000, 2000, 2000, 2000]);
     }
 
     [Fact]
-    public void Jitter_makes_the_delays_differ_between_lists()
+    public void Retries_total_enough_waiting_for_a_burst_of_many_contenders()
     {
-        var options = Options();
+        var total = Options().Delays().Aggregate(TimeSpan.Zero, (sum, d) => sum + d);
 
-        options.Delays(new Random(1)).ShouldNotBe(options.Delays(new Random(2)));
+        total.ShouldBeGreaterThan(TimeSpan.FromSeconds(10));
     }
 
     [Fact]
-    public void The_total_wait_covers_a_burst_of_many_contenders()
+    public void Invalid_values_are_rejected_clearly_before_they_are_used()
     {
-        var total = Options().Delays(new Random(3)).Aggregate(TimeSpan.Zero, (sum, d) => sum + d);
+        var negative = Options();
+        negative.Attempts = -1;
+        var shortMax = Options();
+        shortMax.MaxDelay = TimeSpan.FromMilliseconds(10);
 
-        total.ShouldBeGreaterThan(TimeSpan.FromSeconds(5));
+        Should.Throw<InvalidOperationException>(() => negative.Delays()).Message.ShouldContain("Attempts");
+        Should.Throw<InvalidOperationException>(() => shortMax.Delays()).Message.ShouldContain("MaxDelay");
+        Should.Throw<InvalidOperationException>(() => new ConcurrencyRetryOptions().Delays());
     }
 
     [Fact]

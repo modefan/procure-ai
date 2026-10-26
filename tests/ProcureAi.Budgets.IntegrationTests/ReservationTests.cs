@@ -136,6 +136,34 @@ public sealed class ReservationTests(BudgetsApp app)
     }
 
     [Fact]
+    public async Task A_burst_of_reservations_that_all_fit_reserves_every_one_and_dead_letters_nothing()
+    {
+        // Every one of these writes the budget row, so every contender of the burst conflicts with the others (a refusal writes
+        // nothing). Four instances compete for the queue, like replicas in a cluster.
+        const int contenders = 20;
+        await using var replicas = await app.StartExtraInstancesAsync(3);
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, CostCenter, 100_000m);
+        var deadBefore = await app.DeadLettersAsync();
+        Guid[] ids = [.. Enumerable.Range(0, contenders).Select(_ => Guid.NewGuid())];
+
+        await Task.WhenAll(ids.Select(id => app.SendAsync(Reserve(id, tenant, 1_000m), tenant)));
+
+        var outcomes = new List<BudgetEvent>();
+        foreach (var id in ids)
+        {
+            outcomes.AddRange(await app.Events.WaitForAsync(id, e => e.Count > 0, TimeSpan.FromSeconds(90)));
+        }
+
+        outcomes.ShouldAllBe(e => e.Kind == BudgetEventKind.Reserved);
+        outcomes.Count.ShouldBe(contenders);
+        var stored = await app.StoredAsync(tenant, CostCenter);
+        stored.Reserved.ShouldBe(20_000m);
+        stored.Reserved.ShouldBe(stored.Active, "the stored total equals the sum of the active reservations");
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore, "no contender ran out of retries");
+    }
+
+    [Fact]
     public async Task Duplicate_ReserveBudget_message_reserves_once()
     {
         var tenant = BudgetsInfraFixture.NewTenant();
