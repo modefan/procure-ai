@@ -10,8 +10,8 @@ public interface IBudgetsDbContext
     /// <summary>The budgets, with their reservations loaded when asked for with Include.</summary>
     DbSet<CostCenterBudget> Budgets { get; }
 
-    /// <summary>Tenant-level tombstones of requests released before their reservation arrived.</summary>
-    DbSet<ReleasedRequest> ReleasedRequests { get; }
+    /// <summary>One row per reserved or released request; the unique key that serialises reserve against release.</summary>
+    DbSet<RequestMarker> RequestMarkers { get; }
 
     ChangeTracker ChangeTracker { get; }
 

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ProcureAi.Budgets.Application.Abstractions;
 using ProcureAi.Budgets.Domain;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.Contracts.Budgets;
 using Wolverine;
 
@@ -12,23 +13,33 @@ public static class ReserveBudgetHandler
     /// <summary>
     /// Reserves the amount in the budget of the fiscal year the request was submitted in, then publishes the outcome through
     /// the outbox. A message delivered twice reserves once and repeats the same answer. A request released earlier is refused
-    /// as cancelled. The budget row changes on every reservation, so a concurrent loser fails on the version and is retried.
+    /// as cancelled. Two things serialise concurrent work in the database, and the loser is retried (see the Wolverine
+    /// policies of the infrastructure): the budget row changes on every reservation (its version rejects the second of two
+    /// reservations), and the request marker row has a unique key (a reserve and a release of one request cannot both insert it).
+    /// The command carries the tenant, so the queries name it instead of relying on the caller headers of the message.
     /// </summary>
     public static async Task Handle(
-        ReserveBudget command, IBudgetsDbContext db, IMessageBus bus, IOptions<BudgetsOptions> options, TimeProvider time,
-        CancellationToken cancellationToken)
+        ReserveBudget command, IBudgetsDbContext db, IMessageBus bus, ICacheInvalidator cache, IOptions<BudgetsOptions> options,
+        TimeProvider time, CancellationToken cancellationToken)
     {
         var year = FiscalYear.For(command.SubmittedAt, options.Value.Zone);
-        var releasedEarlier = await db.ReleasedRequests.AnyAsync(
-            r => r.TenantId == command.TenantId && r.RequestId == command.RequestId, cancellationToken);
-        var budget = releasedEarlier
+        var marker = await db.RequestMarkers.IgnoreQueryFilters().SingleOrDefaultAsync(
+            m => m.TenantId == command.TenantId && m.RequestId == command.RequestId, cancellationToken);
+        var budget = marker is { IsReleased: true }
             ? null
-            : await db.Budgets.Include(b => b.Reservations).SingleOrDefaultAsync(
+            : await db.Budgets.IgnoreQueryFilters().Include(b => b.Reservations).SingleOrDefaultAsync(
                 b => b.TenantId == command.TenantId && b.CostCenterCode == command.CostCenterCode && b.FiscalYear == year,
                 cancellationToken);
 
-        var result = BudgetDecisions.Reserve(command, year, budget, releasedEarlier, time.GetUtcNow());
+        var decision = BudgetDecisions.Reserve(command, year, budget, marker, time.GetUtcNow());
+        if (decision.Marker == MarkerChange.AddReserved)
+        {
+            db.RequestMarkers.Add(RequestMarker.Reserved(command.TenantId, command.RequestId));
+            // Cached budget reads of the tenant are dropped once this handler's transaction has committed.
+            await cache.RemoveAfterCommitAsync([BudgetCacheTag.Tenant(command.TenantId)]);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
-        await bus.PublishAsync(result);
+        await bus.PublishAsync(decision.Event);
     }
 }

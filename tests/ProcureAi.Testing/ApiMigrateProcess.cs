@@ -1,0 +1,42 @@
+using System.Diagnostics;
+
+namespace ProcureAi.Testing;
+
+/// <summary>
+/// Runs the real <c>&lt;Service&gt;.Api --migrate</c> (what the deployment's migrate step does), so migration, message store and demo
+/// seed are exercised as deployed. The test project must reference the Api project (its dll is next to the test assembly).
+/// </summary>
+public static class ApiMigrateProcess
+{
+    private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
+
+    /// <param name="apiAssembly">File name of the Api assembly, e.g. <c>ProcureAi.Budgets.Api.dll</c>.</param>
+    /// <param name="databaseConnectionName">The service's connection-string name, e.g. <c>budgetsdb</c>.</param>
+    public static async Task RunAsync(
+        string apiAssembly, string databaseConnectionName, string database, string rabbit, string redis, bool demoSeed)
+    {
+        var dll = Path.Combine(AppContext.BaseDirectory, apiAssembly);
+        var start = new ProcessStartInfo("dotnet", ["exec", dll, "--migrate"])
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(dll)!,
+        };
+        // Production settings: no automatic schema changes, so any table that appears came from --migrate.
+        start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
+        start.Environment[$"ConnectionStrings__{databaseConnectionName}"] = database;
+        start.Environment["ConnectionStrings__rabbitmq"] = rabbit;
+        start.Environment["ConnectionStrings__Redis"] = redis;
+        start.Environment["DemoSeed__Enabled"] = demoSeed ? "true" : "false";
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(Timeout);
+        await process.WaitForExitAsync(timeout.Token);
+        var text = (await output) + (await error);
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"{apiAssembly} --migrate exited with {process.ExitCode}: {text}");
+        }
+    }
+}

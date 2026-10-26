@@ -1,0 +1,483 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "ProcureAi Budgets API",
+    "description": "HTTP API of the budgets-api service of the ProcureAi demo.",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/v1/budgets": {
+      "get": {
+        "tags": [
+          "Budgets"
+        ],
+        "operationId": "ListBudgets",
+        "parameters": [
+          {
+            "name": "fiscalYear",
+            "in": "query",
+            "schema": {
+              "maxLength": 10,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetDto"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/budgets/{costCenter}/check": {
+      "get": {
+        "tags": [
+          "Budgets"
+        ],
+        "operationId": "CheckBudget",
+        "parameters": [
+          {
+            "name": "costCenter",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "type": "string"
+            }
+          },
+          {
+            "name": "amount",
+            "in": "query",
+            "schema": {
+              "maximum": 1000000000000,
+              "minimum": 0,
+              "type": "number",
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetCheckDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/budgets/{costCenter}/{fiscalYear}": {
+      "get": {
+        "tags": [
+          "Budgets"
+        ],
+        "operationId": "GetBudget",
+        "parameters": [
+          {
+            "name": "costCenter",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "type": "string"
+            }
+          },
+          {
+            "name": "fiscalYear",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 10,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Budgets"
+        ],
+        "operationId": "SetBudget",
+        "parameters": [
+          {
+            "name": "costCenter",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 50,
+              "type": "string"
+            }
+          },
+          {
+            "name": "fiscalYear",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 10,
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The ETag of the version you last read, e.g. \"3\". Missing: 428; stale: 412.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBudgetBody"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBudgetBody"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBudgetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BudgetCheckDto": {
+        "required": [
+          "fits",
+          "available",
+          "fiscalYear"
+        ],
+        "type": "object",
+        "properties": {
+          "fits": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "number",
+            "format": "double"
+          },
+          "fiscalYear": {
+            "type": "string"
+          }
+        }
+      },
+      "BudgetDto": {
+        "required": [
+          "costCenterCode",
+          "fiscalYear",
+          "amount",
+          "reserved",
+          "spent",
+          "available",
+          "version"
+        ],
+        "type": "object",
+        "properties": {
+          "costCenterCode": {
+            "type": "string"
+          },
+          "fiscalYear": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number",
+            "format": "double"
+          },
+          "reserved": {
+            "type": "number",
+            "format": "double"
+          },
+          "spent": {
+            "type": "number",
+            "format": "double"
+          },
+          "available": {
+            "type": "number",
+            "format": "double"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instance": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SetBudgetBody": {
+        "required": [
+          "amount"
+        ],
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "description": "The admin API key (Claude's testing access). Send X-Tenant-Id with it on tenant endpoints.",
+        "name": "X-Api-Key",
+        "in": "header"
+      },
+      "OAuth2": {
+        "type": "oauth2",
+        "description": "Keycloak login: authorization code flow with PKCE.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://openapi.invalid/auth",
+            "tokenUrl": "https://openapi.invalid/token",
+            "scopes": {
+              "email": "Email address",
+              "openid": "OpenID Connect",
+              "profile": "Profile"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKey": [ ]
+    },
+    {
+      "OAuth2": [
+        "email",
+        "openid",
+        "profile"
+      ]
+    }
+  ],
+  "tags": [
+    {
+      "name": "Budgets"
+    }
+  ]
+}

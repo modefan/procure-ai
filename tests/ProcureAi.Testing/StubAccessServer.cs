@@ -90,6 +90,11 @@ public sealed class StubAccessServer : IAsyncDisposable
         ["Auth:Internal:ClientSecret"] = "stub-secret",
     };
 
+    private readonly ConcurrentDictionary<(string Tenant, string UserId), string[]> _costCenters = new();
+
+    /// <summary>The cost centers the stub says one user acts for (everyone else gets <c>CC-100</c>).</summary>
+    public void SetCostCenters(string tenantId, string userId, params string[] codes) => _costCenters[(tenantId, userId)] = codes;
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -120,7 +125,8 @@ public sealed class StubAccessServer : IAsyncDisposable
             var matrix = stub._matrices.GetValueOrDefault(tenant) ?? DefaultMatrix;
             var wanted = roles.SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries)).ToHashSet(StringComparer.Ordinal);
             var permissions = matrix.Where(r => wanted.Contains(r.Key)).SelectMany(r => r.Value).Distinct().Order(StringComparer.Ordinal);
-            return Results.Json(new { permissions, costCenterCodes = new[] { "CC-100" }, approvalLimit = 50000m });
+            var costCenterCodes = stub._costCenters.GetValueOrDefault((tenant, userId)) ?? ["CC-100"];
+            return Results.Json(new { permissions, costCenterCodes, approvalLimit = 50000m });
         });
         app.MapPost("/api/v1/access/internal/registrations", async (HttpContext http, StubRegistrationBody body) =>
         {

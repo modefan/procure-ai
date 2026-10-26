@@ -65,6 +65,7 @@ public sealed class GatewayHost : IAsyncDisposable
             ["Session:RedisKeyPrefix"] = keyPrefix,
             ["RateLimiting:PermitLimit"] = "100000",
             ["ReverseProxy:Clusters:requests:Destinations:d1:Address"] = stub.Url,
+            ["ReverseProxy:Clusters:budgets:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:web:Destinations:d1:Address"] = stub.Url,
         };
         foreach (var (key, value) in access.Settings)

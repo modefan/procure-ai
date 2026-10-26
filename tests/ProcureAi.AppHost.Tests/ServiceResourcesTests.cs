@@ -79,6 +79,37 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Budgets_service_gets_its_database_migrate_api_and_debezium_and_the_gateway_routes_to_it()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "budgets-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "budgets-api");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-budgetsdb");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var migrateEnv = await EnvironmentOfAsync(migrate);
+        var apiEnv = await EnvironmentOfAsync(api);
+        var debeziumEnv = await EnvironmentOfAsync(debezium);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        apiEnv.ShouldContainKey("ConnectionStrings__budgetsdb");
+        migrateEnv.ShouldContainKeyAndValue("DemoSeed__Enabled", "true");
+        debeziumEnv.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_DBNAME", "budgetsdb");
+        debeziumEnv.ShouldContainKeyAndValue(
+            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", "public.budgets,public.budget_reservations,public.audit_entries");
+        api.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__budgets__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+    }
+
+    [Fact]
     public async Task Keycloak_gets_the_client_secrets_and_only_keycloak_gets_the_access_admin_secret()
     {
         await using var scope = await ModelScope.BuildAsync();

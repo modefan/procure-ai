@@ -192,6 +192,25 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         config.ShouldContain("usePkceWithAuthorizationCodeGrant");
     }
 
+    [Fact]
+    public async Task Swagger_ui_lists_the_budgets_definition_and_the_gateway_serves_its_document_and_api()
+    {
+        var browser = Browser();
+        using var initializer = await browser.GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+        using var document = await browser.GetAsync("/openapi/budgets/v1.json", Ct);
+        using var anonymous = await browser.GetAsync("/api/v1/budgets", Ct);
+        using var withKey = await browser.SendAsync(
+            Request(HttpMethod.Get, "/api/v1/budgets/IT-200/FY2027", headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+
+        config.ShouldContain("/openapi/budgets/v1.json");
+        config.ShouldContain("\"budgets\"");
+        await ExpectOkAsync(document);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the budgets API needs a session or key like every API");
+        await ExpectOkAsync(withKey);
+        _gateway.Stub.Last.Path.ShouldBe("/api/v1/budgets/IT-200/FY2027");
+    }
+
     // ---- the rest of the contract ----
 
     [Fact]
