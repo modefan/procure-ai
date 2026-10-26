@@ -29,8 +29,11 @@ public sealed class CostCenterBudget
 
     public IReadOnlyList<BudgetReservation> Reservations => _reservations.AsReadOnly();
 
-    /// <summary>Held for requests that are not released yet.</summary>
-    public Money Reserved => Money.Zar(_reservations.Where(r => !r.IsReleased).Sum(r => r.Amount.Amount));
+    /// <summary>
+    /// Held for requests that are not released yet. It is a stored total, updated by every reserve and release, so the budget
+    /// row itself changes and its version (<see cref="Version"/>) rejects the loser of two concurrent reservations.
+    /// </summary>
+    public Money Reserved { get; private set; }
 
     public Money Available => Amount - Reserved - Spent;
 
@@ -73,6 +76,7 @@ public sealed class CostCenterBudget
         }
 
         _reservations.Add(BudgetReservation.Hold(requestId, amount));
+        Reserved += amount;
         return ReservationOutcome.Reserved(amount, Available);
     }
 
@@ -89,7 +93,9 @@ public sealed class CostCenterBudget
             return Money.Zero;
         }
 
-        return existing.Release();
+        var released = existing.Release();
+        Reserved -= released;
+        return released;
     }
 
     /// <summary>Changes the budget. It may not go below what is already reserved or spent.</summary>

@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Services/Budgets/ProcureAi.Budgets.Domain/ProcureAi.Budgets.Domain.csproj" />
+    <ProjectReference Include="../../src/Services/Budgets/ProcureAi.Budgets.Application/ProcureAi.Budgets.Application.csproj" />
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
   </ItemGroup>
 

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ProcureAi.Budgets.Application.Abstractions;
+using ProcureAi.Budgets.Domain;
 using ProcureAi.Contracts.Budgets;
 using Wolverine;
 
@@ -9,25 +10,27 @@ public static class ReleaseBudgetHandler
 {
     /// <summary>
     /// Frees whatever the request holds (compensation). <c>BudgetReleased</c> is published only when money was freed, so a
-    /// release that is repeated, or that arrives for a request that never reserved, is silent.
+    /// repeated release is silent. When no budget holds the request yet, the release came first: a tenant-level tombstone is
+    /// stored so the reservation that follows is refused as cancelled.
     /// </summary>
     public static async Task Handle(
         ReleaseBudget command, IBudgetsDbContext db, IMessageBus bus, TimeProvider time, CancellationToken cancellationToken)
     {
         var budget = await db.Budgets.Include(b => b.Reservations).SingleOrDefaultAsync(
             b => b.TenantId == command.TenantId && b.Reservations.Any(r => r.RequestId == command.RequestId), cancellationToken);
-        if (budget is null)
+
+        var decision = BudgetDecisions.Release(command, budget, time.GetUtcNow());
+        if (decision.RecordTombstone
+            && !await db.ReleasedRequests.AnyAsync(
+                r => r.TenantId == command.TenantId && r.RequestId == command.RequestId, cancellationToken))
         {
-            return;
+            db.ReleasedRequests.Add(ReleasedRequest.Create(command.TenantId, command.RequestId));
         }
 
-        var released = budget.Release(command.RequestId);
         await db.SaveChangesAsync(cancellationToken);
-
-        if (released.Amount > 0m)
+        if (decision.Event is not null)
         {
-            await bus.PublishAsync(new BudgetReleased(
-                command.RequestId, command.TenantId, budget.CostCenterCode, released.Amount, time.GetUtcNow()));
+            await bus.PublishAsync(decision.Event);
         }
     }
 }

@@ -148,4 +148,38 @@ public sealed class CostCenterBudgetTests
     {
         Should.Throw<DomainException>(() => Budget().Reserve(Guid.NewGuid(), new Money(10m, "USD")));
     }
+
+    [Fact]
+    public void The_stored_reserved_total_stays_consistent_through_reserve_replay_release_and_release_twice()
+    {
+        var budget = Budget();
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+
+        budget.Reserve(a, Money.Zar(400m));
+        budget.Reserve(b, Money.Zar(100m));
+        budget.Reserved.ShouldBe(Money.Zar(500m));
+
+        budget.Reserve(a, Money.Zar(400m)); // replay
+        budget.Reserved.ShouldBe(Money.Zar(500m));
+        budget.Available.ShouldBe(Money.Zar(500m));
+
+        budget.Release(a);
+        budget.Reserved.ShouldBe(Money.Zar(100m));
+        budget.Release(a); // twice
+        budget.Reserved.ShouldBe(Money.Zar(100m));
+
+        budget.Reserve(a, Money.Zar(1m)); // cancelled, holds nothing
+        budget.Reserved.ShouldBe(Money.Zar(100m));
+        budget.Reserved.Amount.ShouldBe(budget.Reservations.Where(r => !r.IsReleased).Sum(r => r.Amount.Amount));
+    }
+
+    [Fact]
+    public void A_refused_reservation_does_not_change_the_total()
+    {
+        var budget = Budget();
+        budget.Reserve(Guid.NewGuid(), Money.Zar(1000.01m));
+
+        budget.Reserved.ShouldBe(Money.Zero);
+    }
 }
