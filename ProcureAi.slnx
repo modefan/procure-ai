@@ -17,6 +17,8 @@
     <Project Path="src/Services/Access/ProcureAi.Access.Application/ProcureAi.Access.Application.csproj" />
     <Project Path="src/Services/Access/ProcureAi.Access.Infrastructure/ProcureAi.Access.Infrastructure.csproj" />
     <Project Path="src/Services/Access/ProcureAi.Access.Api/ProcureAi.Access.Api.csproj" />
+    <Project Path="src/Services/Budgets/ProcureAi.Budgets.Domain/ProcureAi.Budgets.Domain.csproj" />
+    <Project Path="src/Services/Budgets/ProcureAi.Budgets.Application/ProcureAi.Budgets.Application.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -25,6 +27,7 @@
     <Project Path="tests/ProcureAi.Requests.Tests/ProcureAi.Requests.Tests.csproj" />
     <Project Path="tests/ProcureAi.Requests.IntegrationTests/ProcureAi.Requests.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Access.Tests/ProcureAi.Access.Tests.csproj" />
+    <Project Path="tests/ProcureAi.Budgets.Tests/ProcureAi.Budgets.Tests.csproj" />
     <Project Path="tests/ProcureAi.Access.IntegrationTests/ProcureAi.Access.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
