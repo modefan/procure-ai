@@ -53,25 +53,36 @@ jobs:
         run: dotnet build ProcureAi.slnx -c Release -warnaserror -m:4
 
       # One project at a time: the container-based suites must never run concurrently.
+      # Safety nets: every project gets its own test timeout (MTP --timeout), so a hang fails that project by name
+      # instead of silently using up the job timeout; the step itself is bounded below the job timeout.
       - name: Test
         shell: bash
+        timeout-minutes: 35
         run: |
           set -o pipefail
           status=0
+          summary=""
           for project in tests/*/; do
             name="$(basename "$project")"
             # Only test projects (*Tests); shared libraries such as ProcureAi.Testing have no tests.
             case "$name" in *Tests) ;; *) continue ;; esac
             if [ "$name" = "ProcureAi.EndToEndTests" ]; then continue; fi
             echo "::group::$name"
-            dotnet test --project "$project" -c Release --no-build \
-              --report-xunit-trx --results-directory "$RUNNER_TEMP/trx" || status=1
+            start=$SECONDS
+            result=passed
+            dotnet test --project "$project" -c Release --no-build --timeout 12m \
+              --report-xunit-trx --results-directory "$RUNNER_TEMP/trx" || { status=1; result=FAILED; }
             echo "::endgroup::"
+            line="$name: $result in $((SECONDS - start)) s"
+            echo "$line"
+            if [ "$result" = FAILED ]; then echo "::error::$line"; fi
+            summary+="$line"$'\n'
           done
+          printf '### .NET test projects\n\n```\n%s```\n' "$summary" >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
       - name: Upload test results
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: dotnet-test-results
@@ -177,11 +188,11 @@ jobs:
 
       - name: End-to-end tests
         run: >
-          dotnet test --project tests/ProcureAi.EndToEndTests -c Release --no-build
+          dotnet test --project tests/ProcureAi.EndToEndTests -c Release --no-build --timeout 30m
           --report-xunit-trx --results-directory "$RUNNER_TEMP/trx-e2e"
 
       - name: Upload test results and Playwright output
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-results

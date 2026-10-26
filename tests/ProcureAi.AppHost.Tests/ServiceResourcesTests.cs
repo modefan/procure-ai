@@ -17,7 +17,8 @@ public sealed class ServiceResourcesTests
     [Fact]
     public async Task Requests_service_gets_migrate_and_api_resources_with_limits()
     {
-        var model = await BuildModelAsync();
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
         var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-migrate");
         var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-api");
 
@@ -56,7 +57,8 @@ public sealed class ServiceResourcesTests
     [Fact]
     public async Task Access_service_gets_its_database_migrate_api_and_debezium()
     {
-        var model = await BuildModelAsync();
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
         var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "access-migrate");
         var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "access-api");
         var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-accessdb");
@@ -79,7 +81,8 @@ public sealed class ServiceResourcesTests
     [Fact]
     public async Task Keycloak_gets_the_client_secrets_and_only_keycloak_gets_the_access_admin_secret()
     {
-        var model = await BuildModelAsync();
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
         var keycloak = model.Resources.Single(r => r.Name == "keycloak");
 
         var keycloakEnv = await EnvironmentOfAsync(keycloak);
@@ -99,7 +102,8 @@ public sealed class ServiceResourcesTests
     [Fact]
     public async Task Captured_database_gets_its_own_debezium_server_after_the_migration()
     {
-        var model = await BuildModelAsync();
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
         var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-migrate");
         var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-requestsdb");
         var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "requests-api");
@@ -124,12 +128,35 @@ public sealed class ServiceResourcesTests
         debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/config/application.properties");
     }
 
-    private static async Task<DistributedApplicationModel> BuildModelAsync()
+    /// <summary>
+    /// The built (never started) AppHost and its model. Must be disposed: an undisposed one still started its complete
+    /// stack of containers in the background while the test process lived on (for the InfrastructureStartsTests fixture),
+    /// so every test here leaked a full stack: five stacks per run, which exhausted the CI runner until the job timed out.
+    /// </summary>
+    private sealed class ModelScope : IAsyncDisposable
     {
-        var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(
-            []);
-        var app = await builder.BuildAsync();
-        return app.Services.GetRequiredService<DistributedApplicationModel>();
+        private readonly IDistributedApplicationTestingBuilder _builder;
+        private readonly DistributedApplication _app;
+
+        private ModelScope(IDistributedApplicationTestingBuilder builder, DistributedApplication app)
+        {
+            _builder = builder;
+            _app = app;
+        }
+
+        public DistributedApplicationModel Model => _app.Services.GetRequiredService<DistributedApplicationModel>();
+
+        public static async Task<ModelScope> BuildAsync()
+        {
+            var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>([]);
+            return new ModelScope(builder, await builder.BuildAsync());
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _app.DisposeAsync();
+            await _builder.DisposeAsync();
+        }
     }
 
     /// <summary>The environment variables the resource's callbacks set (secret parameters stay unresolved, so no secrets are needed).</summary>
