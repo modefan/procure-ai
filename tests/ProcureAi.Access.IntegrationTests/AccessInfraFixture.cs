@@ -14,9 +14,9 @@ public sealed class AccessInfraFixture()
     /// A new tenant with the default matrix and one user (Maria, manager, R 200 000), for a test that changes data. Tests never
     /// change the seeded tenants, which other tests read, so no test depends on the order of the others.
     /// </summary>
-    public async Task<string> CreateTenantAsync()
+    public async Task<string> CreateTenantAsync(string? tenantId = null)
     {
-        var tenant = $"t{Guid.NewGuid():N}"[..12];
+        var tenant = tenantId ?? $"t{Guid.NewGuid():N}"[..12];
         await using var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(DbConnectionString).Options);
         db.PermissionMatrices.Add(DefaultPermissionMatrix.CreateFor(tenant, DateTimeOffset.UtcNow));
         db.TenantUsers.Add(TenantUser.Create(
@@ -31,7 +31,7 @@ public sealed class AccessInfraFixture()
 }
 
 [CollectionDefinition(Name)]
-public sealed class AccessInfraCollection : ICollectionFixture<AccessInfraFixture>
+public sealed class AccessInfraCollection : ICollectionFixture<AccessInfraFixture>, ICollectionFixture<LazyKeycloak>
 {
     public const string Name = "access-infra";
 }

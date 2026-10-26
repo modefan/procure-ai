@@ -4,6 +4,7 @@ using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Health;
+using ProcureAi.BuildingBlocks.Web.Http;
 using ProcureAi.BuildingBlocks.Web.Logging;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.BuildingBlocks.Web.Proxies;
@@ -38,6 +39,7 @@ public static class GatewayApp
         var services = builder.Services;
         services.AddValidatedOptions<OidcOptions>(configuration, OidcOptions.SectionName);
         services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
+        services.AddValidatedOptions<RegistrationOptions>(configuration, RegistrationOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(configuration, RateLimitingOptions.SectionName);
         services.AddProcureAiForwardedHeaders(configuration);
         services.AddProcureAiCorrelationPropagation();
@@ -55,6 +57,8 @@ public static class GatewayApp
         services.AddFusionCache();
         services.AddProcureAiAccessClient(configuration, ServiceName);
         services.AddBffAuthentication();
+        services.AddProcureAiServiceClient<IRegistrationClient, RegistrationClient>(AccessClientSetup.AccessServiceName);
+        services.AddScoped<DemoRegistration>();
 
         services.AddReverseProxy()
             .LoadFromConfig(configuration.GetSection("ReverseProxy"))

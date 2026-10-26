@@ -118,6 +118,29 @@ public sealed class AccessController(
         await bus.InvokeAsync<CostCenterApproversDto>(new GetCostCenterApprovers(code), cancellationToken);
 
     /// <summary>
+    /// Internal: a user who signed up in the identity provider joins the demo company (organization, requester role, tenant user).
+    /// 201 when this call added them, 200 when they were already in. Called by the gateway for the signed-in user only.
+    /// </summary>
+    [HttpPost("internal/registrations", Name = "RegisterDemoUser")]
+    [Idempotent]
+    [Authorize(Policy = InternalPolicy.Name)]
+    [ProducesResponseType<RegistrationDto>(StatusCodes.Status201Created, "application/json")]
+    [ProducesResponseType<RegistrationDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RegistrationDto>> RegisterDemoUser(RegisterDemoUserBody body, CancellationToken cancellationToken)
+    {
+        var result = await bus.InvokeAsync<RegistrationDto>(new RegisterDemoUser(body.UserId, body.Email, body.DisplayName), cancellationToken);
+        if (!result.Joined)
+        {
+            return Ok(result);
+        }
+
+        await InvalidateAsync(UsersTagTemplate);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    /// <summary>
     /// Drops the cached reads of the tenant after a write, so no read after it sees the old state. Runs after the commit,
     /// so it ignores the cancellation of the client, and a failure here is logged, never raised: the cached entries
     /// expire by themselves within the cache duration.

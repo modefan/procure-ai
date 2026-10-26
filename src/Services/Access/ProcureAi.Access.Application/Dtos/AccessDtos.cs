@@ -25,3 +25,6 @@ public sealed record UserDto(
     bool IsFinanceApprover,
     IReadOnlyList<string> CostCenterCodes,
     uint Version);
+
+/// <summary>The answer to a registration: the tenant the user is in, and whether this call added them (false: they were already in).</summary>
+public sealed record RegistrationDto(string TenantId, bool Joined);

@@ -26,6 +26,8 @@
     <OpenApiPlaceholderSettings>Service__DatabaseConnectionName=$(OpenApiDatabaseConnectionName);ConnectionStrings__$(OpenApiDatabaseConnectionName)=Host=openapi.invalid;ConnectionStrings__rabbitmq=amqp://openapi.invalid;ConnectionStrings__Redis=openapi.invalid:6379</OpenApiPlaceholderSettings>
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__Authority=https://openapi.invalid/realms/x;Auth__Audience=openapi;Auth__AdminApiKeySha256=0000000000000000000000000000000000000000000000000000000000000000</OpenApiPlaceholderSettings>
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__OpenApi__AuthorizationUrl=https://openapi.invalid/auth;Auth__OpenApi__TokenUrl=https://openapi.invalid/token;Auth__OpenApi__Scopes__openid=OpenID Connect;Auth__OpenApi__Scopes__email=Email address</OpenApiPlaceholderSettings>
+    <!-- A service with settings of its own that must be present at startup lists them in OpenApiExtraSettings (same placeholder rules). -->
+    <OpenApiPlaceholderSettings Condition="'$(OpenApiExtraSettings)' != ''">$(OpenApiPlaceholderSettings);$(OpenApiExtraSettings)</OpenApiPlaceholderSettings>
   </PropertyGroup>
 
   <Target Name="WriteOpenApiDocument" AfterTargets="Build" Condition="'$(IsServiceApi)' == 'true' And '$(OpenApiDocumentName)' != ''">

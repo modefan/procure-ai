@@ -18,6 +18,7 @@
   <PropertyGroup>
     <OpenApiDocumentName>access-v1</OpenApiDocumentName>
     <OpenApiDatabaseConnectionName>accessdb</OpenApiDatabaseConnectionName>
+    <OpenApiExtraSettings>Keycloak__AdminClientSecret=openapi-placeholder</OpenApiExtraSettings>
   </PropertyGroup>
 
   <ItemGroup>

@@ -14,6 +14,10 @@ namespace ProcureAi.Testing;
 /// <summary>What the stub Access (or its token endpoint) saw in one request.</summary>
 public sealed record StubAccessCall(string Path, string? Tenant, string? CallingService, string? OnBehalfOf, bool HasBearer);
 
+/// <summary>What the stub Access saw in a registration request (a self-registered user joining the demo company).</summary>
+public sealed record StubRegistration(
+    string UserId, string Email, string DisplayName, string? Tenant, string? OnBehalfOf, string? IdempotencyKey);
+
 /// <summary>
 /// A real Kestrel server playing the Access service (and Keycloak's token endpoint) for the services' Access clients.
 /// Each tenant has its own role to permission matrix (the default one until a test sets another), so tests that use a
@@ -57,6 +61,16 @@ public sealed class StubAccessServer : IAsyncDisposable
 
     /// <summary>Makes each effective-access answer slow, so concurrent callers overlap.</summary>
     public TimeSpan Delay { get; set; }
+
+    /// <summary>
+    /// Runs for each registration request before the stub answers 200 (to do what the real Access does, e.g. in Keycloak). When it
+    /// throws, the stub answers 500. Without a hook the registration changes nothing.
+    /// </summary>
+    public Func<StubRegistration, Task>? OnRegister { get; set; }
+
+    private readonly ConcurrentQueue<StubRegistration> _registrations = new();
+
+    public IReadOnlyList<StubRegistration> Registrations => [.. _registrations];
 
     /// <summary>Cost center codes the stub answers 404 for.</summary>
     public ConcurrentDictionary<string, bool> MissingCostCenters { get; } = new(StringComparer.Ordinal);
@@ -108,6 +122,29 @@ public sealed class StubAccessServer : IAsyncDisposable
             var permissions = matrix.Where(r => wanted.Contains(r.Key)).SelectMany(r => r.Value).Distinct().Order(StringComparer.Ordinal);
             return Results.Json(new { permissions, costCenterCodes = new[] { "CC-100" }, approvalLimit = 50000m });
         });
+        app.MapPost("/api/v1/access/internal/registrations", async (HttpContext http, StubRegistrationBody body) =>
+        {
+            stub.Record(http);
+            var registration = new StubRegistration(
+                body.UserId, body.Email, body.DisplayName, Header(http, "X-Tenant-Id"), Header(http, "X-On-Behalf-Of-User"),
+                Header(http, "Idempotency-Key"));
+            stub._registrations.Enqueue(registration);
+            if (stub.Down)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            try
+            {
+                await (stub.OnRegister?.Invoke(registration) ?? Task.CompletedTask);
+            }
+            catch (Exception)
+            {
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+
+            return Results.Json(new { tenantId = registration.Tenant, joined = true });
+        });
         app.MapGet("/api/v1/access/internal/cost-centers/{code}/approvers", (HttpContext http, string code) =>
         {
             Interlocked.Increment(ref stub._approverCalls);
@@ -137,6 +174,8 @@ public sealed class StubAccessServer : IAsyncDisposable
         stub.Url = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         return stub;
     }
+
+    private sealed record StubRegistrationBody(string UserId, string Email, string DisplayName);
 
     private void Record(HttpContext http) =>
         _calls.Enqueue(new StubAccessCall(

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -46,19 +45,7 @@ public sealed class SessionCookieEvents(
             return;
         }
 
-        context.Properties.UpdateTokenValue("access_token", tokens.AccessToken);
-        if (tokens.RefreshToken is not null)
-        {
-            context.Properties.UpdateTokenValue("refresh_token", tokens.RefreshToken);
-        }
-
-        if (tokens.IdToken is not null)
-        {
-            context.Properties.UpdateTokenValue("id_token", tokens.IdToken);
-        }
-
-        context.Properties.UpdateTokenValue(
-            "expires_at", time.GetUtcNow().Add(tokens.ExpiresIn).ToString("o", CultureInfo.InvariantCulture));
+        DemoRegistration.ApplyTokens(context.Properties, tokens, time.GetUtcNow());
         // Tenant and roles may have changed at the provider since sign-in.
         if (context.Principal?.Identity is ClaimsIdentity identity)
         {

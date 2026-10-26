@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -5,7 +7,7 @@ using System.Text.Json.Nodes;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 
-namespace ProcureAi.Gateway.IntegrationTests;
+namespace ProcureAi.Testing;
 
 /// <summary>
 /// A Keycloak container (same image and limits as the AppHost) that imports the committed realm file.
@@ -90,7 +92,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
                 ["password"] = DemoPassword,
             }));
         var body = await response.Content.ReadAsStringAsync();
-        response.IsSuccessStatusCode.ShouldBeTrue($"Token request for {user} failed: {(int)response.StatusCode} {body}");
+        EnsureSuccess(response, $"Token request for {user}", body);
         var token = JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()!;
         return DecodePayload(token);
     }
@@ -113,8 +115,84 @@ public sealed class KeycloakFixture : IAsyncLifetime
                 ["client_secret"] = secret,
             }));
         var body = await response.Content.ReadAsStringAsync();
-        response.IsSuccessStatusCode.ShouldBeTrue($"Client credentials request for {clientId} failed: {(int)response.StatusCode} {body}");
+        EnsureSuccess(response, $"Client credentials request for {clientId}", body);
         return JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()!;
+    }
+
+    private static void EnsureSuccess(HttpResponseMessage response, string what, string body)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"{what} failed: {(int)response.StatusCode} {body}");
+        }
+    }
+
+    /// <summary>An HTTP client for the Keycloak admin API of the realm, signed in as the <c>procure-access-admin</c> service account.</summary>
+    public async Task<HttpClient> AdminHttpAsync()
+    {
+        var http = new HttpClient { BaseAddress = new Uri(BaseUrl) };
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await AccessAdminTokenAsync());
+        return http;
+    }
+
+    /// <summary>Creates a user (as a self-registered one: no organization, no business role); returns its ID.</summary>
+    public async Task<string> CreateUserAsync(string email, string firstName = "New", string lastName = "Person")
+    {
+        using var http = await AdminHttpAsync();
+        using var response = await http.PostAsJsonAsync(
+            $"/admin/realms/{Realm}/users",
+            new { username = email, email, firstName, lastName, enabled = true, emailVerified = true });
+        EnsureSuccess(response, $"Creating user {email}", await response.Content.ReadAsStringAsync());
+        return response.Headers.Location!.Segments[^1];
+    }
+
+    /// <summary>Creates an organization with this alias (and the same name); returns its ID.</summary>
+    public async Task<string> CreateOrganizationAsync(string alias)
+    {
+        using var http = await AdminHttpAsync();
+        using var response = await http.PostAsJsonAsync(
+            $"/admin/realms/{Realm}/organizations",
+            new { name = alias, alias, enabled = true, domains = new[] { new { name = alias + ".test", verified = false } } });
+        EnsureSuccess(response, $"Creating organization {alias}", await response.Content.ReadAsStringAsync());
+        return response.Headers.Location!.Segments[^1];
+    }
+
+    /// <summary>Makes the user a member of the organization.</summary>
+    public async Task AddOrganizationMemberAsync(string organizationId, string userId)
+    {
+        using var http = await AdminHttpAsync();
+        using var response = await http.PostAsJsonAsync($"/admin/realms/{Realm}/organizations/{organizationId}/members", userId);
+        EnsureSuccess(response, $"Adding {userId} to organization {organizationId}", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>Gives the user a realm role.</summary>
+    public async Task AddRealmRoleAsync(string userId, string role)
+    {
+        using var http = await AdminHttpAsync();
+        var found = await http.GetAsync($"/admin/realms/{Realm}/roles/{role}");
+        var body = await found.Content.ReadAsStringAsync();
+        EnsureSuccess(found, $"Reading role {role}", body);
+        using var response = await http.PostAsJsonAsync(
+            $"/admin/realms/{Realm}/users/{userId}/role-mappings/realm", new[] { JsonDocument.Parse(body).RootElement });
+        EnsureSuccess(response, $"Mapping role {role}", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>True when the user is a member of the organization with this ID.</summary>
+    public async Task<bool> IsOrganizationMemberAsync(string organizationId, string userId)
+    {
+        using var http = await AdminHttpAsync();
+        using var response = await http.GetAsync($"/admin/realms/{Realm}/organizations/{organizationId}/members/{userId}");
+        return response.IsSuccessStatusCode;
+    }
+
+    /// <summary>The names of the realm roles assigned directly to the user.</summary>
+    public async Task<string[]> RealmRolesOfAsync(string userId)
+    {
+        using var http = await AdminHttpAsync();
+        using var response = await http.GetAsync($"/admin/realms/{Realm}/users/{userId}/role-mappings/realm");
+        var body = await response.Content.ReadAsStringAsync();
+        EnsureSuccess(response, "Reading role mappings", body);
+        return JsonDocument.Parse(body).RootElement.EnumerateArray().Select(r => r.GetProperty("name").GetString()!).ToArray();
     }
 
     public static JsonElement Payload(string jwt) => DecodePayload(jwt);

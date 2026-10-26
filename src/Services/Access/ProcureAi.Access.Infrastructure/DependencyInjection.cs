@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.Access.Application.Abstractions;
 using ProcureAi.Access.Application.Commands;
+using ProcureAi.Access.Infrastructure.Keycloak;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts;
@@ -33,6 +34,7 @@ public static class DependencyInjection
         // Forwards to the same scoped DbContext instance (a factory, not AddScoped<,>, which would create a second one).
         services.AddScoped<IAccessDbContext>(sp => sp.GetRequiredService<AccessDbContext>());
         services.TryAddSingleton(TimeProvider.System);
+        services.AddKeycloakAdmin(configuration);
         return services;
     }
 
@@ -41,6 +43,8 @@ public static class DependencyInjection
     {
         options.UseProcureAiMessaging<IAccessDbContext, AccessDbContext>(
             configuration, serviceName, DatabaseConnectionName, typeof(SetRolePermissions).Assembly);
+        // A typed HTTP client is registered through a factory, which Wolverine's generated handler code cannot build itself.
+        options.CodeGeneration.AlwaysUseServiceLocationFor<IIdentityDirectory>();
         options.PublishMessage<AccessChanged>().ToRabbitExchange(Exchanges.Access);
     }
 }

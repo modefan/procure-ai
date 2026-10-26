@@ -492,6 +492,78 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         user.GetProperty("userId").GetString().ShouldNotBeNullOrEmpty();
     }
 
+    /// <summary>Registers through Keycloak's own form and returns a browser holding the new session.</summary>
+    private async Task<HttpClient> RegisteredBrowserAsync()
+    {
+        var browser = Browser();
+        var driver = Driver();
+        var authorize = await LoginDriver.StartAsync(browser, "/bff/register");
+        await driver.OpenLoginPageAsync(authorize);
+        var callback = await driver.RegisterAsync($"new-{Guid.NewGuid():N}@registered.test", keycloak.DemoPassword);
+        using var done = await browser.GetAsync(callback, Ct);
+        done.StatusCode.ShouldBe(HttpStatusCode.Redirect);
+        return browser;
+    }
+
+    [Fact]
+    public async Task New_user_after_first_bff_user_call_has_tenant_demo_and_requester_permissions()
+    {
+        // A fresh organization plays "demo", so no test depends on another's members.
+        var tenant = $"d{Guid.NewGuid():N}"[..12];
+        var organizationId = await keycloak.CreateOrganizationAsync(tenant);
+        await _gateway.DisposeAsync();
+        _gateway = await GatewayHost.StartAsync(keycloak, redis, new() { ["Registration:DemoTenantId"] = tenant });
+        _gateway.Access.SetMatrix(tenant, new() { ["requester"] = ["requests.create", "requests.read.own"] });
+        // What the real Access does in Keycloak.
+        _gateway.Access.OnRegister = async registration =>
+        {
+            await keycloak.AddOrganizationMemberAsync(organizationId, registration.UserId);
+            await keycloak.AddRealmRoleAsync(registration.UserId, "requester");
+        };
+        var browser = await RegisteredBrowserAsync();
+
+        var user = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+
+        user.GetProperty("tenantId").GetString().ShouldBe(tenant);
+        user.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ShouldContain("requester");
+        user.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ShouldBe(["requests.create", "requests.read.own"]);
+        var registration = _gateway.Access.Registrations.Single();
+        registration.Tenant.ShouldBe(tenant);
+        registration.UserId.ShouldBe(user.GetProperty("userId").GetString());
+        registration.Email.ShouldEndWith("@registered.test");
+        registration.IdempotencyKey.ShouldNotBeNullOrEmpty();
+
+        // The second call finds the tenant in the session already: no second registration.
+        var again = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+        again.GetProperty("tenantId").GetString().ShouldBe(tenant);
+        _gateway.Access.Registrations.Count.ShouldBe(1);
+        SessionKeys().Length.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Failed_registration_leaves_the_new_user_without_tenant_and_the_answer_is_not_500()
+    {
+        _gateway.Access.OnRegister = _ => throw new InvalidOperationException("Keycloak is down");
+        var browser = await RegisteredBrowserAsync();
+
+        using var response = await browser.GetAsync("/bff/user", Ct);
+
+        await ExpectOkAsync(response);
+        var user = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        user.GetProperty("tenantId").ValueKind.ShouldBe(JsonValueKind.Null);
+        user.GetProperty("permissions").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task User_with_a_tenant_is_never_registered()
+    {
+        var browser = await SignedInAsync();
+
+        await ExpectOkAsync(await browser.GetAsync("/bff/user", Ct));
+
+        _gateway.Access.Registrations.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Logout_revokes_the_session_and_ends_the_keycloak_session()
     {

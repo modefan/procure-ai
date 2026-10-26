@@ -14,7 +14,7 @@ public static class BffEndpoints
         bff.MapGet("/login", (string? returnUrl) => SignIn(returnUrl, prompt: null)).AllowAnonymous();
 
         // OIDC prompt=create opens the identity provider's registration form. A new user has no tenant or roles
-        // yet; they join a tenant later (plan 02).
+        // yet; the first /bff/user call puts them in the demo company.
         bff.MapGet("/register", (string? returnUrl) => SignIn(returnUrl, prompt: "create")).AllowAnonymous();
 
         bff.MapGet("/user", GetUserAsync).RequireAuthorization(BffAuthSetup.SessionPolicy);
@@ -40,9 +40,17 @@ public static class BffEndpoints
     }
 
     private static async Task<IResult> GetUserAsync(
-        HttpContext http, ICurrentUser user, IPermissionProvider permissions, IAntiforgery antiforgery, CancellationToken cancellationToken)
+        HttpContext http, ICurrentUser user, IPermissionProvider permissions, IAntiforgery antiforgery, DemoRegistration registration,
+        CancellationToken cancellationToken)
     {
-        // A user without a tenant (just registered) has no permissions, whatever roles the token carries.
+        // A user without a tenant just registered: they join the demo company (and get their new claims) on this call.
+        // When that fails they are answered as before: no tenant, no permissions.
+        if (user.TenantId is null)
+        {
+            await registration.TryJoinAsync(http);
+        }
+
+        // A user without a tenant has no permissions, whatever roles the token carries.
         IReadOnlySet<string> granted = user.TenantId is null
             ? new HashSet<string>()
             : await permissions.GetPermissionsAsync(user, cancellationToken);

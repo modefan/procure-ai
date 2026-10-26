@@ -1,0 +1,193 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using ProcureAi.Access.Application.Dtos;
+using ProcureAi.Contracts;
+using Shouldly;
+
+namespace ProcureAi.Access.IntegrationTests;
+
+/// <summary>
+/// Self-registration: a user who signed up in Keycloak joins the demo company (organization and role in Keycloak, tenant user
+/// in Access). The "demo" organization is a fresh one per test, so no test touches the seeded demo tenant or another's users.
+/// </summary>
+[Collection(AccessInfraCollection.Name)]
+public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak lazyKeycloak) : IAsyncLifetime
+{
+    private const string Url = "/api/v1/access/internal/registrations";
+
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private KeycloakFixture _keycloak = null!;
+    private AccessApiFactory _factory = null!;
+    private HttpClient _client = null!;
+    private string _tenant = "";
+    private string _organizationId = "";
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    public async ValueTask InitializeAsync()
+    {
+        _keycloak = await lazyKeycloak.GetAsync();
+        _tenant = $"d{Guid.NewGuid():N}"[..12];
+        _organizationId = await _keycloak.CreateOrganizationAsync(_tenant);
+        await infra.CreateTenantAsync(_tenant);
+        _factory = new AccessApiFactory(infra, _keycloak, demoOrganization: _tenant);
+        _client = _factory.CreateClient();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _client.Dispose();
+        await _factory.DisposeAsync();
+    }
+
+    private async Task<HttpResponseMessage> RegisterAsync(string userId, string email, string name, string? tenant = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, Url) { Content = JsonContent.Create(new { userId, email, displayName = name }) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateServiceToken(AccessApiFactory.InternalClientId));
+        request.Headers.Add("X-Tenant-Id", tenant ?? _tenant);
+        request.Headers.Add("X-Calling-Service", "gateway");
+        request.Headers.Add("X-On-Behalf-Of-User", userId);
+        request.Headers.Add("Idempotency-Key", $"register-{Guid.NewGuid():N}");
+        return await _client.SendAsync(request, Ct);
+    }
+
+    private async Task<List<UserDto>> UsersAsync()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/access/users");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateToken("admin-of-" + _tenant, _tenant, "admin"));
+        using var response = await _client.SendAsync(request, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        return (await response.Content.ReadFromJsonAsync<List<UserDto>>(Json, Ct))!;
+    }
+
+    private static string NewEmail() => $"new-{Guid.NewGuid():N}@registered.test";
+
+    [Fact]
+    public async Task Registration_adds_user_to_demo_org_with_requester_role()
+    {
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeFalse();
+        var probe = new RabbitProbe(infra.RabbitConnectionString);
+        var queue = await probe.BindQueueAsync(Exchanges.Access);
+
+        using var response = await RegisterAsync(userId, email, "New Person");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeTrue();
+        (await _keycloak.RealmRolesOfAsync(userId)).ShouldContain("requester");
+        var user = (await UsersAsync()).Single(u => u.UserId == userId);
+        user.Email.ShouldBe(email);
+        user.DisplayName.ShouldBe("New Person");
+        user.Roles.ShouldBe(["requester"]);
+        user.ApprovalLimit.ShouldBe(0m);
+        user.IsFinanceApprover.ShouldBeFalse();
+        user.CostCenterCodes.ShouldBeEmpty();
+        var message = await probe.WaitForMessageAsync(
+            queue, m => m.GetProperty("tenantId").GetString() == _tenant && m.GetProperty("userId").GetString() == userId,
+            TimeSpan.FromSeconds(20));
+        message.GetProperty("kind").GetString().ShouldBe("User");
+    }
+
+    [Fact]
+    public async Task Registration_twice_changes_nothing()
+    {
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        var probe = new RabbitProbe(infra.RabbitConnectionString);
+        var queue = await probe.BindQueueAsync(Exchanges.Access);
+        using var first = await RegisterAsync(userId, email, "New Person");
+        first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.Content.ReadAsStringAsync(Ct));
+        await probe.WaitForMessageAsync(queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(20));
+        var before = (await UsersAsync()).Single(u => u.UserId == userId);
+
+        // A new Idempotency-Key, so the handler itself (not the idempotency replay) decides.
+        using var second = await RegisterAsync(userId, email, "Someone Else");
+
+        second.StatusCode.ShouldBe(HttpStatusCode.OK, await second.Content.ReadAsStringAsync(Ct));
+        var after = (await UsersAsync()).Single(u => u.UserId == userId);
+        // Lists compare by reference in a record, so compare the parts.
+        after.Version.ShouldBe(before.Version);
+        after.DisplayName.ShouldBe(before.DisplayName);
+        after.Email.ShouldBe(before.Email);
+        after.Roles.ShouldBe(before.Roles);
+        after.ApprovalLimit.ShouldBe(before.ApprovalLimit);
+        after.CostCenterCodes.ShouldBe(before.CostCenterCodes);
+        await Should.ThrowAsync<TimeoutException>(() => probe.WaitForMessageAsync(
+            queue, m => m.GetProperty("userId").GetString() == userId, TimeSpan.FromSeconds(3)));
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Registration_heals_a_user_whose_earlier_attempt_stopped_after_keycloak()
+    {
+        // Keycloak was changed but Access never stored the user (it failed in between): the retry finishes the job.
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        using var http = await _keycloak.AdminHttpAsync();
+        using var added = await http.PostAsJsonAsync($"/admin/realms/{KeycloakFixture.Realm}/organizations/{_organizationId}/members", userId, Ct);
+        added.StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        using var response = await RegisterAsync(userId, email, "New Person");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));
+        (await _keycloak.RealmRolesOfAsync(userId)).ShouldContain("requester");
+        (await UsersAsync()).ShouldContain(u => u.UserId == userId);
+    }
+
+    [Fact]
+    public async Task Registration_of_a_user_unknown_to_keycloak_is_404_and_stores_nothing()
+    {
+        var userId = Guid.NewGuid().ToString();
+
+        using var response = await RegisterAsync(userId, NewEmail(), "Ghost");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound, await response.Content.ReadAsStringAsync(Ct));
+        (await UsersAsync()).ShouldNotContain(u => u.UserId == userId);
+    }
+
+    [Fact]
+    public async Task Registration_for_a_tenant_other_than_the_demo_company_is_refused()
+    {
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        var other = await infra.CreateTenantAsync();
+
+        using var response = await RegisterAsync(userId, email, "New Person", tenant: other);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.Content.ReadAsStringAsync(Ct));
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_normal_user_token_cannot_register_anyone()
+    {
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        var request = new HttpRequestMessage(HttpMethod.Post, Url) { Content = JsonContent.Create(new { userId, email, displayName = "X" }) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateToken("someone", _tenant, "admin"));
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+
+        using var response = await _client.SendAsync(request, Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Registration_needs_an_idempotency_key()
+    {
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        var request = new HttpRequestMessage(HttpMethod.Post, Url) { Content = JsonContent.Create(new { userId, email, displayName = "X" }) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateServiceToken(AccessApiFactory.InternalClientId));
+        request.Headers.Add("X-Tenant-Id", _tenant);
+
+        using var response = await _client.SendAsync(request, Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+}

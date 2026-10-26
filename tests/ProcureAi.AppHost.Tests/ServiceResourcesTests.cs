@@ -89,13 +89,20 @@ public sealed class ServiceResourcesTests
 
         keycloakEnv.ShouldContainKey("KC_INTERNAL_SECRET");
         keycloakEnv.ShouldContainKey("KC_ACCESS_ADMIN_SECRET");
-        // The access-admin client holds Keycloak admin rights; no service resource may be handed its secret (Access gets it in a later task).
+        // The access-admin client holds Keycloak admin rights; only the Access API may be handed its secret.
         var accessAdmin = (ParameterResource)keycloakEnv["KC_ACCESS_ADMIN_SECRET"];
         foreach (var resource in model.Resources.OfType<ProjectResource>())
         {
             var env = await EnvironmentOfAsync(resource);
+            if (resource.Name == "access-api")
+            {
+                env["Keycloak__AdminClientSecret"].ShouldBeSameAs(accessAdmin);
+                env["Keycloak__AdminClientId"].ShouldBe("procure-access-admin");
+                continue;
+            }
+
             env.Values.ShouldNotContain(v => ReferenceEquals(v, accessAdmin), resource.Name);
-            env.Keys.ShouldNotContain(k => k.Contains("AccessAdmin", StringComparison.OrdinalIgnoreCase), resource.Name);
+            env.Keys.ShouldNotContain(k => k.StartsWith("Keycloak__", StringComparison.OrdinalIgnoreCase), resource.Name);
         }
     }
 

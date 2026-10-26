@@ -112,7 +112,13 @@ var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     shared);
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),
-    shared);
+    shared)
+    // Self-registration (Task 4): only Access talks to the Keycloak admin API, as `procure-access-admin`. No other service gets this secret.
+    .WithEnvironment("Keycloak__AdminBaseUrl", keycloak.GetEndpoint("http"))
+    .WithEnvironment("Keycloak__Realm", "procure")
+    .WithEnvironment("Keycloak__DemoOrganization", "demo")
+    .WithEnvironment("Keycloak__AdminClientId", "procure-access-admin")
+    .WithEnvironment("Keycloak__AdminClientSecret", keycloakAccessAdminSecret);
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).

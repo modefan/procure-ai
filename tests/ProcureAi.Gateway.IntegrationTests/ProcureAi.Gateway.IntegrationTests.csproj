@@ -30,7 +30,6 @@
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../src/Gateway/ProcureAi.Gateway/appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="../../infra/keycloak/procure-realm.json" Link="procure-realm.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

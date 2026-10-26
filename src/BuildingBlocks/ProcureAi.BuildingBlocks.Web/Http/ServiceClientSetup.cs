@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Auth;
 
 namespace ProcureAi.BuildingBlocks.Web.Http;
@@ -22,7 +23,8 @@ public static class ServiceClientSetup
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<ServiceTokenProvider>();
+        services.TryAddSingleton(sp => new ServiceTokenProvider(
+            sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<IOptions<InternalClientOptions>>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddTransient<ServiceTokenHandler>();
         // The token request itself must not carry a token: a named client without the handler.
         services.AddHttpClient(ServiceTokenProvider.HttpClientName);

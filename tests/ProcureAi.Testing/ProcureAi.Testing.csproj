@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <Content Include="../testcontainers.settings.json" Link="testcontainers.settings.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../infra/keycloak/procure-realm.json" Link="procure-realm.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
