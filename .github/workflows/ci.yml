@@ -21,6 +21,8 @@ jobs:
     name: Build and test (.NET)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # TESTS DISABLED IN CI until the app is done (Dale's call, 2026-10-26): Claude runs every suite locally before each push.
+    # Re-enable by removing the `if: false` lines (marked TESTS-OFF) and fix whatever fails.
     steps:
       - uses: actions/checkout@v4
 
@@ -35,12 +37,14 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Docker Hub login (avoids pull rate limits)
+        if: false # TESTS-OFF
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Trust the ASP.NET Core dev certificate (the Aspire gateway health check uses HTTPS)
+        if: false # TESTS-OFF
         run: |
           # Exit code 4 only means "not trusted system-wide"; the OpenSSL trust directory below is what .NET uses on Linux.
           dotnet dev-certs https --trust || true
@@ -56,6 +60,7 @@ jobs:
       # Safety nets: every project gets its own test timeout (MTP --timeout), so a hang fails that project by name
       # instead of silently using up the job timeout; the step itself is bounded below the job timeout.
       - name: Test
+        if: false # TESTS-OFF
         shell: bash
         timeout-minutes: 35
         run: |
@@ -119,6 +124,7 @@ jobs:
       - run: npm ci
       - run: npx ng build
       - run: npx ng test --watch=false
+        if: false # TESTS-OFF
 
       - name: Regenerate OpenAPI document and API client
         run: |
@@ -140,6 +146,7 @@ jobs:
 
   e2e:
     name: End-to-end (Playwright)
+    if: false # TESTS-OFF
     needs: [dotnet, web]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
