@@ -10,7 +10,8 @@ namespace ProcureAi.BuildingBlocks.Web.Errors;
 /// <summary>
 /// Turns the application's expected outcomes into problem details inside the MVC pipeline, so [Idempotent] and
 /// [CachedGet] see an ordinary response (and share it with waiting callers) instead of an exception:
-/// not found (or another tenant's) 404, forbidden 403, stale version 412, broken business rule 422.
+/// not found (or another tenant's) 404, forbidden 403, no longer in a state that allows it 409, stale version 412,
+/// broken business rule 422.
 /// </summary>
 public sealed class ApplicationExceptionFilter(ProblemDetailsFactory problems) : IExceptionFilter
 {
@@ -21,6 +22,7 @@ public sealed class ApplicationExceptionFilter(ProblemDetailsFactory problems) :
             NotFoundException => StatusCodes.Status404NotFound,
             ForbiddenException => StatusCodes.Status403Forbidden,
             ConcurrencyConflictException => StatusCodes.Status412PreconditionFailed,
+            ConflictException => StatusCodes.Status409Conflict,
             DomainException => StatusCodes.Status422UnprocessableEntity,
             _ => 0,
         };

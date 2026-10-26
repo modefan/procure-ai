@@ -23,6 +23,9 @@ public sealed class ApplicationExceptionFilterTests
         Handle(new ConcurrencyConflictException("stale")).StatusCode.ShouldBe(StatusCodes.Status412PreconditionFailed);
 
     [Fact]
+    public void Conflict_is_409() => Handle(new ConflictException("not pending")).StatusCode.ShouldBe(StatusCodes.Status409Conflict);
+
+    [Fact]
     public void Forbidden_is_403() => Handle(new ForbiddenException("no")).StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
 
     [Fact]

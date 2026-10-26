@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ProcureAi.Budgets.Application;
+using ProcureAi.BuildingBlocks.Application;
 using Shouldly;
 
 namespace ProcureAi.Budgets.Tests;

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Domain;
 
 namespace ProcureAi.Testing;
@@ -95,6 +96,12 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>The cost centers the stub says one user acts for (everyone else gets <c>CC-100</c>).</summary>
     public void SetCostCenters(string tenantId, string userId, params string[] codes) => _costCenters[(tenantId, userId)] = codes;
 
+    private readonly ConcurrentDictionary<(string Tenant, string Code), CostCenterApprovers> _approvers = new();
+
+    /// <summary>What the stub answers for the approvers of one cost center of one tenant (otherwise a manager named after tenant and code).</summary>
+    public void SetApprovers(string tenantId, CostCenterApprovers approvers) =>
+        _approvers[(tenantId, approvers.CostCenterCode)] = approvers;
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -163,6 +170,11 @@ public sealed class StubAccessServer : IAsyncDisposable
             if (stub.MissingCostCenters.ContainsKey(code))
             {
                 return Results.NotFound();
+            }
+
+            if (stub._approvers.TryGetValue((http.Request.Headers["X-Tenant-Id"].ToString(), code), out var configured))
+            {
+                return Results.Json(configured);
             }
 
             // The manager's ID names the tenant and the code, so a test can tell whose answer it got.

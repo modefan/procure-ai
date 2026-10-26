@@ -2,6 +2,7 @@ using System.Reflection;
 using JasperFx;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Web.Access;
 using ProcureAi.Contracts;
 using Wolverine;
@@ -47,6 +48,9 @@ public static class MessagingSetup
         options.Policies.UseDurableInboxOnAllListeners();
         options.Policies.UseDurableOutboxOnAllSendingEndpoints();
         options.UseProcureAiTransport(configuration);
+        // The Access client is a typed HttpClient (a factory registration Wolverine cannot inline): handlers that take it
+        // (the approval saga) resolve it from the container.
+        options.CodeGeneration.AlwaysUseServiceLocationFor<IAccessDirectory>();
         ListenToAccessChanges(options, serviceName);
         return options;
     }

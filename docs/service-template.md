@@ -27,7 +27,8 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    Reference the returned API from the gateway. Add a `ServiceResourcesTests` case.
    With `CapturedTables` set, it also adds the database's own Debezium Server (see "Change data capture" below).
 7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
-   `TestAuth` and `ServiceApiFactory<Program>` (derive from it to add hooks). Never copy a fixture.
+   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `RabbitRecorder` (records what a
+   service publishes and sends) and `RabbitContainer` (a broker of its own to stop, for outage tests). Never copy a fixture.
 8. **Gateway**: add the YARP route and cluster, and the service's OpenAPI document to the Swagger dropdown.
 
 ## Change data capture (Debezium)
@@ -66,4 +67,5 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 | `EnableCdc` / `DisableCdc` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/CdcMigrations.cs` |
 | `AddDebeziumFor`, Debezium shared properties | `ServiceResources.cs`, `infra/debezium/application.properties` |
 | Test fixtures, auth and factory | `tests/ProcureAi.Testing` (`ServiceInfraFixture` is the per-service infrastructure base) |
+| Concurrency retries of message handlers | `ConcurrencyRetryOptions` (BuildingBlocks.Application, bound from the service's section) and `RetryConcurrencyConflicts` (BuildingBlocks.Messaging) |
 | `Permissions` (the 15 constants and `All`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/Permissions.cs`, namespace `ProcureAi.BuildingBlocks.Domain` (so a service domain can validate against it) |

@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
 using ProcureAi.Budgets.Application;
 using ProcureAi.Budgets.Application.Abstractions;
 using ProcureAi.Budgets.Application.Commands;
@@ -12,7 +11,6 @@ using ProcureAi.Contracts;
 using ProcureAi.Contracts.Budgets;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
-using Wolverine.ErrorHandling;
 using Wolverine.RabbitMQ;
 
 namespace ProcureAi.Budgets.Infrastructure;
@@ -20,9 +18,6 @@ namespace ProcureAi.Budgets.Infrastructure;
 public static class DependencyInjection
 {
     public const string DatabaseConnectionName = "budgetsdb";
-
-    /// <summary>The Postgres error for a unique key violated by a concurrent insert.</summary>
-    private const string UniqueViolation = "23505";
 
     /// <summary>
     /// Registers the DbContext (Wolverine-integrated, so its changes and outgoing messages commit together).
@@ -58,24 +53,9 @@ public static class DependencyInjection
         options.PublishMessage<BudgetReservationFailed>().ToRabbitExchange(Exchanges.Budgets);
         options.PublishMessage<BudgetReleased>().ToRabbitExchange(Exchanges.Budgets);
 
+        var section = $"{BudgetsOptions.SectionName}:{nameof(BudgetsOptions.ConcurrencyRetry)}";
         var retry = configuration.GetSection(BudgetsOptions.SectionName).Get<BudgetsOptions>()?.ConcurrencyRetry
-            ?? throw new InvalidOperationException($"'{BudgetsOptions.SectionName}:{nameof(BudgetsOptions.ConcurrencyRetry)}' is not configured.");
-        // Inline retries with a fresh random jitter added at every failure; after the last attempt the message goes to the
-        // dead-letter queue. (Scheduled retries were tried and rejected: they come back in lumps at the scheduled-job polling
-        // interval, so a burst on one budget re-collided each time and 20 contenders still dead-lettered with 10 attempts.
-        // Waiting inline also caps the contenders at the listener parallelism of the instances.)
-        var delays = retry.Delays();
-        InlineRetry(options.OnException<DbUpdateConcurrencyException>(), delays, retry.JitterFraction);
-        InlineRetry(
-            options.OnException<DbUpdateException>(exception => exception.InnerException is PostgresException { SqlState: UniqueViolation }),
-            delays,
-            retry.JitterFraction);
-    }
-
-    private static void InlineRetry(PolicyExpression when, TimeSpan[] delays, double jitterFraction)
-    {
-        var retries = when.RetryWithCooldown(delays);
-        // Wolverine rejects a jitter of zero; zero means none.
-        (jitterFraction > 0 ? retries.WithBoundedJitter(jitterFraction) : retries).Then.MoveToErrorQueue();
+            ?? throw new InvalidOperationException($"'{section}' is not configured.");
+        options.RetryConcurrencyConflicts(retry, section);
     }
 }

@@ -4,9 +4,12 @@ using System.Text;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 
-namespace ProcureAi.Requests.IntegrationTests;
+namespace ProcureAi.Testing;
 
-/// <summary>A RabbitMQ container that tests can stop and restart, with a helper queue to observe delivery.</summary>
+/// <summary>
+/// A RabbitMQ container of its own (fixed host port) that a test can stop and restart, for broker-outage tests, with a helper queue
+/// to observe delivery. Capped like the shared broker (<see cref="RabbitFixture"/>).
+/// </summary>
 public sealed class RabbitContainer : IAsyncDisposable
 {
     private readonly RabbitMqContainer _container;
