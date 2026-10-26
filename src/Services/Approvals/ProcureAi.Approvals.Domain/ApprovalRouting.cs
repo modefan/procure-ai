@@ -24,7 +24,7 @@ public static class ApprovalRouting
         var landed = new List<(ApprovalLevel Level, List<ApprovalLevel> Covers, IReadOnlyList<string> Approvers)>();
         foreach (var level in required)
         {
-            var (landedLevel, approvers) = LandOn(level, totalInclVat, requesterId, org, []);
+            var (landedLevel, approvers) = LandOn(level, totalInclVat, requesterId, org);
             var previous = landed.Count > 0 ? landed[^1] : default;
             if (landed.Count > 0 && Merges(previous.Level, previous.Approvers, landedLevel, approvers))
             {
@@ -42,7 +42,17 @@ public static class ApprovalRouting
             .ToList());
     }
 
-    /// <summary>The next step above <paramref name="from"/> that has eligible approvers (not the requester, not anyone who already approved), or null.</summary>
+    /// <summary>
+    /// Escalates a step that timed out: returns a REPLACEMENT for <paramref name="from"/>, not an extra step.
+    /// <list type="bullet">
+    /// <item><c>StepNo</c> equals <c>from.StepNo</c>.</item>
+    /// <item><c>Level</c> is the next level above <c>from.Level</c> with eligible approvers.</item>
+    /// <item><c>CoversLevels</c> is <c>from.CoversLevels</c> plus every level above <c>from.Level</c> up to and including the landed level (ascending, no duplicates).</item>
+    /// <item><c>ApproverIds</c> are the eligible approvers at the landed level, excluding the requester and anyone in <paramref name="alreadyApproved"/>.</item>
+    /// </list>
+    /// Returns null from Finance, or when nobody above is eligible. The caller replaces <paramref name="from"/> with the result
+    /// and merges it with the following step when that step has the same <c>Level</c>.
+    /// </summary>
     public static PlannedStep? Escalate(
         PlannedStep from,
         Money totalInclVat,
@@ -57,7 +67,12 @@ public static class ApprovalRouting
                 .ToList();
             if (approvers.Count > 0)
             {
-                return new PlannedStep(from.StepNo + 1, level, [level], approvers);
+                var covers = from.CoversLevels
+                    .Concat(Enumerable.Range((int)from.Level + 1, level - from.Level).Select(l => (ApprovalLevel)l))
+                    .Distinct()
+                    .Order()
+                    .ToList();
+                return new PlannedStep(from.StepNo, level, covers, approvers);
             }
         }
 
@@ -65,11 +80,11 @@ public static class ApprovalRouting
     }
 
     private static (ApprovalLevel Level, IReadOnlyList<string> Approvers) LandOn(
-        ApprovalLevel level, Money total, string requesterId, OrganisationSnapshot org, IReadOnlyCollection<string> exclude)
+        ApprovalLevel level, Money total, string requesterId, OrganisationSnapshot org)
     {
         for (var current = level; current <= ApprovalLevel.Finance; current++)
         {
-            var approvers = ApproversAt(current, total, requesterId, org).Where(id => !exclude.Contains(id)).ToList();
+            var approvers = ApproversAt(current, total, requesterId, org);
             if (approvers.Count > 0)
             {
                 return (current, approvers);

@@ -98,29 +98,47 @@ public class ApprovalRoutingTests
         Shape(chain).ShouldBe("1:Finance[Manager+DepartmentHead+Finance]=thandi");
     }
 
+    private static string Shape(PlannedStep? step) =>
+        step is null ? "null" : $"{step.StepNo}:{step.Level}[{string.Join("+", step.CoversLevels)}]={string.Join(",", step.ApproverIds)}";
+
     [Fact]
-    public void Escalate_from_manager_goes_to_department_head()
+    public void Escalate_from_manager_replaces_the_step_with_the_department_head()
     {
         var from = new PlannedStep(1, ApprovalLevel.Manager, [ApprovalLevel.Manager], ["maria"]);
 
         var next = ApprovalRouting.Escalate(from, Money.Zar(5_000m), "tom", Org(), []);
 
-        next.ShouldNotBeNull();
-        next.Level.ShouldBe(ApprovalLevel.DepartmentHead);
-        next.ApproverIds.ShouldBe(["dept"]);
-        next.StepNo.ShouldBe(2);
+        Shape(next).ShouldBe("1:DepartmentHead[Manager+DepartmentHead]=dept");
+    }
+
+    [Fact]
+    public void Escalate_in_the_middle_of_a_chain_keeps_the_step_number_and_the_covered_levels()
+    {
+        var from = new PlannedStep(1, ApprovalLevel.Manager, [ApprovalLevel.Manager], ["maria"]);
+
+        var next = ApprovalRouting.Escalate(from, Money.Zar(30_000m), "tom", Org(), []);
+
+        Shape(next).ShouldBe("1:DepartmentHead[Manager+DepartmentHead]=dept");
     }
 
     [Fact]
     public void Escalate_from_department_head_skips_to_finance_when_dept_is_the_requester()
     {
-        var from = new PlannedStep(1, ApprovalLevel.DepartmentHead, [ApprovalLevel.DepartmentHead], ["dept"]);
+        var from = new PlannedStep(2, ApprovalLevel.DepartmentHead, [ApprovalLevel.DepartmentHead], ["dept"]);
 
         var next = ApprovalRouting.Escalate(from, Money.Zar(30_000m), "dept", Org(), []);
 
-        next.ShouldNotBeNull();
-        next.Level.ShouldBe(ApprovalLevel.Finance);
-        next.ApproverIds.ShouldBe(["thandi"]);
+        Shape(next).ShouldBe("2:Finance[DepartmentHead+Finance]=thandi");
+    }
+
+    [Fact]
+    public void Escalate_from_a_merged_step_keeps_all_its_covered_levels()
+    {
+        var from = new PlannedStep(1, ApprovalLevel.DepartmentHead, [ApprovalLevel.Manager, ApprovalLevel.DepartmentHead], ["dept"]);
+
+        var next = ApprovalRouting.Escalate(from, Money.Zar(250_000m), "tom", Org(), []);
+
+        Shape(next).ShouldBe("1:Finance[Manager+DepartmentHead+Finance]=thandi");
     }
 
     [Fact]
@@ -128,7 +146,7 @@ public class ApprovalRoutingTests
     {
         var from = new PlannedStep(1, ApprovalLevel.Finance, [ApprovalLevel.Finance], ["thandi"]);
 
-        ApprovalRouting.Escalate(from, Money.Zar(30_000m), "tom", Org(), []).ShouldBeNull();
+        Shape(ApprovalRouting.Escalate(from, Money.Zar(30_000m), "tom", Org(), [])).ShouldBe("null");
     }
 
     [Fact]
@@ -136,17 +154,36 @@ public class ApprovalRoutingTests
     {
         var from = new PlannedStep(1, ApprovalLevel.DepartmentHead, [ApprovalLevel.DepartmentHead], ["dept"]);
 
-        ApprovalRouting.Escalate(from, Money.Zar(30_000m), "thandi", Org(), []).ShouldBeNull();
+        Shape(ApprovalRouting.Escalate(from, Money.Zar(30_000m), "thandi", Org(), [])).ShouldBe("null");
     }
 
     [Fact]
-    public void Escalate_excludes_people_who_already_approved()
+    public void Escalate_skips_a_level_whose_only_approver_already_approved()
     {
         var from = new PlannedStep(1, ApprovalLevel.Manager, [ApprovalLevel.Manager], ["maria"]);
 
+        // Without alreadyApproved the escalation would land on dept.
+        Shape(ApprovalRouting.Escalate(from, Money.Zar(5_000m), "tom", Org(), [])).ShouldBe("1:DepartmentHead[Manager+DepartmentHead]=dept");
+
         var next = ApprovalRouting.Escalate(from, Money.Zar(5_000m), "tom", Org(), ["dept"]);
 
-        next.ShouldNotBeNull();
-        next.Level.ShouldBe(ApprovalLevel.Finance);
+        Shape(next).ShouldBe("1:Finance[Manager+DepartmentHead+Finance]=thandi");
+    }
+
+    [Fact]
+    public void Escalate_to_finance_excludes_only_the_requester_and_those_who_already_approved()
+    {
+        var finance = new[]
+        {
+            new Candidate("amy", Money.Zar(2_000_000m), true),
+            new Candidate("bob", Money.Zar(2_000_000m), true),
+            new Candidate("cat", Money.Zar(2_000_000m), true),
+            new Candidate("tom", Money.Zar(2_000_000m), true),
+        };
+        var from = new PlannedStep(2, ApprovalLevel.DepartmentHead, [ApprovalLevel.DepartmentHead], ["dept"]);
+
+        var next = ApprovalRouting.Escalate(from, Money.Zar(30_000m), "tom", Org(finance: finance), ["amy"]);
+
+        Shape(next).ShouldBe("2:Finance[DepartmentHead+Finance]=bob,cat");
     }
 }
