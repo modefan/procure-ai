@@ -5,14 +5,25 @@ namespace ProcureAi.Testing;
 /// <summary>Binds a throwaway queue to an exchange and reads what arrives, headers included.</summary>
 public sealed class RabbitProbe(string connectionString)
 {
-    public async Task<string> BindQueueAsync(string exchange)
+    public Task<string> BindQueueAsync(string exchange) => BindQueueAsync(exchange, "");
+
+    /// <summary>A throwaway queue bound to <paramref name="exchange"/> with <paramref name="routingKey"/> (a topic exchange such as <c>cdc</c>).</summary>
+    public async Task<string> BindQueueAsync(string exchange, string routingKey)
     {
         var queue = $"probe-{Guid.NewGuid():N}";
         await using var connection = await Factory().CreateConnectionAsync();
         await using var channel = await connection.CreateChannelAsync();
         await channel.QueueDeclareAsync(queue, durable: true, exclusive: false, autoDelete: true);
-        await channel.QueueBindAsync(queue, exchange, routingKey: "");
+        await channel.QueueBindAsync(queue, exchange, routingKey);
         return queue;
+    }
+
+    /// <summary>Publishes a raw body (e.g. a Debezium change as JSON) with no properties, as Debezium Server does.</summary>
+    public async Task PublishRawAsync(string exchange, string routingKey, string body)
+    {
+        await using var connection = await Factory().CreateConnectionAsync();
+        await using var channel = await connection.CreateChannelAsync();
+        await channel.BasicPublishAsync(exchange, routingKey, System.Text.Encoding.UTF8.GetBytes(body));
     }
 
     public async Task<uint> CountAsync(string queue)
@@ -58,7 +69,7 @@ public sealed class RabbitProbe(string connectionString)
         {
             if (await channel.BasicGetAsync(queue, autoAck: true) is { } result)
             {
-                return new RawMessage(new BasicProperties(result.BasicProperties), result.Body.ToArray());
+                return new RawMessage(new BasicProperties(result.BasicProperties), result.Body.ToArray(), result.RoutingKey);
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100));
@@ -71,11 +82,11 @@ public sealed class RabbitProbe(string connectionString)
     /// Publishes a captured message again, byte for byte with the same properties (message ID, headers): what the broker
     /// delivers when a consumer failed to acknowledge it, or a publisher's outbox sent it twice.
     /// </summary>
-    public async Task RepublishAsync(string exchange, RawMessage message)
+    public async Task RepublishAsync(string exchange, RawMessage message, string routingKey = "")
     {
         await using var connection = await Factory().CreateConnectionAsync();
         await using var channel = await connection.CreateChannelAsync();
-        await channel.BasicPublishAsync(exchange, routingKey: "", mandatory: false, message.Properties, message.Body);
+        await channel.BasicPublishAsync(exchange, routingKey, mandatory: false, message.Properties, message.Body);
     }
 
     private ConnectionFactory Factory() => new() { Uri = new Uri(connectionString) };
@@ -115,7 +126,7 @@ public sealed class RabbitProbe(string connectionString)
 }
 
 /// <summary>A message as it was on the broker, to deliver it again unchanged.</summary>
-public sealed record RawMessage(BasicProperties Properties, byte[] Body)
+public sealed record RawMessage(BasicProperties Properties, byte[] Body, string RoutingKey = "")
 {
     /// <summary>The AMQP message ID (Wolverine puts its envelope ID here).</summary>
     public string? MessageId => Properties.MessageId;

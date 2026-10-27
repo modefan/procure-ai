@@ -112,6 +112,11 @@ public sealed class StubAccessServer : IAsyncDisposable
 
     public int NameCalls => Volatile.Read(ref _nameCalls);
 
+    private readonly ConcurrentDictionary<string, TimeSpan> _nameDelays = new(StringComparer.Ordinal);
+
+    /// <summary>Makes every display-name answer for the tenant this slow (a slow Access).</summary>
+    public void SetNameDelay(string tenantId, TimeSpan delay) => _nameDelays[tenantId] = delay;
+
     /// <summary>The display name the stub gives one user of one tenant (users without one are 404).</summary>
     public void SetDisplayName(string tenantId, string userId, string displayName) => _displayNames[(tenantId, userId)] = displayName;
 
@@ -171,10 +176,16 @@ public sealed class StubAccessServer : IAsyncDisposable
 
             return Results.Json(new { tenantId = registration.Tenant, joined = true });
         });
-        app.MapGet("/api/v1/access/internal/users/{userId}", (HttpContext http, string userId) =>
+        app.MapGet("/api/v1/access/internal/users/{userId}", async (HttpContext http, string userId) =>
         {
             Interlocked.Increment(ref stub._nameCalls);
             stub.Record(http);
+            if (stub._nameDelays.TryGetValue(http.Request.Headers["X-Tenant-Id"].ToString(), out var delay))
+            {
+                // Not the request's token: the stub keeps "working" after the caller gave up, as a slow server does.
+                await Task.Delay(delay);
+            }
+
             if (stub.Down)
             {
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

@@ -63,6 +63,20 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 - Aspire creates the databases; the Postgres init script only creates the `debezium` role. Debezium starts after the
   service's `-migrate` resource finished.
 - Tests: `DebeziumFixture(network, postgres).StartAsync(database, tables...)` in `ProcureAi.Testing`, same mechanism.
+  A test project that reads other services' changes (Audit) adds their databases with
+  `ServiceInfraFixture.AddCapturedDatabaseAsync(database, migrate, tables...)` (each with its own Debezium).
+- **The Audit service consumes it** (queue `audit-cdc`, bound with `#` to `cdc` only; Wolverine reads Debezium's plain JSON as
+  `DebeziumChange` through `DefaultIncomingMessage`). Each change is matched to the `audit_entries` row of the same transaction,
+  table and key (the app user) or flagged "changed outside the app" after `Audit:Matching:Grace`. Debezium does not say which
+  columns are a table's key, so **a new captured table whose key is not `id` needs an entry in `Audit:Cdc:KeyColumns`** (Audit's
+  appsettings, columns in EF key order); `CdcKeyColumnsTests` fails until it is there. A table whose key is a request ID goes into
+  `Audit:Cdc:RequestTables`; a `request_id` column is found by itself. Values are sent as text (`decimal.handling.mode=string`).
+
+## Business metrics
+
+A service's own metrics go on a meter named `ProcureAi.<Service>` created through `IMeterFactory` (see Audit's `AuditMetrics`);
+the service defaults export every `ProcureAi.*` meter over OTLP, so nothing else needs registering. Tests read them with a
+`MeterListener`.
 
 ## Where the pieces live
 

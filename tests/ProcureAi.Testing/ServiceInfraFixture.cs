@@ -22,11 +22,15 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
     private RabbitFixture? _rabbit;
     private RedisFixture? _redis;
     private DebeziumFixture? _debezium;
+    private readonly List<DebeziumFixture> _otherDebeziums = [];
 
     /// <summary>The service's database, migrated by <see cref="MigrateAsync"/>.</summary>
     public string DbConnectionString { get; private set; } = "";
 
     public string RabbitConnectionString => _rabbit!.ConnectionString;
+
+    /// <summary>RabbitMQ's management HTTP API (same user and password as the connection string).</summary>
+    public Uri RabbitManagementUri => _rabbit!.ManagementUri;
 
     public string RedisConnectionString => _redis!.ConnectionString;
 
@@ -74,6 +78,25 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         }
     }
 
+    /// <summary>
+    /// Another service's database on the same Postgres, migrated by <paramref name="migrate"/>, with its own Debezium Server
+    /// capturing <paramref name="tables"/> (as the AppHost gives every captured database). For a service that reads other
+    /// services' changes (Audit). Returns the connection string once Debezium streams the database.
+    /// </summary>
+    public async Task<string> AddCapturedDatabaseAsync(string database, Func<string, Task> migrate, params string[] tables)
+    {
+        var connectionString = await _postgres!.CreateDatabaseAsync(database);
+        await migrate(connectionString);
+        var debezium = new DebeziumFixture(_network!, _postgres!);
+        lock (_otherDebeziums)
+        {
+            _otherDebeziums.Add(debezium);
+        }
+
+        await debezium.StartAsync(database, tables);
+        return connectionString;
+    }
+
     /// <summary>An empty database (no migrations), for tests that migrate it themselves.</summary>
     public Task<string> CreateEmptyDatabaseAsync(string name) => _postgres!.CreateDatabaseAsync(name);
 
@@ -90,6 +113,11 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         if (_debezium is not null)
         {
             await _debezium.DisposeAsync();
+        }
+
+        foreach (var debezium in _otherDebeziums)
+        {
+            await debezium.DisposeAsync();
         }
 
         if (_postgres is not null)

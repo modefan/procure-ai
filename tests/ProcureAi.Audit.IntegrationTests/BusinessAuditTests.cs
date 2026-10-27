@@ -1,6 +1,12 @@
+using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using ProcureAi.Audit.Application;
 using ProcureAi.Audit.Application.Dtos;
 using ProcureAi.Audit.Infrastructure;
 using ProcureAi.Contracts;
@@ -151,6 +157,66 @@ public sealed class BusinessAuditTests(AuditApp app)
         {
             app.Access.Down = false;
         }
+    }
+
+    [Fact]
+    public async Task History_answers_with_user_ids_within_the_timeout_when_access_is_slow()
+    {
+        var tenant = AuditApp.NewTenant();
+        var requestId = Guid.NewGuid();
+        var timeout = app.Services.GetRequiredService<IOptions<AuditOptions>>().Value.DisplayNameTimeout;
+        app.Access.SetDisplayName(tenant, Tom, "Tom Requester");
+        app.Access.SetNameDelay(tenant, TimeSpan.FromSeconds(20));
+        await app.PublishAsync(Submitted(requestId, tenant), Exchanges.Requests, tenant, Tom);
+        await app.WaitForStoredAsync(tenant, s => s.Count == 1);
+
+        var clock = Stopwatch.StartNew();
+        using var response = await app.Client.SendAsync(AuditApp.GetWithApiKey(History(requestId), tenant), Ct);
+        clock.Stop();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        (await response.Content.ReadFromJsonAsync<List<BusinessEventDto>>(Ct)).ShouldNotBeNull()
+            .ShouldHaveSingleItem().Summary.ShouldStartWith($"Submitted by {Tom}:");
+        // About the timeout (2 s), far from Access's 20 s; the margin covers the query and a busy test machine.
+        clock.Elapsed.ShouldBeLessThan(timeout + TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
+    public async Task Business_events_are_indexed_by_tenant_and_subject_together()
+    {
+        await using var connection = new NpgsqlConnection(app.Infra.DbConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'audit' AND tablename = 'mt_doc_businessevent'", connection);
+        var indexes = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync(Ct))
+        {
+            while (await reader.ReadAsync(Ct))
+            {
+                indexes.Add(reader.GetString(0));
+            }
+        }
+
+        // One index for the history query (tenant and request), not one per column.
+        indexes.ShouldContain(i => i.Contains("tenantid", StringComparison.OrdinalIgnoreCase) && i.Contains("subjectid", StringComparison.OrdinalIgnoreCase),
+            string.Join(Environment.NewLine, indexes));
+        indexes.ShouldNotContain(i => i.Contains("tenantid", StringComparison.OrdinalIgnoreCase) != i.Contains("subjectid", StringComparison.OrdinalIgnoreCase),
+            string.Join(Environment.NewLine, indexes));
+    }
+
+    [Fact]
+    public void Audit_options_come_from_configuration_only()
+    {
+        // Nothing in code: options that were never bound are not valid, so a missing appsettings value fails at startup.
+        var unbound = new AuditOptions();
+        Validator.TryValidateObject(unbound, new ValidationContext(unbound), [], validateAllProperties: true).ShouldBeFalse();
+
+        var bound = app.Services.GetRequiredService<IOptions<AuditOptions>>().Value;
+        bound.DisplayNameTimeout.ShouldBe(TimeSpan.FromSeconds(2));
+        bound.Matching.Window.ShouldBe(TimeSpan.FromMinutes(10));
+        bound.Matching.Grace.ShouldBe(AuditApiFactory.Grace, "the tests' setting overrides appsettings' 30 s");
+        bound.RetentionDays.ShouldBe(90);
+        bound.PurgeInterval.ShouldBe(TimeSpan.FromDays(1));
     }
 
     [Fact]

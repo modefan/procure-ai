@@ -6,8 +6,17 @@ using ProcureAi.Audit.Domain;
 namespace ProcureAi.Audit.Infrastructure;
 
 /// <summary>
-/// The business audit in Marten. An event is inserted, never updated: the first delivery of a message wins and a
-/// redelivery (same message ID, so same document ID) is ignored, so a stored record cannot be overwritten.
+/// The business audit in Marten.
+/// <para>
+/// The write runs in a Marten session of its own, outside Wolverine's transaction (the recording handler takes no
+/// <c>IDocumentSession</c>, so Wolverine wraps no transaction around it). That is safe because the write is idempotent: the durable
+/// inbox already holds the message, and a handler that fails after the commit is run again and finds the record there.
+/// </para>
+/// <para>
+/// Insert-only on purpose, idempotent by ID: an event is inserted, never updated or upserted. The first delivery of a message
+/// wins and a redelivery (same message ID, so same document ID) is ignored, so a stored audit record can never be overwritten,
+/// not even by a message that reuses an ID with other content. Do not turn this into <c>Store</c> (an upsert).
+/// </para>
 /// </summary>
 public sealed class MartenAuditStore(IDocumentStore store) : IAuditStore
 {

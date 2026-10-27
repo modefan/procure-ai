@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Testcontainers.RabbitMq" />
@@ -26,6 +27,15 @@
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
     <ProjectReference Include="../../src/Services/Audit/ProcureAi.Audit.Infrastructure/ProcureAi.Audit.Infrastructure.csproj" />
     <ProjectReference Include="../../src/Services/Audit/ProcureAi.Audit.Api/ProcureAi.Audit.Api.csproj" />
+    <!--
+      The CDC tests run the real Requests API (app changes through its audit interceptor) next to Audit. Its Program is reached
+      through the extern alias "RequestsApi" (both Apis declare a global Program). The other services' Infrastructure projects
+      give the EF models whose keys the Audit:Cdc:KeyColumns configuration must match (CdcKeyColumnsTests).
+    -->
+    <ProjectReference Include="../../src/Services/Requests/ProcureAi.Requests.Api/ProcureAi.Requests.Api.csproj" Aliases="RequestsApi" />
+    <ProjectReference Include="../../src/Services/Budgets/ProcureAi.Budgets.Infrastructure/ProcureAi.Budgets.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Access/ProcureAi.Access.Infrastructure/ProcureAi.Access.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Approvals/ProcureAi.Approvals.Infrastructure/ProcureAi.Approvals.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

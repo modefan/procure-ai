@@ -12,8 +12,14 @@ public static class ApiMigrateProcess
 
     /// <param name="apiAssembly">File name of the Api assembly, e.g. <c>ProcureAi.Budgets.Api.dll</c>.</param>
     /// <param name="databaseConnectionName">The service's connection-string name, e.g. <c>budgetsdb</c>.</param>
+    /// <param name="contentRoot">
+    /// Where the Api reads its <c>appsettings.json</c>, relative to the repository root (e.g. <c>src/Services/Audit/ProcureAi.Audit.Api</c>).
+    /// Needed when the test project references several Api projects: their <c>appsettings.json</c> files all land in the test
+    /// output folder, and only one of them survives there. Default: the test output folder.
+    /// </param>
     public static async Task RunAsync(
-        string apiAssembly, string databaseConnectionName, string database, string rabbit, string redis, bool demoSeed)
+        string apiAssembly, string databaseConnectionName, string database, string rabbit, string redis, bool demoSeed,
+        string? contentRoot = null)
     {
         var dll = Path.Combine(AppContext.BaseDirectory, apiAssembly);
         var start = new ProcessStartInfo("dotnet", ["exec", dll, "--migrate"])
@@ -28,6 +34,12 @@ public static class ApiMigrateProcess
         start.Environment["ConnectionStrings__rabbitmq"] = rabbit;
         start.Environment["ConnectionStrings__Redis"] = redis;
         start.Environment["DemoSeed__Enabled"] = demoSeed ? "true" : "false";
+        if (contentRoot is not null)
+        {
+            // The environment variable, not --contentRoot: WebApplication.CreateBuilder ignores the command-line content root for appsettings.
+            start.Environment["ASPNETCORE_CONTENTROOT"] = Path.GetFullPath(Path.Combine(PostgresFixture.RepoRoot(), contentRoot));
+        }
+
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();

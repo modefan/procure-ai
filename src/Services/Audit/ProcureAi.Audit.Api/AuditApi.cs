@@ -1,5 +1,6 @@
 using ProcureAi.Audit.Application;
 using ProcureAi.Audit.Infrastructure;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Web.Options;
 using Wolverine;
@@ -15,6 +16,7 @@ public static class AuditApi
         ServiceHost.Build(args, ServiceName, builder =>
         {
             builder.Services.AddValidatedOptions<AuditOptions>(builder.Configuration, AuditOptions.SectionName);
+            builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
             // Marten changes its schema (and the Wolverine message store in it) only in the --migrate run.
             builder.Services.AddAuditInfrastructure(builder.Configuration, builder.Configuration.GetValue<bool>(ServiceHost.MigratingSetting));
             builder.Host.UseWolverine(options => options.ConfigureAudit(builder.Configuration, ServiceName));

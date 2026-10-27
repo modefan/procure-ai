@@ -22,6 +22,12 @@ public static class Extensions
     /// <summary>The name of both the ActivitySource and the Meter of Wolverine.</summary>
     public const string WolverineTelemetryName = "Wolverine";
 
+    /// <summary>
+    /// The services' own business meters (e.g. <c>ProcureAi.Audit</c>: changes made outside the app): every meter whose name starts
+    /// with <c>ProcureAi.</c> is exported, so a service adds a metric without touching this file.
+    /// </summary>
+    public const string BusinessMeters = "ProcureAi.*";
+
     /// <summary>Health checks with this tag decide <c>/health/ready</c> (dependencies); services add theirs.</summary>
     public const string ReadyTag = "ready";
 
@@ -58,6 +64,7 @@ public static class Extensions
                 .AddRuntimeInstrumentation()
                 // Registering a meter or source for a library a service does not use is harmless: it just never emits.
                 .AddMeter(WolverineTelemetryName)
+                .AddMeter(BusinessMeters)
                 .AddNpgsqlInstrumentation()
                 .AddFusionCacheInstrumentation())
             .WithTracing(tracing => tracing

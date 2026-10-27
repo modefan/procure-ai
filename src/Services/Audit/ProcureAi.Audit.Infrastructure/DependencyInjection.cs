@@ -1,12 +1,16 @@
+using System.Linq.Expressions;
 using System.Reflection;
 using JasperFx;
 using Marten;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.Audit.Application;
 using ProcureAi.Audit.Application.Abstractions;
+using ProcureAi.Audit.Application.Cdc;
 using ProcureAi.Audit.Application.Events;
 using ProcureAi.Audit.Domain;
+using ProcureAi.Audit.Infrastructure.Retention;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Contracts;
 using Wolverine;
@@ -21,6 +25,12 @@ public static class DependencyInjection
 
     /// <summary>The queue every integration event reaches: bound to every exchange of <see cref="Exchanges"/>.</summary>
     public const string EventsQueue = "audit-events";
+
+    /// <summary>The queue Debezium's changes reach: bound to the <c>cdc</c> exchange only (and nothing else is bound to it).</summary>
+    public const string CdcQueue = "audit-cdc";
+
+    /// <summary>The topic exchange every Debezium Server publishes to (routing key <c>&lt;database&gt;.public.&lt;table&gt;</c>); declared by the AppHost.</summary>
+    public const string CdcExchange = "cdc";
 
     /// <summary>Marten's documents live in this schema of <c>auditdb</c>; Wolverine's inbox and outbox in <c>wolverine</c>.</summary>
     public const string DocumentSchema = "audit";
@@ -55,20 +65,45 @@ public static class DependencyInjection
                 options.Connection(connectionString);
                 options.DatabaseSchemaName = DocumentSchema;
                 options.AutoCreateSchemaObjects = autoCreate;
-                // The history of a request is read by tenant and request.
-                options.Schema.For<BusinessEvent>().Index(e => e.TenantId).Index(e => e.SubjectId!);
+
+                // The history of a request is read by tenant and request: one index on both.
+                options.Schema.For<BusinessEvent>().Index(Columns<BusinessEvent>(e => e.TenantId, e => e.SubjectId!));
+
+                // A pending change is decided by its match or by the grace timeout, never both: versions (optimistic concurrency).
+                options.Schema.For<DataChange>()
+                    .UseOptimisticConcurrency(true)
+                    .Metadata(metadata => metadata.Version.MapTo(c => c.Version))
+                    .Index(Columns<DataChange>(c => c.TenantId!, c => c.SubjectId!))
+                    .Index(c => c.CommittedAt)
+                    .Index(c => c.Database);
+                options.Schema.For<AttributionMatch>()
+                    .UseOptimisticConcurrency(true)
+                    .Metadata(metadata => metadata.Version.MapTo(m => m.Version))
+                    .Index(m => m.LastSeenAt);
+                options.Schema.For<InterceptorEntry>().Index(e => e.OccurredAt);
+                options.Schema.For<OutsideAppAlert>().Index(a => a.CommittedAt);
             })
             .IntegrateWithWolverine(wolverine => wolverine.MessageStorageSchemaName = MessageStoreSchema);
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IAuditStore, MartenAuditStore>();
+        services.AddSingleton<IDataChangeStore, MartenDataChangeStore>();
+        services.AddSingleton<IAuditMetrics, AuditMetrics>();
+        services.AddHostedService<DataChangeRetention>();
         return services;
     }
 
     /// <summary>
-    /// The shared handler setup (durable inbox, caller headers, shared handlers) and the queue <c>audit-events</c>, bound with
-    /// <c>#</c> to every exchange in <see cref="AuditedExchanges"/>. Every integration event type of the contracts is registered
-    /// up front, so Wolverine knows each one when it arrives (the recording handler takes the <c>IIntegrationEvent</c> interface).
-    /// <c>AccessChanged</c> reaches this queue too (exchange <c>access</c>), so the service has no separate access-changed queue:
-    /// one delivery both records it and evicts the cached Access answers.
+    /// The shared handler setup (durable inbox, caller headers, shared handlers) and two queues:
+    /// <list type="bullet">
+    /// <item><c>audit-events</c>, bound with <c>#</c> to every exchange in <see cref="AuditedExchanges"/>. Every integration event type
+    /// of the contracts is registered up front, so Wolverine knows each one when it arrives (the recording handler takes the
+    /// <c>IIntegrationEvent</c> interface). <c>AccessChanged</c> reaches this queue too (exchange <c>access</c>), so the service has no
+    /// separate access-changed queue: one delivery both records it and evicts the cached Access answers.</item>
+    /// <item><c>audit-cdc</c>, bound with <c>#</c> to the topic exchange <c>cdc</c> only. Debezium publishes plain JSON without
+    /// Wolverine's headers, so every message on it is read as a <see cref="DebeziumChange"/>. It is durable like every listener: a
+    /// message is acknowledged once it is in the durable inbox (Postgres), and handled from there.</item>
+    /// </list>
+    /// A handler that lost a race (concurrency exception) is retried inline with backoff and jitter (<c>Audit:ConcurrencyRetry</c>).
     /// </summary>
     public static void ConfigureAudit(this WolverineOptions options, IConfiguration configuration, string serviceName)
     {
@@ -87,5 +122,23 @@ public static class DependencyInjection
                 queue.BindExchange(exchange, "#");
             }
         });
+
+        options.ConfigureRabbitMq().DeclareExchange(CdcExchange, exchange =>
+        {
+            exchange.ExchangeType = Wolverine.RabbitMQ.ExchangeType.Topic;
+            exchange.IsDurable = true;
+        });
+        options.ListenToRabbitQueue(CdcQueue, queue => queue.BindExchange(CdcExchange, "#"))
+            .DefaultIncomingMessage<DebeziumChange>();
+
+        // The grace timeout survives a restart: scheduled in the durable message store.
+        options.LocalQueueFor<ResolveAttribution>().UseDurableInbox();
+
+        const string section = $"{AuditOptions.SectionName}:ConcurrencyRetry";
+        var retry = configuration.GetSection(section).Get<ProcureAi.BuildingBlocks.Application.ConcurrencyRetryOptions>()
+            ?? throw new InvalidOperationException($"'{section}' is not configured.");
+        options.RetryConcurrencyConflicts(retry, section);
     }
+
+    private static IReadOnlyCollection<Expression<Func<T, object>>> Columns<T>(params Expression<Func<T, object>>[] columns) => columns;
 }
