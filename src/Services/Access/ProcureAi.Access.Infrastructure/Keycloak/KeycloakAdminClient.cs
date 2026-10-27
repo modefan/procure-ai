@@ -26,38 +26,61 @@ public sealed class KeycloakAdminClient(
 
     public string DemoTenantId => options.Value.DemoOrganization;
 
-    public async Task<IdentityProfile> EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken)
+    public async Task<IdentityProfile> GetProfileAsync(string userId, CancellationToken cancellationToken)
     {
-        var settings = options.Value;
-        var realm = $"admin/realms/{Uri.EscapeDataString(settings.Realm)}";
+        var realm = Realm();
         var user = Uri.EscapeDataString(userId);
-
-        IdentityProfile profile;
+        JsonElement representation;
         using (var found = await SendAsync(HttpMethod.Get, $"{realm}/users/{user}", null, cancellationToken))
         {
-            if (found.StatusCode == HttpStatusCode.NotFound)
-            {
-                throw new NotFoundException($"User {userId} does not exist in the identity provider.");
-            }
-
+            ThrowIfUnknown(found, userId);
             Ensure(found, "reading the user");
-            profile = ProfileOf(await found.Content.ReadFromJsonAsync<JsonElement>(cancellationToken));
+            representation = await found.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
         }
 
-        var organizationId = await FindOrganizationIdAsync(realm, settings.DemoOrganization, cancellationToken);
+        using var organizations = await SendAsync(
+            HttpMethod.Get, $"{realm}/organizations/members/{user}/organizations", null, cancellationToken);
+        Ensure(organizations, "reading the organizations of the user");
+        var aliases = (await organizations.Content.ReadFromJsonAsync<JsonElement>(cancellationToken)).EnumerateArray()
+            .Select(o => o.GetProperty("alias").GetString() ?? "")
+            .ToList();
+        return ProfileOf(representation, aliases);
+    }
+
+    public async Task EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken)
+    {
+        var realm = Realm();
+        var user = Uri.EscapeDataString(userId);
+
+        using (var found = await SendAsync(HttpMethod.Get, $"{realm}/users/{user}", null, cancellationToken))
+        {
+            ThrowIfUnknown(found, userId);
+            Ensure(found, "reading the user");
+        }
+
+        var organizationId = await FindOrganizationIdAsync(realm, options.Value.DemoOrganization, cancellationToken);
         await EnsureMemberAsync(realm, organizationId, user, userId, cancellationToken);
         await EnsureRoleAsync(realm, user, role, cancellationToken);
-        return profile;
+    }
+
+    private string Realm() => $"admin/realms/{Uri.EscapeDataString(options.Value.Realm)}";
+
+    private static void ThrowIfUnknown(HttpResponseMessage response, string userId)
+    {
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new NotFoundException($"User {userId} does not exist in the identity provider.");
+        }
     }
 
     // "First Last" as the user entered it at sign-up; the username when both are empty.
-    private static IdentityProfile ProfileOf(JsonElement user)
+    private static IdentityProfile ProfileOf(JsonElement user, IReadOnlyList<string> organizations)
     {
         string Text(string name) =>
             user.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()!.Trim() : "";
 
         var name = $"{Text("firstName")} {Text("lastName")}".Trim();
-        return new IdentityProfile(Text("email"), name.Length > 0 ? name : Text("username"));
+        return new IdentityProfile(Text("email"), name.Length > 0 ? name : Text("username"), organizations);
     }
 
     private async Task<string> FindOrganizationIdAsync(string realm, string alias, CancellationToken cancellationToken)

@@ -7,7 +7,9 @@ namespace ProcureAi.Access.IntegrationTests;
 /// settings point nowhere unless a test passes a Keycloak (then they point at it, with <paramref name="demoOrganization"/>
 /// as the demo company).
 /// </summary>
-public class AccessApiFactory(AccessInfraFixture infra, KeycloakFixture? keycloak = null, string? demoOrganization = null)
+public class AccessApiFactory(
+    AccessInfraFixture infra, KeycloakFixture? keycloak = null, string? demoOrganization = null,
+    IReadOnlyDictionary<string, string?>? settings = null)
     : ServiceApiFactory<Program>("accessdb", infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     public const string InternalClientId = "procure-internal";
@@ -24,5 +26,9 @@ public class AccessApiFactory(AccessInfraFixture infra, KeycloakFixture? keycloa
         builder.UseSetting("Keycloak:DemoOrganization", demoOrganization ?? "demo");
         builder.UseSetting("Keycloak:AdminClientId", KeycloakFixture.AccessAdminClient);
         builder.UseSetting("Keycloak:AdminClientSecret", keycloak?.AccessAdminSecret ?? "not-used");
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(key, value);
+        }
     }
 }

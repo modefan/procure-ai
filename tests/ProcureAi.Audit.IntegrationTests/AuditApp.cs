@@ -127,6 +127,9 @@ public sealed class AuditApp : IAsyncLifetime
 
     public IServiceProvider Services => _factory.Services;
 
+    /// <summary>Makes a write of a tenant's Access cache generation fail once (a Redis blip).</summary>
+    public FlakyGenerationCache GenerationFaults { get; } = new();
+
     public IMessageBus Bus => _factory.Services.GetRequiredService<IMessageBus>();
 
     /// <summary>The real Requests API (after <see cref="EnsureCdcAsync"/>), on the same Postgres, broker and Redis.</summary>
@@ -141,7 +144,7 @@ public sealed class AuditApp : IAsyncLifetime
         await _infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
         Approvals = await StubApprovalsServer.StartAsync();
-        _factory = new AuditApiFactory(_infra, Access, Logs);
+        _factory = new AuditApiFactory(_infra, Access, Logs, GenerationFaults.Install);
         Client = _factory.CreateClient();
     }
 

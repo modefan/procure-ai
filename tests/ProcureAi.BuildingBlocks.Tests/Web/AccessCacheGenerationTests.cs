@@ -57,7 +57,7 @@ public sealed class AccessCacheGenerationTests
     }
 
     [Fact]
-    public async Task AccessChanged_handler_fails_when_the_generation_cannot_be_stored_so_the_message_is_retried()
+    public async Task AccessChanged_handler_throws_when_the_generation_cannot_be_stored()
     {
         using var cache = Cache(new SwitchableDistributedCache { Failing = true });
 

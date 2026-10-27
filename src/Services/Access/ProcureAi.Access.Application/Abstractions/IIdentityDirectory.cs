@@ -10,12 +10,21 @@ public interface IIdentityDirectory
     string DemoTenantId { get; }
 
     /// <summary>
-    /// Makes the user a member of the demo company's organization and gives them <paramref name="role"/>. Safe to repeat: whatever
-    /// is already in place stays. Returns the user's profile as the identity provider holds it. Throws
+    /// The user as the identity provider holds them, changing nothing. Throws
     /// <see cref="ProcureAi.BuildingBlocks.Application.NotFoundException"/> when the user does not exist.
     /// </summary>
-    Task<IdentityProfile> EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken);
+    Task<IdentityProfile> GetProfileAsync(string userId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes the user a member of the demo company's organization and gives them <paramref name="role"/>. Safe to repeat: whatever
+    /// is already in place stays. Throws <see cref="ProcureAi.BuildingBlocks.Application.NotFoundException"/> when the user does
+    /// not exist.
+    /// </summary>
+    Task EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken);
 }
 
-/// <summary>A user's email and display name as the identity provider holds them (not as a caller claims them).</summary>
-public sealed record IdentityProfile(string Email, string DisplayName);
+/// <summary>
+/// A user's email, display name and organizations (their aliases, i.e. tenant IDs) as the identity provider holds them, not as a
+/// caller claims them.
+/// </summary>
+public sealed record IdentityProfile(string Email, string DisplayName, IReadOnlyList<string> Organizations);

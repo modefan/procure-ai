@@ -134,7 +134,7 @@ public sealed class AccessController(
     /// Internal: a user who signed up in the identity provider joins the demo company (organization, requester role, sandbox
     /// cost center, tenant user). 201 when this call added them, 200 when they were already in. Called by the gateway for the
     /// signed-in user only: the user in the body must be the one in <c>X-On-Behalf-Of-User</c>, otherwise 403. Email and name
-    /// are read from the identity provider, never taken from the caller.
+    /// are read from the identity provider, never taken from the caller. 409 when the user already belongs to another company.
     /// </summary>
     [HttpPost("internal/registrations", Name = "RegisterDemoUser")]
     [Idempotent]
@@ -143,6 +143,7 @@ public sealed class AccessController(
     [ProducesResponseType<RegistrationDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<RegistrationDto>> RegisterDemoUser(RegisterDemoUserBody body, CancellationToken cancellationToken)
     {

@@ -24,7 +24,10 @@ public static class RegisterDemoUserHandler
     public const int MaxTextLength = 200;
 
     /// <summary>
-    /// Identity provider first (organization and role; repeatable), then the tenant user in Access with the requester role,
+    /// Everything is checked before anything changes: the profile is read from the identity provider, a user of another company
+    /// is refused (409: a second organization would make the tenant of their token undefined, and the realm role would reach
+    /// into their own company) and the email must fit. Then the identity provider (organization and role; repeatable), then
+    /// the tenant user in Access with the requester role,
     /// no approval limit and the sandbox cost center, then <c>AccessChanged</c> through the outbox. Someone already in Access
     /// changes nothing, so a retry after a failure in between finishes the job and a repeated call does no harm.
     /// <para>
@@ -60,11 +63,18 @@ public static class RegisterDemoUserHandler
             throw new InvalidOperationException($"The sandbox cost center '{sandbox}' does not exist in the '{tenant}' company.");
         }
 
-        var profile = await identities.EnsureDemoMemberAsync(command.UserId, RequesterRole, cancellationToken);
+        var profile = await identities.GetProfileAsync(command.UserId, cancellationToken);
+        if (profile.Organizations.Any(o => o != tenant))
+        {
+            throw new ConflictException("The user already belongs to another company and cannot join the demo company.");
+        }
+
         if (profile.Email.Length > MaxTextLength)
         {
             throw new DomainException($"The email address is longer than {MaxTextLength} characters.");
         }
+
+        await identities.EnsureDemoMemberAsync(command.UserId, RequesterRole, cancellationToken);
 
         var name = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Email : profile.DisplayName.Trim();
         var displayName = string.IsNullOrWhiteSpace(name) ? command.UserId : name[..Math.Min(name.Length, MaxTextLength)];

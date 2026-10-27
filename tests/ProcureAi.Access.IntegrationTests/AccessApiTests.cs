@@ -181,6 +181,10 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     {
         // Final review I-3: AccessChanged leaves through the outbox before the controller evicts its cache, so a consumer that
         // reacts to it must never get the pre-change answer. Simulated here by a change committed without any eviction.
+        // The micro-cache is set to an hour here, so a [CachedGet] on these endpoints would certainly still hold the answer,
+        // however slow the run.
+        await using var factory = new AccessApiFactory(infra, settings: new Dictionary<string, string?> { ["Caching:DefaultGetSeconds"] = "3600" });
+        using var client = factory.CreateClient();
         var tenant = await infra.CreateTenantAsync();
         await using (var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options))
         {
@@ -189,10 +193,10 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         }
 
         var effectivePath = $"/internal/effective?userId={DemoUsers.Maria}&roles=manager";
-        (await ReadAsync<EffectiveAccessDto>(await _client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(200_000m);
-        (await ReadAsync<CostCenterApproversDto>(await _client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
+        (await ReadAsync<EffectiveAccessDto>(await client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(200_000m);
+        (await ReadAsync<CostCenterApproversDto>(await client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
             .Manager.ShouldNotBeNull().DisplayName.ShouldBe("Maria Manager");
-        (await ReadAsync<UserNameDto>(await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
+        (await ReadAsync<UserNameDto>(await client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
             .DisplayName.ShouldBe("Maria Manager");
 
         await using (var connection = new NpgsqlConnection(infra.DbConnectionString))
@@ -206,10 +210,10 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
             (await update.ExecuteNonQueryAsync(Ct)).ShouldBe(1);
         }
 
-        (await ReadAsync<EffectiveAccessDto>(await _client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(1234m);
-        (await ReadAsync<CostCenterApproversDto>(await _client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
+        (await ReadAsync<EffectiveAccessDto>(await client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(1234m);
+        (await ReadAsync<CostCenterApproversDto>(await client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
             .Manager.ShouldNotBeNull().DisplayName.ShouldBe("Maria Renamed");
-        (await ReadAsync<UserNameDto>(await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
+        (await ReadAsync<UserNameDto>(await client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
             .DisplayName.ShouldBe("Maria Renamed");
     }
 

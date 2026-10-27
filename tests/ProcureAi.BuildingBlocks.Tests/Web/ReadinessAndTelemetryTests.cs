@@ -123,13 +123,25 @@ public sealed class TelemetryAndBackplanePrefixTests(RedisFixture redis)
         probe.HasListeners().ShouldBeTrue();
     }
 
-    /// <summary>The Redis pub/sub channels FusionCache's backplane has subscribed to (the first use connects it).</summary>
-    private static async Task<string[]> BackplaneChannelsAsync(WebApplication app)
+    /// <summary>
+    /// The Redis pub/sub channels FusionCache's backplane has subscribed to, once one matches <paramref name="expected"/> (the
+    /// first use connects the backplane, which subscribes in the background), or what is there after 5 s.
+    /// </summary>
+    private static async Task<string[]> BackplaneChannelsAsync(WebApplication app, string expected)
     {
         await app.Services.GetRequiredService<IFusionCache>().SetAsync("probe", 1, token: TestContext.Current.CancellationToken);
         var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
-        var channels = await redis.GetServer(redis.GetEndPoints()[0]).SubscriptionChannelsAsync();
-        return channels.Select(c => c.ToString()).ToArray();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (true)
+        {
+            var channels = (await redis.GetServer(redis.GetEndPoints()[0]).SubscriptionChannelsAsync()).Select(c => c.ToString()).ToArray();
+            if (channels.Any(c => c.Contains(expected, StringComparison.Ordinal)) || DateTime.UtcNow > deadline)
+            {
+                return channels;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+        }
     }
 
     [Fact]
@@ -141,7 +153,8 @@ public sealed class TelemetryAndBackplanePrefixTests(RedisFixture redis)
             new() { ["ConnectionStrings:Redis"] = redis.ConnectionString, ["FusionCache:BackplaneChannelPrefix"] = "requests-cache" },
             configure: b => b.AddProcureAiCaching());
 
-        (await BackplaneChannelsAsync(defaults)).ShouldContain(channel => channel.Contains(defaults.Environment.ApplicationName));
-        (await BackplaneChannelsAsync(named)).ShouldContain(channel => channel.Contains("requests-cache"));
+        (await BackplaneChannelsAsync(defaults, defaults.Environment.ApplicationName))
+            .ShouldContain(channel => channel.Contains(defaults.Environment.ApplicationName));
+        (await BackplaneChannelsAsync(named, "requests-cache")).ShouldContain(channel => channel.Contains("requests-cache"));
     }
 }

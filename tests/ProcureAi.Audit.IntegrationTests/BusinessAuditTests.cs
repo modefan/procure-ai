@@ -237,6 +237,23 @@ public sealed class BusinessAuditTests(AuditApp app)
         await EventuallyAsync(async () => (await HistoryAsync(requestId, tenant)).Single().Summary.StartsWith("Submitted by Tom After:", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task A_redis_failure_while_handling_AccessChanged_is_retried_until_the_generation_is_stored()
+    {
+        // Audit records AccessChanged and advances the Access cache generation in one chain. A Redis blip in the second must
+        // retry the chain, not send the message to the error queue: otherwise the other instances keep the old generation.
+        // The record itself is stored once either way (its document ID is the message ID).
+        var tenant = AuditApp.NewTenant();
+        app.GenerationFaults.FailNextWriteOf(tenant);
+
+        await app.PublishAsync(new ProcureAi.Contracts.Access.AccessChanged(tenant, "Matrix", null, DateTimeOffset.UtcNow), Exchanges.Access, tenant, DemoUsers.Admin);
+
+        (await app.WaitForStoredAsync(tenant, s => s.Any(e => e.Type == "AccessChanged"))).Count(e => e.Type == "AccessChanged").ShouldBe(1);
+        await EventuallyAsync(() => Task.FromResult(app.GenerationFaults.Written(tenant)));
+        app.GenerationFaults.Failed.ShouldBeGreaterThanOrEqualTo(1);
+        (await app.StoredAsync(tenant)).Count(e => e.Type == "AccessChanged").ShouldBe(1);
+    }
+
     private async Task<List<BusinessEventDto>> HistoryAsync(Guid requestId, string tenant)
     {
         using var response = await app.Client.SendAsync(AuditApp.GetWithApiKey(History(requestId), tenant), Ct);

@@ -11,7 +11,8 @@ namespace ProcureAi.BuildingBlocks.Messaging;
 /// entries unreachable on every instance, so fail-safe cannot serve a revoked permission while Access is down. The tag eviction
 /// after it only frees them early. Every service except Access listens (see <see cref="MessagingSetup"/>).
 /// When the new generation cannot be stored in Redis or announced on the backplane, the handler throws, so the message is
-/// retried rather than acked: the other instances of the service learn of the change only through Redis.
+/// retried rather than acked (<see cref="AccessChangedRetryPolicy"/>: scheduled, bounded, then the error queue): the other
+/// instances of the service learn of the change only through Redis.
 /// </summary>
 public static class AccessChangedHandler
 {

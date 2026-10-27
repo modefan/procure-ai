@@ -68,6 +68,8 @@ public static class MessagingSetup
         // The Access client is a typed HttpClient (a factory registration Wolverine cannot inline): handlers that take it
         // (the approval saga) resolve it from the container.
         options.CodeGeneration.AlwaysUseServiceLocationFor<IAccessDirectory>();
+        // AccessChanged is retried when Redis or the backplane fails (also where it is handled with more, as in Audit).
+        options.RetryAccessChangedCacheFailures(AccessChangedRetryPolicy.Delays(configuration));
         if (listenToAccessChanges)
         {
             ListenToAccessChanges(options, serviceName);

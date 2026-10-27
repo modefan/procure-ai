@@ -128,6 +128,40 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
     }
 
     [Fact]
+    public async Task A_user_of_another_company_is_refused_409_and_nothing_changes()
+    {
+        // Review minor 1: a second organization would make the tenant of the user's token undefined, and the realm role
+        // "requester" would also apply in their own company.
+        var email = NewEmail();
+        var userId = await _keycloak.CreateUserAsync(email);
+        var other = $"o{Guid.NewGuid():N}"[..12];
+        await _keycloak.AddOrganizationMemberAsync(await _keycloak.CreateOrganizationAsync(other), userId);
+
+        using var response = await RegisterAsync(userId, email, "Someone");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync(Ct));
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeFalse();
+        (await _keycloak.RealmRolesOfAsync(userId)).ShouldNotContain("requester");
+        (await UsersAsync()).ShouldNotContain(u => u.UserId == userId);
+    }
+
+    [Fact]
+    public async Task An_email_too_long_to_store_is_422_before_keycloak_is_changed()
+    {
+        // Review minor 2: the refusal must not leave a half-registered user (in the organization, without an Access row).
+        var label = new string('a', 60);
+        var email = $"{new string('x', 60)}@{label}.{label}.{label}.test";
+        email.Length.ShouldBeGreaterThan(200);
+        var userId = await _keycloak.CreateUserAsync(email);
+
+        using var response = await RegisterAsync(userId, email, "Long Email");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.Content.ReadAsStringAsync(Ct));
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeFalse();
+        (await _keycloak.RealmRolesOfAsync(userId)).ShouldNotContain("requester");
+    }
+
+    [Fact]
     public async Task Registration_twice_changes_nothing()
     {
         var email = NewEmail();
