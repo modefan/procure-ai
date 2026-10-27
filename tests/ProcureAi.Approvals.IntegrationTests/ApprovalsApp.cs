@@ -75,6 +75,17 @@ public sealed class ApprovalsApp : IAsyncLifetime
 
     public Task<ApprovalsInstance> StartFastInstanceAsync() => StartFastInstanceAsync(FastTimeouts);
 
+    /// <summary>
+    /// <see cref="ManualTimeouts"/>, and GET responses cached for 30 seconds instead of 1: a read is only fresh after a change when
+    /// the change evicted it (for the cache eviction tests).
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string?> ManualTimeoutsLongCache =
+        new Dictionary<string, string?>(ManualTimeouts) { ["Caching:DefaultGetSeconds"] = "30" };
+
+    /// <summary>A second instance of the API on the main database and broker (two instances of the service, as in production).</summary>
+    public ApprovalsInstance StartSecondMainInstance() =>
+        ApprovalsInstance.Start(_infra.DbConnectionString, _infra.RabbitConnectionString, _infra.RedisConnectionString, Access);
+
     /// <summary>An instance with <see cref="ManualTimeouts"/> and a database of its own.</summary>
     public Task<ApprovalsInstance> StartManualInstanceAsync() => StartFastInstanceAsync(ManualTimeouts);
 
@@ -126,6 +137,9 @@ public sealed class ApprovalsInstance : IAsyncDisposable
     public IMessageBus Bus => _factory.Services.GetRequiredService<IMessageBus>();
 
     public IServiceProvider Services => _factory.Services;
+
+    /// <summary>An HTTP client of this instance's API (the test server).</summary>
+    public HttpClient CreateClient() => _factory.CreateClient();
 
     /// <summary>
     /// Makes the instance forget its cached Access answers for the tenant, as an <c>AccessChanged</c> does (the next lookup goes to

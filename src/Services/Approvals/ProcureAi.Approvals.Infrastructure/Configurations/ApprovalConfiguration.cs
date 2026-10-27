@@ -32,15 +32,15 @@ internal sealed class ApprovalStepConfiguration : IEntityTypeConfiguration<Appro
         builder.Property(s => s.ActedBy).HasColumnName("acted_by").HasMaxLength(100);
         builder.Property(s => s.ActedAt).HasColumnName("acted_at");
         builder.Property(s => s.DueAt).HasColumnName("due_at");
-        builder.Property(s => s.RemindersSent).HasColumnName("reminders_sent");
         builder.Ignore(s => s.IsPending);
+        builder.Ignore(s => s.IsOpen);
 
         // The Postgres system column xmin changes on every write of the row: an optimistic concurrency token (the ETag).
         builder.Property(s => s.Version).HasColumnName("xmin").HasColumnType("xid")
             .ValueGeneratedOnAddOrUpdate().IsConcurrencyToken();
 
         builder.HasIndex(s => new { s.TenantId, s.RequestId, s.StepNo });
-        // The inbox (Task 9): the pending steps of a tenant.
+        // The inbox: the pending steps of a tenant.
         builder.HasIndex(s => new { s.TenantId, s.Status });
     }
 }
@@ -63,6 +63,7 @@ internal sealed class ApprovalSagaConfiguration : IEntityTypeConfiguration<Appro
         builder.Property(s => s.CancelRequested).HasColumnName("cancel_requested");
         builder.Property(s => s.OverdueAlertStepId).HasColumnName("overdue_alert_step_id");
         builder.Property(s => s.OverdueRemindersSent).HasColumnName("overdue_reminders_sent");
+        builder.Property(s => s.RemindersSent).HasColumnName("reminders_sent");
         // Wolverine increments it on every save of the saga: of two messages for one request at once, the second save fails and is retried.
         builder.Property(s => s.Version).HasColumnName("version").IsConcurrencyToken();
     }

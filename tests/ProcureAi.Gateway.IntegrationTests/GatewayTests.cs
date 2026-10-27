@@ -211,6 +211,25 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         _gateway.Stub.Last.Path.ShouldBe("/api/v1/budgets/IT-200/FY2027");
     }
 
+    [Fact]
+    public async Task Swagger_ui_lists_the_approvals_definition_and_the_gateway_serves_its_document_and_api()
+    {
+        var browser = Browser();
+        using var initializer = await browser.GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+        using var document = await browser.GetAsync("/openapi/approvals/v1.json", Ct);
+        using var anonymous = await browser.GetAsync("/api/v1/approvals/inbox", Ct);
+        using var withKey = await browser.SendAsync(
+            Request(HttpMethod.Get, "/api/v1/approvals/inbox", headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+
+        config.ShouldContain("/openapi/approvals/v1.json");
+        config.ShouldContain("\"approvals\"");
+        await ExpectOkAsync(document);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the approvals API needs a session or key like every API");
+        await ExpectOkAsync(withKey);
+        _gateway.Stub.Last.Path.ShouldBe("/api/v1/approvals/inbox");
+    }
+
     // ---- the rest of the contract ----
 
     [Fact]

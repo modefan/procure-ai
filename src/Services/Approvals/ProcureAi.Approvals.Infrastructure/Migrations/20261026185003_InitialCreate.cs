@@ -31,6 +31,7 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                     cancel_requested = table.Column<bool>(type: "boolean", nullable: false),
                     overdue_alert_step_id = table.Column<Guid>(type: "uuid", nullable: true),
                     overdue_reminders_sent = table.Column<int>(type: "integer", nullable: false),
+                    reminders_sent = table.Column<int>(type: "integer", nullable: false),
                     version = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
@@ -55,7 +56,6 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                     acted_by = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
                     acted_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     due_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    reminders_sent = table.Column<int>(type: "integer", nullable: false),
                     xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
                     approver_ids = table.Column<string[]>(type: "text[]", nullable: false),
                     covers_levels = table.Column<string[]>(type: "text[]", nullable: false)

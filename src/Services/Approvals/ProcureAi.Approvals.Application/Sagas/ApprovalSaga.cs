@@ -5,6 +5,7 @@ using ProcureAi.Approvals.Application.Mapping;
 using ProcureAi.Approvals.Domain;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Access;
+using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Budgets;
@@ -35,6 +36,12 @@ public enum ApprovalState
 /// service's view of the cost center and opens step 1; each <see cref="ApproveStep"/> opens the next step until the last, which
 /// approves the request. A reject, a refused reservation or a cancellation ends it, and every end after a reservation releases
 /// the budget. Each open step has a reminder and an escalation timeout, scheduled durably.
+/// </para>
+/// <para>
+/// Every handler that changes what the API shows (the steps, or the saga's state) evicts the cached inbox of the tenant and the
+/// cached chain of the request after its commit (<see cref="ICacheInvalidator.RemoveAfterCommitAsync"/>, tags in
+/// <see cref="ApprovalCacheTag"/>). A reminder changes neither: its count lives here, on the saga, not on the step, so it does
+/// not change the step's version (the ETag an approver holds).
 /// </para>
 /// </summary>
 public sealed class ApprovalSaga : Saga
@@ -80,10 +87,17 @@ public sealed class ApprovalSaga : Saga
 
     /// <summary>
     /// The last finance reminder of the overdue step that went out (the <c>Attempt</c> of its <see cref="StepTimeout"/>). The
-    /// chain counts on its own, not by the step's <c>RemindersSent</c>: the first reminder and the escalation can be due at
-    /// once and run in either order, and the chain must not depend on which came first.
+    /// chain counts on its own, not by <see cref="RemindersSent"/>: the first reminder and the escalation can be due at once and
+    /// run in either order, and the chain must not depend on which came first.
     /// </summary>
     public int OverdueRemindersSent { get; set; }
+
+    /// <summary>
+    /// The reminders sent for the open step (numbered 1, 2, ... whichever timeout sent them; 0 when a step opens). Kept on the
+    /// saga, not on the step row, so a reminder never changes the step's version: an approver who loaded the step before a
+    /// reminder can still approve it with the ETag they hold.
+    /// </summary>
+    public int RemindersSent { get; set; }
 
     private Money Total => Money.Zar(TotalInclVat);
 
@@ -94,7 +108,8 @@ public sealed class ApprovalSaga : Saga
     /// delivered again finds the saga started and changes nothing.
     /// </summary>
     public async Task StartOrHandle(
-        [SagaIdentityFrom(nameof(RequestSubmitted.RequestId))] RequestSubmitted submitted, IMessageContext context)
+        [SagaIdentityFrom(nameof(RequestSubmitted.RequestId))] RequestSubmitted submitted, IMessageContext context,
+        ICacheInvalidator cache)
     {
         if (TenantId.Length > 0)
         {
@@ -111,19 +126,21 @@ public sealed class ApprovalSaga : Saga
         State = ApprovalState.AwaitingBudget;
         await context.SendAsync(new ReserveBudget(
             submitted.RequestId, submitted.TenantId, submitted.CostCenterCode, submitted.TotalInclVat, submitted.SubmittedAt));
+        await EvictAsync(cache);
     }
 
     // ---- Budgets' answer --------------------------------------------------------------------------------------------------
 
     public async Task Handle(
         [SagaIdentityFrom(nameof(BudgetReservationFailed.RequestId))] BudgetReservationFailed failed, IMessageContext context,
-        TimeProvider time)
+        TimeProvider time, ICacheInvalidator cache)
     {
         if (State != ApprovalState.AwaitingBudget)
         {
             return;
         }
 
+        await EvictAsync(cache);
         if (CancelRequested)
         {
             // Nothing was reserved and the requester has already cancelled: no rejection to report.
@@ -142,13 +159,15 @@ public sealed class ApprovalSaga : Saga
     public async Task Handle(
         [SagaIdentityFrom(nameof(BudgetReserved.RequestId))] BudgetReserved reserved, IApprovalsDbContext db,
         IAccessDirectory access, IOptions<ApprovalsOptions> options, TimeProvider time, IMessageContext context,
-        CancellationToken cancellationToken)
+        ICacheInvalidator cache, CancellationToken cancellationToken)
     {
         if (State != ApprovalState.AwaitingBudget)
         {
             // A repeated reservation: the chain exists already (or the saga ended and released).
             return;
         }
+
+        await EvictAsync(cache);
 
         if (CancelRequested)
         {
@@ -191,10 +210,12 @@ public sealed class ApprovalSaga : Saga
 
     public async Task Handle(
         [SagaIdentityFrom(nameof(ApproveStep.RequestId))] ApproveStep command, IApprovalsDbContext db, ICallerContext caller,
-        IOptions<ApprovalsOptions> options, TimeProvider time, IMessageContext context, CancellationToken cancellationToken)
+        IOptions<ApprovalsOptions> options, TimeProvider time, IMessageContext context, ICacheInvalidator cache,
+        CancellationToken cancellationToken)
     {
         var steps = await StepsAsync(db, cancellationToken);
         var step = Actionable(steps, command.StepId, command.ExpectedVersion, caller);
+        await EvictAsync(cache);
         var now = time.GetUtcNow();
         step.Approve(caller.UserId, now);
         await context.PublishAsync(new ApprovalStepApproved(Id, TenantId, step.Id, caller.UserId, now));
@@ -218,7 +239,7 @@ public sealed class ApprovalSaga : Saga
 
     public async Task Handle(
         [SagaIdentityFrom(nameof(RejectStep.RequestId))] RejectStep command, IApprovalsDbContext db, ICallerContext caller,
-        TimeProvider time, IMessageContext context, CancellationToken cancellationToken)
+        TimeProvider time, IMessageContext context, ICacheInvalidator cache, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(command.Reason))
         {
@@ -227,6 +248,7 @@ public sealed class ApprovalSaga : Saga
 
         var steps = await StepsAsync(db, cancellationToken);
         var step = Actionable(steps, command.StepId, command.ExpectedVersion, caller);
+        await EvictAsync(cache);
         var now = time.GetUtcNow();
         step.Reject(caller.UserId, now);
         CancelPending(steps);
@@ -244,7 +266,8 @@ public sealed class ApprovalSaga : Saga
 
     public async Task Handle(
         [SagaIdentityFrom(nameof(StepTimeout.RequestId))] StepTimeout timeout, IApprovalsDbContext db, IAccessDirectory access,
-        IOptions<ApprovalsOptions> options, TimeProvider time, IMessageContext context, CancellationToken cancellationToken)
+        IOptions<ApprovalsOptions> options, TimeProvider time, IMessageContext context, ICacheInvalidator cache,
+        CancellationToken cancellationToken)
     {
         if (State != ApprovalState.AwaitingApproval)
         {
@@ -263,7 +286,7 @@ public sealed class ApprovalSaga : Saga
         switch (timeout.Kind)
         {
             // The step's one reminder; skipped when a finance reminder already went out (it ran late, after the escalation).
-            case StepTimeoutKind.Reminder when timeout.Attempt == 1 && step.RemindersSent == 0:
+            case StepTimeoutKind.Reminder when timeout.Attempt == 1 && RemindersSent == 0:
                 await RemindAsync(step, now, context);
                 break;
             case StepTimeoutKind.FinanceReminder when OverdueAlertStepId == step.Id && timeout.Attempt == OverdueRemindersSent + 1:
@@ -273,6 +296,8 @@ public sealed class ApprovalSaga : Saga
                 break;
             case StepTimeoutKind.Escalate when timeout.Attempt == 1 && OverdueAlertStepId != step.Id:
                 await EscalateAsync(step, steps, db, access, options.Value, now, context, cancellationToken);
+                // An alert changes nothing the API shows, a replacement does; evicting in both cases is cheap.
+                await EvictAsync(cache);
                 break;
         }
     }
@@ -285,8 +310,9 @@ public sealed class ApprovalSaga : Saga
 
     public async Task Handle(
         [SagaIdentityFrom(nameof(RequestCancelled.RequestId))] RequestCancelled cancelled, IApprovalsDbContext db,
-        IMessageContext context, CancellationToken cancellationToken)
+        IMessageContext context, ICacheInvalidator cache, CancellationToken cancellationToken)
     {
+        await EvictAsync(cache);
         if (State == ApprovalState.AwaitingBudget)
         {
             // The reservation is in flight: Budgets' answer ends the saga (and releases what it reserved).
@@ -355,8 +381,7 @@ public sealed class ApprovalSaga : Saga
     /// <summary>Reminds the step's approvers; reminders of a step are numbered 1, 2, ... whichever timeout sent them.</summary>
     private async Task RemindAsync(ApprovalStep step, DateTimeOffset now, IMessageContext context)
     {
-        var reminderNo = step.RemindersSent + 1;
-        step.RecordReminder(reminderNo);
+        var reminderNo = ++RemindersSent;
         await context.PublishAsync(new ApprovalReminderDue(Id, TenantId, step.Id, step.ApproverIds, reminderNo, now));
     }
 
@@ -364,6 +389,7 @@ public sealed class ApprovalSaga : Saga
     private async Task OpenAsync(ApprovalStep step, ApprovalsOptions options, DateTimeOffset now, IMessageContext context)
     {
         CurrentStepNo = step.StepNo;
+        RemindersSent = 0;
         var dueAt = now + options.Timeouts.EscalateAfter;
         step.Open(dueAt);
         await context.PublishAsync(new ApprovalRequested(
@@ -435,6 +461,9 @@ public sealed class ApprovalSaga : Saga
     }
 
     private ReleaseBudget Release() => new(Id, TenantId);
+
+    /// <summary>Evicts the cached inbox of the tenant and the cached chain of this request once the handler's transaction commits.</summary>
+    private Task EvictAsync(ICacheInvalidator cache) => cache.RemoveAfterCommitAsync(ApprovalCacheTag.Of(TenantId, Id));
 
     private void End(ApprovalState state)
     {

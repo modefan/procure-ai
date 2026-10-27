@@ -1,5 +1,6 @@
 using ProcureAi.Approvals.Application;
 using ProcureAi.Approvals.Infrastructure;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Web.Options;
 using Wolverine;
@@ -15,6 +16,7 @@ public static class ApprovalsApi
         ServiceHost.Build(args, ServiceName, builder =>
         {
             builder.Services.AddValidatedOptions<ApprovalsOptions>(builder.Configuration, ApprovalsOptions.SectionName);
+            builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
             builder.Services.AddApprovalsInfrastructure(builder.Configuration);
             builder.Host.UseWolverine(options => options.ConfigureApprovals(builder.Configuration, ServiceName));
         });

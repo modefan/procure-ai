@@ -14,7 +14,11 @@
     <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
   </ItemGroup>
 
-  <!-- The OpenAPI document (OpenApiDocumentName approvals-v1, see ../../Directory.Build.targets) comes with the controllers in Task 9. -->
+  <!-- The OpenAPI document is written on every build and committed (see ../../Directory.Build.targets). -->
+  <PropertyGroup>
+    <OpenApiDocumentName>approvals-v1</OpenApiDocumentName>
+    <OpenApiDatabaseConnectionName>approvalsdb</OpenApiDatabaseConnectionName>
+  </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="ProcureAi.Approvals.IntegrationTests" />

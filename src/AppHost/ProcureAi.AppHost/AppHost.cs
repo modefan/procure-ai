@@ -122,6 +122,10 @@ var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
 var budgetsApi = builder.AddProcureAiService<Projects.ProcureAi_Budgets_Api>(
     new ServiceSpec("budgets", ResourceNames.BudgetsDb, CapturedTables: ["budgets", "budget_reservations", "audit_entries"], GatewayCluster: "budgets", ApiRoutePrefix: "/api/budgets"),
     shared);
+// The approval saga's table (approval_sagas) is not captured: the steps carry what the audit needs.
+var approvalsApi = builder.AddProcureAiService<Projects.ProcureAi_Approvals_Api>(
+    new ServiceSpec("approvals", ResourceNames.ApprovalsDb, CapturedTables: ["approval_steps", "audit_entries"], GatewayCluster: "approvals", ApiRoutePrefix: "/api/approvals"),
+    shared);
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).
@@ -147,6 +151,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithReference(requestsApi)
     .WithReference(accessApi)
     .WithReference(budgetsApi)
+    .WithReference(approvalsApi)
     .WithEnvironment("Oidc__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
@@ -158,6 +163,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__access__Destinations__d1__Address", accessApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__budgets__Destinations__d1__Address", budgetsApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__approvals__Destinations__d1__Address", approvalsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
@@ -165,6 +171,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WaitFor(requestsApi)
     .WaitFor(accessApi)
     .WaitFor(budgetsApi)
+    .WaitFor(approvalsApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);

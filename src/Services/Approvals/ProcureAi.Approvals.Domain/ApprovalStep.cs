@@ -61,12 +61,13 @@ public sealed class ApprovalStep
     /// <summary>When the step escalates; set when it becomes the current step.</summary>
     public DateTimeOffset? DueAt { get; private set; }
 
-    public int RemindersSent { get; private set; }
-
     /// <summary>Optimistic concurrency token (the Postgres <c>xmin</c> system column), set by the database on every write.</summary>
     public uint Version { get; private set; }
 
     public bool IsPending => Status == ApprovalStepStatus.Pending;
+
+    /// <summary>The step is the open one of its chain: pending and opened (it has a due date). Only an open step can be acted on.</summary>
+    public bool IsOpen => IsPending && DueAt is not null;
 
     public static ApprovalStep Plan(
         string tenantId, Guid requestId, string requestNumber, string requestTitle, string requesterId, Money totalInclVat,
@@ -123,18 +124,6 @@ public sealed class ApprovalStep
     {
         EnsurePending();
         Status = ApprovalStepStatus.Cancelled;
-    }
-
-    /// <summary>Counts a reminder sent to the approvers (reminder numbers start at 1).</summary>
-    public void RecordReminder(int reminderNo)
-    {
-        EnsurePending();
-        if (reminderNo != RemindersSent + 1)
-        {
-            throw new DomainException($"Reminder {reminderNo} does not follow reminder {RemindersSent}.");
-        }
-
-        RemindersSent = reminderNo;
     }
 
     private void Act(ApprovalStepStatus status, string userId, DateTimeOffset at)

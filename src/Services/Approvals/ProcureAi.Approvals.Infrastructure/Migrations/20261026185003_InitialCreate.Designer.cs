@@ -53,6 +53,10 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("overdue_reminders_sent");
 
+                    b.Property<int>("RemindersSent")
+                        .HasColumnType("integer")
+                        .HasColumnName("reminders_sent");
+
                     b.Property<string>("RequestNumber")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -121,10 +125,6 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("level");
-
-                    b.Property<int>("RemindersSent")
-                        .HasColumnType("integer")
-                        .HasColumnName("reminders_sent");
 
                     b.Property<Guid>("RequestId")
                         .HasColumnType("uuid")
