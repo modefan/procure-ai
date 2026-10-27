@@ -33,6 +33,10 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 6. **AppHost**: `builder.AddProcureAiService<Projects.ProcureAi_<Name>_Api>(new ServiceSpec(...), shared)` in `AppHost.cs`
    creates the database, `<name>-migrate` and `<name>-api` with the environment, limits, wait-for-migration and `/health/ready`.
    Reference the returned API from the gateway. Add a `ServiceResourcesTests` case.
+   **Every service it calls over HTTP** (`AddProcureAiServiceClient("<name>-api")`, including Access for permissions) goes into
+   `.CallsServices(accessApi, ...)`: the reference makes service discovery resolve `http://<name>-api`, the wait keeps the API
+   from starting before them. Without it every call fails (a submit answered 503). Add the service to
+   `Every_service_references_and_waits_for_the_services_it_calls`.
    With `CapturedTables` set, it also adds the database's own Debezium Server (see "Change data capture" below).
 7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
    `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `RabbitRecorder` (records what a
@@ -80,6 +84,40 @@ Every service is built the same way from shared pieces. Nothing is copied from a
     by matching. Cover it with pgaudit (database-role audit), and give only the app's database role INSERT on `audit_entries`.
     (2) Debezium skips truncates by default, so a psql `TRUNCATE` is never flagged as outside the app. To capture them set
     `skipped.operations=none` and handle op `t` (it names no row, so it needs its own alert).
+
+## Memory of the whole system (measured 2026-10-27, plan 02 Task 13)
+
+The whole AppHost (five services, four Debezium Servers, gateway, Angular dev server) after a short demo run (six requests in
+every status), `docker stats --no-stream` and the processes' working sets. Budget for Claude's work on the shared PC (CLAUDE.md):
+containers at most 8 GB / 8 CPUs, .NET about 3 GB. `ServiceResourcesTests.Container_caps_of_the_whole_system_stay_within_8_GB_and_8_CPUs`
+keeps the caps inside the budget.
+
+| Containers | Used | Cap |
+|---|---|---|
+| keycloak | 641 MB | 768 MB |
+| debezium-requestsdb / -accessdb / -budgetsdb / -approvalsdb | 307 + 293 + 295 + 294 MB | 4 x 512 MB, 0.5 CPU each |
+| mongo | 244 MB | 512 MB |
+| postgres | 218 MB | 768 MB |
+| rabbitmq | 125 MB | 384 MB |
+| redis, mailpit | 8 + 7 MB | 192 + 64 MB |
+| **Total** | **about 2.4 GB** | **4.6 GB, 7.5 CPUs** |
+
+| .NET processes (working set) | MB |
+|---|---|
+| requests-api | 788 |
+| budgets-api | 517 |
+| audit-api | 490 |
+| approvals-api | 447 |
+| access-api | 262 |
+| gateway | 109 |
+| AppHost | 172 |
+| **Services, gateway and AppHost** | **about 2.8 GB** |
+| plus Aspire's `dotnet run` launcher per project (7 x about 105 MB) | about 0.75 GB |
+
+Plus the Angular dev server (`ng serve`, Node) at about 0.6 GB. The services' GC heaps are capped (`Resources:DotNet`,
+256 MB hard limit each); the rest of a working set is runtime, JIT code and native memory. Debezium did not need lowering
+(`Resources:Debezium` stays at 512 MB / `-Xmx256m`); its CPU cap went from 1 to 0.5 so the container CPU caps add up to
+7.5 of the 8 allowed.
 
 ## Business metrics
 
