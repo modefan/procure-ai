@@ -88,6 +88,8 @@ public sealed class RequestsController(
     [RequirePermission(Permissions.RequestsCreate)]
     [RequireIfMatch]
     [ProducesResponseType<RequestDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
     public async Task<ActionResult<RequestDto>> Update(
@@ -110,6 +112,8 @@ public sealed class RequestsController(
     [RequirePermission(Permissions.RequestsCreate)]
     [RequireIfMatch]
     [ProducesResponseType<RequestDto>(StatusCodes.Status202Accepted, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
     public async Task<ActionResult<RequestDto>> Submit(Guid id, CancellationToken cancellationToken)

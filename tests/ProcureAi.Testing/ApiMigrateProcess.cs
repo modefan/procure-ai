@@ -53,6 +53,7 @@ public static class ApiMigrateProcess
             // A hung migration must not outlive the test run (it would hold database connections and file locks): kill it and
             // everything it started.
             string killed = "and was killed";
+            var exited = true;
             try
             {
                 process.Kill(entireProcessTree: true);
@@ -62,9 +63,12 @@ public static class ApiMigrateProcess
             {
                 // The timeout is the failure to report; the kill failure travels with it and is not hidden.
                 killed = $"and could not be killed ({exception.GetType().Name}: {exception.Message}); check for a leftover process";
+                exited = false;
             }
 
-            throw new TimeoutException($"{apiAssembly} --migrate did not finish within {Timeout} {killed}: {await output}{await error}");
+            // A process that is still alive never closes its output, so only read it once the process has exited.
+            var captured = exited ? (await output) + (await error) : "(output not read: the process may still be running)";
+            throw new TimeoutException($"{apiAssembly} --migrate did not finish within {Timeout} {killed}: {captured}");
         }
 
         var text = (await output) + (await error);
