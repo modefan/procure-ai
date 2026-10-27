@@ -40,7 +40,17 @@ public enum ApprovalState
 public sealed class ApprovalSaga : Saga
 {
     public const string NoEligibleApprover = "No eligible approver";
-    public const string FinanceStepOverdue = "Finance step overdue";
+
+    /// <summary>The rejection reason when Access does not know the request's cost center.</summary>
+    public static string UnknownCostCenter(string code) => $"Unknown cost center {code}";
+
+    /// <summary>The alert reason when a step is overdue and nobody is above it to escalate to (usually finance).</summary>
+    public static string StepOverdue(ApprovalLevel level) => level switch
+    {
+        ApprovalLevel.Manager => "Manager step overdue",
+        ApprovalLevel.DepartmentHead => "Department head step overdue",
+        _ => "Finance step overdue",
+    };
 
     public Guid Id { get; set; }
 
@@ -155,8 +165,10 @@ public sealed class ApprovalSaga : Saga
         }
         catch (Exception exception) when (exception is NoEligibleApproverException or NotFoundException)
         {
+            // Answers, not failures (a failed call to Access throws something else and is retried: Approvals:DependencyRetry).
+            var reason = exception is NotFoundException ? UnknownCostCenter(CostCenterCode) : NoEligibleApprover;
             await context.SendAsync(Release());
-            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, NoEligibleApprover, null, time.GetUtcNow()));
+            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, reason, null, time.GetUtcNow()));
             End(ApprovalState.Rejected);
             return;
         }
@@ -297,15 +309,28 @@ public sealed class ApprovalSaga : Saga
         ApprovalStep step, List<ApprovalStep> steps, IApprovalsDbContext db, IAccessDirectory access, ApprovalsOptions options,
         DateTimeOffset now, IMessageContext context, CancellationToken cancellationToken)
     {
-        var org = await OrganisationAsync(access, cancellationToken);
-        var approved = steps.Where(s => s.Status == ApprovalStepStatus.Approved).Select(s => s.ActedBy!).ToList();
-        var replacement = ApprovalRouting.Escalate(step.ToPlanned(), Total, RequesterId, org, approved);
+        PlannedStep? replacement;
+        string? alert;
+        try
+        {
+            var org = await OrganisationAsync(access, cancellationToken);
+            var approved = steps.Where(s => s.Status == ApprovalStepStatus.Approved).Select(s => s.ActedBy!).ToList();
+            replacement = ApprovalRouting.Escalate(step.ToPlanned(), Total, RequesterId, org, approved);
+            alert = replacement is null ? StepOverdue(step.Level) : null;
+        }
+        catch (NotFoundException)
+        {
+            // The cost center was removed while the request waited: nobody to escalate to; a person has to sort it out.
+            replacement = null;
+            alert = UnknownCostCenter(CostCenterCode);
+        }
+
         if (replacement is null)
         {
             // Nobody above: raise the alert once and keep reminding the step's approvers.
             OverdueAlertStepId = step.Id;
             OverdueRemindersSent = 0;
-            await context.PublishAsync(new ApprovalAlertRaised(Id, TenantId, step.Id, FinanceStepOverdue, now));
+            await context.PublishAsync(new ApprovalAlertRaised(Id, TenantId, step.Id, alert!, now));
             await context.ScheduleAsync(
                 new StepTimeout(Id, step.Id, StepTimeoutKind.FinanceReminder, 1), options.Timeouts.FinanceReminderEvery);
             return;

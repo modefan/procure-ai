@@ -102,6 +102,11 @@ public sealed class StubAccessServer : IAsyncDisposable
     public void SetApprovers(string tenantId, CostCenterApprovers approvers) =>
         _approvers[(tenantId, approvers.CostCenterCode)] = approvers;
 
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _approversFailUntil = new(StringComparer.Ordinal);
+
+    /// <summary>The approvers lookups of one tenant answer 503 for the next <paramref name="duration"/> (a short Access outage).</summary>
+    public void FailApprovers(string tenantId, TimeSpan duration) => _approversFailUntil[tenantId] = DateTimeOffset.UtcNow + duration;
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -162,7 +167,9 @@ public sealed class StubAccessServer : IAsyncDisposable
         {
             Interlocked.Increment(ref stub._approverCalls);
             stub.Record(http);
-            if (stub.Down)
+            if (stub.Down
+                || (stub._approversFailUntil.TryGetValue(http.Request.Headers["X-Tenant-Id"].ToString(), out var until)
+                    && DateTimeOffset.UtcNow < until))
             {
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }

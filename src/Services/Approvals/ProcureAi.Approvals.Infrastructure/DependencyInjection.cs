@@ -49,7 +49,8 @@ public static class DependencyInjection
     /// <c>budgets</c> exchanges on queues of its own, sends <c>ReserveBudget</c> / <c>ReleaseBudget</c> to <c>budgets-commands</c>,
     /// publishes its events to the <c>approvals</c> exchange, and schedules step timeouts on durable local queues (stored in
     /// the database, so a timeout survives a restart). A saga message that lost a race with another message of the same
-    /// request is retried (<c>Approvals:ConcurrencyRetry</c>).
+    /// request is retried (<c>Approvals:ConcurrencyRetry</c>), and one whose call to Access failed is retried later
+    /// (<c>Approvals:DependencyRetry</c>), so an Access outage delays the chain instead of losing the message.
     /// </summary>
     public static void ConfigureApprovals(this WolverineOptions options, IConfiguration configuration, string serviceName)
     {
@@ -70,9 +71,11 @@ public static class DependencyInjection
         options.PublishMessage<RequestApproved>().ToRabbitExchange(Exchanges.Approvals);
         options.PublishMessage<RequestRejected>().ToRabbitExchange(Exchanges.Approvals);
 
-        var section = $"{ApprovalsOptions.SectionName}:{nameof(ApprovalsOptions.ConcurrencyRetry)}";
-        var retry = configuration.GetSection(ApprovalsOptions.SectionName).Get<ApprovalsOptions>()?.ConcurrencyRetry
-            ?? throw new InvalidOperationException($"'{section}' is not configured.");
-        options.RetryConcurrencyConflicts(retry, section);
+        var approvals = configuration.GetSection(ApprovalsOptions.SectionName).Get<ApprovalsOptions>()
+            ?? throw new InvalidOperationException($"'{ApprovalsOptions.SectionName}' is not configured.");
+        options.RetryConcurrencyConflicts(
+            approvals.ConcurrencyRetry, $"{ApprovalsOptions.SectionName}:{nameof(ApprovalsOptions.ConcurrencyRetry)}");
+        options.RetryTransientDependencyFailures(
+            approvals.DependencyRetry, $"{ApprovalsOptions.SectionName}:{nameof(ApprovalsOptions.DependencyRetry)}");
     }
 }

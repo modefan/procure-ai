@@ -62,7 +62,21 @@ public sealed class ApprovalsApp : IAsyncLifetime
     /// own). It shares the broker, so a test drives it in-process (<see cref="ApprovalsInstance.InvokeAsync"/>), never through
     /// the Approvals queues, which the main instance also listens to.
     /// </summary>
+    /// <summary>
+    /// Timeouts hours away, so nothing times out on its own: a test drives the reminder and the escalation by hand, in the order
+    /// it wants. Finance reminders (which only follow an overdue alert) come every 2 seconds.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string?> ManualTimeouts = new Dictionary<string, string?>
+    {
+        ["Approvals:Timeouts:ReminderAfter"] = "01:00:00",
+        ["Approvals:Timeouts:EscalateAfter"] = "02:00:00",
+        ["Approvals:Timeouts:FinanceReminderEvery"] = "00:00:02",
+    };
+
     public Task<ApprovalsInstance> StartFastInstanceAsync() => StartFastInstanceAsync(FastTimeouts);
+
+    /// <summary>An instance with <see cref="ManualTimeouts"/> and a database of its own.</summary>
+    public Task<ApprovalsInstance> StartManualInstanceAsync() => StartFastInstanceAsync(ManualTimeouts);
 
     /// <summary>As <see cref="StartFastInstanceAsync()"/>, with timeouts of the test's choosing.</summary>
     public async Task<ApprovalsInstance> StartFastInstanceAsync(IReadOnlyDictionary<string, string?> timeouts)
@@ -77,12 +91,12 @@ public sealed class ApprovalsApp : IAsyncLifetime
     /// The Acme organisation of cost center IT-200 for <paramref name="tenant"/>: maria manager (R 200 000), dept head of
     /// department (R 500 000), thandi finance (R 2 000 000); everyone may approve.
     /// </summary>
-    public void UseAcme(string tenant) =>
+    public void UseAcme(string tenant, bool deptCanApprove = true, bool withFinance = true) =>
         Access.SetApprovers(tenant, new CostCenterApprovers(
             CostCenter, "IT",
             new Approver(DemoUsers.Maria, "Maria", 200_000m, true),
-            new Approver(DemoUsers.Dept, "Dept", 500_000m, true),
-            [new Approver(DemoUsers.Thandi, "Thandi", 2_000_000m, true)]));
+            new Approver(DemoUsers.Dept, "Dept", 500_000m, deptCanApprove),
+            withFinance ? [new Approver(DemoUsers.Thandi, "Thandi", 2_000_000m, true)] : []));
 
     public const string CostCenter = "IT-200";
 
@@ -110,6 +124,18 @@ public sealed class ApprovalsInstance : IAsyncDisposable
     public string DbConnectionString { get; }
 
     public IMessageBus Bus => _factory.Services.GetRequiredService<IMessageBus>();
+
+    public IServiceProvider Services => _factory.Services;
+
+    /// <summary>
+    /// Makes the instance forget its cached Access answers for the tenant, as an <c>AccessChanged</c> does (the next lookup goes to
+    /// Access, with no last good answer to fall back on).
+    /// </summary>
+    public ValueTask ForgetAccessAsync(string tenant) =>
+        Services.GetRequiredService<ProcureAi.BuildingBlocks.Web.Access.AccessCacheGeneration>().AdvanceAsync(tenant);
+
+    /// <summary>Sends a message to the instance's own queue (durable local queue), so its error policies apply, as for a timeout.</summary>
+    public Task SendAsync(object message, string tenant, string user) => Bus.SendAsync(message, Headers(tenant, user)).AsTask();
 
     public static ApprovalsInstance Start(
         string database, string rabbit, string redis, StubAccessServer access, IReadOnlyDictionary<string, string?>? settings = null)

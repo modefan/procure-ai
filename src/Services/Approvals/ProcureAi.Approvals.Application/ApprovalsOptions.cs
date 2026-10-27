@@ -21,6 +21,10 @@ public sealed class ApprovalsOptions
     [Required, ValidateObjectMembers]
     public ConcurrencyRetryOptions ConcurrencyRetry { get; set; } = new();
 
+    /// <summary>How a saga message is retried when the Access service cannot answer (it is needed to build and escalate the chain).</summary>
+    [Required, ValidateObjectMembers]
+    public DependencyRetryOptions DependencyRetry { get; set; } = new();
+
     public ApprovalThresholds ToThresholds() =>
         new(Money.Zar(Thresholds.DepartmentHeadAbove), Money.Zar(Thresholds.FinanceAbove));
 }

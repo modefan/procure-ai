@@ -18,6 +18,12 @@ public sealed class SagaTests(ApprovalsApp app)
     /// <summary>How long a test waits before asserting that something did NOT happen.</summary>
     private static readonly TimeSpan Settle = TimeSpan.FromSeconds(2);
 
+    /// <summary>A short Access outage: outlasts the HTTP client's own retries (well under a second), not the message's retries.</summary>
+    private static readonly TimeSpan AccessOutage = TimeSpan.FromSeconds(3);
+
+    /// <summary>Waits for a message retried after the outage (first retry after Approvals:DependencyRetry:InitialDelay).</summary>
+    private static readonly TimeSpan RetryTimeout = TimeSpan.FromSeconds(60);
+
     private ApprovalsInstance Main => app.Main;
 
     private RabbitRecorder Recorder => app.Recorder;
@@ -115,13 +121,17 @@ public sealed class SagaTests(ApprovalsApp app)
     {
         var tenant = NewTenant();
         app.UseAcme(tenant);
-        await using var fast = await app.StartFastInstanceAsync();
+        // The timeouts are driven by hand, in their scheduled order (on their own, both can be due at once and run either way).
+        await using var fast = await app.StartManualInstanceAsync();
         var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
         var id = submitted.RequestId;
         await fast.InvokeAsync(submitted, tenant, DemoUsers.Tom);
         await fast.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Tom);
         var first = (await fast.StepsAsync(id))[0];
 
+        await fast.InvokeAsync(new StepTimeout(id, first.Id, StepTimeoutKind.Reminder, 1), tenant, DemoUsers.Tom);
+        await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue), EventTimeout);
+        await fast.InvokeAsync(new StepTimeout(id, first.Id, StepTimeoutKind.Escalate, 1), tenant, DemoUsers.Tom);
         var seen = await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated), EventTimeout);
 
         var reminder = seen.Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue));
@@ -170,7 +180,7 @@ public sealed class SagaTests(ApprovalsApp app)
         var seen = await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue), EventTimeout, count: 3);
 
         var alert = seen.Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised));
-        alert.Text("reason").ShouldBe(ApprovalSaga.FinanceStepOverdue);
+        alert.Text("reason").ShouldBe("Finance step overdue");
         seen.Where(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue))
             .Select(m => m.Body.GetProperty("reminderNo").GetInt32()).Take(3).ShouldBe([1, 2, 3]);
         seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated));
@@ -191,12 +201,7 @@ public sealed class SagaTests(ApprovalsApp app)
         // finance reminders that follow the alert run on their own.
         var tenant = NewTenant();
         app.UseAcme(tenant);
-        await using var instance = await app.StartFastInstanceAsync(new Dictionary<string, string?>
-        {
-            ["Approvals:Timeouts:ReminderAfter"] = "01:00:00",
-            ["Approvals:Timeouts:EscalateAfter"] = "02:00:00",
-            ["Approvals:Timeouts:FinanceReminderEvery"] = "00:00:02",
-        });
+        await using var instance = await app.StartManualInstanceAsync();
         var submitted = Submitted(tenant, DemoUsers.Tom, 600_000m);
         var id = submitted.RequestId;
         await instance.InvokeAsync(submitted, tenant, DemoUsers.Tom);
@@ -210,6 +215,176 @@ public sealed class SagaTests(ApprovalsApp app)
         seen.Count(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised)).ShouldBe(1);
         seen.Where(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue))
             .Select(m => m.Body.GetProperty("reminderNo").GetInt32()).Take(3).ShouldBe([1, 2, 3]);
+    }
+
+    [Fact]
+    public async Task Escalation_to_a_higher_level_absorbs_a_lower_following_step()
+    {
+        // Ruling 1 (amended): a following step at the replacement's level OR LOWER is merged into it. The chain is manager then
+        // department head; by the time step 1 escalates, the department head may no longer approve, so it lands on finance,
+        // which also stands for the department-head step that followed.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        await using var instance = await app.StartManualInstanceAsync();
+        var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
+        var id = submitted.RequestId;
+        await instance.InvokeAsync(submitted, tenant, DemoUsers.Tom);
+        await instance.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Tom);
+        var first = (await instance.StepsAsync(id))[0];
+
+        app.UseAcme(tenant, deptCanApprove: false);
+        await instance.ForgetAccessAsync(tenant);
+        await instance.InvokeAsync(new StepTimeout(id, first.Id, StepTimeoutKind.Escalate, 1), tenant, DemoUsers.Tom);
+
+        var escalated = (await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated), EventTimeout))
+            .Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated));
+        escalated.Text("fromLevel").ShouldBe("Manager");
+        escalated.Text("toLevel").ShouldBe("Finance");
+        var steps = await instance.StepsAsync(id);
+        steps.Single(s => s.Id == first.Id).Status.ShouldBe(ApprovalStepStatus.Escalated);
+        steps.Single(s => s.Level == ApprovalLevel.DepartmentHead).Status.ShouldBe(ApprovalStepStatus.Cancelled);
+        var replacement = steps.Single(s => s.IsPending);
+        replacement.StepNo.ShouldBe(1);
+        replacement.Level.ShouldBe(ApprovalLevel.Finance);
+        replacement.CoversLevels.ShouldBe([ApprovalLevel.Manager, ApprovalLevel.DepartmentHead, ApprovalLevel.Finance]);
+
+        await instance.InvokeAsync(new ApproveStep(id, replacement.Id, replacement.Version), tenant, DemoUsers.Thandi);
+        (await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.RequestApproved), EventTimeout))
+            .Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestApproved))
+            .Body.GetProperty("approverIds").EnumerateArray().Select(e => e.GetString()).ShouldBe([DemoUsers.Thandi]);
+    }
+
+    [Fact]
+    public async Task Overdue_alert_names_the_level_that_has_nobody_above()
+    {
+        // No finance approvers: maria's own R 30 000 request needs the department head, and nobody is above that step.
+        var tenant = NewTenant();
+        app.UseAcme(tenant, withFinance: false);
+        await using var instance = await app.StartManualInstanceAsync();
+        var submitted = Submitted(tenant, DemoUsers.Maria, 30_000m);
+        var id = submitted.RequestId;
+        await instance.InvokeAsync(submitted, tenant, DemoUsers.Maria);
+        await instance.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Maria);
+        var step = (await instance.StepsAsync(id)).Single();
+        step.Level.ShouldBe(ApprovalLevel.DepartmentHead);
+
+        await instance.InvokeAsync(new StepTimeout(id, step.Id, StepTimeoutKind.Escalate, 1), tenant, DemoUsers.Maria);
+
+        var alert = (await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised), EventTimeout))
+            .Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised));
+        alert.Text("reason").ShouldBe("Department head step overdue");
+        // And it keeps reminding the department head.
+        await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue), EventTimeout);
+    }
+
+    [Fact]
+    public async Task Escalation_of_a_request_whose_cost_center_was_removed_raises_an_alert()
+    {
+        var tenant = NewTenant();
+        var code = $"GONE-{Guid.NewGuid():N}"[..13];
+        app.Access.SetApprovers(tenant, new BuildingBlocks.Application.Access.CostCenterApprovers(
+            code, "IT", new BuildingBlocks.Application.Access.Approver(DemoUsers.Maria, "Maria", 200_000m, true), null, []));
+        await using var instance = await app.StartManualInstanceAsync();
+        var submitted = Submitted(tenant, DemoUsers.Tom, 5_000m) with { CostCenterCode = code };
+        var id = submitted.RequestId;
+        await instance.InvokeAsync(submitted, tenant, DemoUsers.Tom);
+        await instance.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Tom);
+        var step = (await instance.StepsAsync(id)).Single();
+
+        app.Access.MissingCostCenters[code] = true;
+        await instance.ForgetAccessAsync(tenant);
+        await instance.InvokeAsync(new StepTimeout(id, step.Id, StepTimeoutKind.Escalate, 1), tenant, DemoUsers.Tom);
+
+        var alert = (await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised), EventTimeout))
+            .Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised));
+        alert.Text("reason").ShouldBe($"Unknown cost center {code}");
+        (await instance.StepsAsync(id)).Single().Status.ShouldBe(ApprovalStepStatus.Pending, "still approvable by its approver");
+    }
+
+    [Fact]
+    public async Task Transient_Access_failure_on_BudgetReserved_is_retried_until_the_chain_exists()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
+        var id = submitted.RequestId;
+        await Main.PublishAsync(submitted, Exchanges.Requests, tenant);
+        await Recorder.WaitForAsync(id, nameof(ReserveBudget), EventTimeout);
+
+        // Access answers 503 for a few seconds: longer than the HTTP client's own retries, shorter than the message's.
+        app.Access.FailApprovers(tenant, AccessOutage);
+        await Main.PublishAsync(Reserved(submitted), Exchanges.Budgets, tenant);
+
+        await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalRequested), RetryTimeout);
+        (await Main.StepsAsync(id)).Count.ShouldBe(2);
+        (await Main.SagaAsync(id))!.State.ShouldBe(ApprovalState.AwaitingApproval);
+        Recorder.Of(id).ShouldNotContain(m => m.Kind == nameof(ReleaseBudget));
+    }
+
+    [Fact]
+    public async Task Transient_Access_failure_on_escalation_is_retried()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        await using var instance = await app.StartManualInstanceAsync();
+        var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
+        var id = submitted.RequestId;
+        await instance.InvokeAsync(submitted, tenant, DemoUsers.Tom);
+        await instance.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Tom);
+        var first = (await instance.StepsAsync(id))[0];
+
+        // Access changed meanwhile (no cached answer to fall back on) and is briefly down when the escalation is due.
+        await instance.ForgetAccessAsync(tenant);
+        app.Access.FailApprovers(tenant, AccessOutage);
+        await instance.SendAsync(new StepTimeout(id, first.Id, StepTimeoutKind.Escalate, 1), tenant, DemoUsers.Tom);
+
+        var escalated = (await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated), RetryTimeout))
+            .Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated));
+        escalated.Text("toLevel").ShouldBe("DepartmentHead");
+        (await instance.StepsAsync(id)).Single(s => s.Id == first.Id).Status.ShouldBe(ApprovalStepStatus.Escalated);
+    }
+
+    [Fact]
+    public async Task Reservation_failure_after_cancel_ends_cancelled_without_rejection()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var submitted = Submitted(tenant, DemoUsers.Tom, 950_000m);
+        var id = submitted.RequestId;
+        await Main.PublishAsync(submitted, Exchanges.Requests, tenant);
+        await Recorder.WaitForAsync(id, nameof(ReserveBudget), EventTimeout);
+        await Main.PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga is { CancelRequested: true }, EventTimeout);
+
+        await Main.PublishAsync(
+            new BudgetReservationFailed(id, tenant, CostCenter, "Insufficient budget", 950_000m, 900_000m, DateTimeOffset.UtcNow),
+            Exchanges.Budgets, tenant);
+
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await Task.Delay(Settle);
+        var seen = Recorder.Of(id);
+        seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected), "the requester cancelled first");
+        seen.ShouldNotContain(m => m.Kind == nameof(ReleaseBudget), "nothing was reserved");
+    }
+
+    [Fact]
+    public async Task Unknown_cost_center_rejects_with_its_own_reason_and_releases()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var code = $"GONE-{Guid.NewGuid():N}"[..13];
+        app.Access.MissingCostCenters[code] = true;
+        var submitted = Submitted(tenant, DemoUsers.Tom, 5_000m) with { CostCenterCode = code };
+        var id = submitted.RequestId;
+        await Main.PublishAsync(submitted, Exchanges.Requests, tenant);
+        await Recorder.WaitForAsync(id, nameof(ReserveBudget), EventTimeout);
+        await Main.PublishAsync(Reserved(submitted), Exchanges.Budgets, tenant);
+
+        var seen = await Recorder.WaitForAsync(
+            id, s => s.Any(m => m.Kind == nameof(ReleaseBudget)) && s.Any(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected)), EventTimeout);
+        seen.Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected)).Text("reason")
+            .ShouldBe($"Unknown cost center {code}");
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
     }
 
     [Fact]
