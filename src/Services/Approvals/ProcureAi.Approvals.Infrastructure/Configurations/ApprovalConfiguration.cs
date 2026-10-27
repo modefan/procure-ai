@@ -62,6 +62,7 @@ internal sealed class ApprovalSagaConfiguration : IEntityTypeConfiguration<Appro
         builder.Property(s => s.CurrentStepNo).HasColumnName("current_step_no");
         builder.Property(s => s.CancelRequested).HasColumnName("cancel_requested");
         builder.Property(s => s.OverdueAlertStepId).HasColumnName("overdue_alert_step_id");
+        builder.Property(s => s.OverdueRemindersSent).HasColumnName("overdue_reminders_sent");
         // Wolverine increments it on every save of the saga: of two messages for one request at once, the second save fails and is retried.
         builder.Property(s => s.Version).HasColumnName("version").IsConcurrencyToken();
     }

@@ -62,10 +62,13 @@ public sealed class ApprovalsApp : IAsyncLifetime
     /// own). It shares the broker, so a test drives it in-process (<see cref="ApprovalsInstance.InvokeAsync"/>), never through
     /// the Approvals queues, which the main instance also listens to.
     /// </summary>
-    public async Task<ApprovalsInstance> StartFastInstanceAsync()
+    public Task<ApprovalsInstance> StartFastInstanceAsync() => StartFastInstanceAsync(FastTimeouts);
+
+    /// <summary>As <see cref="StartFastInstanceAsync()"/>, with timeouts of the test's choosing.</summary>
+    public async Task<ApprovalsInstance> StartFastInstanceAsync(IReadOnlyDictionary<string, string?> timeouts)
     {
         var database = await _infra.CreateMigratedDatabaseAsync($"fast_{Guid.NewGuid():N}");
-        return ApprovalsInstance.Start(database, _infra.RabbitConnectionString, _infra.RedisConnectionString, Access, FastTimeouts);
+        return ApprovalsInstance.Start(database, _infra.RabbitConnectionString, _infra.RedisConnectionString, Access, timeouts);
     }
 
     public static string NewTenant() => $"t{Guid.NewGuid():N}"[..12];

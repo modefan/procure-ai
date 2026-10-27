@@ -46,6 +46,10 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("overdue_alert_step_id");
 
+                    b.Property<int>("OverdueRemindersSent")
+                        .HasColumnType("integer")
+                        .HasColumnName("overdue_reminders_sent");
+
                     b.Property<string>("RequestNumber")
                         .IsRequired()
                         .HasMaxLength(50)

@@ -184,6 +184,35 @@ public sealed class SagaTests(ApprovalsApp app)
     }
 
     [Fact]
+    public async Task Finance_reminders_keep_going_when_the_escalation_runs_before_the_first_reminder()
+    {
+        // Both timeouts can be due at once (e.g. after an outage, or before the scheduler of a new node starts) and then run
+        // in either order. The reminder and escalation are driven by hand here (their own schedule is hours away); only the
+        // finance reminders that follow the alert run on their own.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        await using var instance = await app.StartFastInstanceAsync(new Dictionary<string, string?>
+        {
+            ["Approvals:Timeouts:ReminderAfter"] = "01:00:00",
+            ["Approvals:Timeouts:EscalateAfter"] = "02:00:00",
+            ["Approvals:Timeouts:FinanceReminderEvery"] = "00:00:02",
+        });
+        var submitted = Submitted(tenant, DemoUsers.Tom, 600_000m);
+        var id = submitted.RequestId;
+        await instance.InvokeAsync(submitted, tenant, DemoUsers.Tom);
+        await instance.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Tom);
+        var step = (await instance.StepsAsync(id)).Single();
+
+        await instance.InvokeAsync(new StepTimeout(id, step.Id, StepTimeoutKind.Escalate, 1), tenant, DemoUsers.Tom);
+        await instance.InvokeAsync(new StepTimeout(id, step.Id, StepTimeoutKind.Reminder, 1), tenant, DemoUsers.Tom);
+
+        var seen = await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue), EventTimeout, count: 3);
+        seen.Count(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalAlertRaised)).ShouldBe(1);
+        seen.Where(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalReminderDue))
+            .Select(m => m.Body.GetProperty("reminderNo").GetInt32()).Take(3).ShouldBe([1, 2, 3]);
+    }
+
+    [Fact]
     public async Task Cancel_while_awaiting_budget_releases_after_reservation_arrives()
     {
         var tenant = NewTenant();

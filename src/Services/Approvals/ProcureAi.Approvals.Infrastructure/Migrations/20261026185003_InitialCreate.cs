@@ -30,6 +30,7 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                     current_step_no = table.Column<int>(type: "integer", nullable: false),
                     cancel_requested = table.Column<bool>(type: "boolean", nullable: false),
                     overdue_alert_step_id = table.Column<Guid>(type: "uuid", nullable: true),
+                    overdue_reminders_sent = table.Column<int>(type: "integer", nullable: false),
                     version = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>

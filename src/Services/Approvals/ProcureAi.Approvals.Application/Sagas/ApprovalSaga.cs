@@ -68,6 +68,13 @@ public sealed class ApprovalSaga : Saga
     /// <summary>The open step that could not escalate any higher and raised the overdue alert (it is reminded from then on).</summary>
     public Guid? OverdueAlertStepId { get; set; }
 
+    /// <summary>
+    /// The last finance reminder of the overdue step that went out (the <c>Attempt</c> of its <see cref="StepTimeout"/>). The
+    /// chain counts on its own, not by the step's <c>RemindersSent</c>: the first reminder and the escalation can be due at
+    /// once and run in either order, and the chain must not depend on which came first.
+    /// </summary>
+    public int OverdueRemindersSent { get; set; }
+
     private Money Total => Money.Zar(TotalInclVat);
 
     // ---- RequestSubmitted -------------------------------------------------------------------------------------------------
@@ -243,15 +250,14 @@ public sealed class ApprovalSaga : Saga
         var now = time.GetUtcNow();
         switch (timeout.Kind)
         {
-            case StepTimeoutKind.Reminder or StepTimeoutKind.FinanceReminder when timeout.Attempt == step.RemindersSent + 1:
-                step.RecordReminder(timeout.Attempt);
-                await context.PublishAsync(new ApprovalReminderDue(Id, TenantId, step.Id, step.ApproverIds, timeout.Attempt, now));
-                if (timeout.Kind == StepTimeoutKind.FinanceReminder)
-                {
-                    await context.ScheduleAsync(
-                        timeout with { Attempt = timeout.Attempt + 1 }, options.Value.Timeouts.FinanceReminderEvery);
-                }
-
+            // The step's one reminder; skipped when a finance reminder already went out (it ran late, after the escalation).
+            case StepTimeoutKind.Reminder when timeout.Attempt == 1 && step.RemindersSent == 0:
+                await RemindAsync(step, now, context);
+                break;
+            case StepTimeoutKind.FinanceReminder when OverdueAlertStepId == step.Id && timeout.Attempt == OverdueRemindersSent + 1:
+                OverdueRemindersSent = timeout.Attempt;
+                await RemindAsync(step, now, context);
+                await context.ScheduleAsync(timeout with { Attempt = timeout.Attempt + 1 }, options.Value.Timeouts.FinanceReminderEvery);
                 break;
             case StepTimeoutKind.Escalate when timeout.Attempt == 1 && OverdueAlertStepId != step.Id:
                 await EscalateAsync(step, steps, db, access, options.Value, now, context, cancellationToken);
@@ -298,10 +304,10 @@ public sealed class ApprovalSaga : Saga
         {
             // Nobody above: raise the alert once and keep reminding the step's approvers.
             OverdueAlertStepId = step.Id;
+            OverdueRemindersSent = 0;
             await context.PublishAsync(new ApprovalAlertRaised(Id, TenantId, step.Id, FinanceStepOverdue, now));
             await context.ScheduleAsync(
-                new StepTimeout(Id, step.Id, StepTimeoutKind.FinanceReminder, step.RemindersSent + 1),
-                options.Timeouts.FinanceReminderEvery);
+                new StepTimeout(Id, step.Id, StepTimeoutKind.FinanceReminder, 1), options.Timeouts.FinanceReminderEvery);
             return;
         }
 
@@ -319,6 +325,14 @@ public sealed class ApprovalSaga : Saga
         await context.PublishAsync(new ApprovalEscalated(
             Id, TenantId, next.Id, step.Level.ToString(), next.Level.ToString(), next.ApproverIds, now));
         await OpenAsync(next, options, now, context);
+    }
+
+    /// <summary>Reminds the step's approvers; reminders of a step are numbered 1, 2, ... whichever timeout sent them.</summary>
+    private async Task RemindAsync(ApprovalStep step, DateTimeOffset now, IMessageContext context)
+    {
+        var reminderNo = step.RemindersSent + 1;
+        step.RecordReminder(reminderNo);
+        await context.PublishAsync(new ApprovalReminderDue(Id, TenantId, step.Id, step.ApproverIds, reminderNo, now));
     }
 
     /// <summary>Makes <paramref name="step"/> the open one: announces it and schedules its reminder and escalation.</summary>

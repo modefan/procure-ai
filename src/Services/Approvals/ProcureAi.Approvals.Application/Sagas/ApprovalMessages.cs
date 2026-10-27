@@ -20,6 +20,7 @@ public enum StepTimeoutKind
 
 /// <summary>
 /// A durably scheduled timeout of one step. It is ignored unless that step is still the open one and <c>Attempt</c> is the one
-/// expected (the next reminder number; 1 for an escalation), so a late or repeated timeout changes nothing.
+/// expected (1 for the reminder and the escalation; the next link of the finance-reminder chain for a finance reminder), so a
+/// late or repeated timeout changes nothing.
 /// </summary>
 public sealed record StepTimeout(Guid RequestId, Guid StepId, StepTimeoutKind Kind, int Attempt);
