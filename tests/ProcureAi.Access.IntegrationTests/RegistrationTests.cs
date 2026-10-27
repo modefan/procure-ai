@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ProcureAi.Access.Application.Dtos;
+using ProcureAi.Access.Domain;
 using ProcureAi.Access.Infrastructure;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts;
@@ -36,6 +37,13 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         _tenant = $"d{Guid.NewGuid():N}"[..12];
         _organizationId = await _keycloak.CreateOrganizationAsync(_tenant);
         await infra.CreateTenantAsync(_tenant);
+        await using (var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options))
+        {
+            // The demo company's sandbox cost center, as the demo seed creates it for the real "demo" tenant.
+            db.CostCenters.Add(CostCenter.Create(_tenant, AccessApiFactory.SandboxCostCenter, "Sandbox", "SANDBOX"));
+            await db.SaveChangesAsync();
+        }
+
         _factory = new AccessApiFactory(infra, _keycloak, demoOrganization: _tenant);
         _client = _factory.CreateClient();
     }
@@ -46,13 +54,19 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         await _factory.DisposeAsync();
     }
 
-    private async Task<HttpResponseMessage> RegisterAsync(string userId, string email, string name, string? tenant = null, string? key = null)
+    private async Task<HttpResponseMessage> RegisterAsync(
+        string userId, string email, string name, string? tenant = null, string? key = null, string? onBehalfOf = "")
     {
         var request = new HttpRequestMessage(HttpMethod.Post, Url) { Content = JsonContent.Create(new { userId, email, displayName = name }) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateServiceToken(AccessApiFactory.InternalClientId));
         request.Headers.Add("X-Tenant-Id", tenant ?? _tenant);
         request.Headers.Add("X-Calling-Service", "gateway");
-        request.Headers.Add("X-On-Behalf-Of-User", userId);
+        // "" means "the registered user" (what the gateway sends); null sends no header at all.
+        if (onBehalfOf is not null)
+        {
+            request.Headers.Add("X-On-Behalf-Of-User", onBehalfOf == "" ? userId : onBehalfOf);
+        }
+
         request.Headers.Add("Idempotency-Key", key ?? $"register-{Guid.NewGuid():N}");
         return await _client.SendAsync(request, Ct);
     }
@@ -77,7 +91,8 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         var probe = new RabbitProbe(infra.RabbitConnectionString);
         var queue = await probe.BindQueueAsync(Exchanges.Access);
 
-        using var response = await RegisterAsync(userId, email, "New Person");
+        // The body's email and name are ignored: they come from the identity provider (Keycloak: "New Person").
+        using var response = await RegisterAsync(userId, "forged@elsewhere.test", "Thandi Finance");
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));
         (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeTrue();
@@ -88,11 +103,28 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         user.Roles.ShouldBe(["requester"]);
         user.ApprovalLimit.ShouldBe(0m);
         user.IsFinanceApprover.ShouldBeFalse();
-        user.CostCenterCodes.ShouldBeEmpty();
+        user.CostCenterCodes.ShouldBe([AccessApiFactory.SandboxCostCenter]);
         var message = await probe.WaitForMessageAsync(
             queue, m => m.GetProperty("tenantId").GetString() == _tenant && m.GetProperty("userId").GetString() == userId,
             TimeSpan.FromSeconds(20));
         message.GetProperty("kind").GetString().ShouldBe("User");
+    }
+
+    [Fact]
+    public async Task A_service_registering_someone_other_than_the_user_it_acts_for_is_403()
+    {
+        // Final review I-5: a service (or a leaked internal secret) must not put another person into the demo company.
+        var email = NewEmail();
+        var victim = await _keycloak.CreateUserAsync(email);
+        var caller = await _keycloak.CreateUserAsync(NewEmail());
+
+        using var forgedBody = await RegisterAsync(victim, email, "Victim", onBehalfOf: caller);
+        using var noHeader = await RegisterAsync(victim, email, "Victim", onBehalfOf: null);
+
+        forgedBody.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await forgedBody.Content.ReadAsStringAsync(Ct));
+        noHeader.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await noHeader.Content.ReadAsStringAsync(Ct));
+        (await _keycloak.IsOrganizationMemberAsync(_organizationId, victim)).ShouldBeFalse();
+        (await UsersAsync()).ShouldNotContain(u => u.UserId == victim);
     }
 
     [Fact]

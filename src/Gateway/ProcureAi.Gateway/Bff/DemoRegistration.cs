@@ -20,15 +20,14 @@ public sealed class DemoRegistration(
         {
             var principal = http.User;
             var userId = principal.FindFirst("sub")?.Value;
-            var email = principal.FindFirst("email")?.Value ?? principal.FindFirst("preferred_username")?.Value;
-            if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(email))
+            if (string.IsNullOrEmpty(userId))
             {
-                logger.LogWarning("A signed-in user without a tenant has no subject or email in the token; not registered");
+                logger.LogWarning("A signed-in user without a tenant has no subject in the token; not registered");
                 return false;
             }
 
-            var name = principal.FindFirst("name")?.Value ?? "";
-            if (!await registrations.RegisterAsync(userId, email, name, cancellationToken))
+            // Only the user ID: Access reads email and name from Keycloak itself.
+            if (!await registrations.RegisterAsync(userId, cancellationToken))
             {
                 logger.LogWarning("Access did not register user {UserId} in the demo company", userId);
                 return false;

@@ -26,12 +26,13 @@ public sealed class KeycloakAdminClient(
 
     public string DemoTenantId => options.Value.DemoOrganization;
 
-    public async Task EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken)
+    public async Task<IdentityProfile> EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken)
     {
         var settings = options.Value;
         var realm = $"admin/realms/{Uri.EscapeDataString(settings.Realm)}";
         var user = Uri.EscapeDataString(userId);
 
+        IdentityProfile profile;
         using (var found = await SendAsync(HttpMethod.Get, $"{realm}/users/{user}", null, cancellationToken))
         {
             if (found.StatusCode == HttpStatusCode.NotFound)
@@ -40,11 +41,23 @@ public sealed class KeycloakAdminClient(
             }
 
             Ensure(found, "reading the user");
+            profile = ProfileOf(await found.Content.ReadFromJsonAsync<JsonElement>(cancellationToken));
         }
 
         var organizationId = await FindOrganizationIdAsync(realm, settings.DemoOrganization, cancellationToken);
         await EnsureMemberAsync(realm, organizationId, user, userId, cancellationToken);
         await EnsureRoleAsync(realm, user, role, cancellationToken);
+        return profile;
+    }
+
+    // "First Last" as the user entered it at sign-up; the username when both are empty.
+    private static IdentityProfile ProfileOf(JsonElement user)
+    {
+        string Text(string name) =>
+            user.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()!.Trim() : "";
+
+        var name = $"{Text("firstName")} {Text("lastName")}".Trim();
+        return new IdentityProfile(Text("email"), name.Length > 0 ? name : Text("username"));
     }
 
     private async Task<string> FindOrganizationIdAsync(string realm, string alias, CancellationToken cancellationToken)

@@ -2,6 +2,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using ProcureAi.Access.Domain;
+using ProcureAi.Access.Infrastructure;
 using ProcureAi.Access.Application.Dtos;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts;
@@ -170,6 +174,43 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         approvers.Manager.ShouldNotBeNull().UserId.ShouldBe(DemoUsers.Ben);
         approvers.DepartmentHead.ShouldBeNull("the OPS department has no head");
         approvers.Finance.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Internal_lookups_are_not_micro_cached_so_a_committed_change_is_seen_at_once()
+    {
+        // Final review I-3: AccessChanged leaves through the outbox before the controller evicts its cache, so a consumer that
+        // reacts to it must never get the pre-change answer. Simulated here by a change committed without any eviction.
+        var tenant = await infra.CreateTenantAsync();
+        await using (var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options))
+        {
+            db.CostCenters.Add(CostCenter.Create(tenant, "CC-1", "Cost center one", "D1", DemoUsers.Maria));
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var effectivePath = $"/internal/effective?userId={DemoUsers.Maria}&roles=manager";
+        (await ReadAsync<EffectiveAccessDto>(await _client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(200_000m);
+        (await ReadAsync<CostCenterApproversDto>(await _client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
+            .Manager.ShouldNotBeNull().DisplayName.ShouldBe("Maria Manager");
+        (await ReadAsync<UserNameDto>(await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
+            .DisplayName.ShouldBe("Maria Manager");
+
+        await using (var connection = new NpgsqlConnection(infra.DbConnectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var update = new NpgsqlCommand(
+                "UPDATE tenant_users SET approval_limit = 1234, display_name = 'Maria Renamed' WHERE tenant_id = @tenant AND user_id = @user",
+                connection);
+            update.Parameters.AddWithValue("tenant", tenant);
+            update.Parameters.AddWithValue("user", DemoUsers.Maria);
+            (await update.ExecuteNonQueryAsync(Ct)).ShouldBe(1);
+        }
+
+        (await ReadAsync<EffectiveAccessDto>(await _client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(1234m);
+        (await ReadAsync<CostCenterApproversDto>(await _client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
+            .Manager.ShouldNotBeNull().DisplayName.ShouldBe("Maria Renamed");
+        (await ReadAsync<UserNameDto>(await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
+            .DisplayName.ShouldBe("Maria Renamed");
     }
 
     [Fact]

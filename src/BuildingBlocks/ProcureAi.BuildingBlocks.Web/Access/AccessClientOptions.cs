@@ -26,4 +26,11 @@ public sealed class AccessClientOptions : ServiceClientResilienceOptions
     /// <summary>How long "no such cost center" is remembered (it is never served from fail-safe).</summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:05:00")]
     public TimeSpan NotFoundCacheDuration { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long an instance trusts the tenant generation it holds in memory before it reads it from Redis again. The backplane
+    /// normally updates it at once; this bounds how long an instance that missed a backplane message keeps the old generation.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "00:01:00")]
+    public TimeSpan GenerationMemoryCacheDuration { get; set; } = TimeSpan.FromSeconds(10);
 }

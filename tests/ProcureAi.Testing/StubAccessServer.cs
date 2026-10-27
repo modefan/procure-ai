@@ -17,7 +17,7 @@ public sealed record StubAccessCall(string Path, string? Tenant, string? Calling
 
 /// <summary>What the stub Access saw in a registration request (a self-registered user joining the demo company).</summary>
 public sealed record StubRegistration(
-    string UserId, string Email, string DisplayName, string? Tenant, string? OnBehalfOf, string? IdempotencyKey);
+    string UserId, string? Tenant, string? OnBehalfOf, string? IdempotencyKey);
 
 /// <summary>
 /// A real Kestrel server playing the Access service (and Keycloak's token endpoint) for the services' Access clients.
@@ -157,7 +157,7 @@ public sealed class StubAccessServer : IAsyncDisposable
         {
             stub.Record(http);
             var registration = new StubRegistration(
-                body.UserId, body.Email, body.DisplayName, Header(http, "X-Tenant-Id"), Header(http, "X-On-Behalf-Of-User"),
+                body.UserId, Header(http, "X-Tenant-Id"), Header(http, "X-On-Behalf-Of-User"),
                 Header(http, "Idempotency-Key"));
             stub._registrations.Enqueue(registration);
             if (stub.Down)
@@ -232,7 +232,7 @@ public sealed class StubAccessServer : IAsyncDisposable
         return stub;
     }
 
-    private sealed record StubRegistrationBody(string UserId, string Email, string DisplayName);
+    private sealed record StubRegistrationBody(string UserId);
 
     private void Record(HttpContext http) =>
         _calls.Enqueue(new StubAccessCall(

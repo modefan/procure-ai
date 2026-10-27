@@ -588,7 +588,8 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         var registration = _gateway.Access.Registrations.Single();
         registration.Tenant.ShouldBe(tenant);
         registration.UserId.ShouldBe(user.GetProperty("userId").GetString());
-        registration.Email.ShouldEndWith("@registered.test");
+        // Access binds the registration to the user the gateway acts for (final review I-5).
+        registration.OnBehalfOf.ShouldBe(registration.UserId);
         registration.IdempotencyKey.ShouldNotBeNullOrEmpty();
 
         // The second call finds the tenant in the session already: no second registration.

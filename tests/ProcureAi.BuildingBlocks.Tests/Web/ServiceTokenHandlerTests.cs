@@ -142,6 +142,23 @@ public sealed class ServiceTokenHandlerTests
     }
 
     [Fact]
+    public async Task A_request_can_name_the_user_it_is_for_when_the_caller_is_the_system()
+    {
+        // The gateway has no caller context of its own (system), but registers the signed-in user on their behalf.
+        var (client, downstream, _, _) = Create(SystemCaller.Id, null);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/register");
+        request.Options.Set(ServiceTokenHandler.OnBehalfOfUserOption, "new-user");
+        request.Options.Set(ServiceTokenHandler.TenantOption, "demo");
+        request.Headers.Add("X-On-Behalf-Of-User", "forged");
+
+        await client.SendAsync(request, Ct);
+
+        var sent = downstream.Seen.Single();
+        sent.Headers.GetValues("X-On-Behalf-Of-User").ShouldBe(["new-user"]);
+        sent.Headers.GetValues("X-Tenant-Id").ShouldBe(["demo"]);
+    }
+
+    [Fact]
     public async Task Concurrent_calls_request_one_token()
     {
         var (client, downstream, keycloak, _) = Create();

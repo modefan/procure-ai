@@ -8,7 +8,8 @@ namespace ProcureAi.Access.Infrastructure;
 
 /// <summary>
 /// The demo data the AppHost migrate step writes when DemoSeed:Enabled is true: three tenants, each with the default
-/// matrix of spec 4.2, and the organisation of acme and globex. Idempotent: every row is added only when missing, so a
+/// matrix of spec 4.2, the organisation of acme and globex, and the sandbox cost center <c>DEMO-100</c> of the demo company,
+/// which every self-registered user gets (DemoRegistration:SandboxCostCenter). Idempotent: every row is added only when missing, so a
 /// second run changes nothing and never overwrites a matrix or an approval limit an admin changed.
 /// </summary>
 public static class DemoSeeder
@@ -46,6 +47,7 @@ public static class DemoSeeder
         Department.Create("acme", "IT", "Information Technology", DemoUsers.Dept),
         Department.Create("acme", "MK", "Marketing", DemoUsers.Dept),
         Department.Create("globex", "OPS", "Operations"),
+        Department.Create("demo", "SANDBOX", "Demo Sandbox"),
     ];
 
     private static IEnumerable<CostCenter> CostCenters() =>
@@ -53,6 +55,7 @@ public static class DemoSeeder
         CostCenter.Create("acme", "IT-200", "IT Operations", "IT", DemoUsers.Maria),
         CostCenter.Create("acme", "MK-110", "Brand and Campaigns", "MK", DemoUsers.Maria),
         CostCenter.Create("globex", "GX-100", "Plant Operations", "OPS", DemoUsers.Ben),
+        CostCenter.Create("demo", "DEMO-100", "Demo Sandbox", "SANDBOX"),
     ];
 
     private static IEnumerable<TenantUser> Users() =>

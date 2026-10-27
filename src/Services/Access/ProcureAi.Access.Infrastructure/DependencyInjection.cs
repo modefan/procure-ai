@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.Access.Application;
 using ProcureAi.Access.Application.Abstractions;
 using ProcureAi.Access.Application.Commands;
 using ProcureAi.Access.Infrastructure.Keycloak;
@@ -35,6 +36,10 @@ public static class DependencyInjection
         services.AddScoped<IAccessDbContext>(sp => sp.GetRequiredService<AccessDbContext>());
         services.TryAddSingleton(TimeProvider.System);
         services.AddKeycloakAdmin(configuration);
+        services.AddOptions<DemoRegistrationOptions>()
+            .Bind(configuration.GetSection(DemoRegistrationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         return services;
     }
 

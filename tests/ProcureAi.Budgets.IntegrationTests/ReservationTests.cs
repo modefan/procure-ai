@@ -267,14 +267,16 @@ public sealed class ReservationTests(BudgetsApp app)
     {
         await using var db = app.Infra.NewDbContext();
         var current = BudgetsInfraFixture.CurrentYear;
-        var seeded = (await db.Budgets.IgnoreQueryFilters().Where(b => b.TenantId == "acme" || b.TenantId == "globex").ToListAsync(Ct))
+        var seeded = (await db.Budgets.IgnoreQueryFilters().Where(b => b.TenantId == "acme" || b.TenantId == "globex" || b.TenantId == "demo").ToListAsync(Ct))
             .ToDictionary(b => (b.TenantId, b.CostCenterCode, b.FiscalYear), b => b.Amount.Amount);
 
         seeded[("acme", "IT-200", current)].ShouldBe(900_000m);
         seeded[("acme", "MK-110", current)].ShouldBe(360_000m);
         seeded[("globex", "GX-100", current)].ShouldBe(500_000m);
         seeded[("acme", "IT-200", new FiscalYear(current.EndYear + 1))].ShouldBe(900_000m);
-        seeded.Count.ShouldBe(6);
+        // The sandbox cost center of self-registered demo users.
+        seeded[("demo", "DEMO-100", current)].ShouldBe(250_000m);
+        seeded.Count.ShouldBe(8);
     }
 
     private async Task WaitForReleasedMarkerAsync(string tenant, Guid id)

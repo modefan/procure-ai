@@ -127,7 +127,9 @@ before this repo goes public. CI generates random, per-run secrets; nothing sens
   or published twice.
 - **Idempotent writes and request coalescing.** POSTs need an `Idempotency-Key`; identical concurrent requests run
   once, across instances (FusionCache, Redis, distributed lock).
-- **1-second micro-cache on every GET** absorbs bursts without visible staleness.
+- **1-second micro-cache on every GET** absorbs bursts without visible staleness. One deliberate exception: Access's
+  internal lookups for other services, which those services already cache per tenant generation (a micro-cached answer
+  could outlive the `AccessChanged` event that revokes it).
 - **Two-layer data audit.** An EF Core interceptor records who changed what in the same transaction; Debezium reads
   the Postgres WAL so changes made outside the app are caught too.
 - **Caller model: acting vs initiating.** Every handler knows who the action is *for* (the user) and who actually

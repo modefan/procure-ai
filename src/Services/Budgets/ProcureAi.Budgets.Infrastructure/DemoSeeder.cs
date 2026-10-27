@@ -48,5 +48,7 @@ public static class DemoSeeder
         ("acme", "IT-200", 900_000m),
         ("acme", "MK-110", 360_000m),
         ("globex", "GX-100", 500_000m),
+        // The sandbox of the demo company, shared by every self-registered user of the public demo.
+        ("demo", "DEMO-100", 250_000m),
     ];
 }

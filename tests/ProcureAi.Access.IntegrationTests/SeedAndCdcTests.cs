@@ -31,8 +31,8 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         first.ShouldBe(second);
         first["permission_matrices"].ShouldBe(3, "acme, globex and demo");
         first["permission_grants"].ShouldBe(3 * 47);
-        first["departments"].ShouldBe(3);
-        first["cost_centers"].ShouldBe(3);
+        first["departments"].ShouldBe(4);
+        first["cost_centers"].ShouldBe(4, "IT-200, MK-110, GX-100 and the demo sandbox DEMO-100");
         first["tenant_users"].ShouldBe(6);
     }
 

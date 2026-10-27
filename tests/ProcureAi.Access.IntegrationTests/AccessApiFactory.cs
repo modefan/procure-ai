@@ -12,6 +12,9 @@ public class AccessApiFactory(AccessInfraFixture infra, KeycloakFixture? keycloa
 {
     public const string InternalClientId = "procure-internal";
 
+    /// <summary>The cost center self-registered users get (the demo seed creates it in the real demo tenant).</summary>
+    public const string SandboxCostCenter = "DEMO-100";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);

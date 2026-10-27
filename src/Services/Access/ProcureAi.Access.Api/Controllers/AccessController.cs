@@ -92,9 +92,14 @@ public sealed class AccessController(
         return updated;
     }
 
+    // The internal lookups below are deliberately NOT [CachedGet] (an exception to the "1 s cache on every GET" rule, final
+    // review I-3). A write sends AccessChanged through the outbox inside InvokeAsync, before this controller evicts its cache,
+    // so a consumer reacting to it could get the pre-change answer from the micro-cache and keep it under its new cache
+    // generation. Server-side coalescing alone has the same flaw (a call arriving after the commit can join a run that read
+    // the old state). The callers' AccessClient already caches and coalesces these lookups per tenant generation.
+
     /// <summary>Internal: what a user may do, given the roles of their token. For other services (service account or admin API key).</summary>
     [HttpGet("internal/effective", Name = "GetEffectiveAccess")]
-    [CachedGet(Tags = [MatrixTagTemplate, UsersTagTemplate])]
     [Authorize(Policy = InternalPolicy.Name)]
     [ProducesResponseType<EffectiveAccessDto>(StatusCodes.Status200OK, "application/json")]
     public async Task<ActionResult<EffectiveAccessDto>> GetEffective(
@@ -109,7 +114,6 @@ public sealed class AccessController(
 
     /// <summary>Internal: the manager, department head and finance approvers of a cost center.</summary>
     [HttpGet("internal/cost-centers/{code}/approvers", Name = "GetCostCenterApprovers")]
-    [CachedGet(Tags = [MatrixTagTemplate, UsersTagTemplate])]
     [Authorize(Policy = InternalPolicy.Name)]
     [ProducesResponseType<CostCenterApproversDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -119,7 +123,6 @@ public sealed class AccessController(
 
     /// <summary>Internal: the display name of a user of the tenant (audit history, inboxes). 404 when the tenant has no such user.</summary>
     [HttpGet("internal/users/{userId}", Name = "GetUserName")]
-    [CachedGet(Tags = [UsersTagTemplate])]
     [Authorize(Policy = InternalPolicy.Name)]
     [ProducesResponseType<UserNameDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -128,19 +131,22 @@ public sealed class AccessController(
         await bus.InvokeAsync<UserNameDto>(new GetUserName(userId), cancellationToken);
 
     /// <summary>
-    /// Internal: a user who signed up in the identity provider joins the demo company (organization, requester role, tenant user).
-    /// 201 when this call added them, 200 when they were already in. Called by the gateway for the signed-in user only.
+    /// Internal: a user who signed up in the identity provider joins the demo company (organization, requester role, sandbox
+    /// cost center, tenant user). 201 when this call added them, 200 when they were already in. Called by the gateway for the
+    /// signed-in user only: the user in the body must be the one in <c>X-On-Behalf-Of-User</c>, otherwise 403. Email and name
+    /// are read from the identity provider, never taken from the caller.
     /// </summary>
     [HttpPost("internal/registrations", Name = "RegisterDemoUser")]
     [Idempotent]
     [Authorize(Policy = InternalPolicy.Name)]
     [ProducesResponseType<RegistrationDto>(StatusCodes.Status201Created, "application/json")]
     [ProducesResponseType<RegistrationDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<RegistrationDto>> RegisterDemoUser(RegisterDemoUserBody body, CancellationToken cancellationToken)
     {
-        var result = await bus.InvokeAsync<RegistrationDto>(new RegisterDemoUser(body.UserId, body.Email, body.DisplayName), cancellationToken);
+        var result = await bus.InvokeAsync<RegistrationDto>(new RegisterDemoUser(body.UserId), cancellationToken);
         if (!result.Joined)
         {
             return Ok(result);
