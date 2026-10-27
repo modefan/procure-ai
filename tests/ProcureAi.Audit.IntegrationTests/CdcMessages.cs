@@ -41,8 +41,10 @@ public sealed record SyntheticTransaction(
     }
 
     /// <summary>The interceptor's row (op <c>c</c> on <c>audit_entries</c>), written in the same transaction.</summary>
-    public string EntryJson() =>
-        Envelope("audit_entries", "c", EntryLsn, before: null, after: new Dictionary<string, object?>
+    public string EntryJson() => Envelope("audit_entries", "c", EntryLsn, before: null, after: EntryRow());
+
+    private Dictionary<string, object?> EntryRow() =>
+        new Dictionary<string, object?>
         {
             ["id"] = EntryId,
             ["tenant_id"] = Tenant,
@@ -57,9 +59,15 @@ public sealed record SyntheticTransaction(
             ["changes"] = """[{"column":"title","old":"Old title","new":"New title"}]""",
             // Debezium's ZonedTimestamp: ISO 8601 text in UTC.
             ["occurred_at"] = CommittedAt.AddMilliseconds(-5).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", CultureInfo.InvariantCulture),
-        });
+        };
 
-    private string Envelope(string table, string op, long lsn, object? before, object? after) =>
+    /// <summary>
+    /// A forged copy of the interceptor's row: same <c>transaction_id</c> column, but inserted by a transaction of its own
+    /// (Debezium's <c>source.txId</c> is <paramref name="actualTransactionId"/>).
+    /// </summary>
+    public string ForgedEntryJson(long actualTransactionId) => Envelope("audit_entries", "c", EntryLsn, null, EntryRow(), actualTransactionId);
+
+    private string Envelope(string table, string op, long lsn, object? before, object? after, long? sourceTransactionId = null) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["before"] = before,
@@ -75,7 +83,7 @@ public sealed record SyntheticTransaction(
                 ["sequence"] = $"[null,\"{lsn}\"]",
                 ["schema"] = "public",
                 ["table"] = table,
-                ["txId"] = TransactionId,
+                ["txId"] = sourceTransactionId ?? TransactionId,
                 ["lsn"] = lsn,
                 ["xmin"] = null,
             },

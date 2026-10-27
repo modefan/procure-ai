@@ -24,9 +24,21 @@ public sealed record DebeziumChange(
         ["r"] = "Snapshot",
     };
 
-    /// <summary>A row of <c>audit_entries</c> inserted by the app's interceptor. (An update or delete of one is a change like any other: someone tampered with the audit.)</summary>
+    /// <summary>
+    /// A row of <c>audit_entries</c> inserted by the app's interceptor, in the same transaction as the change it describes: Debezium's
+    /// <c>source.txId</c> (the transaction that really inserted the row) equals the row's own <c>transaction_id</c>. (An update or
+    /// delete of one, or a row inserted by another transaction, is a change like any other: someone tampered with the audit.)
+    /// </summary>
     [JsonIgnore]
-    public bool IsInterceptorEntry => Source.Table == InterceptorEntry.SourceTable && Operation == "c" && Row is not null;
+    public bool IsInterceptorEntry => IsInterceptorInsert && !IsForgedInterceptorEntry;
+
+    /// <summary>An <c>audit_entries</c> insert whose <c>transaction_id</c> is not the transaction that inserted it.</summary>
+    [JsonIgnore]
+    public bool IsForgedInterceptorEntry =>
+        IsInterceptorInsert && !(Present(After) is { } row && row.TryGetProperty("transaction_id", out var claimed)
+            && claimed.ValueKind == JsonValueKind.Number && claimed.TryGetInt64(out var id) && id == Source.TransactionId);
+
+    private bool IsInterceptorInsert => Source.Table == InterceptorEntry.SourceTable && Operation == "c" && Row is not null;
 
     /// <summary>A change of one row (not a truncate or a logical message, which name no row).</summary>
     [JsonIgnore]
@@ -40,14 +52,14 @@ public sealed record DebeziumChange(
 
     private JsonElement? Row => Present(After) ?? Present(Before);
 
-    /// <summary>The interceptor row this change inserted.</summary>
+    /// <summary>The interceptor row this change inserted. Transaction and time come from Debezium's metadata, not from the row's own (forgeable) columns.</summary>
     public InterceptorEntry ToInterceptorEntry()
     {
         var row = Present(After) ?? throw new InvalidOperationException("An audit_entries insert without a row.");
         return new InterceptorEntry(
             Guid.Parse(Required(row, "id")),
             Source.Database,
-            row.GetProperty("transaction_id").GetInt64(),
+            Source.TransactionId ?? throw new InvalidOperationException("The audit_entries insert has no transaction ID."),
             Required(row, "table_name"),
             Required(row, "primary_key"),
             Required(row, "user_id"),
@@ -56,7 +68,7 @@ public sealed record DebeziumChange(
             Text(row, "tenant_id"),
             Text(row, "correlation_id"),
             Text(row, "changes") ?? "[]",
-            DateTimeOffset.Parse(Required(row, "occurred_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
+            CommittedAt);
     }
 
     /// <summary>The change of a captured row, still pending: who made it is decided by the match.</summary>

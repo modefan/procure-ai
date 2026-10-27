@@ -43,6 +43,19 @@ public sealed class CdcKeyColumnsTests(AuditApp app)
         }
     }
 
+    [Fact]
+    public void Every_configured_key_column_table_exists_in_a_services_model()
+    {
+        var cdc = app.Services.GetRequiredService<IOptions<AuditOptions>>().Value.Cdc;
+        var modelTables = new[] { "requests", "budgets", "access", "approvals" }.SelectMany(service =>
+        {
+            using var db = Model(service);
+            return db.Model.GetEntityTypes().Select(e => e.GetTableName()).OfType<string>().ToList();
+        }).ToHashSet(StringComparer.Ordinal);
+
+        cdc.KeyColumns.Keys.Where(table => !modelTables.Contains(table)).ShouldBeEmpty("stale Audit:Cdc:KeyColumns entries (no such table in any model)");
+    }
+
     private static DbContext Model(string service) => service switch
     {
         "requests" => new RequestsDbContext(new DbContextOptionsBuilder<RequestsDbContext>().UseNpgsql("Host=model-only").Options),

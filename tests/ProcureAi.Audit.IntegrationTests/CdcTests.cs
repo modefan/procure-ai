@@ -211,6 +211,78 @@ public sealed class CdcTests(AuditApp app)
     }
 
     [Fact]
+    public async Task Interceptor_row_after_the_grace_decision_withdraws_the_alert()
+    {
+        using var metric = new CounterRecorder(OutsideAppMetric);
+        var database = NewDatabase();
+        var tx = SyntheticTransaction.New(database, AuditApp.NewTenant());
+
+        // The change arrives, the grace period ends (decided outside the app, alert stored, metric counted), then its row arrives.
+        await InvokeAsync(tx.ChangeJson());
+        await app.Bus.InvokeAsync(new ResolveAttribution(tx.ChangeId), Ct);
+        (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == tx.ChangeId))).ShouldHaveSingleItem()
+            .Attribution.Kind.ShouldBe(AttributionKind.OutsideApp);
+        (await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.Id == tx.ChangeId))).ShouldHaveSingleItem().WithdrawnAt.ShouldBeNull();
+
+        await InvokeAsync(tx.EntryJson());
+
+        var change = (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == tx.ChangeId))).ShouldHaveSingleItem();
+        change.Attribution.Kind.ShouldBe(AttributionKind.App);
+        change.Attribution.InterceptorEntryId.ShouldBe(tx.EntryId);
+        (await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.Id == tx.ChangeId))).ShouldHaveSingleItem().WithdrawnAt.ShouldNotBeNull();
+        metric.Sum(("database", database)).ShouldBe(1, "the decision was counted when made and is not undone");
+    }
+
+    [Fact]
+    public async Task Row_changed_twice_in_one_transaction_pairs_each_change_with_its_own_row()
+    {
+        var database = NewDatabase();
+        var first = SyntheticTransaction.New(database, AuditApp.NewTenant());
+        var second = first with { ChangeLsn = first.ChangeLsn + 2, EntryLsn = first.EntryLsn + 2, EntryId = Guid.CreateVersion7() };
+
+        // Log order: change 1, row 1, change 2, row 2.
+        await InvokeAsync(first.ChangeJson());
+        await InvokeAsync(first.EntryJson());
+        await InvokeAsync(second.ChangeJson());
+        var pending = (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == second.ChangeId))).ShouldHaveSingleItem();
+        pending.Attribution.Kind.ShouldBe(AttributionKind.Pending, "its own row has not arrived; row 1 belongs to change 1");
+        await InvokeAsync(second.EntryJson());
+
+        (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == first.ChangeId))).ShouldHaveSingleItem()
+            .Attribution.InterceptorEntryId.ShouldBe(first.EntryId);
+        (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == second.ChangeId))).ShouldHaveSingleItem()
+            .Attribution.InterceptorEntryId.ShouldBe(second.EntryId);
+    }
+
+    [Fact]
+    public async Task Forged_interceptor_row_from_another_transaction_does_not_hide_the_change()
+    {
+        using var metric = new CounterRecorder(OutsideAppMetric);
+        var database = NewDatabase();
+        var tx = SyntheticTransaction.New(database, AuditApp.NewTenant());
+        var forgedRowId = $"{database}:{tx.EntryLsn}:audit_entries:{tx.EntryId}";
+
+        // The outside change, then a forged audit row copying its transaction_id but inserted by a transaction of its own.
+        await InvokeAsync(tx.ChangeJson());
+        await InvokeAsync(tx.ForgedEntryJson(tx.TransactionId + 1));
+
+        await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Database == database),
+            found => found.Count == 2 && found.All(c => c.Attribution.Kind == AttributionKind.OutsideApp), AfterGrace);
+        var original = (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == tx.ChangeId))).ShouldHaveSingleItem();
+        original.Attribution.InterceptorEntryId.ShouldBeNull();
+        var forged = (await app.QueryAsync<DataChange>(q => q.Where(c => c.Id == forgedRowId))).ShouldHaveSingleItem();
+        forged.Table.ShouldBe("audit_entries");
+        forged.Attribution.Kind.ShouldBe(AttributionKind.OutsideApp);
+
+        var alerts = await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.Database == database));
+        alerts.Count.ShouldBe(2);
+        alerts.ShouldAllBe(a => a.WithdrawnAt == null);
+        (await app.QueryAsync<InterceptorEntry>(q => q.Where(e => e.Database == database))).ShouldBeEmpty();
+        metric.Sum(("database", database)).ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Redelivered_change_is_stored_once()
     {
         await app.EnsureCdcAsync();
@@ -286,6 +358,8 @@ public sealed class CdcTests(AuditApp app)
         var database = NewDatabase();
         var old = Enumerable.Range(0, 5).Select(i => Change(database, i, expired)).ToList();
         var recent = Change(database, 99, kept);
+        var oldMatch = AttributionMatch.Start($"{database}:1:t:old", expired);
+        var recentMatch = AttributionMatch.Start($"{database}:1:t:recent", kept);
         var oldEntry = Entry(database, expired);
         var recentEntry = Entry(database, kept);
         var oldAlert = new OutsideAppAlert(old[0].Id, database, "purchase_requests", "pk-0", null, 1, expired, expired, null);
@@ -295,6 +369,7 @@ public sealed class CdcTests(AuditApp app)
             session.Store(old.ToArray());
             session.Store(recent);
             session.Store(oldEntry, recentEntry);
+            session.Store(oldMatch, recentMatch);
             session.Store(oldAlert, recentAlert);
             await session.SaveChangesAsync(Ct);
         }
@@ -309,6 +384,7 @@ public sealed class CdcTests(AuditApp app)
 
         (await app.QueryAsync<DataChange>(q => q.Where(c => c.Database == database))).ShouldHaveSingleItem().Id.ShouldBe(recent.Id);
         (await app.QueryAsync<InterceptorEntry>(q => q.Where(e => e.Database == database))).ShouldHaveSingleItem().Id.ShouldBe(recentEntry.Id);
+        (await app.QueryAsync<AttributionMatch>(q => q.Where(m => m.Id.StartsWith(database)))).ShouldHaveSingleItem().Id.ShouldBe(recentMatch.Id);
         (await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.Database == database))).ShouldHaveSingleItem().Id.ShouldBe(recentAlert.Id);
     }
 

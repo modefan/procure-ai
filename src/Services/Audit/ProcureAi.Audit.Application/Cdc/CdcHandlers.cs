@@ -24,6 +24,15 @@ public static class DebeziumChangeHandler
             return;
         }
 
+        if (change.IsForgedInterceptorEntry)
+        {
+            // Not an interceptor row: it was inserted by a transaction other than the one it names. It is stored as the change it
+            // is (pending, then outside the app) and can never match a change or withdraw an alert.
+            logger.LogWarning(
+                "Forged audit_entries row in {Database}: inserted by transaction {TransactionId} at LSN {Lsn}, not the one it names",
+                change.Source.Database, change.Source.TransactionId, change.Source.Lsn);
+        }
+
         if (!change.IsRowChange)
         {
             logger.LogDebug("Ignored a CDC message without a row ({Operation} on {Database}.{Table})", change.Operation, change.Source.Database, change.Source.Table);

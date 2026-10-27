@@ -15,8 +15,8 @@ public sealed record MatchedEntry(Guid EntryId, long Lsn, DateTimeOffset Occurre
 /// <para>
 /// The transaction ID is Postgres' 32-bit xid and wraps around, so a change and a row match only when the commit and the save are
 /// at most the matching window apart. One transaction may change a row several times (and write one interceptor row each); the
-/// changes and rows are then paired in log order (LSN), and a change beyond the last row takes the last one: they were all made by
-/// the same caller in the same transaction.
+/// changes and rows are then paired in log order (LSN), the n-th change with the n-th row; a change whose row has not arrived stays
+/// pending until it does.
 /// </para>
 /// </summary>
 public sealed record AttributionMatch(
@@ -58,9 +58,11 @@ public sealed record AttributionMatch(
                     .Where(e => (change.CommittedAt - e.OccurredAt).Duration() <= window)
                     .OrderBy(e => e.Lsn)
                     .ToList();
-                if (candidates.Count > 0)
+                // Only the row of the change's own rank: a change whose row has not arrived yet stays pending (it must not take the
+                // row of an earlier change of the same transaction).
+                if (rank < candidates.Count && !ordered.Any(c => c.EntryId == candidates[rank].EntryId))
                 {
-                    var entry = candidates[Math.Min(rank, candidates.Count - 1)];
+                    var entry = candidates[rank];
                     change = change with { EntryId = entry.EntryId };
                     paired.Add((change.ChangeId, entry.EntryId));
                 }

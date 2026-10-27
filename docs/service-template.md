@@ -71,6 +71,15 @@ Every service is built the same way from shared pieces. Nothing is copied from a
   columns are a table's key, so **a new captured table whose key is not `id` needs an entry in `Audit:Cdc:KeyColumns`** (Audit's
   appsettings, columns in EF key order); `CdcKeyColumnsTests` fails until it is there. A table whose key is a request ID goes into
   `Audit:Cdc:RequestTables`; a `request_id` column is found by itself. Values are sent as text (`decimal.handling.mode=string`).
+  - **Interceptor rows are trusted by Debezium's metadata, not their own columns**: an `audit_entries` insert counts as the app's
+    row only when `source.txId` (the transaction that really inserted it) equals its `transaction_id` column; its time is
+    `source.ts_ms`. A row inserted by another transaction (a forgery copying a change's `transaction_id`) is stored as a data change
+    on `audit_entries`, logged as a warning (IDs only) and flagged outside the app like any unmatched change; it never matches a
+    change or withdraws an alert.
+  - **Known limits**: (1) a forger who writes the data change *and* a fake `audit_entries` row in ONE transaction is not detected
+    by matching. Cover it with pgaudit (database-role audit), and give only the app's database role INSERT on `audit_entries`.
+    (2) Debezium skips truncates by default, so a psql `TRUNCATE` is never flagged as outside the app. To capture them set
+    `skipped.operations=none` and handle op `t` (it names no row, so it needs its own alert).
 
 ## Business metrics
 
