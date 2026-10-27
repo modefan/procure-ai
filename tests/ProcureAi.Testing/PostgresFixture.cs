@@ -19,6 +19,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     private static readonly TimeSpan InitScriptTimeout = TimeSpan.FromSeconds(90);
 
+    private static readonly SemaphoreSlim ImageBuild = new(1, 1);
+
     private PostgreSqlContainer? _container;
 
     /// <summary>Optional shared network, set before the fixture starts (Debezium reads the database by <see cref="NetworkAlias"/>).</summary>
@@ -36,7 +38,17 @@ public sealed class PostgresFixture : IAsyncLifetime
             .WithName(ImageName)
             .WithDeleteIfExists(false)
             .Build();
-        await image.CreateAsync();
+        // Fixtures of several test classes start in parallel and all write the same build-context tar: one builds at a time.
+        await ImageBuild.WaitAsync();
+        try
+        {
+            await image.CreateAsync();
+        }
+        finally
+        {
+            ImageBuild.Release();
+        }
+
 
         var pg = TestLimits.Section("Postgres");
         var builder = new PostgreSqlBuilder(image)

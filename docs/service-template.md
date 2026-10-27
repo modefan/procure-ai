@@ -125,6 +125,18 @@ A service's own metrics go on a meter named `ProcureAi.<Service>` created throug
 the service defaults export every `ProcureAi.*` meter over OTLP, so nothing else needs registering. Tests read them with a
 `MeterListener`.
 
+## Receiving webhooks
+
+Signed webhooks (a supplier confirming an order, an invoice arriving) use the building block in `BuildingBlocks.Web/Webhooks`.
+
+- Header `X-Procure-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`. The signature covers the bytes exactly as received, so never re-serialise before checking. Tolerance 5 minutes either way, constant-time comparison.
+- Configuration (`Webhooks` section): `Tolerance` (`00:05:00`), `MaxBodyBytes` (1 MB; more gets 413), and one secret per source, `Webhooks:Sources:<source>:Secret` (at least 32 characters; user secrets locally, a Kubernetes secret when deployed). The host refuses to start when a configured secret is too short or an action names a source with no secret.
+- In the Api: `services.AddProcureAiWebhooks(builder.Configuration)`, then mark the action `[SignedWebhook("supplier")]`. The action is anonymous (the signature is the authentication; other actions keep their token requirement), reads `Request.Body` as usual (it is buffered) and never sees a request that failed verification. A failure is the same 401 for every cause; the cause goes to the warning `Webhook rejected {Source} {Reason}` and the counter `procure.webhooks.rejected` (tags `source`, `reason`: `missing`, `malformed`, `expired`, `bad_signature`, `too_large`) on meter `ProcureAi.Webhooks`.
+- Rate limiting: the global limiter (`AddProcureAiRateLimiting`) already covers every endpoint, and an anonymous webhook falls into its client-IP partition, so a webhook action needs nothing extra. Tune the allowance in the `RateLimiting` section; a sender that legitimately bursts (a simulator) is a reason to raise `PermitLimit`, not to exempt the endpoint.
+- Replay protection: the handler calls `IWebhookInbox.TryRecordAsync(source, eventId, ct)` (BuildingBlocks.Application) before applying the effect and commits it in the same `SaveChanges`. `false` means already processed: return 200 and change nothing. Two deliveries racing past the check collide on the key when saving; catch `DbUpdateException` and treat `WebhookInbox.IsDuplicate(ex)` (BuildingBlocks.Persistence) as already processed too. In the DbContext `modelBuilder.AddProcessedWebhooks()` (table `processed_webhooks`, key `(source, event_id)`), in DI `services.AddWebhookInbox<TDbContext>()`. The entity is `[AuditExclude]` and not captured by Debezium, but a captured database still needs `processed_webhooks` in `Audit:Cdc:KeyColumns` (`CdcKeyColumnsTests` checks every table of the model).
+- The tenant of a webhook always comes from the stored entity it names, never from the payload.
+- Tests sign requests with `WebhookTestSigner.Sign(request, secret, at)` (`tests/ProcureAi.Testing`).
+
 ## Where the pieces live
 
 | Piece | Location |
@@ -143,5 +155,6 @@ the service defaults export every `ProcureAi.*` meter over OTLP, so nothing else
 | Which requests and cost centers the caller may reach: `ICallerScope.GetAsync` gives a `CallerScope(All, UserId, CostCenterCodes)` with `Allows(requesterId, costCenterCode)`. The admin key and a service acting for nobody get `All`; a service on behalf of a user and every other caller get the cost centers Access assigns (finance approvers get every cost center there). Registered by `ServiceHost`; a test host that builds its own container calls `services.AddProcureAiCallerScope()` (a plain registration: Wolverine refuses factory lambdas as handler dependencies) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/Scope` |
 | Exponential backoff with jitter: `BackoffOptions` (`InitialDelay`, `Multiplier`, `MaxDelay`, `JitterFraction`; `DelayFor(attempt, random)`). `ConcurrencyRetryOptions` and `DependencyRetryOptions` compute their delays through it (`.Backoff`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/Backoff` |
 | Every event of an exchange has a handler: `HandlerCoverage.AssertEveryEventHandled(handlersAssembly, "ProcureAi.Contracts.<Ns>", ...)` in the service's unit tests (an event without a `Handle`/`Consume`/`StartOrHandle`/`NotFound`/`Start`/`Orchestrate` method in a `...Handler` class or a saga is listed). Add the namespace when the service binds a new exchange | `tests/ProcureAi.Testing/HandlerCoverage.cs` |
+| Signed webhooks: `[SignedWebhook("source")]`, `WebhookSignature`, `IWebhookInbox` replay protection (see "Receiving webhooks") | `BuildingBlocks.Web/Webhooks`, `BuildingBlocks.Application/Webhooks`, `BuildingBlocks.Persistence/Webhooks` |
 | Paged lists: `PagedResult<T>` and `PagingOptions` (section `Paging`, register with `AddValidatedOptions`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/Paging.cs` |
 | `Permissions` (the 15 constants and `All`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/Permissions.cs`, namespace `ProcureAi.BuildingBlocks.Domain` (so a service domain can validate against it) |
