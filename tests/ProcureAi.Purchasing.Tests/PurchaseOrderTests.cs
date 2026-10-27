@@ -337,4 +337,38 @@ public sealed class PurchaseOrderTests
         tombstone.Cancel("again", Now).ShouldBeOfType<CancelOutcome.AlreadyCancelled>();
         tombstone.Confirm("SUP-1", null, Now).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Cancel_needs_a_reason()
+    {
+        Should.Throw<DomainException>(() => NewOrder().Cancel(" ", Now));
+        Should.Throw<DomainException>(() => PurchaseOrder.CancelledBeforeCreation("acme", Guid.NewGuid(), "", Now));
+    }
+
+    [Fact]
+    public void A_confirmation_after_a_cancel_without_reference_asks_for_a_cancel_at_the_supplier()
+    {
+        var order = NewOrder();
+        order.RecordSupplierFailure("timeout", Now.AddSeconds(5));
+        order.Cancel("x", Now).ShouldBe(new CancelOutcome.Cancelled(false));
+
+        order.RecordConfirmationAfterCancel("SUP-7").ShouldBeTrue();
+
+        order.SupplierReference.ShouldBe("SUP-7");
+        order.SupplierCancelPending.ShouldBeTrue();
+        order.Status.ShouldBe(OrderStatus.Cancelled);
+        order.RecordConfirmationAfterCancel("SUP-7").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_confirmation_after_a_cancel_with_a_reference_or_on_other_orders_asks_for_nothing()
+    {
+        var sent = NewOrder();
+        sent.MarkSent("SUP-1", Now);
+        sent.Cancel("x", Now);
+        sent.RecordConfirmationAfterCancel("SUP-1").ShouldBeFalse();
+
+        NewOrder().RecordConfirmationAfterCancel("SUP-1").ShouldBeFalse();
+        PurchaseOrder.CancelledBeforeCreation("acme", Guid.NewGuid(), "x", Now).RecordConfirmationAfterCancel("SUP-1").ShouldBeFalse();
+    }
 }

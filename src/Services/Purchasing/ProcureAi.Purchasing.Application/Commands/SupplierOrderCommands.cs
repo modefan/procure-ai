@@ -207,24 +207,60 @@ public static class ApplySupplierOrderEventHandler
         }
 
         var now = time.GetUtcNow();
+        var decision = SupplierEventDecisions.Apply(order, command, now);
+        if (decision.Ignored is { } ignored)
+        {
+            logger.LogWarning("Supplier event {EventId} ({Kind}) does not fit order {OrderId}: {Reason}", command.EventId, command.Kind, order.Id, ignored);
+            return;
+        }
+
+        if (decision.Event is not null)
+        {
+            await bus.PublishAsync(decision.Event);
+        }
+
+        if (decision.CancelAtSupplier)
+        {
+            await bus.SendAsync(new CancelOrderAtSupplier(order.Id, 1));
+        }
+
+        await cache.RemoveAfterCommitAsync(PurchasingCacheTag.Of(order.TenantId, order.Id));
+    }
+}
+
+/// <summary>What a supplier event does to an order: an event to publish, a cancel to send to the supplier, or why it was ignored.</summary>
+public sealed record SupplierEventDecision(object? Event, bool CancelAtSupplier, string? Ignored);
+
+/// <summary>The decisions of <see cref="ApplySupplierOrderEventHandler"/> as a pure function over the order, so they can be tested without infrastructure.</summary>
+public static class SupplierEventDecisions
+{
+    /// <summary>
+    /// Changes the order and says what follows. A confirmation for a cancelled order that never learned the supplier reference
+    /// (the submit timed out after it reached the supplier) records the reference and asks for a cancel at the supplier; a second
+    /// one, or a decline for a cancelled order, does nothing. An event that breaks a domain rule is reported as ignored.
+    /// </summary>
+    public static SupplierEventDecision Apply(PurchaseOrder order, ApplySupplierOrderEvent command, DateTimeOffset now)
+    {
         try
         {
             switch (command.Kind)
             {
+                case SupplierOrderEventKind.Confirmed when order.Status == OrderStatus.Cancelled:
+                    return new SupplierEventDecision(null, order.RecordConfirmationAfterCancel(command.SupplierReference), null);
                 case SupplierOrderEventKind.Confirmed when order.Confirm(command.SupplierReference, command.ExpectedDelivery, now):
-                    await bus.PublishAsync(PurchasingMapper.ToConfirmedEvent(order, now));
-                    break;
-                case SupplierOrderEventKind.Declined when order.RejectBySupplier(command.Reason ?? "Declined by the supplier", now):
-                    await bus.PublishAsync(PurchasingMapper.ToRejectedEvent(order, command.Reason ?? "Declined by the supplier", now));
-                    break;
+                    return new SupplierEventDecision(PurchasingMapper.ToConfirmedEvent(order, now), false, null);
+                case SupplierOrderEventKind.Declined:
+                    var reason = command.Reason ?? "Declined by the supplier";
+                    return order.RejectBySupplier(reason, now)
+                        ? new SupplierEventDecision(PurchasingMapper.ToRejectedEvent(order, reason, now), false, null)
+                        : new SupplierEventDecision(null, false, null);
+                default:
+                    return new SupplierEventDecision(null, false, null);
             }
         }
         catch (DomainException exception)
         {
-            logger.LogWarning("Supplier event {EventId} ({Kind}) does not fit order {OrderId}: {Reason}", command.EventId, command.Kind, order.Id, exception.Message);
-            return;
+            return new SupplierEventDecision(null, false, exception.Message);
         }
-
-        await cache.RemoveAfterCommitAsync(PurchasingCacheTag.Of(order.TenantId, order.Id));
     }
 }

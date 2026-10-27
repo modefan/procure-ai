@@ -14,7 +14,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="WolverineFx" />
-    <PackageReference Include="Riok.Mapperly" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

@@ -13,7 +13,7 @@ public sealed class PurchasingOptions
     /// The wait before each new attempt to reach the supplier (sending an order, telling it about a cancel): 5 s doubling to
     /// 5 minutes, with jitter. The attempts continue until the supplier answers or the order is cancelled.
     /// </summary>
-    [Required]
+    [Required, ValidateObjectMembers]
     public BackoffOptions SupplierDelivery { get; set; } = new();
 
     /// <summary>How a handler that lost a race in the database (webhook against cancel, two receipts) is retried.</summary>

@@ -110,6 +110,7 @@ public sealed class PurchaseOrder : Entity<Guid>
     public static PurchaseOrder CancelledBeforeCreation(string tenantId, Guid requestId, string reason, DateTimeOffset now)
     {
         Require(tenantId, "Tenant");
+        Require(reason, "Reason");
         return new PurchaseOrder
         {
             Id = Guid.CreateVersion7(),
@@ -270,6 +271,7 @@ public sealed class PurchaseOrder : Entity<Guid>
 
     public CancelOutcome Cancel(string reason, DateTimeOffset now)
     {
+        Require(reason, "Reason");
         switch (Status)
         {
             case OrderStatus.Cancelled:
@@ -303,6 +305,24 @@ public sealed class PurchaseOrder : Entity<Guid>
 
         SupplierReference ??= supplierReference;
         SupplierCancelPending = true;
+    }
+
+    /// <summary>
+    /// The supplier confirmed an order we cancelled without ever learning its reference (the submit timed out after it reached
+    /// the supplier). Records the reference and that the supplier must be told; true when the caller must send the cancel.
+    /// False when nothing is needed: not cancelled, a reference is already known (the supplier was or is being told), or a
+    /// tombstone.
+    /// </summary>
+    public bool RecordConfirmationAfterCancel(string supplierReference)
+    {
+        Require(supplierReference, "Supplier reference");
+        if (Status != OrderStatus.Cancelled || Number is null || SupplierReference is not null)
+        {
+            return false;
+        }
+
+        RecordAcceptedAfterCancel(supplierReference);
+        return true;
     }
 
     /// <summary>The supplier has been told about the cancellation.</summary>
