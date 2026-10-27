@@ -31,6 +31,9 @@ public sealed class InfraFixture : IAsyncLifetime
     /// </summary>
     public StubAccessServer Access { get; private set; } = null!;
 
+    /// <summary>The Approvals service Requests asks before a submission ("is there an eligible approver?"). Possible for every tenant unless a test says otherwise.</summary>
+    public StubApprovalsServer Approvals { get; private set; } = null!;
+
     public string RabbitConnectionString => _rabbit!.ConnectionString;
 
     public string RedisConnectionString => _redis!.ConnectionString;
@@ -47,6 +50,7 @@ public sealed class InfraFixture : IAsyncLifetime
         await Task.WhenAll(_postgres.InitializeAsync().AsTask(), _rabbit.InitializeAsync().AsTask(), _redis.InitializeAsync().AsTask());
 
         Access = await StubAccessServer.StartAsync();
+        Approvals = await StubApprovalsServer.StartAsync();
 
         // The init script only creates the debezium role; the database (as in the AppHost, where Aspire creates it) comes here.
         RequestsDbConnectionString = await _postgres.CreateDatabaseAsync(RequestsDb);
@@ -102,6 +106,11 @@ public sealed class InfraFixture : IAsyncLifetime
         if (Access is not null)
         {
             await Access.DisposeAsync();
+        }
+
+        if (Approvals is not null)
+        {
+            await Approvals.DisposeAsync();
         }
 
         if (_debezium is not null)

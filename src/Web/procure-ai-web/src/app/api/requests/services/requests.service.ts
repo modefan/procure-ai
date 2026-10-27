@@ -9,6 +9,8 @@ import { BaseService } from '../base-service';
 import { ApiConfiguration } from '../api-configuration';
 import { StrictHttpResponse } from '../strict-http-response';
 
+import { cancelRequest } from '../fn/requests/cancel-request';
+import { CancelRequest$Params } from '../fn/requests/cancel-request';
 import { createRequest } from '../fn/requests/create-request';
 import { CreateRequest$Params } from '../fn/requests/create-request';
 import { getRequest } from '../fn/requests/get-request';
@@ -150,6 +152,31 @@ export class RequestsService extends BaseService {
    */
   submitRequest(params: SubmitRequest$Params, context?: HttpContext): Promise<RequestDto> {
     const resp = this.submitRequest$Response(params, context);
+    return resp.then((r: StrictHttpResponse<RequestDto>): RequestDto => r.body);
+  }
+
+  /** Path part for operation `cancelRequest()` */
+  static readonly CancelRequestPath = '/api/v1/requests/{id}/cancel';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `cancelRequest()` instead.
+   *
+   * This method sends `application/*+json` and handles request body of type `application/*+json`.
+   */
+  cancelRequest$Response(params: CancelRequest$Params, context?: HttpContext): Promise<StrictHttpResponse<RequestDto>> {
+    const obs = cancelRequest(this.http, this.rootUrl, params, context);
+    return firstValueFrom(obs);
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `cancelRequest$Response()` instead.
+   *
+   * This method sends `application/*+json` and handles request body of type `application/*+json`.
+   */
+  cancelRequest(params: CancelRequest$Params, context?: HttpContext): Promise<RequestDto> {
+    const resp = this.cancelRequest$Response(params, context);
     return resp.then((r: StrictHttpResponse<RequestDto>): RequestDto => r.body);
   }
 

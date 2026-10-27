@@ -11,3 +11,5 @@ export type { UpdateRequest$Params as UpdateRequest$Params } from './fn/requests
 export { updateRequest as updateRequest } from './fn/requests/update-request';
 export type { SubmitRequest$Params as SubmitRequest$Params } from './fn/requests/submit-request';
 export { submitRequest as submitRequest } from './fn/requests/submit-request';
+export type { CancelRequest$Params as CancelRequest$Params } from './fn/requests/cancel-request';
+export { cancelRequest as cancelRequest } from './fn/requests/cancel-request';

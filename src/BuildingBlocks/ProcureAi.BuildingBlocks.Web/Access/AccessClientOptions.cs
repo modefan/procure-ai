@@ -1,9 +1,10 @@
 using System.ComponentModel.DataAnnotations;
+using ProcureAi.BuildingBlocks.Web.Http;
 
 namespace ProcureAi.BuildingBlocks.Web.Access;
 
-/// <summary>The <c>AccessClient</c> section: how a service (or the gateway) caches and calls the Access service.</summary>
-public sealed class AccessClientOptions
+/// <summary>The <c>AccessClient</c> section: how a service (or the gateway) caches and calls the Access service (retries and timeouts from the base class).</summary>
+public sealed class AccessClientOptions : ServiceClientResilienceOptions
 {
     public const string SectionName = "AccessClient";
 
@@ -25,19 +26,4 @@ public sealed class AccessClientOptions
     /// <summary>How long "no such cost center" is remembered (it is never served from fail-safe).</summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:05:00")]
     public TimeSpan NotFoundCacheDuration { get; set; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>Retries of a failed call, on top of the first attempt (the resilience pipeline needs at least one).</summary>
-    [Range(1, 5)]
-    public int RetryCount { get; set; } = 1;
-
-    [Range(typeof(TimeSpan), "00:00:00.010", "00:00:30")]
-    public TimeSpan RetryDelay { get; set; } = TimeSpan.FromMilliseconds(200);
-
-    /// <summary>One attempt gives up after this long.</summary>
-    [Range(typeof(TimeSpan), "00:00:00.100", "00:01:00")]
-    public TimeSpan AttemptTimeout { get; set; } = TimeSpan.FromSeconds(3);
-
-    /// <summary>The whole call, retries included, gives up after this long.</summary>
-    [Range(typeof(TimeSpan), "00:00:00.100", "00:05:00")]
-    public TimeSpan TotalTimeout { get; set; } = TimeSpan.FromSeconds(8);
 }

@@ -719,6 +719,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         HeaderNames(paths, "/api/v1/requests", "post").ShouldBe(["Idempotency-Key"]);
         HeaderNames(paths, "/api/v1/requests/{id}", "put").ShouldBe(["If-Match"]);
         HeaderNames(paths, "/api/v1/requests/{id}/submit", "post").Order().ShouldBe(["Idempotency-Key", "If-Match"]);
+        HeaderNames(paths, "/api/v1/requests/{id}/cancel", "post").Order().ShouldBe(["Idempotency-Key", "If-Match"]);
         HeaderNames(paths, "/api/v1/requests/{id}", "get").ShouldBeEmpty();
 
         var schemes = doc.GetProperty("components").GetProperty("securitySchemes");
@@ -736,7 +737,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         doc.GetProperty("security").GetArrayLength().ShouldBe(2);
         // Enums are documented as names.
         doc.GetProperty("components").GetProperty("schemas").GetProperty("RequestStatus").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString()).ShouldBe(["Draft", "Submitted"]);
+            .EnumerateArray().Select(e => e.GetString()).ShouldBe(["Draft", "Submitted", "Approved", "Rejected", "Cancelled"]);
     }
 
     private static string[] HeaderNames(JsonElement paths, string path, string method)

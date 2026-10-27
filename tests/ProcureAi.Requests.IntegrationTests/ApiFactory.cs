@@ -44,7 +44,7 @@ public sealed class CapturingSink : ILogEventSink
 /// The real Requests API (its Program) on a test server, against the shared Postgres, RabbitMQ and Redis.
 /// Several factories on the same infrastructure stand in for several instances of the service.
 /// </summary>
-public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null)
+public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null, IReadOnlyDictionary<string, string?>? settings = null)
     : ServiceApiFactory<Program>("requestsdb", infra.RequestsDbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     /// <summary>Lets a test cancel the client request right after the write committed, while the controller invalidates the cache.</summary>
@@ -53,7 +53,13 @@ public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null)
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
-        foreach (var (key, value) in infra.Access.Settings)
+        foreach (var (key, value) in infra.Access.Settings.Concat(infra.Approvals.Settings))
+        {
+            builder.UseSetting(key, value);
+        }
+
+        // A test's own settings win (e.g. an unreachable Approvals).
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
         {
             builder.UseSetting(key, value);
         }

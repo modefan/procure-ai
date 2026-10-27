@@ -26,6 +26,20 @@ public sealed class PurchaseRequest : Entity<Guid>
 
     public DateTimeOffset? SubmittedAt { get; private set; }
 
+    public DateTimeOffset? ApprovedAt { get; private set; }
+
+    public DateTimeOffset? RejectedAt { get; private set; }
+
+    /// <summary>Why the approval saga rejected it (an approver's reason, or the system's, e.g. the budget was refused).</summary>
+    public string? RejectionReason { get; private set; }
+
+    public DateTimeOffset? CancelledAt { get; private set; }
+
+    /// <summary>The user the cancellation was for (the requester).</summary>
+    public string? CancelledBy { get; private set; }
+
+    public string? CancellationReason { get; private set; }
+
     /// <summary>Optimistic concurrency token (the Postgres <c>xmin</c> system column), set by the database on every write.</summary>
     public uint Version { get; private set; }
 
@@ -105,17 +119,64 @@ public sealed class PurchaseRequest : Entity<Guid>
         _lines.RemoveAt(index);
     }
 
-    public void Submit(DateTimeOffset now)
+    /// <summary>Throws when the request cannot be submitted now (not a draft, or no lines), before anything is asked of other services.</summary>
+    public void EnsureCanSubmit()
     {
         EnsureDraft();
         if (_lines.Count == 0)
         {
             throw new DomainException("A request needs at least one line to be submitted.");
         }
+    }
 
+    public void Submit(DateTimeOffset now)
+    {
+        EnsureCanSubmit();
         Status = RequestStatus.Submitted;
         SubmittedAt = now;
         Raise(new PurchaseRequestSubmitted(Id, TenantId, Number.ToString(), Title, RequesterId, CostCenterCode, TotalInclVat.Amount, now));
+    }
+
+    /// <summary>Every approval step approved (the saga's RequestApproved). Only a submitted request can be approved.</summary>
+    public void Approve(DateTimeOffset now)
+    {
+        EnsureSubmitted("approved");
+        Status = RequestStatus.Approved;
+        ApprovedAt = now;
+    }
+
+    /// <summary>Rejected by an approver or by the system (the saga's RequestRejected). Only a submitted request can be rejected.</summary>
+    public void Reject(string reason, DateTimeOffset now)
+    {
+        EnsureSubmitted("rejected");
+        RequireText(reason, "A rejection reason");
+        Status = RequestStatus.Rejected;
+        RejectionReason = reason.Trim();
+        RejectedAt = now;
+    }
+
+    /// <summary>
+    /// Cancels a draft, a submitted or an approved request. Only a request the approval saga knows of (submitted or approved)
+    /// raises <see cref="PurchaseRequestCancelled"/>, so the saga can stop and release the budget; a draft has nothing to undo.
+    /// (Plan 03 adds: not after the goods were received.)
+    /// </summary>
+    public void Cancel(string cancelledBy, string? reason, DateTimeOffset now)
+    {
+        RequireText(cancelledBy, "Who cancels");
+        if (Status is not (RequestStatus.Draft or RequestStatus.Submitted or RequestStatus.Approved))
+        {
+            throw new DomainException($"A {Status.ToString().ToLowerInvariant()} request cannot be cancelled.");
+        }
+
+        var known = Status != RequestStatus.Draft;
+        Status = RequestStatus.Cancelled;
+        CancelledAt = now;
+        CancelledBy = cancelledBy;
+        CancellationReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        if (known)
+        {
+            Raise(new PurchaseRequestCancelled(Id, TenantId, Number.ToString(), cancelledBy, CancellationReason, now));
+        }
     }
 
     // Max + 1 (not a counter) so it keeps working after the lines are reloaded from the database.
@@ -125,7 +186,15 @@ public sealed class PurchaseRequest : Entity<Guid>
     {
         if (Status != RequestStatus.Draft)
         {
-            throw new DomainException("A submitted request can no longer be changed.");
+            throw new DomainException($"A {Status.ToString().ToLowerInvariant()} request can no longer be changed.");
+        }
+    }
+
+    private void EnsureSubmitted(string outcome)
+    {
+        if (Status != RequestStatus.Submitted)
+        {
+            throw new DomainException($"Only a submitted request can be {outcome}; this one is {Status.ToString().ToLowerInvariant()}.");
         }
     }
 

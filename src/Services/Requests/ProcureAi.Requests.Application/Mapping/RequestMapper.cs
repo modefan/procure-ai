@@ -20,6 +20,7 @@ public static partial class RequestMapper
     [MapperIgnoreSource(nameof(PurchaseRequest.DomainEvents))]
     [MapperIgnoreSource(nameof(PurchaseRequest.TenantId))]
     [MapperIgnoreSource(nameof(PurchaseRequest.RequesterId))]
+    [MapperIgnoreSource(nameof(PurchaseRequest.CancelledBy))]
     public static partial RequestDto ToDto(PurchaseRequest request);
 
     [MapProperty("UnitPriceExclVat.Amount", nameof(RequestLineDto.UnitPriceExclVat))]
@@ -30,6 +31,9 @@ public static partial class RequestMapper
 
     /// <summary>Domain event to integration event (the Contracts type other services consume).</summary>
     public static partial RequestSubmitted ToIntegrationEvent(PurchaseRequestSubmitted submitted);
+
+    [MapProperty(nameof(PurchaseRequestCancelled.CancelledAt), nameof(RequestCancelled.OccurredAt))]
+    public static partial RequestCancelled ToIntegrationEvent(PurchaseRequestCancelled cancelled);
 
     private static string NumberText(RequestNumber number) => number.ToString();
 

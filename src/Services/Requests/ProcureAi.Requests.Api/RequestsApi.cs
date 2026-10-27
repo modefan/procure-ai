@@ -16,7 +16,9 @@ public static class RequestsApi
         ServiceHost.Build(args, ServiceName, builder =>
         {
             builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
+            builder.Services.AddValidatedOptions<RequestsOptions>(builder.Configuration, RequestsOptions.SectionName);
             builder.Services.AddRequestsInfrastructure(builder.Configuration);
+            builder.Services.AddApprovalPreview(builder.Configuration);
             builder.Host.UseWolverine(options => options.ConfigureRequests(builder.Configuration, ServiceName));
         });
 }

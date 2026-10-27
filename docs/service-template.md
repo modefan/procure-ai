@@ -27,7 +27,7 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    Reference the returned API from the gateway. Add a `ServiceResourcesTests` case.
    With `CapturedTables` set, it also adds the database's own Debezium Server (see "Change data capture" below).
 7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
-   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `RabbitRecorder` (records what a
+   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `RabbitRecorder` (records what a
    service publishes and sends) and `RabbitContainer` (a broker of its own to stop, for outage tests). Never copy a fixture.
 8. **Gateway**: add the YARP route and cluster, and the service's OpenAPI document to the Swagger dropdown.
 
@@ -69,5 +69,6 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 | Test fixtures, auth and factory | `tests/ProcureAi.Testing` (`ServiceInfraFixture` is the per-service infrastructure base) |
 | Concurrency retries of message handlers | `ConcurrencyRetryOptions` (BuildingBlocks.Application, bound from the service's section) and `RetryConcurrencyConflicts` (BuildingBlocks.Messaging) |
 | Retries of message handlers when a called service is down | `DependencyRetryOptions` (BuildingBlocks.Application, bound from the service's section) and `RetryTransientDependencyFailures` (BuildingBlocks.Messaging): scheduled retries, then dead letters |
+| A client of another service of ours: `AddProcureAiServiceClient<TClient, TImpl>("<name>-api")` (token, caller headers, service discovery); its own retries and timeouts from a config section with `ServiceClientResilienceOptions` + `.WithResilienceFrom<TOptions>()` (e.g. Requests' `ApprovalsClient`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/Http/` |
 | Paged lists: `PagedResult<T>` and `PagingOptions` (section `Paging`, register with `AddValidatedOptions`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/Paging.cs` |
 | `Permissions` (the 15 constants and `All`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/Permissions.cs`, namespace `ProcureAi.BuildingBlocks.Domain` (so a service domain can validate against it) |

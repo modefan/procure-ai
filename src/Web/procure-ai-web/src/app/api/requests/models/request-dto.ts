@@ -4,10 +4,15 @@
 import { RequestLineDto } from '../models/request-line-dto';
 import { RequestStatus } from '../models/request-status';
 export interface RequestDto {
+  approvedAt: (string | null);
+  cancellationReason: (string | null);
+  cancelledAt: (string | null);
   costCenterCode: string;
   id: string;
   lines: Array<RequestLineDto>;
   number: string;
+  rejectedAt: (string | null);
+  rejectionReason: (string | null);
   status: RequestStatus;
   submittedAt: (string | null);
   supplierId: string;

@@ -18,6 +18,11 @@ public sealed record RequestDto(
     string VatDisplay,
     string TotalInclVatDisplay,
     DateTimeOffset? SubmittedAt,
+    DateTimeOffset? ApprovedAt,
+    DateTimeOffset? RejectedAt,
+    string? RejectionReason,
+    DateTimeOffset? CancelledAt,
+    string? CancellationReason,
     uint Version);
 
 public sealed record RequestLineDto(

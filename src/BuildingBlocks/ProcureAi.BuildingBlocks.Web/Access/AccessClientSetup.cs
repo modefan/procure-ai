@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Http.Resilience;
-using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Web.Auth;
@@ -31,23 +29,9 @@ public static class AccessClientSetup
         services.TryAddSingleton(new ServiceIdentity(serviceName));
         services.TryAddSingleton<ICallerContextAccessor, SystemCallerContextAccessor>();
 
-        // The service defaults give every client one shared standard resilience pipeline (retries of seconds, 30 s timeouts).
-        // Permission checks sit in front of every request, so this client gets its own, from the AccessClient section.
-        // RemoveAllResilienceHandlers is marked experimental by Microsoft; it is the supported way to replace the defaults' pipeline.
-#pragma warning disable EXTEXP0001
-        var pipeline = services.AddProcureAiServiceClient<IAccessDirectory, AccessClient>(AccessServiceName)
-            .RemoveAllResilienceHandlers()
-            .AddStandardResilienceHandler();
-#pragma warning restore EXTEXP0001
-        services.AddOptions<HttpStandardResilienceOptions>(pipeline.PipelineName)
-            .Configure<IOptions<AccessClientOptions>>((resilience, access) =>
-            {
-                var settings = access.Value;
-                resilience.Retry.MaxRetryAttempts = settings.RetryCount;
-                resilience.Retry.Delay = settings.RetryDelay;
-                resilience.AttemptTimeout.Timeout = settings.AttemptTimeout;
-                resilience.TotalRequestTimeout.Timeout = settings.TotalTimeout;
-            });
+        // Permission checks sit in front of every request, so this client fails fast: its own pipeline, from the AccessClient section.
+        services.AddProcureAiServiceClient<IAccessDirectory, AccessClient>(AccessServiceName)
+            .WithResilienceFrom<AccessClientOptions>();
 
         // Scoped: it holds the typed client, which must not outlive its handler chain in a singleton.
         services.Replace(ServiceDescriptor.Scoped<IPermissionProvider, AccessPermissionProvider>());

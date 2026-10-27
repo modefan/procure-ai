@@ -23,6 +23,12 @@ internal sealed class PurchaseRequestConfiguration : IEntityTypeConfiguration<Pu
         builder.Property(r => r.SupplierId).HasColumnName("supplier_id").HasMaxLength(100).IsRequired();
         builder.Property(r => r.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20);
         builder.Property(r => r.SubmittedAt).HasColumnName("submitted_at");
+        builder.Property(r => r.ApprovedAt).HasColumnName("approved_at");
+        builder.Property(r => r.RejectedAt).HasColumnName("rejected_at");
+        builder.Property(r => r.RejectionReason).HasColumnName("rejection_reason").HasMaxLength(500);
+        builder.Property(r => r.CancelledAt).HasColumnName("cancelled_at");
+        builder.Property(r => r.CancelledBy).HasColumnName("cancelled_by").HasMaxLength(100);
+        builder.Property(r => r.CancellationReason).HasColumnName("cancellation_reason").HasMaxLength(500);
 
         // The Postgres system column xmin changes on every write of the row: an optimistic concurrency token.
         builder.Property(r => r.Version).HasColumnName("xmin").HasColumnType("xid")

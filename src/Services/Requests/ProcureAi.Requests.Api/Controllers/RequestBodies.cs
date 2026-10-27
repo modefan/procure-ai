@@ -30,11 +30,18 @@ public sealed record UpdateRequestBody(
         new(id, expectedVersion, Title, [.. Lines.Select(l => l.ToInput())]);
 }
 
+/// <summary>Why the requester cancels (optional).</summary>
+public sealed record CancelRequestBody([StringLength(RequestLimits.ReasonLength)] string? Reason)
+{
+    internal CancelRequest ToCommand(Guid id, uint expectedVersion) => new(id, expectedVersion, Reason);
+}
+
 /// <summary>Input size limits of the API (the domain enforces the business rules).</summary>
 public static class RequestLimits
 {
     public const int CodeLength = 50;
     public const int TextLength = 200;
+    public const int ReasonLength = 500;
     public const int MaxLines = 100;
     public const int MaxQuantity = 100_000;
     public const double MaxUnitPrice = 100_000_000;

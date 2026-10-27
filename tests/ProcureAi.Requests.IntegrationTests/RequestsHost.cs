@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Messaging;
+using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Infrastructure;
 using Wolverine;
 
@@ -43,6 +44,11 @@ public sealed class RequestsHost : IAsyncDisposable
             ["ConnectionStrings:requestsdb"] = postgres,
             ["ConnectionStrings:rabbitmq"] = rabbit,
             ["Wolverine:AutoBuildMessageStorageOnStartup"] = "CreateOrUpdate",
+            ["Requests:ConcurrencyRetry:Attempts"] = "10",
+            ["Requests:ConcurrencyRetry:InitialDelay"] = "00:00:00.050",
+            ["Requests:ConcurrencyRetry:Multiplier"] = "2.0",
+            ["Requests:ConcurrencyRetry:MaxDelay"] = "00:00:02",
+            ["Requests:ConcurrencyRetry:JitterFraction"] = "0.5",
         }).Build();
         var host = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration(c => c.AddConfiguration(configuration))
@@ -60,6 +66,8 @@ public sealed class RequestsHost : IAsyncDisposable
                 }
 
                 services.AddRequestsInfrastructure(context.Configuration);
+                // No HTTP here, so no Approvals to ask: every submission has an eligible approver.
+                services.AddSingleton<IApprovalPreview, AlwaysPossiblePreview>();
             })
             .UseDefaultServiceProvider(o =>
             {
@@ -81,4 +89,12 @@ public sealed class RequestsHost : IAsyncDisposable
         await Host.StopAsync();
         Host.Dispose();
     }
+}
+
+/// <summary>The approval pre-check of a host without Approvals: always possible.</summary>
+public sealed class AlwaysPossiblePreview : IApprovalPreview
+{
+    public Task<ApprovalPreviewResult> CheckAsync(
+        string tenantId, string costCenterCode, decimal totalInclVat, string requesterId, CancellationToken cancellationToken) =>
+        Task.FromResult(new ApprovalPreviewResult(true, null));
 }

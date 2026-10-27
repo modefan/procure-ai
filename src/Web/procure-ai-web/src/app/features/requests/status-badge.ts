@@ -4,6 +4,9 @@ import { RequestStatus } from '../../api/requests/models/request-status';
 const STYLES: Record<RequestStatus, string> = {
   Draft: 'bg-slate-100 text-slate-700 ring-slate-300',
   Submitted: 'bg-sky-50 text-sky-800 ring-sky-300',
+  Approved: 'bg-emerald-50 text-emerald-800 ring-emerald-300',
+  Rejected: 'bg-rose-50 text-rose-800 ring-rose-300',
+  Cancelled: 'bg-zinc-100 text-zinc-600 ring-zinc-300',
 };
 const FALLBACK = 'bg-slate-100 text-slate-700 ring-slate-300';
 
