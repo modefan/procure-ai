@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Infrastructure;
@@ -21,6 +22,9 @@ public sealed class RequestsHost : IAsyncDisposable
     public IHost Host { get; }
 
     public TestCaller Caller { get; }
+
+    /// <summary>The cost centers each user acts for (everyone: <c>CC-100</c> until a test says otherwise).</summary>
+    public FakeAccessDirectory Access => Host.Services.GetRequiredService<FakeAccessDirectory>();
 
     /// <summary>A new DI scope with its own caller, like one HTTP request.</summary>
     public (IServiceScope Scope, ScopedTestCaller Caller, RequestsDbContext Db) NewScope(string userId, string tenantId)
@@ -68,6 +72,9 @@ public sealed class RequestsHost : IAsyncDisposable
                 services.AddRequestsInfrastructure(context.Configuration);
                 // No HTTP here, so no Approvals to ask: every submission has an eligible approver.
                 services.AddSingleton<IApprovalPreview, AlwaysPossiblePreview>();
+                // Nor Access: the fake says which cost centers each user acts for.
+                services.AddSingleton<FakeAccessDirectory>();
+                services.AddSingleton<IAccessDirectory>(sp => sp.GetRequiredService<FakeAccessDirectory>());
             })
             .UseDefaultServiceProvider(o =>
             {
@@ -97,4 +104,22 @@ public sealed class AlwaysPossiblePreview : IApprovalPreview
     public Task<ApprovalPreviewResult> CheckAsync(
         string tenantId, string costCenterCode, decimal totalInclVat, string requesterId, CancellationToken cancellationToken) =>
         Task.FromResult(new ApprovalPreviewResult(true, null));
+}
+
+/// <summary>Access for a host without HTTP: only the cost centers of a user are known.</summary>
+public sealed class FakeAccessDirectory : IAccessDirectory
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Tenant, string UserId), string[]> _costCenters = new();
+
+    public void SetCostCenters(string tenantId, string userId, params string[] codes) => _costCenters[(tenantId, userId)] = codes;
+
+    public ValueTask<EffectiveAccess> GetEffectiveAccessAsync(
+        string userId, IReadOnlyCollection<string> roles, string tenantId, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new EffectiveAccess([], _costCenters.GetValueOrDefault((tenantId, userId)) ?? ["CC-100"], 0m));
+
+    public ValueTask<CostCenterApprovers> GetApproversAsync(string costCenterCode, string tenantId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+
+    public ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }

@@ -59,7 +59,7 @@ public sealed class ContractsTests
     {
         DemoUsers.Tom.ShouldBe("00000000-0000-4000-8000-000000000001");
         DemoUsers.Ben.ShouldBe("00000000-0000-4000-8000-000000000006");
-        DemoUsers.All.Count.ShouldBe(6);
-        DemoUsers.All.Values.Distinct().Count().ShouldBe(6);
+        DemoUsers.All.Count.ShouldBe(7);
+        DemoUsers.All.Values.Distinct().Count().ShouldBe(7);
     }
 }

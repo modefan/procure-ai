@@ -1,4 +1,5 @@
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Application.Dtos;
@@ -17,11 +18,13 @@ public static class CreateRequestHandler
     public static async Task<RequestDto> Handle(
         CreateRequest command,
         ICallerContext caller,
+        IAccessDirectory access,
         IRequestsDbContext db,
         IRequestNumberGenerator numbers,
         CancellationToken cancellationToken)
     {
         var tenant = caller.TenantId ?? throw new DomainException("A tenant is required.");
+        await CostCenterOwnership.EnsureAsync(caller, access, tenant, command.CostCenterCode, cancellationToken);
         var number = await numbers.NextAsync(tenant, cancellationToken);
         var request = PurchaseRequest.CreateDraft(
             tenant, number, caller.UserId, command.Title, command.CostCenterCode, command.SupplierId);

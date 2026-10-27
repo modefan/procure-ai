@@ -13,6 +13,9 @@ public static class DemoUsers
     public const string Admin = "00000000-0000-4000-8000-000000000005";
     public const string Ben = "00000000-0000-4000-8000-000000000006";
 
+    /// <summary>The approver of the demo company (tenant <c>demo</c>): manager of the sandbox cost center DEMO-100, so a self-registered user's request can be approved.</summary>
+    public const string DemoApprover = "00000000-0000-4000-8000-000000000007";
+
     /// <summary>Username to user ID.</summary>
     public static IReadOnlyDictionary<string, string> All { get; } = new Dictionary<string, string>
     {
@@ -22,5 +25,6 @@ public static class DemoUsers
         ["thandi@acme.test"] = Thandi,
         ["admin@acme.test"] = Admin,
         ["ben@globex.test"] = Ben,
+        ["approver@demo.test"] = DemoApprover,
     };
 }

@@ -99,7 +99,11 @@
           "verified": false
         }
       ],
-      "members": []
+      "members": [
+        {
+          "username": "approver@demo.test"
+        }
+      ]
     }
   ],
   "users": [
@@ -206,6 +210,25 @@
       "enabled": true,
       "firstName": "Ben",
       "lastName": "Smit",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "manager"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000007",
+      "username": "approver@demo.test",
+      "email": "approver@demo.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Demo",
+      "lastName": "Approver",
       "credentials": [
         {
           "type": "password",

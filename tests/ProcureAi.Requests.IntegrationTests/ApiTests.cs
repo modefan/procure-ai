@@ -645,6 +645,38 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Requester_can_create_and_submit_only_on_their_own_cost_centers_but_the_admin_key_can_on_any()
+    {
+        var tenant = NewTenant("ownercc");
+        infra.Access.SetCostCenters(tenant, "rita", "IT-200");
+        var rita = TestAuth.CreateToken("rita", tenant, "requester");
+
+        // CC-100 (NewBody) is not Rita's: 403, nothing created.
+        var foreign = await _client.SendAsync(
+            Req(HttpMethod.Post, Requests, NewBody(), bearer: rita, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        foreign.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        // The admin key drafts on CC-100 (as Claude does); Rita may not submit it ...
+        var draft = await CreateAsync(tenant);
+        var submit = await _client.SendAsync(
+            Req(HttpMethod.Post, $"{Requests}/{draft.Id}/submit", tenant: tenant, bearer: rita, ifMatch: ETagOf(draft), idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        submit.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        // ... but she can create and submit on IT-200, and so can the key.
+        var own = await _client.SendAsync(
+            Req(HttpMethod.Post, Requests, new { title = "Own", costCenterCode = "IT-200", supplierId = "s", lines = new[] { new { sku = "A", description = "a", quantity = 1, unitPriceExclVat = 10m } } },
+                bearer: rita, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        own.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var ownDto = (await own.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        var ownSubmit = await _client.SendAsync(
+            Req(HttpMethod.Post, $"{Requests}/{ownDto.Id}/submit", bearer: rita, ifMatch: ETagOf(ownDto), idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        ownSubmit.IsSuccessStatusCode.ShouldBeTrue(await ownSubmit.Content.ReadAsStringAsync(Ct));
+        var keySubmit = await _client.SendAsync(
+            Req(HttpMethod.Post, $"{Requests}/{draft.Id}/submit", tenant: tenant, ifMatch: ETagOf(draft), idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        keySubmit.IsSuccessStatusCode.ShouldBeTrue(await keySubmit.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
     public async Task AccessChanged_on_the_access_exchange_evicts_the_cached_permissions()
     {
         var tenant = NewTenant("evict");

@@ -108,6 +108,7 @@ Sign in through Keycloak; the demo password is the `keycloak-demo-password` para
 | thandi@acme.test | Acme | finance |
 | admin@acme.test | Acme | admin |
 | ben@globex.test | Globex | manager |
+| approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
 
 ## Tests and CI
 

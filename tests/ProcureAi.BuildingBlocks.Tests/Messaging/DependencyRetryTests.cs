@@ -1,3 +1,4 @@
+using System.Net;
 using Polly.CircuitBreaker;
 using Polly.Timeout;
 using ProcureAi.BuildingBlocks.Application;
@@ -52,5 +53,27 @@ public sealed class DependencyRetryTests
         DependencyRetryPolicy.IsTransientDependencyFailure(new NotFoundException("no such cost center")).ShouldBeFalse();
         DependencyRetryPolicy.IsTransientDependencyFailure(new InvalidOperationException("bug")).ShouldBeFalse();
         DependencyRetryPolicy.IsTransientDependencyFailure(new ForbiddenException("no")).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public void Http_failures_that_may_pass_are_transient(HttpStatusCode status) =>
+        DependencyRetryPolicy.IsTransientDependencyFailure(new HttpRequestException("failed", null, status)).ShouldBeTrue();
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public void Http_failures_that_a_retry_cannot_fix_are_not_transient(HttpStatusCode status)
+    {
+        DependencyRetryPolicy.IsTransientDependencyFailure(new HttpRequestException("failed", null, status)).ShouldBeFalse();
+        DependencyRetryPolicy.IsTransientDependencyFailure(
+            new InvalidOperationException("wrapped", new HttpRequestException("failed", null, status))).ShouldBeFalse();
     }
 }

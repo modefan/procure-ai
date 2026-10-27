@@ -27,7 +27,7 @@ public sealed class AccessInfraFixture()
 
     // The seed is written before Debezium starts, so it is not captured (seed data is not a user action).
     protected override Task MigrateAsync(string connectionString) =>
-        MigrateProcess.RunAsync(connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true);
+        ApiMigrateProcess.RunAsync("ProcureAi.Access.Api.dll", "accessdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true);
 }
 
 [CollectionDefinition(Name)]

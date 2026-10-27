@@ -44,7 +44,19 @@ public static class ApiMigrateProcess
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(Timeout);
-        await process.WaitForExitAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            // A hung migration must not outlive the test run (it would hold database connections and file locks): kill it and
+            // everything it started.
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+            throw new TimeoutException($"{apiAssembly} --migrate did not finish within {Timeout} and was killed: {await output}{await error}");
+        }
+
         var text = (await output) + (await error);
         if (process.ExitCode != 0)
         {

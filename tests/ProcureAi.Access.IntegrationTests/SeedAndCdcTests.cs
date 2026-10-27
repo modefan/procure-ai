@@ -23,9 +23,9 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
     {
         var database = await infra.CreateEmptyDatabaseAsync($"seed_{Guid.NewGuid():N}");
 
-        await MigrateProcess.RunAsync(database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: true);
+        await ApiMigrateProcess.RunAsync("ProcureAi.Access.Api.dll", "accessdb", database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: true);
         var first = await CountsAsync(database);
-        await MigrateProcess.RunAsync(database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: true);
+        await ApiMigrateProcess.RunAsync("ProcureAi.Access.Api.dll", "accessdb", database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: true);
         var second = await CountsAsync(database);
 
         first.ShouldBe(second);
@@ -33,7 +33,7 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         first["permission_grants"].ShouldBe(3 * 47);
         first["departments"].ShouldBe(4);
         first["cost_centers"].ShouldBe(4, "IT-200, MK-110, GX-100 and the demo sandbox DEMO-100");
-        first["tenant_users"].ShouldBe(6);
+        first["tenant_users"].ShouldBe(7);
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
     {
         var database = await infra.CreateEmptyDatabaseAsync($"noseed_{Guid.NewGuid():N}");
 
-        await MigrateProcess.RunAsync(database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: false);
+        await ApiMigrateProcess.RunAsync("ProcureAi.Access.Api.dll", "accessdb", database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: false);
 
         var counts = await CountsAsync(database);
         counts["permission_matrices"].ShouldBe(0);

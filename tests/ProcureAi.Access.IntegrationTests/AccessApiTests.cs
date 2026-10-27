@@ -162,6 +162,24 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Demo_sandbox_has_an_approver_who_covers_every_level_so_a_self_registered_users_request_can_be_routed()
+    {
+        var response = await _client.SendAsync(Internal($"/internal/cost-centers/{AccessApiFactory.SandboxCostCenter}/approvers", Demo), Ct);
+
+        var approvers = await ReadAsync<CostCenterApproversDto>(response);
+
+        var manager = approvers.Manager.ShouldNotBeNull();
+        manager.UserId.ShouldBe(DemoUsers.DemoApprover);
+        manager.CanApprove.ShouldBeTrue("the manager role has requests.approve in the demo tenant's matrix");
+        manager.ApprovalLimit.ShouldBeGreaterThanOrEqualTo(1_000_000m);
+        approvers.DepartmentHead.ShouldBeNull();
+        var finance = approvers.Finance.ShouldHaveSingleItem();
+        finance.UserId.ShouldBe(DemoUsers.DemoApprover);
+        finance.CanApprove.ShouldBeTrue();
+        finance.ApprovalLimit.ShouldBe(manager.ApprovalLimit);
+    }
+
+    [Fact]
     public async Task Other_tenant_cost_center_is_404()
     {
         var acmeCostCenterAsGlobex = await _client.SendAsync(Internal("/internal/cost-centers/IT-200/approvers", Globex), Ct);
@@ -362,7 +380,7 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
 
         acme.Select(u => u.UserId).ShouldBe(
             [DemoUsers.Tom, DemoUsers.Maria, DemoUsers.Dept, DemoUsers.Thandi, DemoUsers.Admin], ignoreOrder: true);
-        demo.ShouldBeEmpty();
+        demo.Select(u => u.UserId).ShouldBe([DemoUsers.DemoApprover], "the demo tenant has only its seeded approver");
     }
 
     [Fact]

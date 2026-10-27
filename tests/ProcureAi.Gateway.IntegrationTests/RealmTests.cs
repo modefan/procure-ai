@@ -50,6 +50,7 @@ public sealed class RealmTests(KeycloakFixture keycloak)
     [InlineData("thandi@acme.test", "acme", "finance")]
     [InlineData("admin@acme.test", "acme", "admin")]
     [InlineData("ben@globex.test", "globex", "manager")]
+    [InlineData("approver@demo.test", "demo", "manager")]
     public async Task Demo_users_get_their_tenant_and_role(string user, string tenant, string role)
     {
         var claims = await keycloak.LoginAsync(user);
@@ -65,6 +66,7 @@ public sealed class RealmTests(KeycloakFixture keycloak)
     [InlineData("thandi@acme.test", "finance")]
     [InlineData("admin@acme.test", "admin")]
     [InlineData("ben@globex.test", "manager")]
+    [InlineData("approver@demo.test", "manager")]
     public async Task Each_demo_user_holds_exactly_their_own_business_role(string user, string role)
     {
         var claims = await keycloak.LoginAsync(user);
@@ -110,6 +112,7 @@ public sealed class RealmTests(KeycloakFixture keycloak)
     [InlineData("thandi@acme.test", DemoUsers.Thandi)]
     [InlineData("admin@acme.test", DemoUsers.Admin)]
     [InlineData("ben@globex.test", DemoUsers.Ben)]
+    [InlineData("approver@demo.test", DemoUsers.DemoApprover)]
     public async Task Demo_users_have_fixed_ids(string user, string id)
     {
         // Seeds in other services refer to these IDs, so the realm import must pin them.

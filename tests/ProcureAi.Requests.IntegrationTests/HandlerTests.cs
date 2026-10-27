@@ -57,6 +57,49 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_requester_cannot_create_a_request_on_a_cost_center_they_do_not_act_for()
+    {
+        _app.Caller.TenantId = "acme";
+        _app.Caller.UserId = "tom";
+        _app.Access.SetCostCenters("acme", "tom", "IT-200");
+
+        await Should.ThrowAsync<ForbiddenException>(() => Create(NewCreate()));
+
+        _app.Caller.Kind = CallerKind.User;
+        var ok = await Create(new CreateRequest("Laptops", "IT-200", "sup-1", [new LineInput("LAP-1", "Laptop", 1, 100m)]));
+        ok.CostCenterCode.ShouldBe("IT-200");
+    }
+
+    [Fact]
+    public async Task A_requester_cannot_submit_a_request_on_a_cost_center_they_do_not_act_for()
+    {
+        _app.Caller.TenantId = "acme";
+        _app.Caller.UserId = "tom";
+        _app.Access.SetCostCenters("acme", "tom", "CC-100");
+        var created = await Create();
+        // Access moves Tom to another cost center; the draft on CC-100 is no longer his to submit.
+        _app.Access.SetCostCenters("acme", "tom", "IT-200");
+
+        await Should.ThrowAsync<ForbiddenException>(() => _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version)));
+
+        (await _app.Bus.InvokeAsync<RequestDto>(new GetRequest(created.Id))).Status.ShouldBe(RequestStatus.Draft);
+    }
+
+    [Fact]
+    public async Task The_admin_api_key_may_create_and_submit_on_any_cost_center()
+    {
+        _app.Caller.TenantId = "acme";
+        _app.Caller.UserId = "claude-admin";
+        _app.Caller.Kind = CallerKind.AdminApiKey;
+        _app.Access.SetCostCenters("acme", "claude-admin");
+
+        var created = await Create(new CreateRequest("Anything", "ANY-1", "sup-1", [new LineInput("A", "a", 1, 10m)]));
+        await _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version));
+
+        (await _app.Bus.InvokeAsync<RequestDto>(new GetRequest(created.Id))).Status.ShouldBe(RequestStatus.Submitted);
+    }
+
+    [Fact]
     public async Task Update_changes_title_and_lines_and_bumps_version()
     {
         _app.Caller.TenantId = "acme";
