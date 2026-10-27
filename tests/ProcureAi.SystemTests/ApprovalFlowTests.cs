@@ -285,7 +285,7 @@ public sealed class ApprovalFlowTests(SystemFixture system)
     {
         var clock = Stopwatch.StartNew();
         var limit = timeout ?? FlowTimeout;
-        HttpStatusException? lastTransient = null;
+        Exception? lastTransient = null;
         while (true)
         {
             try
@@ -302,9 +302,10 @@ public sealed class ApprovalFlowTests(SystemFixture system)
                     throw new TimeoutException($"Timed out after {limit.TotalSeconds:0} s waiting for: {what}. Last value: {System.Text.Json.JsonSerializer.Serialize(value)}");
                 }
             }
-            catch (HttpStatusException e) when (e.IsTransient)
+            catch (Exception e) when (e is HttpStatusException { IsTransient: true } or HttpRequestException)
             {
-                // A service restarting or the gateway momentarily without a backend: retry until the deadline. Other statuses fail at once.
+                // A service restarting (connection refused) or the gateway momentarily without a backend: retry until the deadline.
+                // Other statuses fail at once.
                 lastTransient = e;
                 if (clock.Elapsed > limit)
                 {

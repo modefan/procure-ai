@@ -7,7 +7,7 @@ approval chain runs with budget reservation, approved requests become purchase o
 matched and exported for payment. An AI policy assistant (RAG) and invoice scanning come later. Built as a portfolio
 demo of enterprise .NET and Angular practice: microservices, Clean Architecture, messaging, GitOps-style delivery.
 
-**Status: plan 02 of 8 done.** What runs today: five services (Requests, Access, Budgets, Approvals, Audit), the BFF
+**Status: plan 02 of 8 done (final review in progress).** What runs today: five services (Requests, Access, Budgets, Approvals, Audit), the BFF
 gateway with Keycloak login, the Angular app, and per-database change data capture. A purchase request can be
 submitted, its budget reserved, approved through a rules-driven chain (or rejected or cancelled, which returns the
 budget) and audited end to end. Purchasing, invoicing and the AI assistant arrive in the following plans.
@@ -50,7 +50,8 @@ sequenceDiagram
     participant A as Approvals (saga)
     actor M as Approvers
     Tom->>R: submit
-    R-)B: RequestSubmitted
+    R-)A: RequestSubmitted
+    A-)B: ReserveBudget
     B-)A: BudgetReserved (or BudgetReservationFailed, request rejected)
     A->>A: build chain from Access (manager, then department head / finance by amount)
     loop each step
@@ -69,7 +70,8 @@ sequenceDiagram
     end
 ```
 
-Every service writes its state and its events in one transaction (Wolverine outbox), and Audit records every event.
+Each service that publishes events writes its state and those events in one transaction (Wolverine outbox), and Audit
+records every event.
 
 ## Run it locally
 
@@ -145,8 +147,8 @@ before this repo goes public. CI generates random, per-run secrets; nothing sens
   instead of spread across choreographed handlers.
 - **Fiscal year in SAST.** A budget's fiscal year runs 1 March to the end of February in `Africa/Johannesburg` time, so a
   request submitted late on 28 February is judged by the South African calendar, not UTC.
-- **Generated API client.** Angular calls are generated from each service's OpenAPI document (ng-openapi-gen) and CI
-  guards against drift.
+- **Generated API client.** Angular calls are generated from the OpenAPI document (ng-openapi-gen; the Requests client so
+  far) and CI guards against drift for all five services' documents.
 - **Libraries that went commercial are avoided:** Wolverine instead of MassTransit v9, Mapperly instead of
   AutoMapper, plain handlers instead of MediatR, Shouldly instead of FluentAssertions, and YARP with ASP.NET Core's
   OIDC handlers instead of Duende BFF.
