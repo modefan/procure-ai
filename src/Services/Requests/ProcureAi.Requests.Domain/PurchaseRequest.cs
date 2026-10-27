@@ -134,7 +134,7 @@ public sealed class PurchaseRequest : Entity<Guid>
         EnsureCanSubmit();
         Status = RequestStatus.Submitted;
         SubmittedAt = now;
-        Raise(new PurchaseRequestSubmitted(Id, TenantId, Number.ToString(), Title, RequesterId, CostCenterCode, TotalInclVat.Amount, now));
+        Raise(new PurchaseRequestSubmitted(Id, TenantId, Number.ToString(), Title, RequesterId, CostCenterCode, TotalInclVat.Amount, now, SupplierId, _lines.ToList()));
     }
 
     /// <summary>Every approval step approved (the saga's RequestApproved). Only a submitted request can be approved.</summary>

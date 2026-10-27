@@ -12,4 +12,9 @@ public static class IgnoredEventsHandler
     public static void Handle(BudgetReleased released)
     {
     }
+
+    /// <summary>Spend recorded on a payment; the saga learns of completion from Invoicing. A later task may replace this.</summary>
+    public static void Handle(BudgetSpent spent)
+    {
+    }
 }

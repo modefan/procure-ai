@@ -83,4 +83,21 @@ public static class IgnoredApprovalEventsHandler
     public static void Handle(ApprovalAlertRaised message)
     {
     }
+
+    // Ordering and completion events of the saga: Task-later handlers replace these.
+    public static void Handle(RequestOrdered message)
+    {
+    }
+
+    public static void Handle(RequestCancellationConfirmed message)
+    {
+    }
+
+    public static void Handle(RequestCancellationRefused message)
+    {
+    }
+
+    public static void Handle(RequestCompleted message)
+    {
+    }
 }

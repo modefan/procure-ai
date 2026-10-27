@@ -6,6 +6,8 @@ using ProcureAi.Contracts;
 using ProcureAi.Contracts.Access;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Budgets;
+using ProcureAi.Contracts.Invoicing;
+using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Contracts.Requests;
 
 namespace ProcureAi.Audit.Application.Queries;
@@ -61,10 +63,32 @@ public sealed class BusinessEventSummaries
             ApprovalAlertRaised a => $"Alert{Step(a.StepId)}: {a.Reason}",
             RequestApproved a => $"Request approved ({Rand(a.TotalInclVat)} incl. VAT)",
             RequestRejected r => $"Rejected by {Name(r.RejectedBy)}: {r.Reason}",
+            PurchaseOrderCreated o => $"Order {o.OrderNumber} created with supplier {o.SupplierId} ({Rand(o.TotalInclVat)} incl. VAT)",
+            PurchaseOrderConfirmed o => $"Order {o.OrderNumber} confirmed by the supplier ({o.SupplierReference})"
+                + (o.ExpectedDelivery is { } due ? $", delivery expected {due:yyyy-MM-dd}" : ""),
+            PurchaseOrderRejected o => $"Order {o.OrderNumber} rejected by the supplier: {o.Reason}",
+            GoodsReceived g => $"Goods received by {Name(g.ReceivedBy)} ({Units(g.Lines)})",
+            PurchaseOrderClosedShort c => $"Order closed short by {Name(c.ClosedBy)}: {c.Reason} ({Units(c.ClosedLines)} outstanding)",
+            PurchaseOrderCancelled c => (c.OrderId is null ? "Cancelled before an order existed" : "Order cancelled") + $": {c.Reason}",
+            PurchaseOrderCancellationRefused c => $"Order cancellation refused: {c.Reason}",
+            InvoiceReceived i => $"Invoice {i.SupplierInvoiceNumber} received from {i.SupplierId} via {i.Source} ({Rand(i.TotalInclVat)} incl. VAT)",
+            InvoiceMatched => "Invoice matched to the order and the goods received",
+            InvoiceMismatched m => $"Invoice does not match: {string.Join("; ", m.Reasons)}",
+            PaymentReleased p => $"Payment {p.PaymentNumber} of {Rand(p.AmountInclVat)} released by {Name(p.ReleasedBy)}",
+            PaymentExported p => $"Payment exported to the ERP ({p.ErpReference})",
+            PurchaseOrderSettled s => $"Order settled: {Rand(s.PaidInclVat)} paid in total",
+            RequestOrdered o => $"Order {o.OrderNumber} placed for the request",
+            RequestCancellationConfirmed => "Cancellation of the ordered request confirmed",
+            RequestCancellationRefused r => $"Cancellation of the ordered request refused: {r.Reason}",
+            RequestCompleted c => $"Request completed ({Rand(c.SpentInclVat)} spent incl. VAT)",
+            BudgetSpent b => $"{Rand(b.Amount)} spent on {b.CostCenterCode}",
             AccessChanged a => $"Access changed ({a.Kind})" + (a.UserId is null ? "" : $" for {Name(a.UserId)}"),
             _ => e.Stored.Type,
         };
     }
+
+    private static string Units(IEnumerable<ReceivedLine> lines) =>
+        string.Join(", ", lines.Select(l => $"line {l.LineNo}: {l.Quantity}"));
 
     private static string Level(string level) => level == "DepartmentHead" ? "Department head" : level;
 
@@ -74,6 +98,10 @@ public sealed class BusinessEventSummaries
         IEnumerable<string?> named = e.Contract switch
         {
             RequestSubmitted s => new string?[] { s.RequesterId },
+            PurchaseOrderCreated o => new string?[] { o.RequesterId },
+            GoodsReceived g => new string?[] { g.ReceivedBy },
+            PurchaseOrderClosedShort c => new string?[] { c.ClosedBy },
+            PaymentReleased p => new string?[] { p.ReleasedBy },
             RequestCancelled c => new string?[] { c.CancelledBy },
             ApprovalRequested r => r.ApproverIds.ToArray<string?>(),
             ApprovalStepApproved a => new string?[] { a.ApprovedBy },

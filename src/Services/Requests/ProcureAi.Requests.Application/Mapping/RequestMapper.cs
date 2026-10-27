@@ -35,6 +35,10 @@ public static partial class RequestMapper
     [MapProperty(nameof(PurchaseRequestCancelled.CancelledAt), nameof(RequestCancelled.OccurredAt))]
     public static partial RequestCancelled ToIntegrationEvent(PurchaseRequestCancelled cancelled);
 
+    [MapProperty("UnitPriceExclVat.Amount", nameof(RequestLineItem.UnitPriceExclVat))]
+    [MapperIgnoreSource(nameof(RequestLine.TotalExclVat))]
+    private static partial RequestLineItem ToLineItem(RequestLine line);
+
     private static string NumberText(RequestNumber number) => number.ToString();
 
     private static string Display(Money money) => money.ToDisplayString();

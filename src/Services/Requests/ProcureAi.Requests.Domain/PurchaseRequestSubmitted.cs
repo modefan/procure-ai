@@ -9,4 +9,6 @@ public sealed record PurchaseRequestSubmitted(
     string RequesterId,
     string CostCenterCode,
     decimal TotalInclVat,
-    DateTimeOffset SubmittedAt);
+    DateTimeOffset SubmittedAt,
+    string SupplierId,
+    IReadOnlyList<RequestLine> Lines);

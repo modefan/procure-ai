@@ -47,7 +47,7 @@ public sealed class BusinessAuditTests(AuditApp app)
         {
             var exchange = ExchangeOf(type);
             DependencyInjection.AuditedExchanges.ShouldContain(exchange, $"{type.Name} is published to '{exchange}', which Audit must listen to");
-            await app.PublishAsync(Sample(type, tenant, requestId), exchange, tenant, Tom);
+            await app.PublishAsync(ContractSamples.Of(type, tenant, requestId, Maria), exchange, tenant, Tom);
         }
 
         var stored = await app.WaitForStoredAsync(tenant, s => s.Count >= EventTypes.Length);
@@ -264,28 +264,7 @@ public sealed class BusinessAuditTests(AuditApp app)
     private static string History(Guid requestId) => $"/api/v1/audit/requests/{requestId}/history";
 
     private static RequestSubmitted Submitted(Guid requestId, string tenant, DateTimeOffset? at = null) =>
-        new(requestId, tenant, "PR-1", "Laptop", Tom, "IT-200", 30_000m, at ?? DateTimeOffset.UtcNow);
-
-    /// <summary>An instance of any contract: the tenant and request of the test, plausible values elsewhere. A new parameter type fails here, loudly.</summary>
-    private static object Sample(Type type, string tenant, Guid requestId)
-    {
-        var constructor = type.GetConstructors().OrderByDescending(c => c.GetParameters().Length).First();
-        var arguments = constructor.GetParameters().Select(p => Value(p, tenant, requestId)).ToArray();
-        return constructor.Invoke(arguments);
-    }
-
-    private static object? Value(ParameterInfo parameter, string tenant, Guid requestId) => parameter switch
-    {
-        { Name: "TenantId" } => tenant,
-        { Name: "RequestId" } => requestId,
-        _ when parameter.ParameterType == typeof(string) => $"{parameter.Name}-sample",
-        _ when parameter.ParameterType == typeof(Guid) => Guid.NewGuid(),
-        _ when parameter.ParameterType == typeof(decimal) => 1_000m,
-        _ when parameter.ParameterType == typeof(int) => 1,
-        _ when parameter.ParameterType == typeof(DateTimeOffset) => DateTimeOffset.UtcNow,
-        _ when parameter.ParameterType == typeof(IReadOnlyList<string>) => new[] { Maria },
-        _ => throw new InvalidOperationException($"No sample value for {parameter.Member.DeclaringType!.Name}.{parameter.Name} ({parameter.ParameterType})."),
-    };
+        new(requestId, tenant, "PR-1", "Laptop", Tom, "IT-200", 30_000m, at ?? DateTimeOffset.UtcNow, "SUP-1", []);
 
     private static async Task EventuallyAsync(Func<Task<bool>> condition)
     {

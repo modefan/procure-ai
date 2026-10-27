@@ -1,4 +1,5 @@
 using ProcureAi.BuildingBlocks.Domain;
+using ProcureAi.Requests.Application.Mapping;
 using ProcureAi.Requests.Domain;
 using Shouldly;
 
@@ -14,6 +15,21 @@ public class PurchaseRequestTests
         var request = NewDraft();
         request.AddLine("LAP-1", "Laptop", 3, Money.Zar(25200m));
         return request;
+    }
+
+    [Fact]
+    public void Submitted_integration_event_carries_the_supplier_and_the_lines()
+    {
+        var request = DraftWithLines();
+        request.AddLine("MOU-1", "Mouse", 2, Money.Zar(150m));
+        request.Submit(DateTimeOffset.UtcNow);
+
+        var evt = RequestMapper.ToIntegrationEvent(request.DomainEvents.OfType<PurchaseRequestSubmitted>().Single());
+
+        evt.SupplierId.ShouldBe("sup-1");
+        evt.Lines.Count.ShouldBe(2);
+        evt.Lines[0].ShouldBe(new ProcureAi.Contracts.Requests.RequestLineItem(1, "LAP-1", "Laptop", 3, 25200m));
+        evt.Lines[1].ShouldBe(new ProcureAi.Contracts.Requests.RequestLineItem(2, "MOU-1", "Mouse", 2, 150m));
     }
 
     [Fact]

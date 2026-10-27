@@ -5,7 +5,10 @@ namespace ProcureAi.BuildingBlocks.Tests;
 
 public sealed class ContractsTests
 {
-    private static readonly string[] Commands = ["ReserveBudget", "ReleaseBudget"];
+    private static readonly string[] Commands = ["ReserveBudget", "ReleaseBudget", "CreatePurchaseOrder", "CancelPurchaseOrder", "RecordSpend"];
+
+    /// <summary>Value types nested in messages: neither events nor commands, so they carry no tenant.</summary>
+    private static readonly string[] Parts = ["RequestLineItem", "OrderLineItem", "ReceivedLine", "PaidLine"];
 
     private static readonly string[] Events =
     [
@@ -14,6 +17,11 @@ public sealed class ContractsTests
         "ApprovalRequested", "ApprovalStepApproved", "ApprovalReminderDue", "ApprovalEscalated", "ApprovalAlertRaised",
         "RequestApproved", "RequestRejected",
         "AccessChanged",
+        "PurchaseOrderCreated", "PurchaseOrderConfirmed", "PurchaseOrderRejected", "GoodsReceived", "PurchaseOrderClosedShort",
+        "PurchaseOrderCancelled", "PurchaseOrderCancellationRefused",
+        "InvoiceReceived", "InvoiceMatched", "InvoiceMismatched", "PaymentReleased", "PaymentExported", "PurchaseOrderSettled",
+        "RequestOrdered", "RequestCancellationConfirmed", "RequestCancellationRefused", "RequestCompleted",
+        "BudgetSpent",
     ];
 
     private static Type[] ContractTypes() =>
@@ -26,7 +34,7 @@ public sealed class ContractsTests
     {
         var types = ContractTypes();
 
-        types.Select(t => t.Name).Order().ShouldBe(Commands.Concat(Events).Order());
+        types.Select(t => t.Name).Order().ShouldBe(Commands.Concat(Events).Concat(Parts).Order());
         foreach (var type in types)
         {
             typeof(IIntegrationEvent).IsAssignableFrom(type).ShouldBe(Events.Contains(type.Name), type.Name);
@@ -38,9 +46,14 @@ public sealed class ContractsTests
     {
         foreach (var type in ContractTypes())
         {
-            type.GetProperty("TenantId")!.PropertyType.ShouldBe(typeof(string), type.Name);
             type.GetProperties().Where(p => p.PropertyType == typeof(double) || p.PropertyType == typeof(float))
                 .ShouldBeEmpty(type.Name);
+            if (Parts.Contains(type.Name))
+            {
+                continue;
+            }
+
+            type.GetProperty("TenantId")!.PropertyType.ShouldBe(typeof(string), type.Name);
         }
     }
 
@@ -51,7 +64,10 @@ public sealed class ContractsTests
         Exchanges.Budgets.ShouldBe("budgets");
         Exchanges.Approvals.ShouldBe("approvals");
         Exchanges.Access.ShouldBe("access");
+        Exchanges.Purchasing.ShouldBe("purchasing");
+        Exchanges.Invoicing.ShouldBe("invoicing");
         Queues.BudgetCommands.ShouldBe("budgets-commands");
+        Queues.PurchasingCommands.ShouldBe("purchasing-commands");
     }
 
     [Fact]
