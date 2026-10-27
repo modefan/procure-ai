@@ -12,3 +12,15 @@ public interface IWebhookInbox
     /// </summary>
     Task<bool> TryRecordAsync(string source, string eventId, CancellationToken cancellationToken);
 }
+
+/// <summary>Sizes of the <c>processed_webhooks</c> columns, so a receiver can refuse what would not fit before touching the database.</summary>
+public static class WebhookLimits
+{
+    public const int MaxSourceLength = 100;
+
+    /// <summary>
+    /// The longest event ID the inbox can store. A receiver answers a longer one with 400 (the sender's error) before saving:
+    /// a database error would be a 500, which a sender retries forever.
+    /// </summary>
+    public const int MaxEventIdLength = 200;
+}

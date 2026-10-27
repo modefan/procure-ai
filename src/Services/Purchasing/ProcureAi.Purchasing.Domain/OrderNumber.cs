@@ -22,6 +22,12 @@ public readonly record struct OrderNumber
             ? new OrderNumber(sequence + Offset)
             : throw new DomainException("An order number sequence must be positive.");
 
+    /// <summary>The number from its stored value (1001, 1002, ...), as persisted.</summary>
+    public static OrderNumber FromValue(int value) =>
+        value > Offset
+            ? new OrderNumber(value)
+            : throw new DomainException($"{value} is not a valid order number.");
+
     public static OrderNumber Parse(string text)
     {
         if (text is not null

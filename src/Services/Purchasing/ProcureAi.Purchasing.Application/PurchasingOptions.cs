@@ -23,4 +23,8 @@ public sealed class PurchasingOptions
     /// <summary>How a message is retried when a service it calls cannot answer (Access, for the caller scope).</summary>
     [Required, ValidateObjectMembers]
     public DependencyRetryOptions DependencyRetry { get; set; } = new();
+
+    /// <summary>How often the gauge <c>procure.purchasing.orders_waiting_for_supplier</c> is counted again from the database.</summary>
+    [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
+    public TimeSpan WaitingOrdersRefresh { get; set; } = TimeSpan.FromSeconds(30);
 }

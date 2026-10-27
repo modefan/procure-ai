@@ -69,6 +69,7 @@ public sealed class GatewayHost : IAsyncDisposable
             ["ReverseProxy:Clusters:approvals:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:audit:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:suppliers:Destinations:d1:Address"] = stub.Url,
+            ["ReverseProxy:Clusters:purchasing:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:web:Destinations:d1:Address"] = stub.Url,
         };
         foreach (var (key, value) in access.Settings)

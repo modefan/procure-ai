@@ -156,6 +156,16 @@ var simulators = builder.AddProject<Projects.ProcureAi_Simulators>(ResourceNames
     .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
     .WithHttpHealthCheck("/health/ready")
     .WithDotNetLimits(limits.DotNet);
+// Purchasing: orders of approved requests, sent to the supplier (the simulator) through its anti-corruption layer with the simulator
+// key, confirmed by the supplier's signed webhooks (the secret both sides share). It does not wait for the simulator: an unreachable
+// supplier is an outage it retries through. Where the simulator sends its webhooks (http://purchasing-api) is wired in Task 12.
+var purchasingApi = builder.AddProcureAiService<Projects.ProcureAi_Purchasing_Api>(
+    new ServiceSpec("purchasing", ResourceNames.PurchasingDb, CapturedTables: ["purchase_orders", "order_lines", "goods_receipts", "receipt_lines", "audit_entries"], GatewayCluster: "purchasing", ApiRoutePrefix: "/api/purchasing"),
+    shared)
+    .CallsServices(accessApi)
+    .WithEnvironment("SupplierClient__BaseUrl", simulators.GetEndpoint("http"))
+    .WithEnvironment("SupplierClient__ApiKey", simulatorApiKey)
+    .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
 
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
@@ -185,6 +195,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithReference(approvalsApi)
     .WithReference(auditApi)
     .WithReference(suppliersApi)
+    .WithReference(purchasingApi)
     .WithEnvironment("Oidc__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
@@ -199,6 +210,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithEnvironment("ReverseProxy__Clusters__approvals__Destinations__d1__Address", approvalsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__audit__Destinations__d1__Address", auditApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__suppliers__Destinations__d1__Address", suppliersApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__purchasing__Destinations__d1__Address", purchasingApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
@@ -209,6 +221,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WaitFor(approvalsApi)
     .WaitFor(auditApi)
     .WaitFor(suppliersApi)
+    .WaitFor(purchasingApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);

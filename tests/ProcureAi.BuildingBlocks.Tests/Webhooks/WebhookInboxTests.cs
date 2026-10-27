@@ -84,6 +84,20 @@ public sealed class WebhookInboxTests(PostgresFixture postgres) : IClassFixture<
     }
 
     [Fact]
+    public async Task ApplyOnce_treats_a_concurrent_duplicate_as_applied_and_lets_other_failures_through()
+    {
+        var connectionString = await NewDatabaseAsync("webhook_inbox_apply_once");
+        await using var left = NewContext(connectionString);
+        await using var right = NewContext(connectionString);
+        (await new WebhookInbox<InboxDbContext>(left).TryRecordAsync("supplier", "e1", Ct)).ShouldBeTrue();
+        (await new WebhookInbox<InboxDbContext>(right).TryRecordAsync("supplier", "e1", Ct)).ShouldBeTrue();
+
+        (await WebhookInbox.ApplyOnceAsync(() => left.SaveChangesAsync(Ct))).ShouldBeTrue("the first delivery applies it");
+        (await WebhookInbox.ApplyOnceAsync(() => right.SaveChangesAsync(Ct))).ShouldBeFalse("the concurrent duplicate collided on the inbox key");
+        await Should.ThrowAsync<InvalidOperationException>(() => WebhookInbox.ApplyOnceAsync(() => throw new InvalidOperationException("boom")));
+    }
+
+    [Fact]
     public async Task Other_database_failures_are_not_duplicates()
     {
         var connectionString = await NewDatabaseAsync("webhook_inbox_other");

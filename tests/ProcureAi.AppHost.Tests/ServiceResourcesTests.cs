@@ -200,6 +200,39 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Purchasing_service_gets_its_database_debezium_the_supplier_settings_and_the_gateway_routes_to_it()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "purchasing-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "purchasing-api");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-purchasingdb");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var apiEnv = await EnvironmentOfAsync(api);
+        var debeziumEnv = await EnvironmentOfAsync(debezium);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        apiEnv.ShouldContainKey("ConnectionStrings__purchasingdb");
+        debeziumEnv.ShouldContainKeyAndValue(
+            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST",
+            "public.purchase_orders,public.order_lines,public.goods_receipts,public.receipt_lines,public.audit_entries");
+        // The supplier (the simulator): its address, the key Purchasing presents and the secret its webhooks are signed with (secret parameters).
+        apiEnv.ShouldContainKey("SupplierClient__BaseUrl");
+        apiEnv["SupplierClient__ApiKey"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("simulator-api-key");
+        apiEnv["Webhooks__Sources__supplier__Secret"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("supplier-webhook-secret");
+        api.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__purchasing__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+    }
+
+    [Fact]
     public async Task Simulators_get_their_secrets_and_the_dotnet_limits_and_need_nothing_else()
     {
         await using var scope = await ModelScope.BuildAsync();
@@ -369,6 +402,7 @@ public sealed class ServiceResourcesTests
     [InlineData("approvals-api", new[] { "access-api" })]
     [InlineData("audit-api", new[] { "access-api" })]
     [InlineData("suppliers-api", new[] { "access-api" })]
+    [InlineData("purchasing-api", new[] { "access-api" })]
     [InlineData("access-api", new string[0])]
     public async Task Every_service_references_and_waits_for_the_services_it_calls(string service, string[] calls)
     {
@@ -423,7 +457,7 @@ public sealed class ServiceResourcesTests
             totalCpus += double.Parse(texts[cpus + 1], System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(4, "one Debezium per captured database");
+        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(5, "one Debezium per captured database");
         totalMemoryMb.ShouldBeLessThanOrEqualTo(8 * 1024, "container memory caps in MB");
         totalCpus.ShouldBeLessThanOrEqualTo(8.0, "container CPU caps");
     }

@@ -35,7 +35,18 @@ public sealed record SupplierOrder(Guid OrderId, string TenantId, string OrderNu
 public sealed record SupplierAcceptance(string SupplierReference);
 
 /// <summary>The supplier could not be reached or answered with a server error (timeout, 5xx, open circuit). Worth retrying.</summary>
-public sealed class SupplierUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
+/// <param name="reason">A short metric-friendly cause: <c>timeout</c>, <c>circuit_open</c>, <c>unreachable</c> or <c>status_&lt;code&gt;</c>.</param>
+public sealed class SupplierUnavailableException(string message, string reason, Exception? inner = null) : Exception(message, inner)
+{
+    public string Reason { get; } = reason;
+}
 
 /// <summary>The supplier refused the request for good (a 400 answer). Retrying cannot help.</summary>
 public sealed class SupplierRejectedException(string message) : Exception(message);
+
+/// <summary>The business metrics of Purchasing (meter <c>ProcureAi.Purchasing</c>), implemented in Infrastructure.</summary>
+public interface IPurchasingMetrics
+{
+    /// <summary>A send to the supplier failed; <paramref name="reason"/> is the cause (<c>rejected</c>, <c>timeout</c>, <c>circuit_open</c>, ...).</summary>
+    void SupplierSendFailed(string reason);
+}

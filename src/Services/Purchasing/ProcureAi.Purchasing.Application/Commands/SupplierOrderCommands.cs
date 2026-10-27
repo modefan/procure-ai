@@ -71,7 +71,8 @@ public static class SendOrderToSupplierHandler
     /// </summary>
     public static async Task Handle(
         SendOrderToSupplier command, IPurchasingDbContext db, ISupplierGateway gateway, IMessageBus bus, ICacheInvalidator cache,
-        IOptions<PurchasingOptions> options, TimeProvider time, ILogger<SendOrderToSupplier> logger, CancellationToken cancellationToken)
+        IOptions<PurchasingOptions> options, IPurchasingMetrics metrics, TimeProvider time, ILogger<SendOrderToSupplier> logger,
+        CancellationToken cancellationToken)
     {
         var order = await Load(db, command.OrderId, cancellationToken);
         if (order is not { Status: OrderStatus.PendingSupplier })
@@ -89,6 +90,7 @@ public static class SendOrderToSupplierHandler
         }
         catch (SupplierUnavailableException exception)
         {
+            metrics.SupplierSendFailed(exception.Reason);
             var delay = options.Value.SupplierDelivery.DelayFor(command.Attempt, Random.Shared);
             order.RecordSupplierFailure(exception.Message, now + delay);
             await db.SaveChangesAsync(cancellationToken);
@@ -98,6 +100,7 @@ public static class SendOrderToSupplierHandler
         }
         catch (SupplierRejectedException exception)
         {
+            metrics.SupplierSendFailed("rejected");
             order.RejectBySupplier(exception.Message, now);
             await db.SaveChangesAsync(cancellationToken);
             await bus.PublishAsync(PurchasingMapper.ToRejectedEvent(order, exception.Message, now));

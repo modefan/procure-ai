@@ -17,8 +17,8 @@ public static class WebhookInbox
         {
             row.ToTable("processed_webhooks");
             row.HasKey(r => new { r.Source, r.EventId }).HasName(KeyName);
-            row.Property(r => r.Source).HasColumnName("source").HasMaxLength(100);
-            row.Property(r => r.EventId).HasColumnName("event_id").HasMaxLength(200);
+            row.Property(r => r.Source).HasColumnName("source").HasMaxLength(WebhookLimits.MaxSourceLength);
+            row.Property(r => r.EventId).HasColumnName("event_id").HasMaxLength(WebhookLimits.MaxEventIdLength);
             row.Property(r => r.ReceivedAt).HasColumnName("received_at");
         });
         return modelBuilder;
@@ -28,6 +28,25 @@ public static class WebhookInbox
     public static IServiceCollection AddWebhookInbox<TDbContext>(this IServiceCollection services)
         where TDbContext : DbContext =>
         services.AddScoped<IWebhookInbox, WebhookInbox<TDbContext>>();
+
+    /// <summary>
+    /// Runs the effect of one webhook delivery (for example <c>() => bus.InvokeAsync(command, ct)</c>). Returns false when a concurrent
+    /// delivery of the same event committed first and this one still collided on the inbox key after the handler's own retries: the
+    /// event was applied once, by the other delivery, so the receiver answers as for a duplicate. For callers (controllers) that may
+    /// not depend on EF Core themselves.
+    /// </summary>
+    public static async Task<bool> ApplyOnceAsync(Func<Task> apply)
+    {
+        try
+        {
+            await apply();
+            return true;
+        }
+        catch (DbUpdateException exception) when (IsDuplicate(exception))
+        {
+            return false;
+        }
+    }
 
     /// <summary>True when the save failed because the same webhook event was committed concurrently: treat it as already processed.</summary>
     public static bool IsDuplicate(DbUpdateException exception) =>

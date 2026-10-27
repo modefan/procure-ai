@@ -3,6 +3,8 @@ namespace ProcureAi.Purchasing.Domain;
 /// <summary>A delivery (possibly partial) booked against an order.</summary>
 public sealed class GoodsReceipt
 {
+    private readonly List<ReceiptLine> _lines = [];
+
     private GoodsReceipt()
     {
     }
@@ -13,7 +15,7 @@ public sealed class GoodsReceipt
         ReceivedBy = receivedBy;
         ReceivedAt = receivedAt;
         DeliveryNote = deliveryNote;
-        Lines = [.. lines];
+        _lines.AddRange(lines);
     }
 
     public Guid Id { get; private set; }
@@ -24,7 +26,7 @@ public sealed class GoodsReceipt
 
     public string? DeliveryNote { get; private set; }
 
-    public IReadOnlyList<ReceiptLine> Lines { get; private set; } = [];
+    public IReadOnlyList<ReceiptLine> Lines => _lines.AsReadOnly();
 }
 
 /// <summary>How many of an order line a receipt brought in.</summary>

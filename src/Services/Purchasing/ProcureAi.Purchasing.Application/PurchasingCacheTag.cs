@@ -9,9 +9,10 @@ namespace ProcureAi.Purchasing.Application;
 public static class PurchasingCacheTag
 {
     /// <summary>The route value is <c>id</c>.</summary>
-    public const string ItemTemplate = "orders:{tenant}:{id}";
+    public const string ItemTemplate = "purchasing:{tenant}:{id}";
 
-    public const string ListTemplate = "orders:{tenant}:list";
+    /// <summary>Every list of the tenant (and the lookup by request, whose route has no order ID).</summary>
+    public const string ListTemplate = "purchasing:{tenant}:orders";
 
     /// <summary>Both tags a change of one order touches.</summary>
     public static string[] Of(string? tenantId, Guid orderId) =>

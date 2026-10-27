@@ -28,6 +28,12 @@ public static class Extensions
     /// </summary>
     public const string BusinessMeters = "ProcureAi.*";
 
+    /// <summary>
+    /// Polly's meter: the <c>resilience.polly.*</c> metrics of every resilience pipeline (retries, timeouts, a circuit breaker
+    /// opening and closing, e.g. Purchasing's supplier client).
+    /// </summary>
+    public const string ResilienceMeter = "Polly";
+
     /// <summary>Health checks with this tag decide <c>/health/ready</c> (dependencies); services add theirs.</summary>
     public const string ReadyTag = "ready";
 
@@ -65,6 +71,7 @@ public static class Extensions
                 // Registering a meter or source for a library a service does not use is harmless: it just never emits.
                 .AddMeter(WolverineTelemetryName)
                 .AddMeter(BusinessMeters)
+                .AddMeter(ResilienceMeter)
                 .AddNpgsqlInstrumentation()
                 .AddFusionCacheInstrumentation())
             .WithTracing(tracing => tracing

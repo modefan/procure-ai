@@ -269,6 +269,28 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         _gateway.Stub.Last.Path.ShouldBe("/api/v1/suppliers/contoso-hardware/items");
     }
 
+    [Fact]
+    public async Task Swagger_ui_lists_the_purchasing_definition_and_the_gateway_serves_its_document_and_api()
+    {
+        var browser = Browser();
+        using var initializer = await browser.GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+        using var document = await browser.GetAsync("/openapi/purchasing/v1.json", Ct);
+        using var anonymous = await browser.GetAsync("/api/v1/purchasing/orders", Ct);
+        // The supplier webhook is not exposed through the gateway yet (plan 07/08): without a session or key it is refused here.
+        using var webhook = await browser.PostAsync("/api/v1/purchasing/webhooks/supplier", new StringContent("{}"), Ct);
+        using var withKey = await browser.SendAsync(
+            Request(HttpMethod.Get, "/api/v1/purchasing/orders", headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+
+        config.ShouldContain("/openapi/purchasing/v1.json");
+        config.ShouldContain("\"purchasing\"");
+        await ExpectOkAsync(document);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the purchasing API needs a session or key like every API");
+        webhook.StatusCode.ShouldNotBe(HttpStatusCode.OK);
+        await ExpectOkAsync(withKey);
+        _gateway.Stub.Last.Path.ShouldBe("/api/v1/purchasing/orders");
+    }
+
     // ---- the rest of the contract ----
 
     [Fact]

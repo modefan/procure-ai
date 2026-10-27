@@ -6,6 +6,7 @@ using ProcureAi.Approvals.Infrastructure;
 using ProcureAi.Audit.Application;
 using ProcureAi.Budgets.Infrastructure;
 using ProcureAi.BuildingBlocks.Persistence;
+using ProcureAi.Purchasing.Infrastructure;
 using ProcureAi.Requests.Infrastructure;
 using Shouldly;
 
@@ -20,7 +21,7 @@ namespace ProcureAi.Audit.IntegrationTests;
 [Collection(AuditCollection.Name)]
 public sealed class CdcKeyColumnsTests(AuditApp app)
 {
-    public static TheoryData<string> Services => ["requests", "budgets", "access", "approvals"];
+    public static TheoryData<string> Services => ["requests", "budgets", "access", "approvals", "purchasing"];
 
     [Theory]
     [MemberData(nameof(Services))]
@@ -47,7 +48,7 @@ public sealed class CdcKeyColumnsTests(AuditApp app)
     public void Every_configured_key_column_table_exists_in_a_services_model()
     {
         var cdc = app.Services.GetRequiredService<IOptions<AuditOptions>>().Value.Cdc;
-        var modelTables = new[] { "requests", "budgets", "access", "approvals" }.SelectMany(service =>
+        var modelTables = new[] { "requests", "budgets", "access", "approvals", "purchasing" }.SelectMany(service =>
         {
             using var db = Model(service);
             return db.Model.GetEntityTypes().Select(e => e.GetTableName()).OfType<string>().ToList();
@@ -62,6 +63,7 @@ public sealed class CdcKeyColumnsTests(AuditApp app)
         "budgets" => new BudgetsDbContext(new DbContextOptionsBuilder<BudgetsDbContext>().UseNpgsql("Host=model-only").Options),
         "access" => new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql("Host=model-only").Options),
         "approvals" => new ApprovalsDbContext(new DbContextOptionsBuilder<ApprovalsDbContext>().UseNpgsql("Host=model-only").Options),
+        "purchasing" => new PurchasingDbContext(new DbContextOptionsBuilder<PurchasingDbContext>().UseNpgsql("Host=model-only").Options),
         _ => throw new ArgumentOutOfRangeException(nameof(service)),
     };
 }
