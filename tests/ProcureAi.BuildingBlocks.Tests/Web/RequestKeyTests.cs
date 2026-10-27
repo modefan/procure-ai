@@ -8,7 +8,7 @@ namespace ProcureAi.BuildingBlocks.Tests.Web;
 
 public sealed class RequestKeyTests
 {
-    private sealed class FakeUser(string userId, string? tenant) : ICurrentUser
+    private sealed class FakeUser(string userId, string? tenant, string? onBehalfOf = null) : ICurrentUser
     {
         public string UserId => userId;
         public string? TenantId => tenant;
@@ -17,7 +17,7 @@ public sealed class RequestKeyTests
         public bool IsAdminApiKey => false;
         public bool IsServiceAccount => false;
         public string? CallingService => null;
-        public string? OnBehalfOfUser => null;
+        public string? OnBehalfOfUser => onBehalfOf;
     }
 
     private static DefaultHttpContext Context(string path, string query)
@@ -65,6 +65,21 @@ public sealed class RequestKeyTests
         RequestKey.ForRead(context, new FakeUser("u2", "acme")).ShouldNotBe(baseKey);
         RequestKey.ForRead(context, new FakeUser("u1", null)).ShouldNotBe(baseKey);
         RequestKey.ForRead(Context("/api/items", "?a=2"), new FakeUser("u1", "acme")).ShouldNotBe(baseKey);
+    }
+
+    [Fact]
+    public void Keys_differ_by_the_user_the_admin_key_or_a_service_acts_for()
+    {
+        // The admin API key (and a service) answers for X-On-Behalf-Of-User: an inbox read for maria must never be served to dept.
+        var context = Context("/api/v1/approvals/inbox", string.Empty);
+        var forMaria = new FakeUser("claude-admin", "acme", "maria");
+        var forDept = new FakeUser("claude-admin", "acme", "dept");
+        var forNobody = new FakeUser("claude-admin", "acme");
+
+        RequestKey.ForRead(context, forMaria).ShouldNotBe(RequestKey.ForRead(context, forDept));
+        RequestKey.ForRead(context, forMaria).ShouldNotBe(RequestKey.ForRead(context, forNobody));
+        RequestKey.ForWrite(context, forMaria, "k1").ShouldNotBe(RequestKey.ForWrite(context, forDept, "k1"));
+        RequestKey.ForWrite(context, forMaria, "k1").ShouldNotBe(RequestKey.ForWrite(context, forNobody, "k1"));
     }
 
     [Fact]

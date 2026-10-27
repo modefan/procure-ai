@@ -1,3 +1,4 @@
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Requests.Application;

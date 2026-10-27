@@ -29,5 +29,3 @@ public sealed record RequestLineDto(
     decimal TotalExclVat,
     string UnitPriceExclVatDisplay,
     string TotalExclVatDisplay);
-
-public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total);

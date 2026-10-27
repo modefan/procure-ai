@@ -69,4 +69,5 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 | Test fixtures, auth and factory | `tests/ProcureAi.Testing` (`ServiceInfraFixture` is the per-service infrastructure base) |
 | Concurrency retries of message handlers | `ConcurrencyRetryOptions` (BuildingBlocks.Application, bound from the service's section) and `RetryConcurrencyConflicts` (BuildingBlocks.Messaging) |
 | Retries of message handlers when a called service is down | `DependencyRetryOptions` (BuildingBlocks.Application, bound from the service's section) and `RetryTransientDependencyFailures` (BuildingBlocks.Messaging): scheduled retries, then dead letters |
+| Paged lists: `PagedResult<T>` and `PagingOptions` (section `Paging`, register with `AddValidatedOptions`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Application/Paging.cs` |
 | `Permissions` (the 15 constants and `All`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/Permissions.cs`, namespace `ProcureAi.BuildingBlocks.Domain` (so a service domain can validate against it) |
