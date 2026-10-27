@@ -71,6 +71,22 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_service_acting_for_tom_cannot_create_on_a_cost_center_tom_does_not_act_for_but_one_acting_for_nobody_can()
+    {
+        _app.Caller.TenantId = "acme";
+        _app.Caller.Kind = CallerKind.Service;
+        _app.Caller.UserId = "tom";
+        _app.Access.SetCostCenters("acme", "tom", "IT-200");
+
+        await Should.ThrowAsync<ForbiddenException>(() => Create(NewCreate()));
+        (await Create(new CreateRequest("Laptops", "IT-200", "sup-1", [new LineInput("LAP-1", "Laptop", 1, 100m)]))).CostCenterCode
+            .ShouldBe("IT-200");
+
+        _app.Caller.UserId = SystemCaller.Id;
+        (await Create(NewCreate())).CostCenterCode.ShouldBe("CC-100");
+    }
+
+    [Fact]
     public async Task A_requester_cannot_submit_a_request_on_a_cost_center_they_do_not_act_for()
     {
         _app.Caller.TenantId = "acme";

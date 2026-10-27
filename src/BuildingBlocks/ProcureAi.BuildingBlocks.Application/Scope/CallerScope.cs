@@ -3,8 +3,8 @@ using ProcureAi.BuildingBlocks.Application.Access;
 namespace ProcureAi.BuildingBlocks.Application;
 
 /// <summary>
-/// What a caller may reach: everything (<paramref name="All"/>: the admin API key and other services) or their own
-/// requests plus the cost centers Access assigns to them (finance approvers get every cost center there).
+/// What a caller may reach: everything (<paramref name="All"/>: the admin API key, and a service acting for nobody) or their own
+/// requests plus the cost centers Access assigns to them (finance approvers get every cost center there). A service acting on behalf of a user is scoped like that user.
 /// </summary>
 public sealed record CallerScope(bool All, string UserId, IReadOnlySet<string> CostCenterCodes)
 {
@@ -25,7 +25,10 @@ public sealed class CallerScopeResolver(ICallerContext caller, IAccessDirectory 
 
     public async Task<CallerScope> GetAsync(CancellationToken cancellationToken)
     {
-        if (caller.Kind is CallerKind.AdminApiKey or CallerKind.Service)
+        // The admin key sees everything; so does a service acting for nobody (no user to scope to). A service acting on behalf
+        // of a user gets that user's scope from Access, like the user would.
+        if (caller.Kind is CallerKind.AdminApiKey
+            || (caller.Kind is CallerKind.Service && caller.UserId == SystemCaller.Id))
         {
             return new CallerScope(true, caller.UserId, None);
         }

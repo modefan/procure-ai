@@ -15,8 +15,8 @@ public static class HandlerCoverage
 
     /// <summary>
     /// Fails, listing the missing types, unless every <see cref="IIntegrationEvent"/> in <paramref name="contractNamespaces"/>
-    /// (for example <c>ProcureAi.Contracts.Approvals</c>) has a public <c>Handle</c>, <c>Consume</c>, <c>StartOrHandle</c> or
-    /// <c>NotFound</c> method taking it, in a class of <paramref name="handlers"/> whose name ends in <c>Handler</c> or that is a
+    /// (for example <c>ProcureAi.Contracts.Approvals</c>) has a public <c>Handle</c>, <c>Consume</c>, <c>StartOrHandle</c>,
+    /// <c>NotFound</c>, <c>Start</c> or <c>Orchestrate</c> method taking it, in a class of <paramref name="handlers"/> whose name ends in <c>Handler</c> or that is a
     /// Wolverine <c>Saga</c>.
     /// </summary>
     public static void AssertEveryEventHandled(Assembly handlers, params string[] contractNamespaces)

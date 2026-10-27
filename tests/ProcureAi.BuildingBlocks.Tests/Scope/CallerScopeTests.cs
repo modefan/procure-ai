@@ -38,19 +38,42 @@ public sealed class CallerScopeTests
     }
 
     private static Task<CallerScope> ScopeAsync(CallerKind kind, string userId, params string[] costCenters) =>
-        new CallerScopeResolver(new FakeCaller(userId, kind), new FakeAccess(costCenters)).GetAsync(CancellationToken.None);
+        new CallerScopeResolver(new FakeCaller(userId, kind), new FakeAccess(costCenters)).GetAsync(TestContext.Current.CancellationToken);
 
-    [Theory]
-    [InlineData(CallerKind.AdminApiKey)]
-    [InlineData(CallerKind.Service)]
-    public async Task The_admin_key_and_other_services_see_everything_without_asking_Access(CallerKind kind)
+    [Fact]
+    public async Task The_admin_key_sees_everything_without_asking_Access()
     {
         var access = new FakeAccess();
-        var scope = await new CallerScopeResolver(new FakeCaller("claude-admin", kind), access).GetAsync(CancellationToken.None);
+        var scope = await new CallerScopeResolver(new FakeCaller("claude-admin", CallerKind.AdminApiKey), access)
+            .GetAsync(TestContext.Current.CancellationToken);
 
         scope.All.ShouldBeTrue();
         scope.Allows("someone", "MK-110").ShouldBeTrue();
         access.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_service_acting_for_nobody_sees_everything_without_asking_Access()
+    {
+        var access = new FakeAccess();
+        var scope = await new CallerScopeResolver(new FakeCaller(SystemCaller.Id, CallerKind.Service), access)
+            .GetAsync(TestContext.Current.CancellationToken);
+
+        scope.All.ShouldBeTrue();
+        access.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_service_acting_on_behalf_of_a_user_gets_that_users_cost_centers()
+    {
+        var access = new FakeAccess("IT-200");
+        var scope = await new CallerScopeResolver(new FakeCaller("tom", CallerKind.Service), access)
+            .GetAsync(TestContext.Current.CancellationToken);
+
+        scope.All.ShouldBeFalse();
+        scope.AllowsCostCenter("IT-200").ShouldBeTrue();
+        scope.AllowsCostCenter("MK-110").ShouldBeFalse();
+        access.Calls.ShouldBe(1);
     }
 
     [Fact]
@@ -87,7 +110,7 @@ public sealed class CallerScopeTests
     public async Task A_caller_without_a_tenant_sees_only_their_own_requests()
     {
         var scope = await new CallerScopeResolver(new FakeCaller("sipho", CallerKind.User, tenant: null), new FakeAccess("IT-200"))
-            .GetAsync(CancellationToken.None);
+            .GetAsync(TestContext.Current.CancellationToken);
 
         scope.Allows("sipho", "IT-200").ShouldBeTrue();
         scope.Allows("thandi", "IT-200").ShouldBeFalse();
