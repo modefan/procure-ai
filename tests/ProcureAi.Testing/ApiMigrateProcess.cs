@@ -52,9 +52,19 @@ public static class ApiMigrateProcess
         {
             // A hung migration must not outlive the test run (it would hold database connections and file locks): kill it and
             // everything it started.
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
-            throw new TimeoutException($"{apiAssembly} --migrate did not finish within {Timeout} and was killed: {await output}{await error}");
+            string killed = "and was killed";
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                // The timeout is the failure to report; the kill failure travels with it and is not hidden.
+                killed = $"and could not be killed ({exception.GetType().Name}: {exception.Message}); check for a leftover process";
+            }
+
+            throw new TimeoutException($"{apiAssembly} --migrate did not finish within {Timeout} {killed}: {await output}{await error}");
         }
 
         var text = (await output) + (await error);

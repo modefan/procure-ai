@@ -7,6 +7,7 @@ using Npgsql;
 using ProcureAi.Access.Domain;
 using ProcureAi.Access.Infrastructure;
 using ProcureAi.Access.Application.Dtos;
+using ProcureAi.Approvals.Domain;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts;
 using Shouldly;
@@ -177,6 +178,30 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         finance.UserId.ShouldBe(DemoUsers.DemoApprover);
         finance.CanApprove.ShouldBeTrue();
         finance.ApprovalLimit.ShouldBe(manager.ApprovalLimit);
+    }
+
+    [Fact]
+    public async Task Seeded_demo_organisation_routes_a_sign_ups_request_to_the_demo_approver_and_never_the_approver_themselves()
+    {
+        // The real seeded answer for DEMO-100, fed to the real routing rules with Approvals' configured thresholds.
+        var dto = await ReadAsync<CostCenterApproversDto>(
+            await _client.SendAsync(Internal($"/internal/cost-centers/{AccessApiFactory.SandboxCostCenter}/approvers", Demo), Ct));
+        Candidate? ToCandidate(ApproverDto? a) => a is null ? null : new Candidate(a.UserId, Money.Zar(a.ApprovalLimit), a.CanApprove);
+        var org = new OrganisationSnapshot(dto.CostCenterCode, ToCandidate(dto.Manager), ToCandidate(dto.DepartmentHead), [.. dto.Finance.Select(f => ToCandidate(f)!)]);
+        var thresholds = new ApprovalThresholds(Money.Zar(20_000m), Money.Zar(200_000m));
+        const string signUp = "11111111-2222-4333-8444-555555555555";
+
+        foreach (var amount in new[] { 1_500m, 86_940m, 250_000m })
+        {
+            var chain = ApprovalRouting.Resolve(Money.Zar(amount), signUp, org, thresholds);
+
+            var step = chain.Steps.ShouldHaveSingleItem($"one person covers every level at R {amount}");
+            step.ApproverIds.ShouldBe([DemoUsers.DemoApprover]);
+        }
+
+        // Separation of duties: the approver's own request has nobody else to go to (preview answers 422).
+        Should.Throw<NoEligibleApproverException>(
+            () => ApprovalRouting.Resolve(Money.Zar(1_500m), DemoUsers.DemoApprover, org, thresholds));
     }
 
     [Fact]

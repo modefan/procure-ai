@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Http;
 using ProcureAi.Requests.Application.Abstractions;
 
@@ -39,7 +40,7 @@ public sealed class ApprovalPreviewClient(HttpClient http) : IApprovalPreview
         // The request's tenant, whoever the caller is.
         request.Options.Set(ServiceTokenHandler.TenantOption, tenantId);
         using var response = await http.SendAsync(request, cancellationToken);
-        if (IsTransient(response.StatusCode))
+        if (DependencyFailures.IsTransientStatus(response.StatusCode))
         {
             response.EnsureSuccessStatusCode();
         }
@@ -54,9 +55,6 @@ public sealed class ApprovalPreviewClient(HttpClient http) : IApprovalPreview
             ?? throw new InvalidOperationException("Approvals returned an empty preview.");
         return new ApprovalPreviewResult(preview.Possible, preview.Reason);
     }
-
-    private static bool IsTransient(HttpStatusCode status) =>
-        (int)status >= 500 || status is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
 
     /// <summary>The part of Approvals' <c>ApprovalPreviewDto</c> this check needs (its steps are for the preview screen).</summary>
     private sealed record PreviewAnswer(bool Possible, string? Reason);

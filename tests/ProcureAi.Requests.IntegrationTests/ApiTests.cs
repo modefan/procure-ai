@@ -190,10 +190,11 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
     public async Task Published_message_names_requests_api_as_sender_whoever_called(bool adminKeyClaimingAnotherService)
     {
         var tenant = NewTenant("sender");
-        var created = await CreateAsync(tenant);
+        var user = TestAuth.CreateToken("alice", tenant, "requester");
+        // Only the requester submits: Alice's own draft for the user case, the key's own draft for the key case.
+        var created = adminKeyClaimingAnotherService ? await CreateAsync(tenant) : await CreateAsync(tenant, user);
         var probe = new RabbitProbe(infra.RabbitConnectionString);
         var queue = await probe.BindQueueAsync("requests");
-        var user = TestAuth.CreateToken("alice", tenant, "requester");
         var request = adminKeyClaimingAnotherService
             ? Req(HttpMethod.Post, $"{Requests}/{created.Id}/submit", null, tenant, ifMatch: ETagOf(created), idempotencyKey: Guid.NewGuid().ToString())
             : Req(HttpMethod.Post, $"{Requests}/{created.Id}/submit", null, bearer: user, ifMatch: ETagOf(created), idempotencyKey: Guid.NewGuid().ToString());
@@ -674,6 +675,39 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         var keySubmit = await _client.SendAsync(
             Req(HttpMethod.Post, $"{Requests}/{draft.Id}/submit", tenant: tenant, ifMatch: ETagOf(draft), idempotencyKey: Guid.NewGuid().ToString()), Ct);
         keySubmit.IsSuccessStatusCode.ShouldBeTrue(await keySubmit.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Nobody_but_the_requester_can_edit_or_submit_a_draft_not_a_manager_and_not_another_demo_user()
+    {
+        var tenant = NewTenant("ownerdraft");
+        infra.Access.SetCostCenters(tenant, "tom", "IT-200");
+        infra.Access.SetCostCenters(tenant, "maria", "IT-200");
+        infra.Access.SetCostCenters(tenant, "demo-a", "DEMO-100");
+        infra.Access.SetCostCenters(tenant, "demo-b", "DEMO-100");
+        var draftBody = new { title = "Mine", costCenterCode = "IT-200", supplierId = "s", lines = new[] { new { sku = "A", description = "a", quantity = 1, unitPriceExclVat = 10m } } };
+        var tomDraft = await CreateWithAsync(draftBody, TestAuth.CreateToken("tom", tenant, "requester"));
+        var demoDraft = await CreateWithAsync(
+            new { title = "Demo", costCenterCode = "DEMO-100", supplierId = "s", lines = draftBody.lines }, TestAuth.CreateToken("demo-a", tenant, "requester"));
+
+        foreach (var (draft, intruder) in new[] { (tomDraft, "maria"), (demoDraft, "demo-b") })
+        {
+            var token = TestAuth.CreateToken(intruder, tenant, intruder == "maria" ? "manager" : "requester");
+            var put = await _client.SendAsync(
+                Req(HttpMethod.Put, $"{Requests}/{draft.Id}", new { title = "Taken over", lines = draftBody.lines }, bearer: token, ifMatch: ETagOf(draft)), Ct);
+            var submit = await _client.SendAsync(
+                Req(HttpMethod.Post, $"{Requests}/{draft.Id}/submit", bearer: token, ifMatch: ETagOf(draft), idempotencyKey: Guid.NewGuid().ToString()), Ct);
+            put.StatusCode.ShouldBe(HttpStatusCode.Forbidden, intruder);
+            submit.StatusCode.ShouldBe(HttpStatusCode.Forbidden, intruder);
+        }
+    }
+
+    private async Task<RequestDto> CreateWithAsync(object body, string bearer)
+    {
+        var response = await _client.SendAsync(
+            Req(HttpMethod.Post, Requests, body, bearer: bearer, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));
+        return (await response.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
     }
 
     [Fact]

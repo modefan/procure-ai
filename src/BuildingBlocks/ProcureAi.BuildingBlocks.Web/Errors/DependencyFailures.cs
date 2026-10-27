@@ -27,6 +27,7 @@ public static class DependencyFailures
         return false;
     }
 
-    private static bool IsTransientStatus(HttpStatusCode? status) =>
+    /// <summary>The one rule for an HTTP answer that may pass by itself: no status, 408, 429 or 5xx.</summary>
+    public static bool IsTransientStatus(HttpStatusCode? status) =>
         status is null or HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)status >= 500;
 }

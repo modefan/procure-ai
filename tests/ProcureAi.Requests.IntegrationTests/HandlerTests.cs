@@ -86,6 +86,37 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_manager_of_the_cost_center_cannot_update_or_submit_a_draft_someone_else_wrote()
+    {
+        // Maria manages the cost center, so the cost-center rule passes; the draft is still Tom's.
+        _app.Caller.TenantId = "acme";
+        _app.Caller.UserId = "tom";
+        var created = await Create();
+        _app.Caller.UserId = "maria";
+
+        await Should.ThrowAsync<ForbiddenException>(() => _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
+            created.Id, created.Version, "Maria's choice", [new LineInput("X", "x", 1, 199000m)])));
+        await Should.ThrowAsync<ForbiddenException>(() => _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version)));
+
+        _app.Caller.UserId = "tom";
+        var unchanged = await _app.Bus.InvokeAsync<RequestDto>(new GetRequest(created.Id));
+        unchanged.Title.ShouldBe("Laptops");
+        unchanged.Status.ShouldBe(RequestStatus.Draft);
+        unchanged.Version.ShouldBe(created.Version);
+    }
+
+    [Fact]
+    public async Task The_owner_check_comes_before_the_version_check()
+    {
+        _app.Caller.TenantId = "acme";
+        _app.Caller.UserId = "tom";
+        var created = await Create();
+        _app.Caller.UserId = "maria";
+
+        await Should.ThrowAsync<ForbiddenException>(() => _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version + 100)));
+    }
+
+    [Fact]
     public async Task The_admin_api_key_may_create_and_submit_on_any_cost_center()
     {
         _app.Caller.TenantId = "acme";

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Npgsql;
 using Shouldly;
 
@@ -14,24 +13,9 @@ public sealed class MigrateTests(InfraFixture infra)
         var database = await infra.CreateEmptyDatabaseAsync($"migrate_{Guid.NewGuid():N}");
         (await TablesAsync(database)).ShouldBeEmpty("a new database starts empty");
 
-        var start = new ProcessStartInfo("dotnet", ["exec", ApiDll(), "--migrate"])
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(ApiDll())!,
-        };
-        // Production settings: no automatic schema changes, so any table that appears came from --migrate.
-        start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
-        start.Environment["ConnectionStrings__requestsdb"] = database;
-        start.Environment["ConnectionStrings__rabbitmq"] = infra.RabbitConnectionString;
-        start.Environment["ConnectionStrings__Redis"] = infra.RedisConnectionString;
-        using var process = Process.Start(start)!;
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await process.WaitForExitAsync(timeout.Token);
+        await ApiMigrateProcess.RunAsync(
+            "ProcureAi.Requests.Api.dll", "requestsdb", database, infra.RabbitConnectionString, infra.RedisConnectionString, demoSeed: false);
 
-        process.ExitCode.ShouldBe(0, (await output) + (await error));
         var tables = await TablesAsync(database);
         tables.ShouldContain("public.purchase_requests");
         tables.ShouldContain("public.request_number_counters");
@@ -54,6 +38,4 @@ public sealed class MigrateTests(InfraFixture infra)
 
         return tables;
     }
-
-    private static string ApiDll() => Path.Combine(AppContext.BaseDirectory, "ProcureAi.Requests.Api.dll");
 }

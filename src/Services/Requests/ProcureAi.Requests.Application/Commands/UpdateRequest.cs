@@ -13,9 +13,10 @@ public sealed record UpdateRequest(Guid Id, uint ExpectedVersion, string Title, 
 
 public static class UpdateRequestHandler
 {
-    public static async Task<RequestDto> Handle(UpdateRequest command, IRequestsDbContext db, CancellationToken cancellationToken)
+    public static async Task<RequestDto> Handle(
+        UpdateRequest command, IRequestsDbContext db, ICallerContext caller, CancellationToken cancellationToken)
     {
-        var request = await db.LoadAsync(command.Id, command.ExpectedVersion, cancellationToken);
+        var request = await db.LoadAsync(command.Id, command.ExpectedVersion, caller, cancellationToken);
         request.UpdateTitle(command.Title);
         foreach (var existing in request.Lines.ToList())
         {
@@ -35,12 +36,21 @@ public static class UpdateRequestHandler
 
 internal static class RequestsDbContextExtensions
 {
-    /// <summary>Loads a request of the current tenant for change and checks the caller's version against it.</summary>
+    /// <summary>
+    /// Loads a request of the current tenant for change by its requester and checks the caller's version against it. Anyone else
+    /// gets 403, decided before the version is checked (as in Cancel), so a stale <c>If-Match</c> does not hide the refusal.
+    /// For the admin key, <c>caller.UserId</c> is the user it acts on behalf of, or <c>claude-admin</c>: the same rule as Cancel.
+    /// </summary>
     public static async Task<PurchaseRequest> LoadAsync(
-        this IRequestsDbContext db, Guid id, uint expectedVersion, CancellationToken cancellationToken)
+        this IRequestsDbContext db, Guid id, uint expectedVersion, ICallerContext caller, CancellationToken cancellationToken)
     {
         var request = await db.PurchaseRequests.Include(r => r.Lines).FirstOrDefaultAsync(r => r.Id == id, cancellationToken)
             ?? throw new NotFoundException($"Request {id} was not found.");
+        if (!string.Equals(request.RequesterId, caller.UserId, StringComparison.Ordinal))
+        {
+            throw new ForbiddenException("Only the requester can change or submit a request.");
+        }
+
         OptimisticConcurrency.EnsureVersion($"Request {id}", request.Version, expectedVersion);
 
         return request;

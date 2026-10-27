@@ -94,6 +94,9 @@ Prerequisites: Docker, .NET 10 SDK, Node 24.
 2. Start everything: `dotnet run --project src/AppHost/ProcureAi.AppHost`
 3. Open the Aspire dashboard link printed in the console, then the `gateway` endpoint to use the app.
 
+After pulling changes to a demo seed, reset the local data volumes once: the seed only adds rows that are missing, so an old
+volume keeps old rows (for example the sandbox cost center DEMO-100 without its manager).
+
 Memory and CPU caps for every container come from the `Resources` section of the AppHost `appsettings.json`.
 
 ## Demo users

@@ -26,6 +26,8 @@
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
     <ProjectReference Include="../../src/Services/Access/ProcureAi.Access.Infrastructure/ProcureAi.Access.Infrastructure.csproj" />
     <ProjectReference Include="../../src/Services/Access/ProcureAi.Access.Api/ProcureAi.Access.Api.csproj" />
+    <!-- Only the routing rules (pure domain), to prove that the seeded demo organisation can be routed. -->
+    <ProjectReference Include="../../src/Services/Approvals/ProcureAi.Approvals.Domain/ProcureAi.Approvals.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
