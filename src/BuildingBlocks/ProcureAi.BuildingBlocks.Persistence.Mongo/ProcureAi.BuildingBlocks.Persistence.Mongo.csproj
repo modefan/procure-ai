@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- MongoDB for a service whose data is documents (Suppliers, the Assistant's chat history): the client and database, the
+       tenant-scoped collection wrapper, readiness and migrations. Only Infrastructure and Hosting may use it. -->
+  <PropertyGroup>
+    <RootNamespace>ProcureAi.BuildingBlocks.Persistence.Mongo</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
+    <!-- Only for the "ready" health-check tag. -->
+    <ProjectReference Include="../../ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+  </ItemGroup>
+
+</Project>

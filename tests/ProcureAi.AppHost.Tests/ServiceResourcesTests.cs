@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
@@ -166,6 +167,85 @@ public sealed class ServiceResourcesTests
         {
             apiEnv.ShouldContainKey(cap);
         }
+    }
+
+    /// <summary>A stand-in project for a MongoDB service (no service is on MongoDB yet; Suppliers will be the first).</summary>
+    private sealed class MongoServiceProject : IProjectMetadata
+    {
+        public string ProjectPath { get; } = Path.Combine(RepoRoot(), "src", "Services", "Audit", "ProcureAi.Audit.Api", "ProcureAi.Audit.Api.csproj");
+
+        private static string RepoRoot()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "ProcureAi.slnx")))
+            {
+                dir = dir.Parent;
+            }
+
+            return dir?.FullName ?? throw new InvalidOperationException("ProcureAi.slnx not found above the test output folder.");
+        }
+    }
+
+    [Fact]
+    public async Task Mongo_service_gets_database_on_mongo_and_no_debezium()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "testcontainers.settings.json"), optional: false);
+        var limits = ResourcesOptions.Load(builder.Configuration);
+        var postgres = builder.AddPostgres("postgres");
+        #pragma warning disable ASPIREMONGODB001
+        var mongo = builder.AddMongoDB("mongo").WithReplicaSet("rs0");
+        #pragma warning restore ASPIREMONGODB001
+        var rabbit = builder.AddRabbitMQ("rabbitmq");
+        var redis = builder.AddRedis("redis");
+        var keycloak = builder.AddContainer("keycloak", "keycloak");
+        var secret = builder.AddParameter("secret", secret: true);
+        var shared = new SharedResources(
+            postgres, rabbit, redis, mongo, keycloak, ReferenceExpression.Create($"http://keycloak/realms/procure"),
+            secret.Resource, secret.Resource, secret.Resource, null, limits, secret.Resource, UseDataVolumes: false);
+
+        var api = builder.AddProcureAiService<MongoServiceProject>(
+            new ServiceSpec("suppliers", "suppliersdb", CapturedTables: [], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),
+            shared);
+
+        var model = builder.Resources;
+        var migrate = model.OfType<ProjectResource>().Single(r => r.Name == "suppliers-migrate");
+        var apiResource = model.OfType<ProjectResource>().Single(r => r.Name == "suppliers-api");
+        apiResource.ShouldBeSameAs(api.Resource);
+
+        // The database lives on the mongo resource, not on Postgres.
+        model.OfType<MongoDBDatabaseResource>().Single(d => d.Name == "suppliersdb").Parent.ShouldBeSameAs(mongo.Resource);
+        model.OfType<PostgresDatabaseResource>().ShouldNotContain(d => d.Name == "suppliersdb");
+        // Both resources get the connection string and tell the shared host that the store is MongoDB.
+        foreach (var resource in new[] { migrate, apiResource })
+        {
+            var env = await EnvironmentOfAsync(resource);
+            env.ShouldContainKey("ConnectionStrings__suppliersdb");
+            env.ShouldContainKeyAndValue("Service__Store", "MongoDB");
+        }
+
+        // Nothing to capture with Debezium (it reads the Postgres WAL), and the api still waits for the migration.
+        model.ShouldNotContain(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal));
+        apiResource.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public void A_mongo_service_cannot_ask_for_debezium_tables()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "testcontainers.settings.json"), optional: false);
+        var secret = builder.AddParameter("secret", secret: true);
+        #pragma warning disable ASPIREMONGODB001
+        var shared = new SharedResources(
+            builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
+            builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
+        #pragma warning restore ASPIREMONGODB001
+
+        Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
+            new ServiceSpec("suppliers", "suppliersdb", ["suppliers"], "suppliers", "/api/suppliers", ServiceStore.MongoDB), shared));
     }
 
     [Fact]

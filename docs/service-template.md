@@ -38,10 +38,45 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    from starting before them. Without it every call fails (a submit answered 503). Add the service to
    `Every_service_references_and_waits_for_the_services_it_calls`.
    With `CapturedTables` set, it also adds the database's own Debezium Server (see "Change data capture" below).
-7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
+7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `MongoFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
    `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `RabbitRecorder` (records what a
    service publishes and sends) and `RabbitContainer` (a broker of its own to stop, for outage tests). Never copy a fixture.
 8. **Gateway**: add the YARP route and cluster, and the service's OpenAPI document to the Swagger dropdown.
+
+## A service on MongoDB (Suppliers, the Assistant's chat history)
+
+For a service whose data is documents and that publishes no integration events. Everything is in `BuildingBlocks.Persistence.Mongo`
+(only a service's Infrastructure and `Hosting` may use it; an architecture test enforces that).
+
+- **`Service:Store`** (`ServiceOptions.Store`, default `Postgres`): set `MongoDB` through `ServiceSpec(..., Store: ServiceStore.MongoDB)`
+  in the AppHost, which creates the database on the `mongo` resource (`mongo.AddDatabase`), passes its connection string and
+  `Service__Store=MongoDB` to `-migrate` and `-api`, and adds **no Debezium** (it reads the Postgres WAL; `CapturedTables` must be
+  empty). `ServiceHost` then adds a MongoDB readiness check (`ping`) instead of Postgres. `--migrate` runs every registered
+  `IMongoMigration.ApplyAsync(IMongoDatabase, ct)` (indexes; idempotent), then the optional `migrate` callback (pass `null`), then the
+  demo seed; there is no Wolverine message store to migrate. Register migrations as singletons.
+- **Infrastructure**: `services.AddProcureAiMongo(configuration, "<name>db")` (one `IMongoClient` singleton, the `IMongoDatabase`, tracing),
+  and `services.AddTenantCollection<T>("collection")` for each collection of tenant data. `T : ITenantDocument` (a mapped `TenantId`
+  string).
+- **`TenantCollection<T>` is the tenant boundary** (the MongoDB equivalent of the EF Core tenant query filter): the raw
+  `IMongoCollection<T>` is not exposed; `Find`/`CountAsync`/`ReplaceOneAsync`/`DeleteOneAsync`/`DeleteManyAsync` AND `TenantId == caller's tenant`
+  onto the caller's filter (never replace it), `InsertOneAsync`/`InsertManyAsync`/`ReplaceOneAsync` throw `ForbiddenException` for a
+  document of another tenant (before writing anything), and a caller without a tenant gets `ForbiddenException` on every call. It
+  offers no operator updates or aggregation, because those could move a document to another tenant: read, change, replace. Seeding and
+  migrations work on the raw `IMongoDatabase` as the system, so a seeder that wants the same checks builds
+  `new TenantCollection<T>(rawCollection, seedCaller)` with an `ICallerContext` for the tenant it seeds.
+- **Wolverine without a message store**: `options.UseProcureAiAccessEviction(configuration, "<name>-api", handlersAssembly)` instead of
+  `UseProcureAiMessaging`. RabbitMQ with caller propagation and only the queue `<name>-api-access-changed` (bound to `access`), which is
+  **buffered** (no durable inbox, no outbox, no transactions). `AccessChanged` still advances the cache generation and evicts the
+  tenant's tags; a lost message only leaves a cached answer until it expires or the generation is re-read (seconds).
+  `AccessEvictionTests` proves it end to end (Access-side publish through RabbitMQ, generation advanced, tagged entries evicted, another
+  tenant untouched). A service that later needs events of its own would need a message store, and so Postgres.
+- **Tracing: the driver's own.** MongoDB.Driver 3.13 has OpenTelemetry tracing built in (`MongoClientSettings.TracingOptions`, on by
+  default; activity source `MongoTelemetry.ActivitySourceName`, "MongoDB.Driver"), so `AddProcureAiMongo` only registers that source
+  with the tracer provider (`AddSource`). The community package `MongoDB.Driver.Core.Extensions.DiagnosticSources` was not used: it is
+  the pre-3.x way, adds a dependency and a second set of spans for the same commands.
+- **Tests**: `MongoFixture` (`ProcureAi.Testing`) starts `mongo:8.0` as a single-node replica set like the AppHost, with the limits of
+  `Resources:Mongo` (including the WiredTiger cache size), and fails at startup if it is not the replica set's PRIMARY.
+  `Client` and `ConnectionStringFor(database)` give a client or a connection string.
 
 ## Change data capture (Debezium)
 
@@ -141,7 +176,8 @@ Signed webhooks (a supplier confirming an order, an invoice arriving) use the bu
 
 | Piece | Location |
 |---|---|
-| `ServiceHost`, `ServiceOptions` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Hosting` (references Web, Messaging and Persistence; only `*.Api` projects may use it) |
+| `ServiceHost`, `ServiceOptions` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Hosting` (references Web, Messaging, Persistence and Persistence.Mongo; only `*.Api` projects may use it) |
+| MongoDB: `AddProcureAiMongo`, `TenantCollection<T>`, `ITenantDocument`, `IMongoMigration`, `MongoReadinessCheck` (see "A service on MongoDB") | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence.Mongo` |
 | `ApplicationExceptionFilter` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/Errors` |
 | OpenAPI build step | `src/Services/Directory.Build.targets` |
 | `AddProcureAiService`, `ServiceSpec`, `SharedResources` | `src/AppHost/ProcureAi.AppHost/ServiceResources.cs` |

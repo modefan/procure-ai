@@ -7,7 +7,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Messaging;
+using MongoDB.Driver;
 using ProcureAi.BuildingBlocks.Messaging.Caching;
+using ProcureAi.BuildingBlocks.Persistence.Mongo;
 using ProcureAi.BuildingBlocks.Web;
 using ProcureAi.BuildingBlocks.Web.Access;
 using ProcureAi.BuildingBlocks.Web.Caching;
@@ -89,7 +91,17 @@ public static class ServiceHost
         var service = builder.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>();
         var databaseName = service?.DatabaseConnectionName
             ?? throw new InvalidOperationException($"'{ServiceOptions.SectionName}:{nameof(ServiceOptions.DatabaseConnectionName)}' is not configured.");
-        services.AddPostgresReadiness(Required(builder.Configuration, databaseName));
+        var databaseConnectionString = Required(builder.Configuration, databaseName);
+        if (service.Store == ServiceStore.MongoDB)
+        {
+            // The service registers its client with AddProcureAiMongo; the check pings through it.
+            MongoReadinessCheck.AddMongoReadiness(services);
+        }
+        else
+        {
+            services.AddPostgresReadiness(databaseConnectionString);
+        }
+
         services.AddRabbitMqReadiness(Required(builder.Configuration, MessagingSetup.RabbitMqConnectionName));
         services.AddRedisReadiness();
 
@@ -108,12 +120,14 @@ public static class ServiceHost
     /// <summary>
     /// With <c>--migrate</c>: runs <paramref name="migrate"/> (the service's EF Core migrations), then Wolverine's message store
     /// (outbox and inbox tables), then <paramref name="seedDemoData"/> when <c>DemoSeed:Enabled</c> is true, and returns.
+    /// A MongoDB service (<c>Service:Store=MongoDB</c>) has no message store: it runs every registered <see cref="IMongoMigration"/>
+    /// (indexes), then <paramref name="migrate"/> when given, then the seed.
     /// Otherwise runs the application. Nothing migrates at normal startup.
     /// </summary>
     public static async Task RunAsync(
         WebApplication app,
         string[] args,
-        Func<IServiceProvider, CancellationToken, Task> migrate,
+        Func<IServiceProvider, CancellationToken, Task>? migrate,
         Func<IServiceProvider, CancellationToken, Task>? seedDemoData = null)
     {
         if (!args.Contains(MigrateFlag))
@@ -123,8 +137,27 @@ public static class ServiceHost
         }
 
         var cancellationToken = app.Lifetime.ApplicationStopping;
-        await migrate(app.Services, cancellationToken);
-        await app.Services.GetRequiredService<IWolverineRuntime>().Storage.Admin.MigrateAsync();
+        var mongo = app.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>()?.Store == ServiceStore.MongoDB;
+        if (mongo)
+        {
+            // A MongoDB service has no message store: its migrations are the registered IMongoMigrations (indexes).
+            var database = app.Services.GetRequiredService<IMongoDatabase>();
+            foreach (var step in app.Services.GetServices<IMongoMigration>())
+            {
+                await step.ApplyAsync(database, cancellationToken);
+            }
+        }
+
+        if (migrate is not null)
+        {
+            await migrate(app.Services, cancellationToken);
+        }
+
+        if (!mongo)
+        {
+            await app.Services.GetRequiredService<IWolverineRuntime>().Storage.Admin.MigrateAsync();
+        }
+
         if (seedDemoData is not null && app.Configuration.GetValue<bool>(DemoSeedSetting))
         {
             await seedDemoData(app.Services, cancellationToken);

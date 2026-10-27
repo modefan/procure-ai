@@ -35,6 +35,7 @@ public sealed class LayerRulesTests
     [
         typeof(IAuditContextSource).Assembly, typeof(ICallerContext).Assembly, typeof(CallerContext).Assembly, typeof(ServiceHost).Assembly,
         typeof(ProcureAi.BuildingBlocks.Web.WebExtensions).Assembly, Assembly.Load("ProcureAi.ServiceDefaults"),
+        typeof(ProcureAi.BuildingBlocks.Persistence.Mongo.MongoSetup).Assembly,
     ];
 
     private static readonly Architecture Architecture = new ArchLoader()
@@ -100,6 +101,20 @@ public sealed class LayerRulesTests
             .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
                 @"^ProcureAi\.BuildingBlocks\.(Web|Messaging|Persistence|Hosting)(\..*)?$")
             .Check(Architecture);
+    }
+
+    [Fact]
+    public void MongoDB_building_block_is_used_only_by_Infrastructure_and_Hosting()
+    {
+        // The MongoDB services' data access (TenantCollection, migrations) belongs in Infrastructure; the composition root (Hosting)
+        // wires its readiness and migrate run. Domain, Application and the Api never see it (nor the MongoDB driver, see the other rules).
+        foreach (var layer in new[] { "Domain", "Application", "Api" })
+        {
+            var assemblies = Layer(layer);
+            Types().That().ResideInAssembly(assemblies[0], assemblies[1..])
+                .Should().NotDependOnAnyTypesThat().ResideInNamespaceMatching(@"^ProcureAi\.BuildingBlocks\.Persistence\.Mongo(\..*)?$")
+                .Check(Architecture);
+        }
     }
 
     [Fact]

@@ -106,7 +106,7 @@ builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
-    postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
+    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
 
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),

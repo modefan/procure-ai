@@ -13,6 +13,7 @@
     <ProjectReference Include="../ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
     <ProjectReference Include="../ProcureAi.BuildingBlocks.Messaging/ProcureAi.BuildingBlocks.Messaging.csproj" />
     <ProjectReference Include="../ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
+    <ProjectReference Include="../ProcureAi.BuildingBlocks.Persistence.Mongo/ProcureAi.BuildingBlocks.Persistence.Mongo.csproj" />
   </ItemGroup>
 
 </Project>

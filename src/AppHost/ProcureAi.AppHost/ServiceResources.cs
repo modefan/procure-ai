@@ -2,13 +2,22 @@ using Aspire.Hosting.ApplicationModel;
 
 namespace ProcureAi.AppHost;
 
+/// <summary>Which kind of server holds a service's database. The value is passed as <c>Service__Store</c>; the names match <c>ProcureAi.BuildingBlocks.Hosting.ServiceStore</c> (the AppHost does not reference the Hosting library).</summary>
+public enum ServiceStore
+{
+    Postgres,
+    MongoDB,
+}
+
 /// <summary>What one service needs from the AppHost. Everything else comes from <see cref="SharedResources"/>.</summary>
 /// <param name="Name">Short service name, e.g. <c>requests</c>; the resources are called <c>&lt;name&gt;-migrate</c> and <c>&lt;name&gt;-api</c>.</param>
-/// <param name="Database">The service's Postgres database, e.g. <c>requestsdb</c> (also its connection-string name).</param>
+/// <param name="Database">The service's database on the Postgres or MongoDB server, e.g. <c>requestsdb</c> (also its connection-string name).</param>
 /// <param name="CapturedTables">Tables Debezium captures for the audit trail (wired by <c>AddDebeziumFor</c>); empty when none.</param>
 /// <param name="GatewayCluster">The YARP cluster the gateway routes this service's traffic to, e.g. <c>requests</c>.</param>
 /// <param name="ApiRoutePrefix">The path the gateway exposes the service under, e.g. <c>/api/requests</c>.</param>
-public sealed record ServiceSpec(string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix);
+/// <param name="Store">Which server holds the database. MongoDB services have no Debezium (it reads the Postgres WAL), so <c>CapturedTables</c> must be empty.</param>
+public sealed record ServiceSpec(
+    string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix, ServiceStore Store = ServiceStore.Postgres);
 
 /// <summary>The infrastructure and settings every service resource is wired to.</summary>
 /// <param name="InternalClientSecret">Secret of the Keycloak client <c>procure-internal</c>, with which services call each other (<c>Auth:Internal:ClientSecret</c>).</param>
@@ -20,6 +29,7 @@ public sealed record SharedResources(
     IResourceBuilder<PostgresServerResource> Postgres,
     IResourceBuilder<RabbitMQServerResource> RabbitMq,
     IResourceBuilder<RedisResource> Redis,
+    IResourceBuilder<MongoDBServerResource> Mongo,
     IResourceBuilder<ContainerResource> Keycloak,
     ReferenceExpression KeycloakAuthority,
     ParameterResource AdminApiKeySha256,
@@ -57,11 +67,21 @@ public static class ServiceResources
     {
         // Aspire creates the database on the server. The Postgres init script only creates the debezium role; the
         // migration creates the publication and grants (CdcMigrations.EnableCdc).
-        var database = shared.Postgres.AddDatabase(spec.Database);
+        // A MongoDB service's database is created on the mongo resource instead. Debezium reads the Postgres WAL, so there is nothing to capture.
+        var mongo = spec.Store == ServiceStore.MongoDB;
+        if (mongo && spec.CapturedTables.Length > 0)
+        {
+            throw new ArgumentException($"{spec.Name}: a MongoDB service has no Debezium capture (CapturedTables must be empty).", nameof(spec));
+        }
+
+        IResourceBuilder<IResourceWithConnectionString> database = mongo
+            ? shared.Mongo.AddDatabase(spec.Database)
+            : shared.Postgres.AddDatabase(spec.Database);
 
         var migrate = builder.AddProject<TProject>(spec.Name + MigrateSuffix)
             .WithArgs("--migrate")
             .WithEnvironment("DemoSeed__Enabled", "true")
+            .WithEnvironment("Service__Store", spec.Store.ToString())
             .WithReference(database)
             .WithReference(shared.RabbitMq)
             .WithReference(shared.Redis)
@@ -71,6 +91,7 @@ public static class ServiceResources
         var api = builder.AddProject<TProject>(spec.Name + ApiSuffix)
             // No launchSettings.json: Aspire picks a free port, so dev runs and test runs never clash.
             .WithHttpEndpoint(name: "http")
+            .WithEnvironment("Service__Store", spec.Store.ToString())
             .WithReference(database)
             .WithReference(shared.RabbitMq)
             .WithReference(shared.Redis)

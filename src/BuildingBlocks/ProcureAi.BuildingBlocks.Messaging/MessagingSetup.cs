@@ -78,6 +78,28 @@ public static class MessagingSetup
         return options;
     }
 
+    /// <summary>
+    /// Wolverine setup for a service that has <b>no message store</b> and no events of its own (a MongoDB service such as Suppliers,
+    /// which publishes nothing and consumes nothing but <c>AccessChanged</c>): RabbitMQ with caller propagation and only the queue
+    /// <c>&lt;serviceName&gt;-access-changed</c> bound to the <c>access</c> exchange, with the handler that evicts the cached Access
+    /// answers. The listener is <b>buffered</b>, not durable: there is no inbox, and nothing is lost that matters, because a missed
+    /// eviction only leaves an entry until it expires (the cache generation is read again within seconds, see
+    /// <see cref="ProcureAi.BuildingBlocks.Web.Access.AccessCacheGeneration"/>). No transactions and no outbox are set up.
+    /// A service that needs to send or receive more events of its own needs a message store and uses
+    /// <see cref="UseProcureAiHandlers"/>, which is durable.
+    /// </summary>
+    public static WolverineOptions UseProcureAiAccessEviction(
+        this WolverineOptions options, IConfiguration configuration, string serviceName, Assembly handlers)
+    {
+        options.Discovery.IncludeAssembly(handlers);
+        options.Discovery.IncludeAssembly(typeof(MessagingSetup).Assembly);
+        options.UseProcureAiTransport(configuration);
+        options.CodeGeneration.AlwaysUseServiceLocationFor<IAccessDirectory>();
+        options.RetryAccessChangedCacheFailures(AccessChangedRetryPolicy.Delays(configuration));
+        ListenToAccessChanges(options, serviceName);
+        return options;
+    }
+
     /// <summary>The queue of <paramref name="serviceName"/> that receives <c>AccessChanged</c>.</summary>
     public static string AccessChangedQueue(string serviceName) => $"{serviceName}-access-changed";
 
