@@ -23,6 +23,12 @@ public sealed class MongoFixture : IAsyncLifetime
     public string ConnectionStringFor(string database)
     {
         var url = new MongoUrlBuilder(ConnectionString) { DatabaseName = database };
+        if (url.Username is not null)
+        {
+            // The container's user lives in the admin database; without this the driver would look for it in the one opened.
+            url.AuthenticationSource = "admin";
+        }
+
         return url.ToMongoUrl().ToString();
     }
 

@@ -30,6 +30,10 @@
     <Project Path="src/Services/Audit/ProcureAi.Audit.Application/ProcureAi.Audit.Application.csproj" />
     <Project Path="src/Services/Audit/ProcureAi.Audit.Infrastructure/ProcureAi.Audit.Infrastructure.csproj" />
     <Project Path="src/Services/Audit/ProcureAi.Audit.Api/ProcureAi.Audit.Api.csproj" />
+    <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Domain/ProcureAi.Suppliers.Domain.csproj" />
+    <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Application/ProcureAi.Suppliers.Application.csproj" />
+    <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Infrastructure/ProcureAi.Suppliers.Infrastructure.csproj" />
+    <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Api/ProcureAi.Suppliers.Api.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -44,6 +48,8 @@
     <Project Path="tests/ProcureAi.Approvals.IntegrationTests/ProcureAi.Approvals.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Access.IntegrationTests/ProcureAi.Access.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Audit.IntegrationTests/ProcureAi.Audit.IntegrationTests.csproj" />
+    <Project Path="tests/ProcureAi.Suppliers.Tests/ProcureAi.Suppliers.Tests.csproj" />
+    <Project Path="tests/ProcureAi.Suppliers.IntegrationTests/ProcureAi.Suppliers.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
     <Project Path="tests/ProcureAi.ArchitectureTests/ProcureAi.ArchitectureTests.csproj" />

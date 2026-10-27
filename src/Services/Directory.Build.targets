@@ -11,6 +11,8 @@
   -->
   <PropertyGroup Condition="$(MSBuildProjectName.StartsWith('ProcureAi.')) And $(MSBuildProjectName.EndsWith('.Api'))">
     <IsServiceApi>true</IsServiceApi>
+    <!-- A MongoDB service sets OpenApiDatabaseConnectionString to a mongodb:// placeholder (its URL is parsed at startup). -->
+    <OpenApiDatabaseConnectionString Condition="'$(OpenApiDatabaseConnectionString)' == ''">Host=openapi.invalid</OpenApiDatabaseConnectionString>
     <OpenApiGenerateDocumentsOnBuild>false</OpenApiGenerateDocumentsOnBuild>
     <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/openapi</OpenApiDocumentsDirectory>
   </PropertyGroup>
@@ -23,7 +25,7 @@
   </ItemGroup>
 
   <PropertyGroup Condition="'$(IsServiceApi)' == 'true'">
-    <OpenApiPlaceholderSettings>Service__DatabaseConnectionName=$(OpenApiDatabaseConnectionName);ConnectionStrings__$(OpenApiDatabaseConnectionName)=Host=openapi.invalid;ConnectionStrings__rabbitmq=amqp://openapi.invalid;ConnectionStrings__Redis=openapi.invalid:6379</OpenApiPlaceholderSettings>
+    <OpenApiPlaceholderSettings>Service__DatabaseConnectionName=$(OpenApiDatabaseConnectionName);ConnectionStrings__$(OpenApiDatabaseConnectionName)=$(OpenApiDatabaseConnectionString);ConnectionStrings__rabbitmq=amqp://openapi.invalid;ConnectionStrings__Redis=openapi.invalid:6379</OpenApiPlaceholderSettings>
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__Authority=https://openapi.invalid/realms/x;Auth__Audience=openapi;Auth__AdminApiKeySha256=0000000000000000000000000000000000000000000000000000000000000000</OpenApiPlaceholderSettings>
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__OpenApi__AuthorizationUrl=https://openapi.invalid/auth;Auth__OpenApi__TokenUrl=https://openapi.invalid/token;Auth__OpenApi__Scopes__openid=OpenID Connect;Auth__OpenApi__Scopes__email=Email address</OpenApiPlaceholderSettings>
     <!-- A service with settings of its own that must be present at startup lists them in OpenApiExtraSettings (same placeholder rules). -->

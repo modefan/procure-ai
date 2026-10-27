@@ -129,7 +129,7 @@ jobs:
 
       - name: Regenerate OpenAPI document and API client
         run: |
-          for service in Requests Access Budgets Approvals Audit; do
+          for service in Requests Access Budgets Approvals Audit Suppliers; do
             dotnet build "../../Services/$service/ProcureAi.$service.Api" -c Release -m:4
           done
           npm run generate:api
@@ -137,7 +137,7 @@ jobs:
       - name: Fail on client drift
         working-directory: .
         run: |
-          paths="src/Services/Requests/ProcureAi.Requests.Api/openapi src/Services/Access/ProcureAi.Access.Api/openapi src/Services/Budgets/ProcureAi.Budgets.Api/openapi src/Services/Approvals/ProcureAi.Approvals.Api/openapi src/Services/Audit/ProcureAi.Audit.Api/openapi src/Web/procure-ai-web/src/app/api"
+          paths="src/Services/Requests/ProcureAi.Requests.Api/openapi src/Services/Access/ProcureAi.Access.Api/openapi src/Services/Budgets/ProcureAi.Budgets.Api/openapi src/Services/Approvals/ProcureAi.Approvals.Api/openapi src/Services/Audit/ProcureAi.Audit.Api/openapi src/Services/Suppliers/ProcureAi.Suppliers.Api/openapi src/Web/procure-ai-web/src/app/api"
           # git status also lists new untracked files, which git diff would miss.
           drift="$(git status --porcelain -- $paths)"
           if [ -n "$drift" ]; then

@@ -132,6 +132,11 @@ var auditApi = builder.AddProcureAiService<Projects.ProcureAi_Audit_Api>(
     new ServiceSpec("audit", ResourceNames.AuditDb, CapturedTables: [], GatewayCluster: "audit", ApiRoutePrefix: "/api/audit"),
     shared)
     .CallsServices(accessApi);
+// Suppliers (MongoDB): the catalog of suppliers and items per tenant. It publishes no events, so it has no message store and no Debezium.
+var suppliersApi = builder.AddProcureAiService<Projects.ProcureAi_Suppliers_Api>(
+    new ServiceSpec("suppliers", ResourceNames.SuppliersDb, CapturedTables: [], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),
+    shared)
+    .CallsServices(accessApi);
 // Requests checks with Approvals that a request can be approved before it submits it (503 when Approvals cannot be found).
 var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
@@ -164,6 +169,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithReference(budgetsApi)
     .WithReference(approvalsApi)
     .WithReference(auditApi)
+    .WithReference(suppliersApi)
     .WithEnvironment("Oidc__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
@@ -177,6 +183,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithEnvironment("ReverseProxy__Clusters__budgets__Destinations__d1__Address", budgetsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__approvals__Destinations__d1__Address", approvalsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__audit__Destinations__d1__Address", auditApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__suppliers__Destinations__d1__Address", suppliersApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
@@ -186,6 +193,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WaitFor(budgetsApi)
     .WaitFor(approvalsApi)
     .WaitFor(auditApi)
+    .WaitFor(suppliersApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);

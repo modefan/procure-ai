@@ -250,6 +250,25 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         _gateway.Stub.Last.Path.ShouldBe($"/api/v1/audit/requests/{requestId}/history");
     }
 
+    [Fact]
+    public async Task Swagger_ui_lists_the_suppliers_definition_and_the_gateway_serves_its_document_and_api()
+    {
+        var browser = Browser();
+        using var initializer = await browser.GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+        using var document = await browser.GetAsync("/openapi/suppliers/v1.json", Ct);
+        using var anonymous = await browser.GetAsync("/api/v1/suppliers", Ct);
+        using var withKey = await browser.SendAsync(
+            Request(HttpMethod.Get, "/api/v1/suppliers/contoso-hardware/items", headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+
+        config.ShouldContain("/openapi/suppliers/v1.json");
+        config.ShouldContain("\"suppliers\"");
+        await ExpectOkAsync(document);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the suppliers API needs a session or key like every API");
+        await ExpectOkAsync(withKey);
+        _gateway.Stub.Last.Path.ShouldBe("/api/v1/suppliers/contoso-hardware/items");
+    }
+
     // ---- the rest of the contract ----
 
     [Fact]

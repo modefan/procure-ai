@@ -61,6 +61,10 @@ public class ServiceApiFactory<TProgram>(
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
-        NpgsqlConnection.ClearPool(new NpgsqlConnection(databaseConnectionString));
+        ReleaseDatabaseConnections(databaseConnectionString);
     }
+
+    /// <summary>Closes the idle connections of the pool for the database. A service on another database than Postgres (MongoDB) overrides it with nothing.</summary>
+    protected virtual void ReleaseDatabaseConnections(string databaseConnectionString) =>
+        NpgsqlConnection.ClearPool(new NpgsqlConnection(databaseConnectionString));
 }

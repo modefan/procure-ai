@@ -82,7 +82,7 @@ public sealed class AccessChangedRetryTests
         AccessChangedRetryPolicy.Defaults().Delays().Select(d => d.TotalSeconds).ShouldBe([1, 5, 25, 125, 600]);
     }
 
-    private sealed class NoInvalidator : ICacheInvalidator
+    internal sealed class NoInvalidator : ICacheInvalidator
     {
         public Task RemoveByTagAsync(IEnumerable<string> tags, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -90,7 +90,7 @@ public sealed class AccessChangedRetryTests
     }
 
     /// <summary>An in-memory "Redis" whose first <c>failures</c> writes fail.</summary>
-    private sealed class FlakyDistributedCache(int failures) : IDistributedCache
+    internal sealed class FlakyDistributedCache(int failures) : IDistributedCache
     {
         private readonly MemoryDistributedCache _inner = new(Options.Create(new MemoryDistributedCacheOptions()));
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _written = new();

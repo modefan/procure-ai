@@ -169,7 +169,37 @@ public sealed class ServiceResourcesTests
         }
     }
 
-    /// <summary>A stand-in project for a MongoDB service (no service is on MongoDB yet; Suppliers will be the first).</summary>
+    [Fact]
+    public async Task Suppliers_service_gets_its_database_on_mongo_migrate_and_api_without_debezium_and_the_gateway_routes_to_it()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "suppliers-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "suppliers-api");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var apiEnv = await EnvironmentOfAsync(api);
+        var migrateEnv = await EnvironmentOfAsync(migrate);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        model.Resources.OfType<MongoDBDatabaseResource>().ShouldContain(d => d.Name == "suppliersdb");
+        model.Resources.OfType<PostgresDatabaseResource>().ShouldNotContain(d => d.Name == "suppliersdb");
+        apiEnv.ShouldContainKey("ConnectionStrings__suppliersdb");
+        apiEnv.ShouldContainKeyAndValue("Service__Store", "MongoDB");
+        migrateEnv.ShouldContainKey("ConnectionStrings__suppliersdb");
+        migrateEnv.ShouldContainKeyAndValue("DemoSeed__Enabled", "true");
+        model.Resources.ShouldNotContain(r => r.Name == "debezium-suppliersdb");
+        api.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__suppliers__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+    }
+
+    /// <summary>A stand-in project for a MongoDB service (the real one is Suppliers; this one exercises the template on its own).</summary>
     private sealed class MongoServiceProject : IProjectMetadata
     {
         public string ProjectPath { get; } = Path.Combine(RepoRoot(), "src", "Services", "Audit", "ProcureAi.Audit.Api", "ProcureAi.Audit.Api.csproj");
@@ -316,6 +346,7 @@ public sealed class ServiceResourcesTests
     [InlineData("budgets-api", new[] { "access-api" })]
     [InlineData("approvals-api", new[] { "access-api" })]
     [InlineData("audit-api", new[] { "access-api" })]
+    [InlineData("suppliers-api", new[] { "access-api" })]
     [InlineData("access-api", new string[0])]
     public async Task Every_service_references_and_waits_for_the_services_it_calls(string service, string[] calls)
     {
