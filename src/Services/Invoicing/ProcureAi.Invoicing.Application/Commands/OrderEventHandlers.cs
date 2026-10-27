@@ -151,6 +151,15 @@ public static class PurchaseOrderIgnoredEventsHandler
     }
 }
 
+/// <summary>Builds what the ERP is told about a payment.</summary>
+public static class ErpPayments
+{
+    /// <summary>The vendor is always the supplier of the order, never the one named on the invoice.</summary>
+    public static ErpPayment Build(Invoice invoice, Payment payment, OrderView order) => new(
+        payment.Id, payment.Number.ToString(), order.SupplierId, invoice.SupplierInvoiceNumber, payment.TotalInclVat,
+        [.. payment.Lines.Select(l => new ErpPaymentLine(l.LineNo, l.Sku, l.Quantity, l.AmountExclVat))]);
+}
+
 /// <summary>Hands a released payment to the ERP.</summary>
 public static class ExportPaymentHandler
 {
@@ -171,9 +180,10 @@ public static class ExportPaymentHandler
             return;
         }
 
-        var erpPayment = new ErpPayment(
-            payment.Id, payment.Number.ToString(), invoice.SupplierId, invoice.SupplierInvoiceNumber, payment.TotalInclVat,
-            [.. payment.Lines.Select(l => new ErpPaymentLine(l.LineNo, l.Sku, l.Quantity, l.AmountExclVat))]);
+        var order = await db.Orders.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(o => o.TenantId == invoice.TenantId && o.Id == invoice.OrderId, cancellationToken)
+            ?? throw new OrderViewMissingException(invoice.OrderId);
+        var erpPayment = ErpPayments.Build(invoice, payment, order);
         await cache.RemoveAfterCommitAsync(InvoicingCacheTag.Of(invoice.TenantId, invoice.Id));
         string reference;
         try

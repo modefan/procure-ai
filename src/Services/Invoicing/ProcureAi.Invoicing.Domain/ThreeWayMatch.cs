@@ -18,9 +18,9 @@ public static class ThreeWayMatch
         var reasons = new List<string>();
         var lines = new List<LineMatch>();
 
-        if (!string.Equals(invoice.SupplierId, order.SupplierId, StringComparison.Ordinal))
+        if (!invoice.SameSupplierAs(order))
         {
-            reasons.Add($"Invoice is from {invoice.SupplierId}, the order is with {order.SupplierId}");
+            reasons.Add(invoice.SupplierReason(order));
         }
 
         var earlier = earlierInvoices

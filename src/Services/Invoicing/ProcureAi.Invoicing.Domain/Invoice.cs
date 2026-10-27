@@ -52,6 +52,9 @@ public sealed class Invoice : Entity<Guid>
 
     public DateTimeOffset ReceivedAt { get; private set; }
 
+    /// <summary>Counts every state-changing operation (attach, match, hold, release, payment), so each one changes this row and moves <see cref="Version"/> even when only child rows change.</summary>
+    public int Revision { get; private set; }
+
     /// <summary>Optimistic concurrency token (the Postgres <c>xmin</c> system column), set by the database on every write.</summary>
     public uint Version { get; private set; }
 
@@ -124,6 +127,7 @@ public sealed class Invoice : Entity<Guid>
             throw new DomainException("That is not the order of this invoice.");
         }
 
+        Revision++;
         RequestId = order.RequestId;
         foreach (var line in _lines)
         {
@@ -150,6 +154,7 @@ public sealed class Invoice : Entity<Guid>
             throw new DomainException($"An invoice that is {Status} is not matched again.");
         }
 
+        Revision++;
         var newStatus = result.IsMatch ? InvoiceStatus.Matched : InvoiceStatus.Mismatched;
         var changed = Status != newStatus || Match is null || !Match.Reasons.SequenceEqual(result.Reasons);
         Status = newStatus;
@@ -170,6 +175,7 @@ public sealed class Invoice : Entity<Guid>
             throw new DomainException("The invoice is already on hold.");
         }
 
+        Revision++;
         OnHold = true;
         HoldReason = reason.Trim();
     }
@@ -181,6 +187,7 @@ public sealed class Invoice : Entity<Guid>
             throw new DomainException("The invoice is not on hold.");
         }
 
+        Revision++;
         OnHold = false;
         HoldReason = null;
     }
@@ -210,6 +217,11 @@ public sealed class Invoice : Entity<Guid>
         if (order.Status == OrderViewStatus.Cancelled)
         {
             throw new DomainException($"{order.OrderNumber} was cancelled.");
+        }
+
+        if (!SameSupplierAs(order))
+        {
+            throw new DomainException(SupplierReason(order));
         }
 
         var chosen = new Dictionary<int, int>();
@@ -296,14 +308,24 @@ public sealed class Invoice : Entity<Guid>
             _lines.First(l => l.LineNo == lineNo).AddPaid(quantity);
         }
 
+        Revision++;
         var payment = Payment.Create(plan, number, releasedBy.Trim(), now);
         _payments.Add(payment);
         Status = _lines.All(l => l.Paid >= l.Quantity) ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
         return payment;
     }
 
+    internal bool SameSupplierAs(OrderView order) => string.Equals(SupplierId, order.SupplierId, StringComparison.Ordinal);
+
+    internal string SupplierReason(OrderView order) => $"Invoice is from {SupplierId}, the order is with {order.SupplierId}";
+
     private int Payable(InvoiceLine line, OrderView order)
     {
+        if (!SameSupplierAs(order))
+        {
+            return 0;
+        }
+
         if (Match?.Lines.FirstOrDefault(m => m.LineNo == line.LineNo) is not { PriceOk: true })
         {
             return 0;

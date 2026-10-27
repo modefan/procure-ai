@@ -196,4 +196,51 @@ public sealed class PaymentTests
         PaymentNumber.FromSequence(12).ToString().ShouldBe("PAY-0012");
         Should.Throw<DomainException>(() => PaymentNumber.FromSequence(0));
     }
+
+    [Fact]
+    public void An_invoice_from_another_supplier_is_never_payable_even_when_prices_match()
+    {
+        var order = Fixture.Order(received: 3);
+        var invoice = Fixture.Matched(Fixture.Invoice(supplier: "sup-2"), order);
+        invoice.Match!.Lines.ShouldAllBe(l => l.PriceOk);
+
+        Should.Throw<DomainException>(() => invoice.PlanPayment(order, null)).Message
+            .ShouldBe("Invoice is from sup-2, the order is with sup-1");
+        Should.Throw<DomainException>(() => invoice.PlanPayment(order, [(1, 1)])).Message
+            .ShouldBe("Invoice is from sup-2, the order is with sup-1");
+    }
+
+    [Fact]
+    public void The_erp_vendor_is_the_supplier_of_the_order()
+    {
+        var order = Fixture.Order(received: 3);
+        var invoice = Fixture.Matched(Fixture.Invoice(), order);
+        var payment = invoice.Pay(invoice.PlanPayment(order, null), PaymentNumber.FromSequence(1), "fiona", Fixture.Now);
+        var other = Fixture.Order(received: 3, supplier: "sup-9");
+
+        ProcureAi.Invoicing.Application.Commands.ErpPayments.Build(invoice, payment, order).SupplierId.ShouldBe("sup-1");
+        ProcureAi.Invoicing.Application.Commands.ErpPayments.Build(invoice, payment, other).SupplierId.ShouldBe("sup-9");
+    }
+
+    [Fact]
+    public void Every_state_changing_invoice_operation_bumps_the_revision()
+    {
+        var order = Fixture.Order(received: 3);
+        var invoice = Fixture.Invoice(quantity: 2);
+        var revision = invoice.Revision;
+
+        invoice.AttachOrder(order);
+        invoice.Revision.ShouldBe(revision + 1);
+        invoice.ApplyMatch(ThreeWayMatch.Evaluate(invoice, order, [], Fixture.Tolerance));
+        invoice.Revision.ShouldBe(revision + 2);
+        invoice.Hold("check");
+        invoice.Revision.ShouldBe(revision + 3);
+        invoice.ReleaseHold();
+        invoice.Revision.ShouldBe(revision + 4);
+        invoice.Pay(invoice.PlanPayment(order, [(1, 1)]), PaymentNumber.FromSequence(1), "fiona", Fixture.Now);
+        invoice.Revision.ShouldBe(revision + 5);
+        invoice.Status.ShouldBe(InvoiceStatus.PartiallyPaid);
+        invoice.Pay(invoice.PlanPayment(order, [(1, 1)]), PaymentNumber.FromSequence(2), "fiona", Fixture.Now);
+        invoice.Revision.ShouldBe(revision + 6);
+    }
 }
