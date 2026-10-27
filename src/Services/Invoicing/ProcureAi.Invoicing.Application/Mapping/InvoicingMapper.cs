@@ -7,19 +7,22 @@ namespace ProcureAi.Invoicing.Application.Mapping;
 /// <summary>Domain to DTO and to the integration events other services consume. By hand: money and numbers are value objects.</summary>
 public static class InvoicingMapper
 {
-    public static InvoiceDto ToDto(Invoice invoice) => new(
+    /// <summary>The invoice with its match lines; <paramref name="order"/> (its order view) adds the ordered quantities and prices.</summary>
+    public static InvoiceDto ToDto(Invoice invoice, OrderView? order) => new(
         invoice.Id, invoice.OrderId, invoice.RequestId, invoice.SupplierId, invoice.SupplierInvoiceNumber, invoice.InvoiceDate,
         invoice.Sequence, invoice.Source, invoice.Status, invoice.OnHold, invoice.HoldReason,
         invoice.Match?.Reasons ?? [],
-        [.. invoice.Lines.OrderBy(l => l.LineNo).Select(l => ToLineDto(l, invoice.Match?.Lines.FirstOrDefault(m => m.LineNo == l.LineNo)))],
+        [.. invoice.Lines.OrderBy(l => l.LineNo).Select(l => ToLineDto(
+            l, invoice.Match?.Lines.FirstOrDefault(m => m.LineNo == l.LineNo), order?.Lines.FirstOrDefault(o => o.LineNo == l.LineNo)))],
         [.. invoice.Payments.OrderBy(p => p.ReleasedAt).Select(ToPaymentDto)],
         invoice.TotalExclVat.Amount, invoice.Vat.Amount, invoice.TotalInclVat.Amount,
         invoice.TotalExclVat.ToDisplayString(), invoice.Vat.ToDisplayString(), invoice.TotalInclVat.ToDisplayString(),
         invoice.ReceivedAt, invoice.Version);
 
-    public static InvoiceLineDto ToLineDto(InvoiceLine line, LineMatch? match) => new(
+    public static InvoiceLineDto ToLineDto(InvoiceLine line, LineMatch? match, OrderViewLine? orderLine) => new(
         line.LineNo, line.Sku, line.Description, line.Quantity, line.Paid, line.UnitPriceExclVat.Amount, line.LineTotalExclVat.Amount,
         line.UnitPriceExclVat.ToDisplayString(), line.LineTotalExclVat.ToDisplayString(),
+        orderLine?.Ordered, orderLine?.UnitPriceExclVat.Amount, orderLine?.UnitPriceExclVat.ToDisplayString(),
         match?.PriceOk, match?.QuantityOk, match?.Received, match?.InvoicedBefore, match?.Reason);
 
     public static PaymentDto ToPaymentDto(Payment payment) => new(

@@ -13,12 +13,14 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="ProcureAi.Testing" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/Services/Invoicing/ProcureAi.Invoicing.Domain/ProcureAi.Invoicing.Domain.csproj" />
     <ProjectReference Include="../../src/Services/Invoicing/ProcureAi.Invoicing.Application/ProcureAi.Invoicing.Application.csproj" />
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="../ProcureAi.Testing/ProcureAi.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

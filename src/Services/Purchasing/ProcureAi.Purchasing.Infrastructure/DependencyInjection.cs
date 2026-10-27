@@ -2,12 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Http.Resilience;
-using Microsoft.Extensions.Options;
-using Polly;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
-using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.Http;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Purchasing.Application;
@@ -53,42 +50,13 @@ public static class DependencyInjection
 
     /// <summary>
     /// The supplier anti-corruption layer (<see cref="ISupplierGateway"/>): a typed client of the supplier API with the key in
-    /// <c>X-Api-Key</c>, whose one resilience pipeline <c>supplier</c> (replacing the service defaults' standard one) is, from
-    /// outside in: total timeout, retries with exponential backoff and jitter, circuit breaker, attempt timeout, all from the
-    /// <c>SupplierClient</c> section. The circuit is shared by every call of the process, so an outage opens it for all orders.
+    /// <c>X-Api-Key</c> and its own resilience pipeline <c>supplier</c> (total timeout, retries with backoff and jitter, circuit
+    /// breaker, attempt timeout), all from the <c>SupplierClient</c> section (<see cref="ExternalSystemClient"/>).
     /// </summary>
     public static IServiceCollection AddSupplierGateway(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddValidatedOptions<SupplierClientOptions>(configuration, SupplierClientOptions.SectionName);
-        services.AddHttpClient<ISupplierGateway, SupplierSimulatorGateway>(SupplierSimulatorGateway.ClientName, (sp, client) =>
-            {
-                var options = sp.GetRequiredService<IOptions<SupplierClientOptions>>().Value;
-                client.BaseAddress = options.BaseUrl;
-                client.DefaultRequestHeaders.Add(SupplierSimulatorGateway.ApiKeyHeader, options.ApiKey);
-            })
-            .RemoveAllResilienceHandlers()
-            .AddResilienceHandler(SupplierSimulatorGateway.PipelineName, (pipeline, context) =>
-            {
-                var options = context.ServiceProvider.GetRequiredService<IOptions<SupplierClientOptions>>().Value;
-                var breaker = options.CircuitBreaker;
-                pipeline
-                    .AddTimeout(options.TotalTimeout)
-                    .AddRetry(new HttpRetryStrategyOptions
-                    {
-                        MaxRetryAttempts = options.RetryCount,
-                        BackoffType = DelayBackoffType.Exponential,
-                        UseJitter = true,
-                        Delay = options.RetryDelay,
-                    })
-                    .AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
-                    {
-                        FailureRatio = breaker.FailureRatio,
-                        MinimumThroughput = breaker.MinimumThroughput,
-                        SamplingDuration = breaker.SamplingDuration,
-                        BreakDuration = breaker.BreakDuration,
-                    })
-                    .AddTimeout(options.AttemptTimeout);
-            });
+        services.AddExternalSystemClient<ISupplierGateway, SupplierSimulatorGateway, SupplierClientOptions>(
+            configuration, SupplierClientOptions.SectionName, SupplierSimulatorGateway.ClientName);
         return services;
     }
 

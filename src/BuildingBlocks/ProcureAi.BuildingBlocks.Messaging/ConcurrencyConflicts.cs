@@ -45,4 +45,18 @@ public static class ConcurrencyConflicts
             throw new ConflictException($"{what} was changed by someone else at the same time. Reload it and try again.");
         }
     }
+
+    /// <summary>As <see cref="InvokeOrConflictAsync(IMessageBus, object, string, CancellationToken)"/>, for a command with a response.</summary>
+    public static async Task<T> InvokeOrConflictAsync<T>(
+        this IMessageBus bus, object command, string what, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await bus.InvokeAsync<T>(command, cancellationToken);
+        }
+        catch (Exception exception) when (IsLostRace(exception))
+        {
+            throw new ConflictException($"{what} was changed by someone else at the same time. Reload it and try again.");
+        }
+    }
 }

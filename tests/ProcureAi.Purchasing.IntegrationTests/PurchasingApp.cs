@@ -1,5 +1,3 @@
-extern alias simulators;
-
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -7,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,8 +24,6 @@ using ProcureAi.Purchasing.Infrastructure;
 using ProcureAi.Purchasing.Infrastructure.Supplier;
 using Shouldly;
 using Wolverine;
-using SimulatorProgram = simulators::Program;
-using SupplierStore = simulators::ProcureAi.Simulators.Supplier.SupplierStore;
 
 namespace ProcureAi.Purchasing.IntegrationTests;
 
@@ -43,42 +38,6 @@ public sealed class PurchasingInfraFixture()
         ApiMigrateProcess.RunAsync(
             ApiAssembly, "purchasingdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false,
             contentRoot: "src/Services/Purchasing/ProcureAi.Purchasing.Api");
-}
-
-/// <summary>
-/// The real supplier simulator (its Program) on a test server: Purchasing calls it through <see cref="SupplierTraffic"/>, and its
-/// signed webhooks reach the Purchasing test server through <see cref="WebhookTraffic"/>. Real clock, short confirm delay, no
-/// automatic invoices (Invoicing is not part of these tests).
-/// </summary>
-public sealed class SimulatorHost(WebhookTraffic webhooks) : WebApplicationFactory<SimulatorProgram>
-{
-    public const string SimulatorKey = "test-simulator-key-0123456789";
-    public const string Secret = "test-supplier-webhook-secret-0123456789abcdef";
-    public const string PurchasingWebhookUrl = "http://purchasing.test/api/v1/purchasing/webhooks/supplier";
-
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
-    {
-        builder.UseEnvironment("Development");
-        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Simulators:ApiKey"] = SimulatorKey,
-            ["Auth:AdminApiKeySha256"] = TestAuth.ApiKeySha256,
-            ["Simulators:Webhooks:PurchasingUrl"] = PurchasingWebhookUrl,
-            ["Simulators:Webhooks:InvoicingUrl"] = "",
-            ["Simulators:Webhooks:Secret"] = Secret,
-            ["Simulators:Random:Seed"] = "42",
-            ["Simulators:Supplier:ConfirmDelay"] = "00:00:00.300",
-            ["Simulators:Supplier:AutoInvoice"] = "false",
-            ["Simulators:Chaos:Supplier:MinLatency"] = "00:00:00",
-            ["Simulators:Chaos:Supplier:MaxLatency"] = "00:00:00",
-            ["Simulators:Chaos:Erp:MinLatency"] = "00:00:00",
-            ["Simulators:Chaos:Erp:MaxLatency"] = "00:00:00",
-        }));
-        builder.ConfigureTestServices(services =>
-            services.AddHttpClient("simulator-webhooks").ConfigurePrimaryHttpMessageHandler(() => webhooks));
-    }
-
-    public SupplierStore Store => Services.GetRequiredService<SupplierStore>();
 }
 
 /// <summary>The real Purchasing API on a test server, against the shared infrastructure, the stub Access and the simulator.</summary>
@@ -126,12 +85,15 @@ public sealed class PurchasingApiFactory(
 }
 
 /// <summary>
-/// One running Purchasing API and one simulator for the whole collection, with the events Purchasing publishes and helpers to
+/// One running Purchasing API and one simulator (<see cref="SimulatorHost"/>, its webhooks to <see cref="PurchasingWebhookUrl"/>, no
+/// automatic invoices: Invoicing is not part of these tests) for the whole collection, with the events Purchasing publishes and helpers to
 /// send commands, call the API and post webhooks. Tests use a tenant of their own.
 /// </summary>
 public sealed class PurchasingApp : IAsyncLifetime
 {
     public static readonly TimeSpan EventTimeout = TimeSpan.FromSeconds(30);
+
+    public const string PurchasingWebhookUrl = "http://purchasing.test/api/v1/purchasing/webhooks/supplier";
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
@@ -164,7 +126,7 @@ public sealed class PurchasingApp : IAsyncLifetime
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
         Webhooks = new WebhookTraffic(() => _factory.Server.CreateHandler());
-        Simulator = new SimulatorHost(Webhooks);
+        Simulator = new SimulatorHost(Webhooks, new Dictionary<string, string?> { ["Simulators:Webhooks:PurchasingUrl"] = PurchasingWebhookUrl });
         Supplier = new SupplierTraffic(() => Simulator.Server.CreateHandler());
         _factory = new PurchasingApiFactory(Infra, Access, Supplier, Hooks, ExportedMetrics);
         Client = _factory.CreateClient();

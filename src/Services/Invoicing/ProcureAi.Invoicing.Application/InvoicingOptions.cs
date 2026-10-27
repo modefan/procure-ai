@@ -24,6 +24,13 @@ public sealed class InvoicingOptions
     [Required, ValidateObjectMembers]
     public ConcurrencyRetryOptions ConcurrencyRetry { get; set; } = new();
 
+    /// <summary>
+    /// How a message about an order Invoicing has no copy of yet (a delivery, a close short or an export before
+    /// <c>PurchaseOrderCreated</c>, or invoices that came by webhook before it) is retried: scheduled, durable, then dead-lettered.
+    /// </summary>
+    [Required, ValidateObjectMembers]
+    public DependencyRetryOptions OrderViewRetry { get; set; } = new();
+
     /// <summary>How a message is retried when a service it calls cannot answer (Access, for the caller scope).</summary>
     [Required, ValidateObjectMembers]
     public DependencyRetryOptions DependencyRetry { get; set; } = new();

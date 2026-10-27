@@ -3,9 +3,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Polly.CircuitBreaker;
-using Polly.Timeout;
 using ProcureAi.BuildingBlocks.Web.Errors;
+using ProcureAi.BuildingBlocks.Web.Http;
 using ProcureAi.Purchasing.Application.Abstractions;
 
 namespace ProcureAi.Purchasing.Infrastructure.Supplier;
@@ -28,10 +27,8 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
     /// <summary>The name of the resilience pipeline (metrics tag <c>pipeline.name</c>).</summary>
     public const string PipelineName = "supplier";
 
-    public const string ApiKeyHeader = "X-Api-Key";
     public const string OrdersPath = "supplier/v1/orders";
     private const string Currency = "ZAR";
-    private const int MaxMessageLength = 300;
 
     public async Task<SupplierAcceptance> SubmitOrderAsync(SupplierOrder order, CancellationToken cancellationToken)
     {
@@ -71,30 +68,10 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
         await EnsureAcceptedAsync(response, $"the cancel of {supplierReference}", cancellationToken);
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, string what, CancellationToken cancellationToken)
-    {
-        // The base address and X-Api-Key are on the client (AddSupplierGateway).
-        try
-        {
-            return await http.SendAsync(request, cancellationToken);
-        }
-        catch (BrokenCircuitException exception)
-        {
-            throw new SupplierUnavailableException($"Supplier unavailable (circuit open) for {what}.", "circuit_open", exception);
-        }
-        catch (TimeoutRejectedException exception)
-        {
-            throw new SupplierUnavailableException($"The supplier did not answer in time for {what}.", "timeout", exception);
-        }
-        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new SupplierUnavailableException($"The supplier did not answer in time for {what}.", "timeout", exception);
-        }
-        catch (HttpRequestException exception) when (exception.StatusCode is null)
-        {
-            throw new SupplierUnavailableException($"The supplier could not be reached for {what}.", "unreachable", exception);
-        }
-    }
+    // The base address and X-Api-Key are on the client (AddSupplierGateway).
+    private Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, string what, CancellationToken cancellationToken) =>
+        ExternalSystemClient.SendAsync(
+            http, request, "supplier", what, (message, reason, inner) => new SupplierUnavailableException(message, reason, inner), cancellationToken);
 
     private async Task EnsureAcceptedAsync(HttpResponseMessage response, string what, CancellationToken cancellationToken)
     {
@@ -106,7 +83,7 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
         var status = (int)response.StatusCode;
         if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity)
         {
-            throw new SupplierRejectedException(await RefusalMessageAsync(response, cancellationToken));
+            throw new SupplierRejectedException(await ExternalSystemClient.RefusalMessageAsync(response, "The supplier refused it", cancellationToken));
         }
 
         if (!DependencyFailures.IsTransientStatus(response.StatusCode))
@@ -119,35 +96,7 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
             string.Create(CultureInfo.InvariantCulture, $"status_{status}"));
     }
 
-    /// <summary>The supplier's own words: the problem's validation errors or detail, else the status. Kept short (it is stored on the order).</summary>
-    private static async Task<string> RefusalMessageAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        var fallback = string.Create(CultureInfo.InvariantCulture, $"The supplier refused it (HTTP {(int)response.StatusCode}).");
-        try
-        {
-            var problem = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-            string? message = null;
-            if (problem.ValueKind == JsonValueKind.Object && problem.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Object)
-            {
-                message = string.Join(" ", errors.EnumerateObject()
-                    .SelectMany(e => e.Value.ValueKind == JsonValueKind.Array ? e.Value.EnumerateArray().Select(v => v.ToString()) : [e.Value.ToString()]));
-            }
-
-            if (string.IsNullOrWhiteSpace(message) && problem.ValueKind == JsonValueKind.Object && problem.TryGetProperty("detail", out var detail))
-            {
-                message = detail.ToString();
-            }
-
-            message = string.IsNullOrWhiteSpace(message) ? fallback : $"The supplier refused it: {message.Trim()}";
-            return message.Length <= MaxMessageLength ? message : message[..MaxMessageLength];
-        }
-        catch (JsonException)
-        {
-            return fallback;
-        }
-    }
-
-    private static long ToCents(decimal rand) => (long)Math.Round(rand * 100m, MidpointRounding.AwayFromZero);
+    private static long ToCents(decimal rand) => ExternalSystemClient.ToCents(rand);
 }
 
 /// <summary>The supplier's own types (copies of its published API, never shared code), serialized as camelCase JSON.</summary>

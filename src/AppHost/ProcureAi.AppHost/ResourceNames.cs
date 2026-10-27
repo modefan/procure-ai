@@ -11,6 +11,7 @@ public static class ResourceNames
     public const string AuditDb = "auditdb";
     public const string SuppliersDb = "suppliersdb";
     public const string PurchasingDb = "purchasingdb";
+    public const string InvoicingDb = "invoicingdb";
     public const string Mongo = "mongo";
     public const string MongoReplicaSet = "rs0";
     public const string Redis = "redis";

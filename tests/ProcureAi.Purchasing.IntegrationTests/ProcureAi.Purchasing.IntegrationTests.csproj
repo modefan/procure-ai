@@ -32,6 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The simulator on a test server, shared with the other services' tests (it needs the simulators alias above). -->
+    <Compile Include="../Shared/SimulatorHost.cs" Link="Shared/SimulatorHost.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

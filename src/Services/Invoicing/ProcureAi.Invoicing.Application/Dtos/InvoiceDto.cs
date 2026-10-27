@@ -27,7 +27,11 @@ public sealed record InvoiceDto(
     DateTimeOffset ReceivedAt,
     uint Version);
 
-/// <summary>An invoice line with the outcome of its match: the match fields are null until it was matched.</summary>
+/// <summary>
+/// An invoice line with the outcome of its match (screen 11): what was ordered at which price, what was received, what earlier
+/// invoices claimed, and what this one invoices. The match fields are null until it was matched; the order fields are null while the
+/// order is not known or the line is not on it.
+/// </summary>
 public sealed record InvoiceLineDto(
     int LineNo,
     string Sku,
@@ -38,6 +42,9 @@ public sealed record InvoiceLineDto(
     decimal LineTotalExclVat,
     string UnitPriceText,
     string LineTotalText,
+    int? Ordered,
+    decimal? OrderUnitPriceExclVat,
+    string? OrderUnitPriceText,
     bool? PriceOk,
     bool? QuantityOk,
     int? Received,

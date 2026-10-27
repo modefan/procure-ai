@@ -2,8 +2,6 @@
 
   <PropertyGroup>
     <RootNamespace>ProcureAi.Purchasing.Infrastructure</RootNamespace>
-    <!-- EXTEXP0001: RemoveAllResilienceHandlers (the supplier client replaces the defaults' pipeline with its own) is marked experimental. -->
-    <NoWarn>$(NoWarn);EXTEXP0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,7 +15,6 @@
     <!-- Explicit, so the Npgsql provider does not pull in an older Relational than the rest of EF Core. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
     <PackageReference Include="WolverineFx.EntityFrameworkCore" />
     <PackageReference Include="WolverineFx.RuntimeCompilation" />
   </ItemGroup>

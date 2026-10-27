@@ -233,6 +233,40 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Invoicing_service_gets_its_database_debezium_the_erp_settings_and_the_gateway_routes_to_it()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "invoicing-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "invoicing-api");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-invoicingdb");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var apiEnv = await EnvironmentOfAsync(api);
+        var debeziumEnv = await EnvironmentOfAsync(debezium);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        apiEnv.ShouldContainKey("ConnectionStrings__invoicingdb");
+        // The order views are a read copy of Purchasing's orders (captured there), so they are not captured here.
+        debeziumEnv.ShouldContainKeyAndValue(
+            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST",
+            "public.invoices,public.invoice_lines,public.payments,public.payment_lines,public.audit_entries");
+        // The ERP (the simulator): its address, the key Invoicing presents, and the secret the supplier's invoice webhooks are signed with.
+        apiEnv.ShouldContainKey("ErpClient__BaseUrl");
+        apiEnv["ErpClient__ApiKey"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("simulator-api-key");
+        apiEnv["Webhooks__Sources__supplier__Secret"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("supplier-webhook-secret");
+        api.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__invoicing__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+    }
+
+    [Fact]
     public async Task Simulators_get_their_secrets_and_the_dotnet_limits_and_need_nothing_else()
     {
         await using var scope = await ModelScope.BuildAsync();
@@ -403,6 +437,7 @@ public sealed class ServiceResourcesTests
     [InlineData("audit-api", new[] { "access-api" })]
     [InlineData("suppliers-api", new[] { "access-api" })]
     [InlineData("purchasing-api", new[] { "access-api" })]
+    [InlineData("invoicing-api", new[] { "access-api" })]
     [InlineData("access-api", new string[0])]
     public async Task Every_service_references_and_waits_for_the_services_it_calls(string service, string[] calls)
     {
@@ -457,7 +492,7 @@ public sealed class ServiceResourcesTests
             totalCpus += double.Parse(texts[cpus + 1], System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(5, "one Debezium per captured database");
+        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(6, "one Debezium per captured database");
         totalMemoryMb.ShouldBeLessThanOrEqualTo(8 * 1024, "container memory caps in MB");
         totalCpus.ShouldBeLessThanOrEqualTo(8.0, "container CPU caps");
     }

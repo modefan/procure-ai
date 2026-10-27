@@ -53,3 +53,13 @@ public sealed class OrderViewMissingException(Guid orderId)
 {
     public Guid OrderId { get; } = orderId;
 }
+
+/// <summary>The business metrics of Invoicing (meter <c>ProcureAi.Invoicing</c>), implemented in Infrastructure.</summary>
+public interface IInvoicingMetrics
+{
+    /// <summary>An invoice was found not to match (first match, or a match that turned into a mismatch).</summary>
+    void InvoiceMismatched(InvoiceSource source);
+
+    /// <summary>Handing a payment to the ERP failed (<c>unavailable</c>: retried later; <c>rejected</c>: refused for good).</summary>
+    void ErpExportFailed(string reason);
+}

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The Wolverine and Testcontainers calls here are short; threading the test token through every one adds noise. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="ProcureAi.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ProcureAi.Testing/ProcureAi.Testing.csproj" />
+    <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
+    <ProjectReference Include="../../src/Services/Invoicing/ProcureAi.Invoicing.Infrastructure/ProcureAi.Invoicing.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Invoicing/ProcureAi.Invoicing.Api/ProcureAi.Invoicing.Api.csproj" />
+    <!-- The supplier and ERP, hosted in-process as the real simulator application. Aliased: it has a Program of its own, like the Api. -->
+    <ProjectReference Include="../../src/Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" Aliases="simulators" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The simulator on a test server, shared with the other services' tests (it needs the simulators alias above). -->
+    <Compile Include="../Shared/SimulatorHost.cs" Link="Shared/SimulatorHost.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

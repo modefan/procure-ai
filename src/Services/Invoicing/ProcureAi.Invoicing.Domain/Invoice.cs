@@ -70,6 +70,54 @@ public sealed class Invoice : Entity<Guid>
         DateTimeOffset now)
     {
         Require(tenantId, "Tenant");
+        if (sequence < 1)
+        {
+            throw new DomainException("An invoice of a tenant needs its arrival number.");
+        }
+
+        return New(tenantId, orderId, requestId, supplierId, supplierInvoiceNumber, invoiceDate, sequence, source, lines, statedTotalInclVat, document, now);
+    }
+
+    /// <summary>
+    /// An invoice the supplier sent (signed webhook) for an order Invoicing does not know yet. Its tenant is not known either: it is
+    /// never taken from the payload, so the invoice has none (<see cref="UnassignedTenant"/>, so no tenant's query can see it) and no
+    /// arrival number until <see cref="AssignTenant"/> gives it the tenant of the order, when the order arrives.
+    /// </summary>
+    public static Invoice CreateAwaitingOrder(
+        Guid orderId, string supplierId, string supplierInvoiceNumber, DateOnly invoiceDate, IReadOnlyList<InvoiceLine> lines,
+        Money statedTotalInclVat, string document, DateTimeOffset now) =>
+        New(UnassignedTenant, orderId, Guid.Empty, supplierId, supplierInvoiceNumber, invoiceDate, 0, InvoiceSource.Webhook, lines, statedTotalInclVat, document, now);
+
+    /// <summary>The tenant of an invoice that waits for an order Invoicing does not know yet.</summary>
+    public const string UnassignedTenant = "";
+
+    /// <summary>False while the invoice waits for its order without a tenant (<see cref="CreateAwaitingOrder"/>).</summary>
+    public bool HasTenant => TenantId.Length > 0;
+
+    /// <summary>The order of a waiting invoice arrived: the invoice takes the order's tenant and its arrival number in that tenant.</summary>
+    public void AssignTenant(string tenantId, long sequence)
+    {
+        Require(tenantId, "Tenant");
+        if (HasTenant)
+        {
+            throw new DomainException("The invoice already belongs to a tenant.");
+        }
+
+        if (sequence < 1)
+        {
+            throw new DomainException("An invoice of a tenant needs its arrival number.");
+        }
+
+        Revision++;
+        TenantId = tenantId;
+        Sequence = sequence;
+    }
+
+    private static Invoice New(
+        string tenantId, Guid orderId, Guid requestId, string supplierId, string supplierInvoiceNumber, DateOnly invoiceDate,
+        long sequence, InvoiceSource source, IReadOnlyList<InvoiceLine> lines, Money statedTotalInclVat, string document,
+        DateTimeOffset now)
+    {
         Require(supplierInvoiceNumber, "Invoice number");
         if (lines is null || lines.Count == 0)
         {
@@ -125,6 +173,11 @@ public sealed class Invoice : Entity<Guid>
         if (order.Id != OrderId)
         {
             throw new DomainException("That is not the order of this invoice.");
+        }
+
+        if (TenantId != order.TenantId)
+        {
+            throw new DomainException("The order belongs to another tenant (or the invoice has none yet).");
         }
 
         Revision++;

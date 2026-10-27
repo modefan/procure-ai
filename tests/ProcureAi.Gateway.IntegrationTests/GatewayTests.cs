@@ -291,6 +291,28 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         _gateway.Stub.Last.Path.ShouldBe("/api/v1/purchasing/orders");
     }
 
+    [Fact]
+    public async Task Swagger_ui_lists_the_invoicing_definition_and_the_gateway_serves_its_document_and_api()
+    {
+        var browser = Browser();
+        using var initializer = await browser.GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+        using var document = await browser.GetAsync("/openapi/invoicing/v1.json", Ct);
+        using var anonymous = await browser.GetAsync("/api/v1/invoicing/invoices", Ct);
+        // The supplier's invoice webhook is not exposed through the gateway yet (plan 07/08): without a session or key it is refused here.
+        using var webhook = await browser.PostAsync("/api/v1/invoicing/webhooks/supplier", new StringContent("{}"), Ct);
+        using var withKey = await browser.SendAsync(
+            Request(HttpMethod.Get, "/api/v1/invoicing/invoices", headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+
+        config.ShouldContain("/openapi/invoicing/v1.json");
+        config.ShouldContain("\"invoicing\"");
+        await ExpectOkAsync(document);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the invoicing API needs a session or key like every API");
+        webhook.StatusCode.ShouldNotBe(HttpStatusCode.OK);
+        await ExpectOkAsync(withKey);
+        _gateway.Stub.Last.Path.ShouldBe("/api/v1/invoicing/invoices");
+    }
+
     // ---- the rest of the contract ----
 
     [Fact]

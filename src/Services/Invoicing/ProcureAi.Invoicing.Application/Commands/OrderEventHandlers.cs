@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts.Purchasing;
@@ -23,14 +24,62 @@ internal static class OrderEvents
             .Where(i => i.TenantId == tenantId && i.OrderId == orderId)
             .ToListAsync(cancellationToken);
 
-    /// <summary>Publishes what a re-match changed: <c>InvoiceReceived</c> for invoices that were waiting for the order, then the outcome.</summary>
-    public static async Task PublishAsync(IMessageBus bus, IReadOnlyList<MatchOutcome> outcomes, DateTimeOffset now)
+    /// <summary>The invoices of both lists, each once (an invoice adopted in this unit of work is not in the database's answer yet).</summary>
+    public static List<Invoice> Union(IEnumerable<Invoice> loaded, IEnumerable<Invoice> more) => [.. loaded.Concat(more).DistinctBy(i => i.Id)];
+
+    /// <summary>
+    /// Gives the invoices that wait for <paramref name="order"/> without a tenant (they came by webhook before the order) the order's
+    /// tenant and their arrival numbers in it, in the order they arrived. A waiting invoice whose number the tenant already has for this
+    /// supplier (a second copy that came by webhook before the order was known) is the supplier's mistake: it is removed and logged,
+    /// as it would have been refused had the tenant been known. Returns the adopted invoices (tracked, not yet saved).
+    /// </summary>
+    public static async Task<List<Invoice>> AdoptWaitingAsync(
+        IInvoicingDbContext db, ITenantSequence sequence, OrderView order, ILogger logger, CancellationToken cancellationToken)
+    {
+        var waiting = await db.Invoices.IgnoreQueryFilters().Include(i => i.Lines)
+            .Where(i => i.OrderId == order.Id && i.TenantId == Invoice.UnassignedTenant)
+            .OrderBy(i => i.ReceivedAt).ThenBy(i => i.Id)
+            .ToListAsync(cancellationToken);
+        var adopted = new List<Invoice>();
+        foreach (var invoice in waiting)
+        {
+            var supplier = invoice.SupplierId.Length == 0 ? order.SupplierId : invoice.SupplierId;
+            var taken = adopted.Any(a => a.SupplierId == supplier && a.SupplierInvoiceNumber == invoice.SupplierInvoiceNumber)
+                || await db.Invoices.IgnoreQueryFilters().AnyAsync(
+                    i => i.TenantId == order.TenantId && i.SupplierId == supplier && i.SupplierInvoiceNumber == invoice.SupplierInvoiceNumber,
+                    cancellationToken);
+            if (taken)
+            {
+                logger.LogWarning(
+                    "Invoice {InvoiceId} waited for order {OrderId}, but the tenant already has invoice number {Number} of {Supplier}; removed",
+                    invoice.Id, order.Id, invoice.SupplierInvoiceNumber, supplier);
+                db.Invoices.Remove(invoice);
+                continue;
+            }
+
+            invoice.AssignTenant(order.TenantId, await sequence.NextAsync(order.TenantId, "invoice", cancellationToken));
+            adopted.Add(invoice);
+        }
+
+        return adopted;
+    }
+
+    /// <summary>
+    /// Publishes what a re-match changed: <c>InvoiceReceived</c> for invoices that were waiting for the order, then the outcome. Each
+    /// new mismatch is counted.
+    /// </summary>
+    public static async Task PublishAsync(IMessageBus bus, IInvoicingMetrics metrics, IReadOnlyList<MatchOutcome> outcomes, DateTimeOffset now)
     {
         foreach (var outcome in outcomes.Where(o => o.Changed))
         {
             if (outcome.WasAwaitingOrder)
             {
                 await bus.PublishAsync(InvoicingMapper.ToReceivedEvent(outcome.Invoice, now));
+            }
+
+            if (outcome.Invoice.Status == InvoiceStatus.Mismatched)
+            {
+                metrics.InvoiceMismatched(outcome.Invoice.Source);
             }
 
             await bus.PublishAsync(InvoicingMapper.ToOutcomeEvent(outcome.Invoice, now));
@@ -42,12 +91,14 @@ internal static class OrderEvents
 public static class PurchaseOrderCreatedHandler
 {
     /// <summary>
-    /// A copy that exists already means a repeat: nothing happens. Otherwise the copy is stored and the invoices waiting for this
-    /// order are matched in arrival order, with the outcomes published together with the save.
+    /// A copy that exists already means a repeat: nothing happens. Otherwise the copy is stored, the invoices that came by webhook
+    /// before it get the order's tenant (<see cref="OrderEvents.AdoptWaitingAsync"/>) and all of the order's invoices are matched in
+    /// arrival order, with the outcomes published together with the save.
     /// </summary>
     public static async Task Handle(
-        PurchaseOrderCreated message, IInvoicingDbContext db, IMessageBus bus, ICacheInvalidator cache,
-        IOptions<InvoicingOptions> options, TimeProvider time, CancellationToken cancellationToken)
+        PurchaseOrderCreated message, IInvoicingDbContext db, ITenantSequence sequence, IMessageBus bus, ICacheInvalidator cache,
+        IInvoicingMetrics metrics, IOptions<InvoicingOptions> options, TimeProvider time, ILogger<PurchaseOrderCreated> logger,
+        CancellationToken cancellationToken)
     {
         var exists = await db.Orders.IgnoreQueryFilters()
             .AnyAsync(o => o.TenantId == message.TenantId && o.Id == message.OrderId, cancellationToken);
@@ -62,11 +113,12 @@ public static class PurchaseOrderCreatedHandler
             [.. message.Lines.Select(l => new OrderViewLine(l.LineNo, l.Sku, l.Description, l.Quantity, Money.Zar(l.UnitPriceExclVat)))]);
         db.Orders.Add(order);
 
+        var adopted = await OrderEvents.AdoptWaitingAsync(db, sequence, order, logger, cancellationToken);
         var invoices = await OrderEvents.LoadInvoicesAsync(db, message.TenantId, message.OrderId, cancellationToken);
-        var outcomes = MatchDecisions.Rematch(order, invoices, Money.Zar(options.Value.PriceTolerance));
+        var outcomes = MatchDecisions.Rematch(order, OrderEvents.Union(invoices, adopted), Money.Zar(options.Value.PriceTolerance));
         await cache.RemoveAfterCommitAsync(InvoicingCacheTag.Of(message.TenantId, outcomes.Select(o => o.Invoice.Id)));
         await db.SaveChangesAsync(cancellationToken);
-        await OrderEvents.PublishAsync(bus, outcomes, time.GetUtcNow());
+        await OrderEvents.PublishAsync(bus, metrics, outcomes, time.GetUtcNow());
     }
 }
 
@@ -78,7 +130,7 @@ public static class GoodsReceivedHandler
     /// published. Without the copy of the order yet, <see cref="OrderViewMissingException"/> sends the message back for a later retry.
     /// </summary>
     public static async Task Handle(
-        GoodsReceived message, IInvoicingDbContext db, IMessageBus bus, ICacheInvalidator cache,
+        GoodsReceived message, IInvoicingDbContext db, IMessageBus bus, ICacheInvalidator cache, IInvoicingMetrics metrics,
         IOptions<InvoicingOptions> options, TimeProvider time, CancellationToken cancellationToken)
     {
         var order = await OrderEvents.LoadViewAsync(db, message.TenantId, message.OrderId, cancellationToken)
@@ -89,7 +141,7 @@ public static class GoodsReceivedHandler
         var outcomes = MatchDecisions.Rematch(order, invoices, Money.Zar(options.Value.PriceTolerance));
         await cache.RemoveAfterCommitAsync(InvoicingCacheTag.Of(message.TenantId, outcomes.Select(o => o.Invoice.Id)));
         await db.SaveChangesAsync(cancellationToken);
-        await OrderEvents.PublishAsync(bus, outcomes, time.GetUtcNow());
+        await OrderEvents.PublishAsync(bus, metrics, outcomes, time.GetUtcNow());
     }
 }
 
@@ -170,7 +222,8 @@ public static class ExportPaymentHandler
     /// </summary>
     public static async Task Handle(
         ExportPayment command, IInvoicingDbContext db, IErpGateway gateway, IMessageBus bus, ICacheInvalidator cache,
-        IOptions<InvoicingOptions> options, TimeProvider time, ILogger<ExportPayment> logger, CancellationToken cancellationToken)
+        IInvoicingMetrics metrics, IOptions<InvoicingOptions> options, TimeProvider time, ILogger<ExportPayment> logger,
+        CancellationToken cancellationToken)
     {
         var invoice = await db.Invoices.IgnoreQueryFilters().Include(i => i.Lines).Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Payments.Any(p => p.Id == command.PaymentId), cancellationToken);
@@ -192,6 +245,7 @@ public static class ExportPaymentHandler
         }
         catch (ErpUnavailableException exception)
         {
+            metrics.ErpExportFailed("unavailable");
             var delay = options.Value.ErpExport.DelayFor(command.Attempt, Random.Shared);
             payment.RecordExportFailure(exception.Message);
             await db.SaveChangesAsync(cancellationToken);
@@ -201,6 +255,7 @@ public static class ExportPaymentHandler
         }
         catch (ErpRejectedException exception)
         {
+            metrics.ErpExportFailed("rejected");
             payment.RecordExportFailure(exception.Message);
             await db.SaveChangesAsync(cancellationToken);
             logger.LogError(exception, "ERP refused payment {PaymentId}; not retried", payment.Id);
