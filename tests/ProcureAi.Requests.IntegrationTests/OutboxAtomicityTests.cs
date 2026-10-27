@@ -28,7 +28,7 @@ public sealed class OutboxAtomicityTests(InfraFixture infra) : IAsyncLifetime
     public async ValueTask DisposeAsync() => await _app.DisposeAsync();
 
     private Task<RequestDto> CreateAsync() => _app.Bus.InvokeAsync<RequestDto>(
-        new CreateRequest("Laptops", "CC-100", "sup-1", [new LineInput("LAP-1", "Laptop", 3, 25200m)]));
+        new CreateRequest("Laptops", "CC-100", "contoso-hardware", [new LineInput("LAP-1", 3)]));
 
     [Fact]
     public async Task Handler_that_publishes_and_then_fails_leaves_no_message_and_no_state_change()

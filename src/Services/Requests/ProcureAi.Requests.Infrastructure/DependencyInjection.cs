@@ -62,6 +62,18 @@ public static class DependencyInjection
     }
 
     /// <summary>
+    /// The supplier catalog (<see cref="ISupplierCatalog"/>): a client of the Suppliers service, with retries and timeouts and the
+    /// cache durations from the <c>SuppliersClient</c> section. Registered by the API (it needs <c>Auth:Internal</c>).
+    /// </summary>
+    public static IServiceCollection AddSupplierCatalog(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddValidatedOptions<SuppliersClientOptions>(configuration, SuppliersClientOptions.SectionName);
+        services.AddProcureAiServiceClient<ISupplierCatalog, SuppliersClient>(SuppliersClient.SuppliersServiceName)
+            .WithResilienceFrom<SuppliersClientOptions>();
+        return services;
+    }
+
+    /// <summary>
     /// Wolverine setup (shared messaging building block): handler discovery, Postgres outbox/inbox in the requests
     /// database, EF Core transactions around handlers, RabbitMQ, <c>RequestSubmitted</c> and <c>RequestCancelled</c> going to
     /// the <c>requests</c> exchange (where the approval saga listens), and the saga's outcome arriving on
@@ -77,6 +89,7 @@ public static class DependencyInjection
         options.ListenToRabbitQueue(ApprovalsQueue, queue => queue.BindExchange(Exchanges.Approvals));
         // A typed HttpClient (a factory registration Wolverine cannot inline): the submit handler resolves it from the container.
         options.CodeGeneration.AlwaysUseServiceLocationFor<IApprovalPreview>();
+        options.CodeGeneration.AlwaysUseServiceLocationFor<ISupplierCatalog>();
 
         var section = $"{RequestsOptions.SectionName}:{nameof(RequestsOptions.ConcurrencyRetry)}";
         var retry = configuration.GetSection(RequestsOptions.SectionName).Get<RequestsOptions>()?.ConcurrencyRetry

@@ -57,8 +57,8 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
     {
         title,
         costCenterCode = "CC-100",
-        supplierId = "sup-1",
-        lines = new[] { new { sku = "LAP-1", description = "Laptop", quantity = 3, unitPriceExclVat = 25200m } },
+        supplierId = "contoso-hardware",
+        lines = new[] { new { sku = "LAP-1", quantity = 3 } },
     };
 
     private static HttpRequestMessage Req(
@@ -665,7 +665,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
 
         // ... but she can create and submit on IT-200, and so can the key.
         var own = await _client.SendAsync(
-            Req(HttpMethod.Post, Requests, new { title = "Own", costCenterCode = "IT-200", supplierId = "s", lines = new[] { new { sku = "A", description = "a", quantity = 1, unitPriceExclVat = 10m } } },
+            Req(HttpMethod.Post, Requests, new { title = "Own", costCenterCode = "IT-200", supplierId = "contoso-hardware", lines = new[] { new { sku = "A", quantity = 1 } } },
                 bearer: rita, idempotencyKey: Guid.NewGuid().ToString()), Ct);
         own.StatusCode.ShouldBe(HttpStatusCode.Created);
         var ownDto = (await own.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
@@ -685,10 +685,10 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         infra.Access.SetCostCenters(tenant, "maria", "IT-200");
         infra.Access.SetCostCenters(tenant, "demo-a", "DEMO-100");
         infra.Access.SetCostCenters(tenant, "demo-b", "DEMO-100");
-        var draftBody = new { title = "Mine", costCenterCode = "IT-200", supplierId = "s", lines = new[] { new { sku = "A", description = "a", quantity = 1, unitPriceExclVat = 10m } } };
+        var draftBody = new { title = "Mine", costCenterCode = "IT-200", supplierId = "contoso-hardware", lines = new[] { new { sku = "A", quantity = 1 } } };
         var tomDraft = await CreateWithAsync(draftBody, TestAuth.CreateToken("tom", tenant, "requester"));
         var demoDraft = await CreateWithAsync(
-            new { title = "Demo", costCenterCode = "DEMO-100", supplierId = "s", lines = draftBody.lines }, TestAuth.CreateToken("demo-a", tenant, "requester"));
+            new { title = "Demo", costCenterCode = "DEMO-100", supplierId = "contoso-hardware", lines = draftBody.lines }, TestAuth.CreateToken("demo-a", tenant, "requester"));
 
         foreach (var (draft, intruder) in new[] { (tomDraft, "maria"), (demoDraft, "demo-b") })
         {
@@ -761,7 +761,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
     {
         var tenant = NewTenant("rules");
         var created = await _client.SendAsync(
-            Req(HttpMethod.Post, Requests, new { title = "Empty", costCenterCode = "CC-1", supplierId = "s", lines = Array.Empty<object>() }, tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+            Req(HttpMethod.Post, Requests, new { title = "Empty", costCenterCode = "CC-1", supplierId = "contoso-hardware", lines = Array.Empty<object>() }, tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct);
         var dto = (await created.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
 
         var submit = await _client.SendAsync(

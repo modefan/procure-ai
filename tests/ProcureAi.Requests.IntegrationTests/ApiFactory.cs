@@ -53,7 +53,7 @@ public sealed class ApiFactory(InfraFixture infra, CapturingSink? sink = null, I
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
-        foreach (var (key, value) in infra.Access.Settings.Concat(infra.Approvals.Settings))
+        foreach (var (key, value) in infra.Access.Settings.Concat(infra.Approvals.Settings).Concat(infra.Suppliers.Settings))
         {
             builder.UseSetting(key, value);
         }

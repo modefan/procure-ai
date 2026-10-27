@@ -9,13 +9,13 @@ namespace ProcureAi.Audit.IntegrationTests;
 /// with the stub Access and Approvals. Its writes go through the audit interceptor, so they are app changes for the CDC tests.
 /// </summary>
 public sealed class RequestsApiFactory(
-    AuditInfraFixture infra, string requestsDbConnectionString, StubAccessServer access, StubApprovalsServer approvals)
+    AuditInfraFixture infra, string requestsDbConnectionString, StubAccessServer access, StubApprovalsServer approvals, StubSuppliersServer suppliers)
     : ServiceApiFactory<RequestsApi::Program>("requestsdb", requestsDbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
-        foreach (var (key, value) in access.Settings.Concat(approvals.Settings))
+        foreach (var (key, value) in access.Settings.Concat(approvals.Settings).Concat(suppliers.Settings))
         {
             builder.UseSetting(key, value);
         }

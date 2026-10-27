@@ -36,7 +36,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
     public async ValueTask DisposeAsync() => await _app.DisposeAsync();
 
     private static CreateRequest NewCreate(string title = "Laptops") =>
-        new(title, "CC-100", "sup-1", [new LineInput("LAP-1", "Laptop", 3, 25200m)]);
+        new(title, "CC-100", "contoso-hardware", [new LineInput("LAP-1", 3)]);
 
     private async Task<RequestDto> CreateAsync(string tenant, string user = "alice")
     {
@@ -62,7 +62,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         var created = await CreateAsync("audit-update", "alice");
 
         await _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
-            created.Id, created.Version, "Monitors", [new LineInput("LAP-1", "Laptop", 3, 25200m)]));
+            created.Id, created.Version, "Monitors", [new LineInput("LAP-1", 3)]));
 
         var update = (await AuditOfAsync(created.Id)).Where(e => e.Operation == AuditOperation.Update).ShouldHaveSingleItem();
         update.UserId.ShouldBe("alice");
@@ -96,7 +96,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
 
         // Same title; quantity 3 is the very same line again (nothing changed at all), 5 changes only the line.
         var updated = await _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
-            created.Id, created.Version, "Laptops", [new LineInput("LAP-1", "Laptop", quantity, 25200m)]));
+            created.Id, created.Version, "Laptops", [new LineInput("LAP-1", quantity)]));
 
         updated.Version.ShouldNotBe(created.Version, "the request row was written");
         var update = (await AuditOfAsync(created.Id)).Where(e => e.Operation == AuditOperation.Update).ShouldHaveSingleItem();
@@ -118,8 +118,8 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
             {
                 title = "On behalf",
                 costCenterCode = "CC-100",
-                supplierId = "sup-1",
-                lines = new[] { new { sku = "LAP-1", description = "Laptop", quantity = 3, unitPriceExclVat = 25200m } },
+                supplierId = "contoso-hardware",
+                lines = new[] { new { sku = "LAP-1", quantity = 3 } },
             }),
         };
         request.Headers.Add("X-Api-Key", TestAuth.ApiKey);
@@ -143,8 +143,8 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
     public async Task Audit_entry_commits_with_the_change()
     {
         var tenant = "audit-rollback";
-        var first = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(1), "alice", "First", "CC-1", "sup-1");
-        var duplicate = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(1), "alice", "Same number", "CC-1", "sup-1");
+        var first = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(1), "alice", "First", "CC-1", "contoso-hardware");
+        var duplicate = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(1), "alice", "Same number", "CC-1", "contoso-hardware");
 
         var options = new DbContextOptionsBuilder<RequestsDbContext>()
             .UseNpgsql(infra.RequestsDbConnectionString)
@@ -153,7 +153,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         var caller = new TestCaller { UserId = "alice", TenantId = tenant };
 
         // Positive control: a valid save writes its audit row, so the empty result below really comes from the rollback.
-        var control = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(2), "alice", "Control", "CC-1", "sup-1");
+        var control = PurchaseRequest.CreateDraft(tenant, RequestNumber.From(2), "alice", "Control", "CC-1", "contoso-hardware");
         await using (var db = new RequestsDbContext(options, caller))
         {
             db.PurchaseRequests.Add(control);
@@ -216,7 +216,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         var created = await CreateAsync("cdc-update");
 
         await _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
-            created.Id, created.Version, "Chairs", [new LineInput("LAP-1", "Laptop", 3, 25200m)]));
+            created.Id, created.Version, "Chairs", [new LineInput("LAP-1", 3)]));
 
         var message = await cdc.WaitForAsync(
             m => m.RoutingKey == "requestsdb.public.purchase_requests"
@@ -325,8 +325,8 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         var two = _app.NewScope("user-two", "scope-tenant-2");
         using var scopeOne = one.Scope;
         using var scopeTwo = two.Scope;
-        var requestOne = PurchaseRequest.CreateDraft("scope-tenant-1", RequestNumber.From(1), "user-one", "One", "CC-1", "sup-1");
-        var requestTwo = PurchaseRequest.CreateDraft("scope-tenant-2", RequestNumber.From(1), "user-two", "Two", "CC-1", "sup-1");
+        var requestOne = PurchaseRequest.CreateDraft("scope-tenant-1", RequestNumber.From(1), "user-one", "One", "CC-1", "contoso-hardware");
+        var requestTwo = PurchaseRequest.CreateDraft("scope-tenant-2", RequestNumber.From(1), "user-two", "Two", "CC-1", "contoso-hardware");
         one.Db.PurchaseRequests.Add(requestOne);
         two.Db.PurchaseRequests.Add(requestTwo);
 

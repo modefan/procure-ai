@@ -19,6 +19,7 @@ public static class RequestsApi
             builder.Services.AddValidatedOptions<RequestsOptions>(builder.Configuration, RequestsOptions.SectionName);
             builder.Services.AddRequestsInfrastructure(builder.Configuration);
             builder.Services.AddApprovalPreview(builder.Configuration);
+            builder.Services.AddSupplierCatalog(builder.Configuration);
             builder.Host.UseWolverine(options => options.ConfigureRequests(builder.Configuration, ServiceName));
         });
 }

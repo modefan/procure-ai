@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using ProcureAi.BuildingBlocks.Application;
-using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Application.Dtos;
 using ProcureAi.Requests.Application.Mapping;
@@ -14,10 +13,22 @@ public sealed record UpdateRequest(Guid Id, uint ExpectedVersion, string Title, 
 public static class UpdateRequestHandler
 {
     public static async Task<RequestDto> Handle(
-        UpdateRequest command, IRequestsDbContext db, ICallerContext caller, CancellationToken cancellationToken)
+        UpdateRequest command, IRequestsDbContext db, ICallerContext caller, ISupplierCatalog catalog, CancellationToken cancellationToken)
     {
         var request = await db.LoadAsync(command.Id, command.ExpectedVersion, caller, cancellationToken);
         request.UpdateTitle(command.Title);
+
+        // A line the draft already has keeps its description and locked price, whatever the catalog says now; only SKUs new to
+        // the draft are looked up (and so checked against the supplier).
+        var locked = new Dictionary<string, RequestLine>(StringComparer.Ordinal);
+        foreach (var existing in request.Lines)
+        {
+            locked.TryAdd(existing.Sku, existing);
+        }
+
+        var added = command.Lines.Select(l => l.Sku).Where(s => !locked.ContainsKey(s)).Distinct(StringComparer.Ordinal).ToList();
+        var prices = await LinePricing.LookUpAsync(catalog, request.SupplierId, added, request.TenantId, cancellationToken);
+
         foreach (var existing in request.Lines.ToList())
         {
             request.RemoveLine(existing.LineNo);
@@ -25,7 +36,14 @@ public static class UpdateRequestHandler
 
         foreach (var line in command.Lines)
         {
-            request.AddLine(line.Sku, line.Description, line.Quantity, Money.Zar(line.UnitPriceExclVat));
+            if (locked.TryGetValue(line.Sku, out var kept))
+            {
+                request.AddLine(kept.Sku, kept.Description, line.Quantity, kept.UnitPriceExclVat);
+            }
+            else
+            {
+                LinePricing.AddFromCatalog(request, line, prices[line.Sku]);
+            }
         }
 
         db.MarkModified(request);

@@ -517,8 +517,8 @@ public sealed class CdcTests(AuditApp app)
             {
                 title,
                 costCenterCode = "CC-100",
-                supplierId = "sup-1",
-                lines = new[] { new { sku = "LAP-1", description = "Laptop", quantity = 2, unitPriceExclVat = 15000m } },
+                supplierId = "contoso-hardware",
+                lines = new[] { new { sku = "LAP-1", quantity = 2 } },
             }),
         };
         AsTomWithTheAdminKey(request, tenant);

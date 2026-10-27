@@ -39,7 +39,7 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    `Every_service_references_and_waits_for_the_services_it_calls`.
    With `CapturedTables` set, it also adds the database's own Debezium Server (see "Change data capture" below).
 7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `MongoFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
-   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `RabbitRecorder` (records what a
+   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `StubSuppliersServer` (Suppliers' internal item lookup; a default catalog for every tenant, settable per tenant), `RabbitRecorder` (records what a
    service publishes and sends) and `RabbitContainer` (a broker of its own to stop, for outage tests). Never copy a fixture.
 8. **Gateway**: add the YARP route and cluster, and the service's OpenAPI document to the Swagger dropdown.
 

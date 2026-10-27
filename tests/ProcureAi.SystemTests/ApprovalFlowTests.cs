@@ -15,14 +15,14 @@ namespace ProcureAi.SystemTests;
 public sealed class ApprovalFlowTests(SystemFixture system)
 {
     private const string CostCenter = "IT-200";
-    private const decimal TotalInclVat = 30_000.00m;
+    private const decimal TotalInclVat = 28_980.00m;
 
     // Messages travel through RabbitMQ, CDC through Debezium; attribution of an unmatched change waits Audit:Matching:Grace (30 s).
     private static readonly TimeSpan FlowTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan AttributionTimeout = TimeSpan.FromSeconds(120);
 
     [Fact]
-    public async Task R30000_request_goes_from_submit_to_approved()
+    public async Task R28980_request_goes_from_submit_to_approved()
     {
         system.RequireReady();
         using var tomRequests = system.Service("requests", SystemFixture.Tom);
@@ -30,18 +30,18 @@ public sealed class ApprovalFlowTests(SystemFixture system)
         var before = await AvailableAsync(tomBudgets);
 
         // Tom raises the request as two lines, then edits it to one line of the same total, keeping the title (an edit that
-        // changes no column of the request row itself), and submits: R 26 086,96 excl. VAT = R 30 000,00 incl.
+        // changes no column of the request row itself), and submits: R 25 200,00 excl. VAT = R 28 980,00 incl. (LAP-14 of the demo catalog)
         var (draft, draftTag) = await tomRequests.SendAsync<RequestView>(HttpMethod.Post, "/api/v1/requests", HttpStatusCode.Created, new
         {
             title = "Developer laptop",
             costCenterCode = CostCenter,
-            supplierId = "sup-1",
-            lines = new[] { new { sku = "LAP-15", description = "Laptop 15 inch", quantity = 2, unitPriceExclVat = 13_043.48m } },
+            supplierId = "contoso-hardware",
+            lines = new[] { new { sku = "LAP-14", quantity = 2 } },
         });
         var (edited, editedTag) = await tomRequests.SendAsync<RequestView>(HttpMethod.Put, $"/api/v1/requests/{draft.Id}", HttpStatusCode.OK, new
         {
             title = "Developer laptop",
-            lines = new[] { new { sku = "LAP-15", description = "Laptop 15 inch", quantity = 1, unitPriceExclVat = 26_086.96m } },
+            lines = new[] { new { sku = "LAP-14", quantity = 1 } },
         }, draftTag);
         edited.TotalInclVat.ShouldBe(TotalInclVat);
         var (submitted, _) = await tomRequests.SendAsync<RequestView>(
@@ -55,7 +55,7 @@ public sealed class ApprovalFlowTests(SystemFixture system)
         var approved = await EventuallyAsync(
             () => tomRequests.GetAsync<RequestView>($"/api/v1/requests/{draft.Id}"), r => r.Body.Status == "Approved", "request approved");
         approved.Body.ApprovedAt.ShouldNotBeNull();
-        (await EventuallyAsync(() => AvailableAsync(tomBudgets), a => a == before - TotalInclVat, "IT-200 lowered by R 30 000,00"))
+        (await EventuallyAsync(() => AvailableAsync(tomBudgets), a => a == before - TotalInclVat, "IT-200 lowered by R 28 980,00"))
             .ShouldBe(before - TotalInclVat);
 
         // Audit: every business event of the request, with readable summaries.
@@ -66,11 +66,11 @@ public sealed class ApprovalFlowTests(SystemFixture system)
             "full history");
         history.Select(e => e.Type).Order().ShouldBe(
             new[] { "RequestSubmitted", "BudgetReserved", "ApprovalRequested", "ApprovalRequested", "ApprovalStepApproved", "ApprovalStepApproved", "RequestApproved" }.Order());
-        history.ShouldContain(e => e.Type == "RequestSubmitted" && e.Summary.StartsWith("Submitted by Tom Requester: Developer laptop (R 30 000,00 incl. VAT"));
-        history.ShouldContain(e => e.Type == "BudgetReserved" && e.Summary.StartsWith("R 30 000,00 reserved on IT-200"));
+        history.ShouldContain(e => e.Type == "RequestSubmitted" && e.Summary.StartsWith("Submitted by Tom Requester: Developer laptop (R 28 980,00 incl. VAT"));
+        history.ShouldContain(e => e.Type == "BudgetReserved" && e.Summary.StartsWith("R 28 980,00 reserved on IT-200"));
         history.ShouldContain(e => e.Type == "ApprovalStepApproved" && e.UserId == SystemFixture.Maria && e.Summary == "Approved by Maria Manager (step 1, Manager)");
         history.ShouldContain(e => e.Type == "ApprovalStepApproved" && e.UserId == SystemFixture.Dept && e.Summary == "Approved by Dept Head (step 2, Department head)");
-        history.ShouldContain(e => e.Type == "RequestApproved" && e.Summary == "Request approved (R 30 000,00 incl. VAT)");
+        history.ShouldContain(e => e.Type == "RequestApproved" && e.Summary == "Request approved (R 28 980,00 incl. VAT)");
 
         // Data changes: every captured row change of the request is matched to the app user who caused it, none is "outside the app".
         var changes = await ResolvedDataChangesAsync(tomAudit, draft.Id);
@@ -95,8 +95,8 @@ public sealed class ApprovalFlowTests(SystemFixture system)
         {
             title = "Second monitor",
             costCenterCode = CostCenter,
-            supplierId = "sup-1",
-            lines = new[] { new { sku = "MON-27", description = "Monitor 27 inch", quantity = 1, unitPriceExclVat = 26_086.96m } },
+            supplierId = "contoso-hardware",
+            lines = new[] { new { sku = "LAP-14", quantity = 1 } },
         });
         await tomRequests.SendAsync<RequestView>(HttpMethod.Post, $"/api/v1/requests/{draft.Id}/submit", HttpStatusCode.Accepted, ifMatch: tag);
         await EventuallyAsync(() => AvailableAsync(tomBudgets), a => a == before - TotalInclVat, "budget reserved");
@@ -116,7 +116,7 @@ public sealed class ApprovalFlowTests(SystemFixture system)
         var history = await EventuallyAsync(
             () => HistoryAsync(tomAudit, draft.Id), h => h.Any(e => e.Type == "BudgetReleased") && h.Any(e => e.Type == "RequestRejected"), "history");
         history.ShouldContain(e => e.Type == "RequestRejected" && e.UserId == SystemFixture.Maria && e.Summary == "Rejected by Maria Manager: Not in this year's plan");
-        history.ShouldContain(e => e.Type == "BudgetReleased" && e.Summary.StartsWith("R 30 000,00 released on IT-200"));
+        history.ShouldContain(e => e.Type == "BudgetReleased" && e.Summary.StartsWith("R 28 980,00 released on IT-200"));
         history.ShouldNotContain(e => e.Type == "RequestApproved");
 
         var changes = await ResolvedDataChangesAsync(tomAudit, draft.Id);
@@ -180,7 +180,7 @@ public sealed class ApprovalFlowTests(SystemFixture system)
         var step = await InboxStepAsync(approvals, requestId);
         step.StepNo.ShouldBe(expectedStep);
         step.Level.ShouldBe(expectedLevel);
-        Plain(step.TotalInclVatDisplay).ShouldBe("R 30 000,00");
+        Plain(step.TotalInclVatDisplay).ShouldBe("R 28 980,00");
         step.CanAct.ShouldBeTrue(step.CannotActReason);
         var (acted, _) = await approvals.SendAsync<StepView>(
             HttpMethod.Post, $"/api/v1/approvals/{step.Id}/approve", HttpStatusCode.OK, ifMatch: $"\"{step.Version}\"");

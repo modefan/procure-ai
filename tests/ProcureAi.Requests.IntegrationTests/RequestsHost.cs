@@ -6,6 +6,7 @@ using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Requests.Application.Abstractions;
 using ProcureAi.Requests.Infrastructure;
+using ProcureAi.Testing;
 using Wolverine;
 
 namespace ProcureAi.Requests.IntegrationTests;
@@ -72,6 +73,8 @@ public sealed class RequestsHost : IAsyncDisposable
                 services.AddRequestsInfrastructure(context.Configuration);
                 // No HTTP here, so no Approvals to ask: every submission has an eligible approver.
                 services.AddSingleton<IApprovalPreview, AlwaysPossiblePreview>();
+                // Nor Suppliers: the default demo catalog (what the stub Suppliers offers) answers for every tenant.
+                services.AddSingleton<ISupplierCatalog, DefaultCatalog>();
                 // Nor Access: the fake says which cost centers each user acts for.
                 services.AddSingleton<FakeAccessDirectory>();
                 services.AddSingleton<IAccessDirectory>(sp => sp.GetRequiredService<FakeAccessDirectory>());
@@ -105,6 +108,24 @@ public sealed class AlwaysPossiblePreview : IApprovalPreview
     public Task<ApprovalPreviewResult> CheckAsync(
         string tenantId, string costCenterCode, decimal totalInclVat, string requesterId, CancellationToken cancellationToken) =>
         Task.FromResult(new ApprovalPreviewResult(true, null));
+}
+
+/// <summary>The supplier catalog of a host without Suppliers: the stub's default supplier and items, for every tenant.</summary>
+public sealed class DefaultCatalog : ISupplierCatalog
+{
+    public Task<SupplierItems?> GetItemsAsync(
+        string supplierCode, IReadOnlyCollection<string> skus, string tenantId, CancellationToken cancellationToken)
+    {
+        if (supplierCode != StubSuppliersServer.DefaultSupplier)
+        {
+            return Task.FromResult<SupplierItems?>(null);
+        }
+
+        var items = StubSuppliersServer.DefaultItems
+            .Where(i => skus.Contains(i.Sku))
+            .ToDictionary(i => i.Sku, i => new CatalogPrice(i.Description, i.UnitPriceExclVat, i.Active));
+        return Task.FromResult<SupplierItems?>(new SupplierItems(supplierCode, "Contoso Hardware", true, items));
+    }
 }
 
 /// <summary>Access for a host without HTTP: only the cost centers of a user are known.</summary>

@@ -118,6 +118,9 @@ public sealed class AuditApp : IAsyncLifetime
 
     public StubApprovalsServer Approvals { get; private set; } = null!;
 
+    /// <summary>The Suppliers catalog Requests prices its lines from.</summary>
+    public StubSuppliersServer Suppliers { get; private set; } = null!;
+
     /// <summary>What the Audit service logged (every test shares the one host).</summary>
     public CapturingSink Logs { get; } = new();
 
@@ -144,6 +147,7 @@ public sealed class AuditApp : IAsyncLifetime
         await _infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
         Approvals = await StubApprovalsServer.StartAsync();
+        Suppliers = await StubSuppliersServer.StartAsync();
         _factory = new AuditApiFactory(_infra, Access, Logs, GenerationFaults.Install);
         Client = _factory.CreateClient();
     }
@@ -166,7 +170,7 @@ public sealed class AuditApp : IAsyncLifetime
             RequestsDbConnectionString = await _infra.AddCapturedDatabaseAsync(
                 RequestsDb, connectionString => RequestsDatabase.MigrateAsync(connectionString), RequestsTables);
             BudgetsDbConnectionString = await _infra.AddCapturedDatabaseAsync(BudgetsDb, MigrateBudgetsAsync, BudgetsTables);
-            _requests = new RequestsApiFactory(_infra, RequestsDbConnectionString, Access, Approvals);
+            _requests = new RequestsApiFactory(_infra, RequestsDbConnectionString, Access, Approvals, Suppliers);
             RequestsClient = _requests.CreateClient();
         }
         finally
@@ -199,6 +203,7 @@ public sealed class AuditApp : IAsyncLifetime
         await _factory.DisposeAsync();
         await Access.DisposeAsync();
         await Approvals.DisposeAsync();
+        await Suppliers.DisposeAsync();
         await _infra.DisposeAsync();
     }
 

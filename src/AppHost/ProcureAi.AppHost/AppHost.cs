@@ -137,11 +137,12 @@ var suppliersApi = builder.AddProcureAiService<Projects.ProcureAi_Suppliers_Api>
     new ServiceSpec("suppliers", ResourceNames.SuppliersDb, CapturedTables: [], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),
     shared)
     .CallsServices(accessApi);
-// Requests checks with Approvals that a request can be approved before it submits it (503 when Approvals cannot be found).
+// Requests checks with Approvals that a request can be approved before it submits it, and takes line descriptions and prices from
+// the Suppliers catalog (503 when either cannot be found).
 var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
     shared)
-    .CallsServices(accessApi, approvalsApi);
+    .CallsServices(accessApi, approvalsApi, suppliersApi);
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).

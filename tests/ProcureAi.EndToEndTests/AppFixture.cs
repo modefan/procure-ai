@@ -130,8 +130,8 @@ public sealed class AppFixture : IAsyncLifetime
             {
                 title,
                 costCenterCode = "CC-100",
-                supplierId = "sup-1",
-                lines = new[] { new { sku = "LAP-1", description = "Laptop", quantity = 3, unitPriceExclVat = 25200m } },
+                supplierId = "contoso-hardware",
+                lines = new[] { new { sku = "LAP-14", quantity = 3 } },
             }),
         };
         message.Headers.Add("X-Api-Key", _adminApiKey);

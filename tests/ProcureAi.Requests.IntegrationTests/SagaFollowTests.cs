@@ -102,8 +102,8 @@ public sealed class SagaFollowTests(InfraFixture infra) : IAsyncLifetime
         {
             title = "Laptops",
             costCenterCode = "CC-100",
-            supplierId = "sup-1",
-            lines = new[] { new { sku = "LAP-1", description = "Laptop", quantity = 3, unitPriceExclVat = 25200m } },
+            supplierId = "contoso-hardware",
+            lines = new[] { new { sku = "LAP-1", quantity = 3 } },
         };
         var response = await _client.SendAsync(Req(HttpMethod.Post, Requests, tenant, body, bearer), Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));

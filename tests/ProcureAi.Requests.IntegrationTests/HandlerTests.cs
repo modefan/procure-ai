@@ -27,7 +27,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
     public async ValueTask DisposeAsync() => await _app.DisposeAsync();
 
     private static CreateRequest NewCreate(string title = "Laptops") =>
-        new(title, "CC-100", "sup-1", [new LineInput("LAP-1", "Laptop", 3, 25200m)]);
+        new(title, "CC-100", "contoso-hardware", [new LineInput("LAP-1", 3)]);
 
     private Task<RequestDto> Create(CreateRequest? command = null) =>
         _app.Bus.InvokeAsync<RequestDto>(command ?? NewCreate());
@@ -46,7 +46,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         loaded.Title.ShouldBe("Laptops");
         loaded.Status.ShouldBe(RequestStatus.Draft);
         loaded.CostCenterCode.ShouldBe("CC-100");
-        loaded.SupplierId.ShouldBe("sup-1");
+        loaded.SupplierId.ShouldBe("contoso-hardware");
         loaded.Version.ShouldBeGreaterThan(0u);
         loaded.Version.ShouldBe(created.Version);
         loaded.Lines.ShouldHaveSingleItem().LineNo.ShouldBe(1);
@@ -66,7 +66,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         await Should.ThrowAsync<ForbiddenException>(() => Create(NewCreate()));
 
         _app.Caller.Kind = CallerKind.User;
-        var ok = await Create(new CreateRequest("Laptops", "IT-200", "sup-1", [new LineInput("LAP-1", "Laptop", 1, 100m)]));
+        var ok = await Create(new CreateRequest("Laptops", "IT-200", "contoso-hardware", [new LineInput("LAP-1", 1)]));
         ok.CostCenterCode.ShouldBe("IT-200");
     }
 
@@ -79,7 +79,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         _app.Access.SetCostCenters("acme", "tom", "IT-200");
 
         await Should.ThrowAsync<ForbiddenException>(() => Create(NewCreate()));
-        (await Create(new CreateRequest("Laptops", "IT-200", "sup-1", [new LineInput("LAP-1", "Laptop", 1, 100m)]))).CostCenterCode
+        (await Create(new CreateRequest("Laptops", "IT-200", "contoso-hardware", [new LineInput("LAP-1", 1)]))).CostCenterCode
             .ShouldBe("IT-200");
 
         _app.Caller.UserId = SystemCaller.Id;
@@ -111,7 +111,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         _app.Caller.UserId = "maria";
 
         await Should.ThrowAsync<ForbiddenException>(() => _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
-            created.Id, created.Version, "Maria's choice", [new LineInput("X", "x", 1, 199000m)])));
+            created.Id, created.Version, "Maria's choice", [new LineInput("X", 1)])));
         await Should.ThrowAsync<ForbiddenException>(() => _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version)));
 
         _app.Caller.UserId = "tom";
@@ -140,7 +140,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         _app.Caller.Kind = CallerKind.AdminApiKey;
         _app.Access.SetCostCenters("acme", "claude-admin");
 
-        var created = await Create(new CreateRequest("Anything", "ANY-1", "sup-1", [new LineInput("A", "a", 1, 10m)]));
+        var created = await Create(new CreateRequest("Anything", "ANY-1", "contoso-hardware", [new LineInput("A", 1)]));
         await _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version));
 
         (await _app.Bus.InvokeAsync<RequestDto>(new GetRequest(created.Id))).Status.ShouldBe(RequestStatus.Submitted);
@@ -153,7 +153,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         var created = await Create();
 
         var updated = await _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
-            created.Id, created.Version, "Monitors", [new LineInput("MON-1", "Monitor", 2, 3000m)]));
+            created.Id, created.Version, "Monitors", [new LineInput("MON-1", 2)]));
 
         updated.Title.ShouldBe("Monitors");
         updated.Lines.Select(l => l.Sku).ShouldBe(["MON-1"]);
@@ -220,7 +220,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
     public async Task Cannot_submit_a_request_without_lines()
     {
         _app.Caller.TenantId = "acme";
-        var created = await Create(new CreateRequest("Empty", "CC-100", "sup-1", []));
+        var created = await Create(new CreateRequest("Empty", "CC-100", "contoso-hardware", []));
 
         await Should.ThrowAsync<DomainException>(() => _app.Bus.InvokeAsync(new SubmitRequest(created.Id, created.Version)));
     }
@@ -278,7 +278,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         _app.Caller.TenantId = $"gap-{Guid.NewGuid():N}";
 
         await Should.ThrowAsync<DomainException>(() => Create(
-            new CreateRequest("Bad", "CC-100", "sup-1", [new LineInput("A", "a", 0, 1m)])));
+            new CreateRequest("Bad", "CC-100", "contoso-hardware", [new LineInput("A", 0)])));
         var created = await Create();
 
         created.Number.ShouldBe("PR-0001");
@@ -333,7 +333,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         delivered.ShouldContain(created.Id.ToString());
     }
 
-    private static LineInput ToInput(RequestLineDto l) => new(l.Sku, l.Description, l.Quantity, l.UnitPriceExclVat);
+    private static LineInput ToInput(RequestLineDto l) => new(l.Sku, l.Quantity);
 
     private static async Task<long> CountOutgoingAsync(string connectionString)
     {

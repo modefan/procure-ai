@@ -3,14 +3,12 @@ using ProcureAi.Requests.Application.Commands;
 
 namespace ProcureAi.Requests.Api.Controllers;
 
-/// <summary>A line of a request. The unit price is Rand excl. VAT.</summary>
+/// <summary>A line of a request: a SKU of the supplier's catalog and a quantity. Description and unit price come from the catalog.</summary>
 public sealed record LineBody(
     [Required, StringLength(RequestLimits.CodeLength)] string Sku,
-    [Required, StringLength(RequestLimits.TextLength)] string Description,
-    [Range(1, RequestLimits.MaxQuantity)] int Quantity,
-    [Range(0.01, RequestLimits.MaxUnitPrice)] decimal UnitPriceExclVat)
+    [Range(1, RequestLimits.MaxQuantity)] int Quantity)
 {
-    internal LineInput ToInput() => new(Sku, Description, Quantity, UnitPriceExclVat);
+    internal LineInput ToInput() => new(Sku, Quantity);
 }
 
 public sealed record CreateRequestBody(
@@ -44,5 +42,4 @@ public static class RequestLimits
     public const int ReasonLength = 500;
     public const int MaxLines = 100;
     public const int MaxQuantity = 100_000;
-    public const double MaxUnitPrice = 100_000_000;
 }

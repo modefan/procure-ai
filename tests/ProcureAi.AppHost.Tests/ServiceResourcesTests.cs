@@ -342,7 +342,7 @@ public sealed class ServiceResourcesTests
     /// The caller also waits for what it calls, so it never starts answering before its dependencies can.
     /// </summary>
     [Theory]
-    [InlineData("requests-api", new[] { "access-api", "approvals-api" })]
+    [InlineData("requests-api", new[] { "access-api", "approvals-api", "suppliers-api" })]
     [InlineData("budgets-api", new[] { "access-api" })]
     [InlineData("approvals-api", new[] { "access-api" })]
     [InlineData("audit-api", new[] { "access-api" })]

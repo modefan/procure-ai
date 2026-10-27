@@ -694,25 +694,16 @@
       "LineBody": {
         "required": [
           "sku",
-          "description",
-          "quantity",
-          "unitPriceExclVat"
+          "quantity"
         ],
         "type": "object",
         "properties": {
           "sku": {
             "type": "string"
           },
-          "description": {
-            "type": "string"
-          },
           "quantity": {
             "type": "integer",
             "format": "int32"
-          },
-          "unitPriceExclVat": {
-            "type": "number",
-            "format": "double"
           }
         }
       },
