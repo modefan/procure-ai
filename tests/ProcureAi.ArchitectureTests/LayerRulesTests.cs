@@ -153,6 +153,34 @@ public sealed class LayerRulesTests
     }
 
     [Fact]
+    public void Simulators_depend_only_on_ServiceDefaults()
+    {
+        // The simulators play another company's systems (a supplier, an ERP). Sharing BuildingBlocks or Contracts with the services
+        // would let a contract change hide on both sides; they talk through HTTP and signed webhooks only, with their own signing code.
+        var simulators = Assembly.Load("ProcureAi.Simulators");
+        var ours = simulators.GetReferencedAssemblies().Select(a => a.Name!).Where(n => n.StartsWith("ProcureAi.", StringComparison.Ordinal)).ToList();
+        ours.ShouldBeSubsetOf(["ProcureAi.ServiceDefaults"], "the simulators may reference only ServiceDefaults");
+
+        var project = Path.Combine(FindRepositoryRoot(), "src", "Simulators", "ProcureAi.Simulators", "ProcureAi.Simulators.csproj");
+        var references = File.ReadAllLines(project).Where(l => l.Contains("ProjectReference", StringComparison.Ordinal)).ToList();
+        references.ShouldNotBeEmpty();
+        references.ShouldAllBe(l => l.Contains("ProcureAi.ServiceDefaults.csproj", StringComparison.Ordinal), "project references of the simulators");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "ProcureAi.slnx")))
+            {
+                return directory.FullName;
+            }
+        }
+
+        throw new InvalidOperationException("ProcureAi.slnx not found above " + AppContext.BaseDirectory);
+    }
+
+    [Fact]
     public void Controllers_do_not_use_DbContext()
     {
         var api = Layer("Api");

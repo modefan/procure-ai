@@ -22,6 +22,9 @@ var keycloakAccessAdminSecret = builder.AddParameter("keycloak-access-admin-secr
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
+// The simulated supplier and ERP: the key the services call them with, and the secret the supplier signs its webhooks with.
+var simulatorApiKey = builder.AddParameter("simulator-api-key", secret: true);
+var supplierWebhookSecret = builder.AddParameter("supplier-webhook-secret", secret: true);
 
 // Postgres: custom image (pgvector + pgaudit), logical WAL for Debezium CDC.
 var postgres = builder.AddPostgres(ResourceNames.Postgres)
@@ -143,6 +146,17 @@ var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
     shared)
     .CallsServices(accessApi, approvalsApi, suppliersApi);
+// The simulators: someone else's supplier and ERP (slow, sometimes failing, with a chaos switch), in one process. No database, no
+// messaging: they hold state in memory and answer by signed webhook. The receiver URLs (Purchasing, Invoicing) are wired when those
+// services exist (Task 12); until then the webhooks are dropped with a logged error. They depend on no service, so nothing waits for them.
+var simulators = builder.AddProject<Projects.ProcureAi_Simulators>(ResourceNames.Simulators)
+    .WithHttpEndpoint(name: "http")
+    .WithEnvironment("Simulators__ApiKey", simulatorApiKey)
+    .WithEnvironment("Simulators__Webhooks__Secret", supplierWebhookSecret)
+    .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
+    .WithHttpHealthCheck("/health/ready")
+    .WithDotNetLimits(limits.DotNet);
+
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).

@@ -199,6 +199,28 @@ public sealed class ServiceResourcesTests
         }
     }
 
+    [Fact]
+    public async Task Simulators_get_their_secrets_and_the_dotnet_limits_and_need_nothing_else()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var simulators = scope.Model.Resources.OfType<ProjectResource>().Single(r => r.Name == "simulators");
+
+        var env = await EnvironmentOfAsync(simulators);
+
+        // The simulated supplier and ERP: their API key and the webhook secret (secret parameters), and the admin key hash for the chaos switch.
+        env.ShouldContainKey("Simulators__ApiKey");
+        env.ShouldContainKey("Simulators__Webhooks__Secret");
+        env.ShouldContainKey("Auth__AdminApiKeySha256");
+        foreach (var cap in CapResources)
+        {
+            env.ShouldContainKey(cap);
+        }
+
+        simulators.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
+        // No database, no broker, no other service: it only answers calls and sends webhooks.
+        simulators.Annotations.OfType<WaitAnnotation>().ShouldBeEmpty();
+    }
+
     /// <summary>A stand-in project for a MongoDB service (the real one is Suppliers; this one exercises the template on its own).</summary>
     private sealed class MongoServiceProject : IProjectMetadata
     {

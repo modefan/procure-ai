@@ -34,6 +34,7 @@
     <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Application/ProcureAi.Suppliers.Application.csproj" />
     <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Infrastructure/ProcureAi.Suppliers.Infrastructure.csproj" />
     <Project Path="src/Services/Suppliers/ProcureAi.Suppliers.Api/ProcureAi.Suppliers.Api.csproj" />
+    <Project Path="src/Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -50,6 +51,7 @@
     <Project Path="tests/ProcureAi.Audit.IntegrationTests/ProcureAi.Audit.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Suppliers.Tests/ProcureAi.Suppliers.Tests.csproj" />
     <Project Path="tests/ProcureAi.Suppliers.IntegrationTests/ProcureAi.Suppliers.IntegrationTests.csproj" />
+    <Project Path="tests/ProcureAi.Simulators.Tests/ProcureAi.Simulators.Tests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
     <Project Path="tests/ProcureAi.ArchitectureTests/ProcureAi.ArchitectureTests.csproj" />

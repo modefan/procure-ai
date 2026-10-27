@@ -19,4 +19,5 @@ public static class ResourceNames
     public const string CdcExchange = "cdc";
     public const string Gateway = "gateway";
     public const string Web = "web";
+    public const string Simulators = "simulators";
 }

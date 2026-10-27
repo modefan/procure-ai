@@ -22,6 +22,7 @@
   -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Services\*\*\*.csproj" />
+    <ProjectReference Include="..\..\src\Simulators\ProcureAi.Simulators\ProcureAi.Simulators.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Application\ProcureAi.BuildingBlocks.Application.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Domain\ProcureAi.BuildingBlocks.Domain.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\ProcureAi.BuildingBlocks.Hosting\ProcureAi.BuildingBlocks.Hosting.csproj" />
