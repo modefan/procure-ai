@@ -24,6 +24,7 @@ public static class WebExtensions
 
         var services = builder.Services;
         services.AddValidatedOptions<CachingOptions>(builder.Configuration, CachingOptions.SectionName);
+        services.AddValidatedOptions<ErrorResponseOptions>(builder.Configuration, ErrorResponseOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(builder.Configuration, RateLimitingOptions.SectionName);
 
         // Enums travel as names ("Draft"), in responses, query strings and the OpenAPI document alike. Numbers are

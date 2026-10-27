@@ -400,8 +400,8 @@ public sealed class ApprovalSaga : Saga
 
     /// <summary>
     /// The step the caller wants to act on, if they may: it exists in this request of the caller's tenant (else 404), it is the
-    /// open step of a request awaiting approval (else 409), the caller saw its current version (else 412), and the caller is
-    /// one of its approvers and did not raise the request (else 403).
+    /// open step of a request awaiting approval (else 409), the caller is one of its approvers and did not raise the request
+    /// (else 403), and the caller saw its current version (else 412).
     /// </summary>
     private ApprovalStep Actionable(List<ApprovalStep> steps, Guid stepId, uint expectedVersion, ICallerContext caller)
     {
@@ -416,7 +416,6 @@ public sealed class ApprovalSaga : Saga
             throw new ConflictException($"Approval step {step.StepNo} of {RequestNumber} is not open (it is {step.Status}).");
         }
 
-        OptimisticConcurrency.EnsureVersion($"Approval step {step.StepNo} of {RequestNumber}", step.Version, expectedVersion);
         if (caller.UserId == RequesterId)
         {
             throw new ForbiddenException("You raised this request, so you cannot approve or reject it.");
@@ -427,6 +426,8 @@ public sealed class ApprovalSaga : Saga
             throw new ForbiddenException($"You are not an approver of step {step.StepNo} of {RequestNumber}.");
         }
 
+        // Last: a caller who may not act at all hears 403, not "reload" (412) for a copy they could never use.
+        OptimisticConcurrency.EnsureVersion($"Approval step {step.StepNo} of {RequestNumber}", step.Version, expectedVersion);
         return step;
     }
 

@@ -9,6 +9,7 @@ using ProcureAi.Approvals.Application;
 using ProcureAi.Approvals.Application.Dtos;
 using ProcureAi.Approvals.Application.Queries;
 using ProcureAi.Approvals.Application.Sagas;
+using ProcureAi.Approvals.Domain;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Application.Caching;
@@ -94,7 +95,7 @@ public sealed class ApprovalsController(
 
         var step = await bus.InvokeAsync<ApprovalStepDto>(new GetApprovalStep(stepId), cancellationToken);
         await bus.InvokeOrConflictAsync(new ApproveStep(step.RequestId, stepId, version), Approval, cancellationToken);
-        return await ActedAsync(step.RequestId, stepId);
+        return await ActedAsync(step, ApprovalStepStatus.Approved);
     }
 
     /// <summary>Rejects the step and with it the request (the budget is released). Same rules as approve; a reason is required.</summary>
@@ -118,7 +119,7 @@ public sealed class ApprovalsController(
 
         var step = await bus.InvokeAsync<ApprovalStepDto>(new GetApprovalStep(stepId), cancellationToken);
         await bus.InvokeOrConflictAsync(new RejectStep(step.RequestId, stepId, version, body.Reason.Trim()), Approval, cancellationToken);
-        return await ActedAsync(step.RequestId, stepId);
+        return await ActedAsync(step, ApprovalStepStatus.Rejected);
     }
 
     /// <summary>The approval chain of a request: its state and every step, with what the caller may do on each.</summary>
@@ -158,24 +159,44 @@ public sealed class ApprovalsController(
         CancellationToken cancellationToken) =>
         await bus.InvokeAsync<ApprovalPreviewDto>(new PreviewApproval(costCenter, amount, requesterId), cancellationToken);
 
+
     /// <summary>
     /// After the saga committed: evicts the cached inbox and chain at once (the saga's own eviction follows through its outbox),
-    /// then answers with the step as it is now and its new ETag.
+    /// then answers with the step as it is now and its new ETag. The write is done, so the answer must not depend on a read that
+    /// can fail: if the read fails, the answer is built from the step as read before the action, now closed as
+    /// <paramref name="outcome"/>, without an ETag (the new version is not known; nothing more can be done on a closed step, and the
+    /// next read of the step or the chain has it). Otherwise the client would retry and get 409 "not open" for what succeeded.
     /// </summary>
-    private async Task<ActionResult<ApprovalStepDto>> ActedAsync(Guid requestId, Guid stepId)
+    private async Task<ActionResult<ApprovalStepDto>> ActedAsync(ApprovalStepDto before, ApprovalStepStatus outcome)
     {
         try
         {
-            await cache.RemoveByTagAsync(ApprovalCacheTag.Of(user.TenantId, requestId), CancellationToken.None);
+            await cache.RemoveByTagAsync(ApprovalCacheTag.Of(user.TenantId, before.RequestId), CancellationToken.None);
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Cache invalidation failed for the approval of {RequestId}; cached reads expire on their own", requestId);
+            logger.LogWarning(exception, "Cache invalidation failed for the approval of {RequestId}; cached reads expire on their own", before.RequestId);
         }
 
         // The write has committed: a client that disconnects now must not turn it into a failure (its retry would run it again).
-        var step = await bus.InvokeAsync<ApprovalStepDto>(new GetApprovalStep(stepId), CancellationToken.None);
-        Response.Headers.ETag = VersionETag.Format(step.Version);
-        return step;
+        try
+        {
+            var step = await bus.InvokeAsync<ApprovalStepDto>(new GetApprovalStep(before.Id), CancellationToken.None);
+            Response.Headers.ETag = VersionETag.Format(step.Version);
+            return step;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception, "Step {StepId} of {RequestId} was {Outcome} but could not be read back; answering from what was read before",
+                before.Id, before.RequestId, outcome);
+            return before with
+            {
+                Status = outcome.ToString(),
+                DueAt = null,
+                CanAct = false,
+                CannotActReason = ApprovalStepView.NotOpen,
+            };
+        }
     }
 }

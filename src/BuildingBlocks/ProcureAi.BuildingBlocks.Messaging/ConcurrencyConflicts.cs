@@ -21,6 +21,12 @@ public static class ConcurrencyConflicts
     /// (<see cref="ConcurrencyException"/>, which Wolverine's <c>SagaConcurrencyException</c> derives from) or a concurrent insert
     /// of the same key. Not a stale <c>If-Match</c> (<see cref="ConcurrencyConflictException"/>): that is the caller's answer.
     /// </summary>
+    /// <remarks>
+    /// Caveat: every Postgres <c>23505</c> counts, whichever unique index it came from, so a duplicate that is a plain data error
+    /// (not a race) is also answered 409 "changed by someone else, try again". That is acceptable for the commands that use this
+    /// (their only unique keys are the ones concurrent callers contend for); a command with another unique constraint must not
+    /// rely on it.
+    /// </remarks>
     public static bool IsLostRace(Exception exception) =>
         exception is DbUpdateConcurrencyException or ConcurrencyException
         || exception is DbUpdateException { InnerException: PostgresException { SqlState: UniqueViolation } };

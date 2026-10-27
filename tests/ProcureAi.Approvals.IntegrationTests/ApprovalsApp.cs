@@ -138,6 +138,8 @@ public sealed class ApprovalsInstance : IAsyncDisposable
 
     public IServiceProvider Services => _factory.Services;
 
+    public StepReadFault StepReadFault => _factory.StepReadFault;
+
     /// <summary>An HTTP client of this instance's API (the test server).</summary>
     public HttpClient CreateClient() => _factory.CreateClient();
 

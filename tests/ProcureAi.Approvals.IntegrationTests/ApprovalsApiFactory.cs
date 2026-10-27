@@ -1,4 +1,8 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using ProcureAi.Approvals.Infrastructure;
 
 namespace ProcureAi.Approvals.IntegrationTests;
 
@@ -13,9 +17,13 @@ public sealed class ApprovalsApiFactory(
     /// <summary>The client ID whose tokens count as another service's (policy <c>internal</c>).</summary>
     public const string InternalClientId = "procure-internal";
 
+    /// <summary>Makes reads of an approval step fail on demand (see <see cref="StepReadFault"/>).</summary>
+    public StepReadFault StepReadFault { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
+        builder.ConfigureTestServices(services => services.ConfigureDbContext<ApprovalsDbContext>(o => o.AddInterceptors(StepReadFault)));
         builder.UseSetting("Auth:InternalClientId", InternalClientId);
         foreach (var (key, value) in access.Settings.Concat(settings ?? new Dictionary<string, string?>()))
         {

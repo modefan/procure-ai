@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
+using Polly.Timeout;
 using ProcureAi.BuildingBlocks.Web.Errors;
+using ProcureAi.BuildingBlocks.Web.Options;
 using Shouldly;
 
 namespace ProcureAi.BuildingBlocks.Tests.Web;
@@ -33,6 +35,28 @@ public sealed class ApplicationExceptionFilterTests
         Handle(new DomainException("rule")).StatusCode.ShouldBe(StatusCodes.Status422UnprocessableEntity);
 
     [Fact]
+    public void A_failed_call_to_another_service_is_503_with_retry_after()
+    {
+        foreach (var failure in new Exception[]
+        {
+            new HttpRequestException("Access answered 503"),
+            new TimeoutRejectedException("timed out"),
+            new InvalidOperationException("wrapped", new HttpRequestException("refused")),
+        })
+        {
+            var context = Context(failure);
+
+            new ApplicationExceptionFilter(Factory(), Options.Create(new ErrorResponseOptions { DependencyRetryAfterSeconds = 7 })).OnException(context);
+
+            context.ExceptionHandled.ShouldBeTrue();
+            var result = context.Result.ShouldBeOfType<ObjectResult>();
+            result.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+            result.Value.ShouldBeOfType<ProblemDetails>().Status.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+            context.HttpContext.Response.Headers.RetryAfter.ToString().ShouldBe("7");
+        }
+    }
+
+    [Fact]
     public void Result_is_problem_details_with_the_message_as_title()
     {
         var result = Handle(new NotFoundException("Request PR-1 was not found."));
@@ -48,7 +72,7 @@ public sealed class ApplicationExceptionFilterTests
     {
         var context = Context(new InvalidOperationException("boom"));
 
-        new ApplicationExceptionFilter(Factory()).OnException(context);
+        new ApplicationExceptionFilter(Factory(), Options.Create(new ErrorResponseOptions())).OnException(context);
 
         context.ExceptionHandled.ShouldBeFalse();
         context.Result.ShouldBeNull();
@@ -57,7 +81,7 @@ public sealed class ApplicationExceptionFilterTests
     private static ObjectResult Handle(Exception exception)
     {
         var context = Context(exception);
-        new ApplicationExceptionFilter(Factory()).OnException(context);
+        new ApplicationExceptionFilter(Factory(), Options.Create(new ErrorResponseOptions())).OnException(context);
         context.ExceptionHandled.ShouldBeTrue();
         return context.Result.ShouldBeOfType<ObjectResult>();
     }

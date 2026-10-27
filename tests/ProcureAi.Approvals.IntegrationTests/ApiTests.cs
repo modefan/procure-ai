@@ -394,6 +394,96 @@ public sealed class ApiTests(ApprovalsApp app)
     // ---- preview ------------------------------------------------------------------------------------------------------------
 
     [Fact]
+    public async Task Approve_whose_step_cannot_be_read_back_still_answers_200_and_a_retry_gets_the_same_answer()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (id, steps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 5_000m);
+        using var client = Main.CreateClient();
+        var maria = User(tenant, DemoUsers.Maria, "manager");
+        var key = Guid.NewGuid().ToString("N");
+
+        // The read before the approval works; the read after its commit hits a database blip.
+        Main.StepReadFault.FailNthRead(2);
+        HttpResponseMessage first;
+        try
+        {
+            first = await client.SendAsync(Post($"{steps[0].Id}/approve", maria, Tag(steps[0].Version), key: key), Ct);
+        }
+        finally
+        {
+            Main.StepReadFault.Disarm();
+        }
+
+        var retry = await client.SendAsync(Post($"{steps[0].Id}/approve", maria, Tag(steps[0].Version), key: key), Ct);
+
+        (await Main.StepsAsync(id)).Single().Status.ShouldBe(ApprovalStepStatus.Approved);
+        (await ReadAsync<ApprovalStepDto>(first)).Status.ShouldBe("Approved", "the approval committed, so the answer is a success");
+        (await ReadAsync<ApprovalStepDto>(retry)).Status.ShouldBe("Approved");
+    }
+
+    [Fact]
+    public async Task Reject_whose_step_cannot_be_read_back_still_answers_200()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (id, steps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 5_000m);
+        using var client = Main.CreateClient();
+
+        Main.StepReadFault.FailNthRead(2);
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(
+                Post($"{steps[0].Id}/reject", User(tenant, DemoUsers.Maria, "manager"), Tag(steps[0].Version), body: new { reason = "Too much" }), Ct);
+        }
+        finally
+        {
+            Main.StepReadFault.Disarm();
+        }
+
+        (await Main.StepsAsync(id)).Single().Status.ShouldBe(ApprovalStepStatus.Rejected);
+        (await ReadAsync<ApprovalStepDto>(response)).Status.ShouldBe("Rejected");
+    }
+
+    [Fact]
+    public async Task Requester_with_a_stale_etag_gets_403_not_412()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (_, steps) = await OpenAsync(Main, tenant, DemoUsers.Maria, 5_000m);
+        using var client = Main.CreateClient();
+
+        var response = await client.SendAsync(
+            Post($"{steps[0].Id}/approve", User(tenant, DemoUsers.Maria, "manager"), Tag(steps[0].Version + 1)), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "who may act is decided before whether their copy is current");
+        (await response.Content.ReadAsStringAsync(Ct)).ShouldContain("You raised this request");
+    }
+
+    [Fact]
+    public async Task Preview_when_access_is_down_and_nothing_is_cached_503_with_retry_after()
+    {
+        var tenant = NewTenant();
+        app.Access.FailApprovers(tenant, TimeSpan.FromSeconds(30));
+        using var client = Main.CreateClient();
+        var query = $"costCenter={CostCenter}&amount=1000";
+
+        var asUser = await client.SendAsync(Get($"preview?{query}", User(tenant, DemoUsers.Tom, "requester")), Ct);
+        var asService = await client.SendAsync(Get($"internal/preview?{query}&requesterId={DemoUsers.Tom}", Service(tenant)), Ct);
+
+        foreach (var response in new[] { asUser, asService })
+        {
+            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+            response.Headers.RetryAfter.ShouldNotBeNull();
+            response.Headers.RetryAfter.Delta.ShouldBe(TimeSpan.FromSeconds(5));
+            (await response.Content.ReadAsStringAsync(Ct)).ShouldContain("\"status\":503");
+        }
+
+        app.Access.FailApprovers(tenant, TimeSpan.Zero);
+    }
+
+    [Fact]
     public async Task Preview_for_R250000_lists_dept_then_thandi()
     {
         var tenant = NewTenant();

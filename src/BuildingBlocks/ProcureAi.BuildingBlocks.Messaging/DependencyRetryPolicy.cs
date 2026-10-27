@@ -1,5 +1,5 @@
-using Polly;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Web.Errors;
 using Wolverine;
 using Wolverine.ErrorHandling;
 
@@ -26,16 +26,6 @@ public static class DependencyRetryPolicy
     }
 
     /// <summary>True when <paramref name="exception"/>, or one it wraps, is a failed or refused call to another service.</summary>
-    public static bool IsTransientDependencyFailure(Exception exception)
-    {
-        for (var current = exception; current is not null; current = current.InnerException)
-        {
-            if (current is HttpRequestException or ExecutionRejectedException)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    public static bool IsTransientDependencyFailure(Exception exception) =>
+        DependencyFailures.IsTransient(exception);
 }
