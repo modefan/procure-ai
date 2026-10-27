@@ -75,6 +75,7 @@ public sealed class RequestsHost : IAsyncDisposable
                 // Nor Access: the fake says which cost centers each user acts for.
                 services.AddSingleton<FakeAccessDirectory>();
                 services.AddSingleton<IAccessDirectory>(sp => sp.GetRequiredService<FakeAccessDirectory>());
+                services.AddProcureAiCallerScope();
             })
             .UseDefaultServiceProvider(o =>
             {

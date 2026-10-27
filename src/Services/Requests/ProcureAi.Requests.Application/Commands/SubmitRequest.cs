@@ -23,7 +23,7 @@ public static class SubmitRequestHandler
     public static async Task Handle(
         SubmitRequest command,
         ICallerContext caller,
-        IAccessDirectory access,
+        ICallerScope scope,
         IRequestsDbContext db,
         IApprovalPreview approvals,
         IMessageBus bus,
@@ -33,7 +33,7 @@ public static class SubmitRequestHandler
         var request = await db.LoadAsync(command.Id, command.ExpectedVersion, caller, cancellationToken);
         // The request's own rules first: a request that cannot be submitted anyway needs no call to Approvals.
         request.EnsureCanSubmit();
-        await CostCenterOwnership.EnsureAsync(caller, access, request.TenantId, request.CostCenterCode, cancellationToken);
+        await CostCenterOwnership.EnsureAsync(scope, request.CostCenterCode, cancellationToken);
         var preview = await approvals.CheckAsync(
             request.TenantId, request.CostCenterCode, request.TotalInclVat.Amount, request.RequesterId, cancellationToken);
         if (!preview.Possible)

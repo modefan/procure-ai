@@ -46,7 +46,9 @@ public sealed class DependencyRetryOptions : IValidatableObject
                 $"'{section}' is not valid: {string.Join("; ", results.Select(r => r.ErrorMessage))}");
         }
 
-        return [.. Enumerable.Range(0, Attempts).Select(i =>
-            TimeSpan.FromMilliseconds(Math.Min(InitialDelay.TotalMilliseconds * Math.Pow(Multiplier, i), MaxDelay.TotalMilliseconds)))];
+        return [.. Enumerable.Range(1, Attempts).Select(Backoff.BaseDelayFor)];
     }
+
+    /// <summary>The same values as a <see cref="BackoffOptions"/> (no jitter here: Wolverine adds none to scheduled retries), which owns the formula.</summary>
+    public BackoffOptions Backoff => new() { InitialDelay = InitialDelay, Multiplier = Multiplier, MaxDelay = MaxDelay };
 }

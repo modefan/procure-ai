@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using Serilog.Context;
@@ -27,6 +28,14 @@ public static class CallerPropagationExtensions
         services.TryAddSingleton<ICallerContextAccessor, AmbientCallerContextAccessor>();
         return services;
     }
+
+    /// <summary>
+    /// Registers <see cref="ICallerScope"/>: which requests and cost centers the caller may reach (the admin key and other
+    /// services: all; others: what Access assigns). Needs <see cref="ICallerContext"/> and <see cref="IAccessDirectory"/>. A plain
+    /// registration (no factory), because Wolverine's generated handler code refuses service location.
+    /// </summary>
+    public static IServiceCollection AddProcureAiCallerScope(this IServiceCollection services) =>
+        services.AddScoped<ICallerScope, CallerScopeResolver>();
 
     /// <summary>
     /// Outgoing messages carry the correlation, tenant and user IDs as envelope headers; handlers that consume a

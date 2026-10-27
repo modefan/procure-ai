@@ -1,5 +1,4 @@
 using ProcureAi.BuildingBlocks.Application;
-using ProcureAi.BuildingBlocks.Application.Access;
 
 namespace ProcureAi.Requests.Application.Abstractions;
 
@@ -11,19 +10,11 @@ public static class CostCenterOwnership
 {
     /// <summary>
     /// Throws <see cref="ForbiddenException"/> (403) unless <paramref name="costCenterCode"/> is one of the caller's cost
-    /// centers in <paramref name="tenantId"/>. The admin API key (Claude's testing access) acts for every cost center. The
-    /// cost centers do not depend on roles, so Access is asked without them.
+    /// centers (<see cref="ICallerScope"/>). The admin API key (Claude's testing access) and other services act for every cost center.
     /// </summary>
-    public static async Task EnsureAsync(
-        ICallerContext caller, IAccessDirectory access, string tenantId, string costCenterCode, CancellationToken cancellationToken)
+    public static async Task EnsureAsync(ICallerScope scope, string costCenterCode, CancellationToken cancellationToken)
     {
-        if (caller.Kind == CallerKind.AdminApiKey)
-        {
-            return;
-        }
-
-        var effective = await access.GetEffectiveAccessAsync(caller.UserId, [], tenantId, cancellationToken);
-        if (!effective.CostCenterCodes.Contains(costCenterCode, StringComparer.Ordinal))
+        if (!(await scope.GetAsync(cancellationToken)).AllowsCostCenter(costCenterCode))
         {
             throw new ForbiddenException($"You do not act for cost center '{costCenterCode}'.");
         }

@@ -97,6 +97,27 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                     b.ToTable("audit_entries", (string)null);
                 });
 
+            modelBuilder.Entity("ProcureAi.BuildingBlocks.Persistence.TenantSequenceRow", b =>
+                {
+                    b.Property<string>("TenantId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("Value")
+                        .HasColumnType("integer")
+                        .HasColumnName("value");
+
+                    b.HasKey("TenantId", "Name");
+
+                    b.ToTable("tenant_sequences", (string)null);
+                });
+
             modelBuilder.Entity("ProcureAi.Requests.Domain.PurchaseRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -186,22 +207,6 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("purchase_requests", (string)null);
-                });
-
-            modelBuilder.Entity("ProcureAi.Requests.Infrastructure.RequestNumberCounter", b =>
-                {
-                    b.Property<string>("TenantId")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<int>("LastValue")
-                        .HasColumnType("integer")
-                        .HasColumnName("last_value");
-
-                    b.HasKey("TenantId");
-
-                    b.ToTable("request_number_counters", (string)null);
                 });
 
             modelBuilder.Entity("ProcureAi.Requests.Domain.PurchaseRequest", b =>

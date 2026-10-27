@@ -17,8 +17,6 @@ public sealed class RequestsDbContext(DbContextOptions<RequestsDbContext> option
 
     public DbSet<PurchaseRequest> PurchaseRequests => Set<PurchaseRequest>();
 
-    public DbSet<RequestNumberCounter> RequestNumberCounters => Set<RequestNumberCounter>();
-
     public void MarkModified(PurchaseRequest request) => Entry(request).State = EntityState.Modified;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -27,13 +25,7 @@ public sealed class RequestsDbContext(DbContextOptions<RequestsDbContext> option
         modelBuilder.Entity<PurchaseRequest>().HasQueryFilter(r => r.TenantId == CurrentTenantId);
         // Written by AuditSaveChangesInterceptor, registered in DependencyInjection.
         modelBuilder.AddAuditEntries();
+        // Request numbers (PR-1043): one counter per tenant, bumped by TenantSequence.
+        modelBuilder.AddTenantSequences();
     }
-}
-
-/// <summary>Last request number handed out per tenant (one row per tenant).</summary>
-public sealed class RequestNumberCounter
-{
-    public string TenantId { get; set; } = "";
-
-    public int LastValue { get; set; }
 }

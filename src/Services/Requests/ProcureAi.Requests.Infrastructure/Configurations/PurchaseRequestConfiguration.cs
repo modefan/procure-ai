@@ -57,14 +57,3 @@ internal sealed class PurchaseRequestConfiguration : IEntityTypeConfiguration<Pu
         builder.Navigation(r => r.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }
-
-internal sealed class RequestNumberCounterConfiguration : IEntityTypeConfiguration<RequestNumberCounter>
-{
-    public void Configure(EntityTypeBuilder<RequestNumberCounter> builder)
-    {
-        builder.ToTable("request_number_counters");
-        builder.HasKey(c => c.TenantId);
-        builder.Property(c => c.TenantId).HasColumnName("tenant_id").HasMaxLength(100);
-        builder.Property(c => c.LastValue).HasColumnName("last_value");
-    }
-}

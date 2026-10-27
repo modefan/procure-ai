@@ -56,7 +56,12 @@ public sealed class ConcurrencyRetryOptions : IValidatableObject
     public TimeSpan[] Delays(string section = "ConcurrencyRetry")
     {
         EnsureValid(section);
-        return [.. Enumerable.Range(0, Attempts).Select(i =>
-            TimeSpan.FromMilliseconds(Math.Min(InitialDelay.TotalMilliseconds * Math.Pow(Multiplier, i), MaxDelay.TotalMilliseconds)))];
+        return [.. Enumerable.Range(1, Attempts).Select(Backoff.BaseDelayFor)];
     }
+
+    /// <summary>The same values as a <see cref="BackoffOptions"/>, which owns the formula.</summary>
+    public BackoffOptions Backoff => new()
+    {
+        InitialDelay = InitialDelay, Multiplier = Multiplier, MaxDelay = MaxDelay, JitterFraction = JitterFraction,
+    };
 }

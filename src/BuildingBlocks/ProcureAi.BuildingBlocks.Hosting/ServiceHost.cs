@@ -66,6 +66,8 @@ public static class ServiceHost
         services.Configure<MvcOptions>(mvc => mvc.Filters.Add<ApplicationExceptionFilter>());
         // The service identity, the scoped caller context and the incoming-message holder.
         services.AddProcureAiCaller(serviceName);
+        // Which requests and cost centers the caller may reach (admin key and services: all; others: what Access assigns).
+        services.AddProcureAiCallerScope();
         // Handlers evict cached reads after their transaction commits (replaces the immediate-only invalidator of AddProcureAiCaching).
         services.Replace(ServiceDescriptor.Scoped<ICacheInvalidator, MessageCacheInvalidator>());
 

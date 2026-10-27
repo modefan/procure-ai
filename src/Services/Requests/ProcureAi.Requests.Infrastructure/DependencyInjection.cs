@@ -42,6 +42,7 @@ public static class DependencyInjection
             (sp, options) => options.UseNpgsql(connectionString).AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>()));
         // Forwards to the same scoped DbContext instance (a factory, not AddScoped<,>, which would create a second one).
         services.AddScoped<IRequestsDbContext>(sp => sp.GetRequiredService<RequestsDbContext>());
+        services.AddTenantSequence<RequestsDbContext>();
         services.AddScoped<IRequestNumberGenerator, RequestNumberGenerator>();
         services.TryAddSingleton(TimeProvider.System);
         return services;
