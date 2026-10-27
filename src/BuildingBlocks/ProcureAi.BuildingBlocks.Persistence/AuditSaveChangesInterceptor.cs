@@ -71,8 +71,11 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
                 continue;
             }
 
+            // One row for every statement EF sends, also an UPDATE that changes no value (an entity marked Modified as a whole,
+            // e.g. a request whose lines changed, so its version moves). Change data capture sees that UPDATE; without a row of
+            // the same transaction, Audit would flag it "changed outside the app". Its changes list is then empty.
             var changes = ChangesOf(entry);
-            if (changes.Count == 0)
+            if (changes.Count == 0 && !SendsStatement(entry))
             {
                 continue;
             }
@@ -131,6 +134,13 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
 
         return changes;
     }
+
+    /// <summary>
+    /// Whether EF sends a statement for the entry: always for an insert or delete; for an update when any property is marked
+    /// modified, whatever its value (EF writes marked properties without comparing them).
+    /// </summary>
+    private static bool SendsStatement(EntityEntry entry) =>
+        entry.State != EntityState.Modified || entry.Properties.Any(p => p.IsModified);
 
     // Scalars compare by value; a primitive collection (text[] column) by its items, since the snapshot and the current
     // value are different collection objects that never compare equal by reference.

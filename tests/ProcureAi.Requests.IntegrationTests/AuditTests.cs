@@ -82,6 +82,31 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
         JsonDocument.Parse(insert.Changes).RootElement.EnumerateArray().Select(c => c.GetProperty("column").GetString()).ShouldContain("status");
     }
 
+    /// <summary>
+    /// An update that changes only the lines (or nothing) still sends an UPDATE of the request row, so its version moves. The
+    /// interceptor must write a row for every UPDATE it lets through, or Audit sees a CDC change of purchase_requests without
+    /// an app row in its transaction and flags it "changed outside the app" (a false alert on an ordinary edit).
+    /// </summary>
+    [Theory]
+    [InlineData(5)]
+    [InlineData(3)]
+    public async Task Update_without_a_changed_request_column_still_audits_the_request_row(int quantity)
+    {
+        var created = await CreateAsync("audit-touch", "alice");
+
+        // Same title; quantity 3 is the very same line again (nothing changed at all), 5 changes only the line.
+        var updated = await _app.Bus.InvokeAsync<RequestDto>(new UpdateRequest(
+            created.Id, created.Version, "Laptops", [new LineInput("LAP-1", "Laptop", quantity, 25200m)]));
+
+        updated.Version.ShouldNotBe(created.Version, "the request row was written");
+        var update = (await AuditOfAsync(created.Id)).Where(e => e.Operation == AuditOperation.Update).ShouldHaveSingleItem();
+        update.UserId.ShouldBe("alice");
+        // Same transaction as the line changes of this save (the top-level xid, which is what Debezium reports as txId).
+        var lineDelete = (await AuditOfAsync(created.Id, "request_lines")).Where(e => e.Operation == AuditOperation.Delete).ShouldHaveSingleItem();
+        update.TransactionId.ShouldBe(lineDelete.TransactionId);
+        JsonDocument.Parse(update.Changes).RootElement.EnumerateArray().ShouldBeEmpty("no request column changed value");
+    }
+
     [Fact]
     public async Task Api_key_on_behalf_of_user_audits_user_and_actor()
     {
