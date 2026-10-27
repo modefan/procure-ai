@@ -140,6 +140,35 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Audit_service_gets_its_database_migrate_and_api_without_debezium_and_the_gateway_routes_to_it()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "audit-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "audit-api");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var apiEnv = await EnvironmentOfAsync(api);
+        var migrateEnv = await EnvironmentOfAsync(migrate);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        model.Resources.OfType<PostgresDatabaseResource>().ShouldContain(d => d.Name == "auditdb");
+        apiEnv.ShouldContainKey("ConnectionStrings__auditdb");
+        migrateEnv.ShouldContainKey("ConnectionStrings__auditdb");
+        apiEnv.ShouldContainKeyAndValue("Auth__InternalClientId", "procure-internal");
+        // Audit stores what the others publish; its own documents are not captured.
+        model.Resources.ShouldNotContain(r => r.Name == "debezium-auditdb");
+        api.Annotations.OfType<WaitAnnotation>()
+            .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__audit__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+    }
+
+    [Fact]
     public async Task Keycloak_gets_the_client_secrets_and_only_keycloak_gets_the_access_admin_secret()
     {
         await using var scope = await ModelScope.BuildAsync();

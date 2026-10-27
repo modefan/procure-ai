@@ -142,6 +142,22 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Internal_user_lookup_gives_the_display_name_and_404_outside_the_tenant()
+    {
+        var maria = await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", Acme), Ct);
+        var mariaAsGlobex = await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", Globex), Ct);
+        var unknown = await _client.SendAsync(Internal("/internal/users/nobody", Acme), Ct);
+        var asUser = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{DemoUsers.Maria}", AdminToken(Acme)), Ct);
+
+        var name = await ReadAsync<UserNameDto>(maria);
+        name.UserId.ShouldBe(DemoUsers.Maria);
+        name.DisplayName.ShouldBe("Maria Manager");
+        mariaAsGlobex.StatusCode.ShouldBe(HttpStatusCode.NotFound, "a user of another tenant looks like no user");
+        unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        asUser.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "internal lookups are for services only");
+    }
+
+    [Fact]
     public async Task Other_tenant_cost_center_is_404()
     {
         var acmeCostCenterAsGlobex = await _client.SendAsync(Internal("/internal/cost-centers/IT-200/approvers", Globex), Ct);

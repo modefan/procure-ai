@@ -12,6 +12,9 @@ public interface IAccessDirectory
 
     /// <summary>The manager, department head and finance approvers of a cost center.</summary>
     ValueTask<CostCenterApprovers> GetApproversAsync(string costCenterCode, string tenantId, CancellationToken cancellationToken);
+
+    /// <summary>The name <paramref name="userId"/> is shown under in <paramref name="tenantId"/>, or null when the tenant has no such user.</summary>
+    ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken);
 }
 
 /// <summary>Permissions, the cost centers the user acts for, and the approval limit in Rand.</summary>

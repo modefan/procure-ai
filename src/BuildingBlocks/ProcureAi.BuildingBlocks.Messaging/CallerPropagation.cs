@@ -14,7 +14,7 @@ public static class CallerPropagationExtensions
 {
     /// <summary>
     /// Registers what the caller model needs: the service's identity and the scoped <see cref="ICallerContext"/>
-    /// (<see cref="CallerContext"/>). Call it from the composition root with the service name (e.g. <c>requests-api</c>).
+    /// (<see cref="CallerContext"/>), and <see cref="IMessageMetadata"/> of the message being handled. Call it from the composition root with the service name (e.g. <c>requests-api</c>).
     /// </summary>
     public static IServiceCollection AddProcureAiCaller(this IServiceCollection services, string serviceName)
     {
@@ -23,6 +23,7 @@ public static class CallerPropagationExtensions
         services.TryAddScoped<IncomingMessage>();
         services.AddSingleton(new ServiceIdentity(serviceName));
         services.AddScoped<ICallerContext, CallerContext>();
+        services.TryAddScoped<IMessageMetadata, IncomingMessageMetadata>();
         services.TryAddSingleton<ICallerContextAccessor, AmbientCallerContextAccessor>();
         return services;
     }

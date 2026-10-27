@@ -12,6 +12,7 @@
     <ProjectReference Include="../../Services/Access/ProcureAi.Access.Api/ProcureAi.Access.Api.csproj" />
     <ProjectReference Include="../../Services/Budgets/ProcureAi.Budgets.Api/ProcureAi.Budgets.Api.csproj" />
     <ProjectReference Include="../../Services/Approvals/ProcureAi.Approvals.Api/ProcureAi.Approvals.Api.csproj" />
+    <ProjectReference Include="../../Services/Audit/ProcureAi.Audit.Api/ProcureAi.Audit.Api.csproj" />
     <ProjectReference Include="../../Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />
   </ItemGroup>
 

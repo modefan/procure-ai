@@ -77,7 +77,7 @@ public sealed class LayerRulesTests
             .Should().NotDependOnAnyTypesThat()
             .ResideInNamespaceMatching(@"^ProcureAi\.\w+\.(Application|Infrastructure|Api)(\..*)?$")
             .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
-                @"^(Microsoft\.AspNetCore|Microsoft\.EntityFrameworkCore|Microsoft\.Extensions\.(DependencyInjection|Hosting)|Npgsql|Wolverine|JasperFx|StackExchange|ZiggyCreatures|MongoDB)(\..*)?$")
+                @"^(Microsoft\.AspNetCore|Microsoft\.EntityFrameworkCore|Microsoft\.Extensions\.(DependencyInjection|Hosting)|Npgsql|Wolverine|JasperFx|StackExchange|ZiggyCreatures|MongoDB|Marten|Weasel)(\..*)?$")
             .Check(Architecture);
     }
 
@@ -88,12 +88,13 @@ public sealed class LayerRulesTests
         // Microsoft.EntityFrameworkCore core types (IQueryable/DbSet/async LINQ behind IRequestsDbContext, the
         // read-side abstraction; providers such as Npgsql and any concrete DbContext stay in Infrastructure),
         // Riok.Mapperly attributes, Microsoft.Extensions abstractions (Options, Logging) and the Domain and Contracts.
+        // Document stores stay in Infrastructure too: Audit's Application sees IAuditStore, never Marten (or its Weasel layer).
         var application = Layer("Application");
         Types().That().ResideInAssembly(application[0], application[1..])
             .Should().NotDependOnAnyTypesThat()
             .ResideInNamespaceMatching(@"^ProcureAi\.\w+\.(Infrastructure|Api)(\..*)?$")
             .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(
-                @"^(Microsoft\.AspNetCore|Npgsql|StackExchange|ZiggyCreatures|MongoDB)(\..*)?$")
+                @"^(Microsoft\.AspNetCore|Npgsql|StackExchange|ZiggyCreatures|MongoDB|Marten|Weasel)(\..*)?$")
             // The caller reaches Application as ICallerContext (BuildingBlocks.Application); the web, messaging and persistence
             // building blocks are for the outer layers.
             .AndShould().NotDependOnAnyTypesThat().ResideInNamespaceMatching(

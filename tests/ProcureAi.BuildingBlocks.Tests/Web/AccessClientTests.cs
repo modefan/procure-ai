@@ -256,6 +256,26 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Display_names_are_read_from_access_cached_per_tenant_and_null_when_unknown()
+    {
+        var host = await StartAsync();
+        var tenant = NewTenant();
+        var other = NewTenant();
+        _access.SetDisplayName(tenant, "maria", "Maria Manager");
+        var access = host.Services.GetRequiredService<IAccessDirectory>();
+
+        var first = await access.GetDisplayNameAsync("maria", tenant, Ct);
+        var second = await access.GetDisplayNameAsync("maria", tenant, Ct);
+        var elsewhere = await access.GetDisplayNameAsync("maria", other, Ct);
+
+        first.ShouldBe("Maria Manager");
+        second.ShouldBe(first);
+        elsewhere.ShouldBeNull("the user is not in the other tenant");
+        _access.Calls.Count(c => c.Tenant == tenant).ShouldBe(1);
+        _access.Calls.Single(c => c.Tenant == other).Path.ShouldBe("/api/v1/access/internal/users/maria");
+    }
+
+    [Fact]
     public async Task AccessChanged_makes_the_tenants_cached_answers_unreachable_even_while_access_is_down()
     {
         var a = await StartAsync();

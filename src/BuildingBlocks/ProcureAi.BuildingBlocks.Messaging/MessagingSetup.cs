@@ -37,13 +37,30 @@ public static class MessagingSetup
         this WolverineOptions options, IConfiguration configuration, string serviceName, string databaseConnectionName, Assembly handlers)
         where TDbContext : DbContext, TAbstraction
     {
-        options.Discovery.IncludeAssembly(handlers);
-        // The shared handlers (cache eviction after commit).
-        options.Discovery.IncludeAssembly(typeof(MessagingSetup).Assembly);
         options.PersistMessagesWithPostgresql(Required(configuration, databaseConnectionName));
         options.AutoBuildMessageStorageOnStartup =
             configuration.GetValue("Wolverine:AutoBuildMessageStorageOnStartup", AutoCreate.None);
         options.UseEntityFrameworkCoreTransactions().WithDbContextAbstraction<TAbstraction, TDbContext>();
+        return options.UseProcureAiHandlers(configuration, serviceName, handlers);
+    }
+
+    /// <summary>
+    /// What every service's Wolverine setup shares, whatever stores its messages: handler discovery (the service's and the
+    /// shared ones: cache eviction after commit, <c>AccessChanged</c>), transactions around handlers, durable inbox and outbox,
+    /// RabbitMQ with caller propagation (<see cref="UseProcureAiTransport"/>), and the queue <c>&lt;serviceName&gt;-access-changed</c>.
+    /// <see cref="UseProcureAiMessaging{TAbstraction,TDbContext}"/> calls it for EF Core services; a service with another message
+    /// store (Audit: Marten's <c>IntegrateWithWolverine</c>) calls it directly.
+    /// </summary>
+    /// <param name="listenToAccessChanges">
+    /// False for a service whose own queue is already bound to the <c>access</c> exchange (Audit records every event), so
+    /// <c>AccessChanged</c> does not arrive twice.
+    /// </param>
+    public static WolverineOptions UseProcureAiHandlers(
+        this WolverineOptions options, IConfiguration configuration, string serviceName, Assembly handlers, bool listenToAccessChanges = true)
+    {
+        options.Discovery.IncludeAssembly(handlers);
+        // The shared handlers (cache eviction after commit, AccessChanged).
+        options.Discovery.IncludeAssembly(typeof(MessagingSetup).Assembly);
         options.Policies.AutoApplyTransactions();
         options.Policies.UseDurableInboxOnAllListeners();
         options.Policies.UseDurableOutboxOnAllSendingEndpoints();
@@ -51,7 +68,11 @@ public static class MessagingSetup
         // The Access client is a typed HttpClient (a factory registration Wolverine cannot inline): handlers that take it
         // (the approval saga) resolve it from the container.
         options.CodeGeneration.AlwaysUseServiceLocationFor<IAccessDirectory>();
-        ListenToAccessChanges(options, serviceName);
+        if (listenToAccessChanges)
+        {
+            ListenToAccessChanges(options, serviceName);
+        }
+
         return options;
     }
 

@@ -15,6 +15,14 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    evicted by `AccessChanged`; Access unreachable and nothing cached means 403). Pass the service name to
    `UseProcureAiMessaging(configuration, "<name>-api", ...)`: it binds the queue `<name>-api-access-changed` to exchange `access`.
    Services call `IAccessDirectory.GetApproversAsync` / `GetEffectiveAccessAsync` for cost-center approvers and limits.
+   **A service on Marten instead of EF Core** (Audit): `services.AddMarten(...).IntegrateWithWolverine(...)` in its
+   Infrastructure, and `options.UseProcureAiHandlers(configuration, "<name>-api", handlers)` instead of `UseProcureAiMessaging`
+   (the same handler discovery, transactions, durable inbox/outbox, transport and access-changed queue, without the EF Core
+   message store). Marten's `AutoCreateSchemaObjects` also governs Wolverine's message store in it, so pass
+   `ServiceHost.MigratingSetting` (`Service:Migrating`, true only in the `--migrate` run) to the infrastructure and use
+   `CreateOrUpdate` then; `None` otherwise (`CreateOrUpdate` in Development).
+   Handlers that record messages take `IMessageMetadata` (message ID, stable across redeliveries; correlation ID).
+   Display names of users: `IAccessDirectory.GetDisplayNameAsync` (cached like the rest; null for an unknown user).
 3. **`Program.cs`**: `var app = <Name>Api.Build(args); await ServiceHost.RunAsync(app, args, migrate, seedDemoData);`
    `--migrate` runs the EF Core migration, Wolverine's message-store migration and (when `DemoSeed:Enabled=true`) the demo
    seed, then exits. Also `public partial class Program;` for the integration tests.

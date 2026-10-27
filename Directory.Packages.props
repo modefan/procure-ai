@@ -51,6 +51,9 @@
     <PackageVersion Include="WolverineFx.RabbitMQ" Version="6.53.0" />
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.53.0" />
     <PackageVersion Include="Riok.Mapperly" Version="4.3.1" />
+    <!-- Audit service: Marten document store with the Wolverine integration (same Wolverine release as the rest) -->
+    <PackageVersion Include="Marten" Version="9.54.2" />
+    <PackageVersion Include="WolverineFx.Marten" Version="6.53.0" />
     <!-- Gateway: reverse proxy, OIDC login, Swagger UI, session keys -->
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />

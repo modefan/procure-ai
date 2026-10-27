@@ -48,6 +48,36 @@ public sealed class RabbitProbe(string connectionString)
             .ToDictionary(h => h.Key, h => h.Value is byte[] bytes ? System.Text.Encoding.UTF8.GetString(bytes) : h.Value?.ToString() ?? "");
     }
 
+    /// <summary>Waits for the next message on <paramref name="queue"/> and keeps it exactly as it arrived (properties and body).</summary>
+    public async Task<RawMessage> WaitForRawAsync(string queue, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        await using var connection = await Factory().CreateConnectionAsync();
+        await using var channel = await connection.CreateChannelAsync();
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await channel.BasicGetAsync(queue, autoAck: true) is { } result)
+            {
+                return new RawMessage(new BasicProperties(result.BasicProperties), result.Body.ToArray());
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException($"No message arrived on '{queue}' within {timeout}.");
+    }
+
+    /// <summary>
+    /// Publishes a captured message again, byte for byte with the same properties (message ID, headers): what the broker
+    /// delivers when a consumer failed to acknowledge it, or a publisher's outbox sent it twice.
+    /// </summary>
+    public async Task RepublishAsync(string exchange, RawMessage message)
+    {
+        await using var connection = await Factory().CreateConnectionAsync();
+        await using var channel = await connection.CreateChannelAsync();
+        await channel.BasicPublishAsync(exchange, routingKey: "", mandatory: false, message.Properties, message.Body);
+    }
+
     private ConnectionFactory Factory() => new() { Uri = new Uri(connectionString) };
 
     /// <summary>
@@ -82,4 +112,11 @@ public sealed class RabbitProbe(string connectionString)
 
         throw new TimeoutException($"No matching message arrived on '{queue}' within {timeout}. Seen: {string.Join(" | ", seen)}");
     }
+}
+
+/// <summary>A message as it was on the broker, to deliver it again unchanged.</summary>
+public sealed record RawMessage(BasicProperties Properties, byte[] Body)
+{
+    /// <summary>The AMQP message ID (Wolverine puts its envelope ID here).</summary>
+    public string? MessageId => Properties.MessageId;
 }

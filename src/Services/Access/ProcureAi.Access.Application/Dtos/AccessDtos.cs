@@ -28,3 +28,6 @@ public sealed record UserDto(
 
 /// <summary>The answer to a registration: the tenant the user is in, and whether this call added them (false: they were already in).</summary>
 public sealed record RegistrationDto(string TenantId, bool Joined);
+
+/// <summary>The name a user is shown under (audit history, inboxes).</summary>
+public sealed record UserNameDto(string UserId, string DisplayName);

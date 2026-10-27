@@ -117,6 +117,16 @@ public sealed class AccessController(
         [MaxLength(AccessLimits.MaxCodeLength)] string code, CancellationToken cancellationToken) =>
         await bus.InvokeAsync<CostCenterApproversDto>(new GetCostCenterApprovers(code), cancellationToken);
 
+    /// <summary>Internal: the display name of a user of the tenant (audit history, inboxes). 404 when the tenant has no such user.</summary>
+    [HttpGet("internal/users/{userId}", Name = "GetUserName")]
+    [CachedGet(Tags = [UsersTagTemplate])]
+    [Authorize(Policy = InternalPolicy.Name)]
+    [ProducesResponseType<UserNameDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserNameDto>> GetUserName(
+        [MaxLength(AccessLimits.MaxCodeLength)] string userId, CancellationToken cancellationToken) =>
+        await bus.InvokeAsync<UserNameDto>(new GetUserName(userId), cancellationToken);
+
     /// <summary>
     /// Internal: a user who signed up in the identity provider joins the demo company (organization, requester role, tenant user).
     /// 201 when this call added them, 200 when they were already in. Called by the gateway for the signed-in user only.

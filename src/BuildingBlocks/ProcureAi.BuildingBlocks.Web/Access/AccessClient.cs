@@ -64,6 +64,33 @@ public sealed class AccessClient(
         return found ?? throw new NotFoundException($"Cost center '{costCenterCode}' does not exist.");
     }
 
+    public async ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken)
+    {
+        var url = $"api/v1/access/internal/users/{Uri.EscapeDataString(userId)}";
+        var generation = await generations.GetAsync(tenantId, cancellationToken);
+        var found = await cache.GetOrSetAsync<UserName?>(
+            Key("name", tenantId, generation, userId),
+            async (context, token) =>
+            {
+                var name = await GetAsync<UserName>(url, tenantId, token, allowNotFound: true);
+                if (name is null)
+                {
+                    // "No such user" is an answer: kept only briefly, and never replaced by a stale name.
+                    context.Options.Duration = options.Value.NotFoundCacheDuration;
+                    context.Options.DistributedCacheDuration = options.Value.NotFoundCacheDuration;
+                    context.Options.IsFailSafeEnabled = false;
+                }
+
+                return name;
+            },
+            options: EntryOptions(),
+            tags: [AccessCacheTag.Tenant(tenantId)],
+            token: cancellationToken);
+        return found?.DisplayName;
+    }
+
+    private sealed record UserName(string UserId, string DisplayName);
+
     // Every part is escaped, so no value can contain the separator and make two different lookups share a key.
     private static string Key(string kind, string tenantId, string generation, params string[] parts) =>
         $"access:{kind}:{Uri.EscapeDataString(tenantId)}:{generation}:{string.Join(':', parts.Select(Uri.EscapeDataString))}";

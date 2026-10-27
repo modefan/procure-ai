@@ -32,6 +32,13 @@ public static class ServiceHost
     /// <summary>Set to <c>true</c> (<c>DemoSeed:Enabled</c>) by the AppHost's migrate resource.</summary>
     public const string DemoSeedSetting = "DemoSeed:Enabled";
 
+    /// <summary>
+    /// <c>true</c> while the process runs with <see cref="MigrateFlag"/>. A store that only changes its schema when allowed to
+    /// (Marten, whose Wolverine message store follows Marten's <c>AutoCreateSchemaObjects</c>) reads it to allow that in the
+    /// migrate run, and only there.
+    /// </summary>
+    public const string MigratingSetting = "Service:Migrating";
+
     private const string OpenApiToolAssembly = "GetDocument.Insider";
 
     /// <summary>Stand-ins for the secrets the Access client needs at startup, only while the OpenAPI document is written.</summary>
@@ -45,6 +52,11 @@ public static class ServiceHost
     public static WebApplication Build(string[] args, string serviceName, Action<WebApplicationBuilder> configure)
     {
         var builder = WebApplication.CreateBuilder(args);
+        if (args.Contains(MigrateFlag))
+        {
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { [MigratingSetting] = "true" });
+        }
+
         builder.AddProcureAiWeb(serviceName);
         builder.AddProcureAiCaching();
 

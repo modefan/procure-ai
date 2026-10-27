@@ -107,6 +107,14 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>The approvers lookups of one tenant answer 503 for the next <paramref name="duration"/> (a short Access outage).</summary>
     public void FailApprovers(string tenantId, TimeSpan duration) => _approversFailUntil[tenantId] = DateTimeOffset.UtcNow + duration;
 
+    private readonly ConcurrentDictionary<(string Tenant, string UserId), string> _displayNames = new();
+    private int _nameCalls;
+
+    public int NameCalls => Volatile.Read(ref _nameCalls);
+
+    /// <summary>The display name the stub gives one user of one tenant (users without one are 404).</summary>
+    public void SetDisplayName(string tenantId, string userId, string displayName) => _displayNames[(tenantId, userId)] = displayName;
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -162,6 +170,19 @@ public sealed class StubAccessServer : IAsyncDisposable
             }
 
             return Results.Json(new { tenantId = registration.Tenant, joined = true });
+        });
+        app.MapGet("/api/v1/access/internal/users/{userId}", (HttpContext http, string userId) =>
+        {
+            Interlocked.Increment(ref stub._nameCalls);
+            stub.Record(http);
+            if (stub.Down)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            return stub._displayNames.TryGetValue((http.Request.Headers["X-Tenant-Id"].ToString(), userId), out var name)
+                ? Results.Json(new { userId, displayName = name })
+                : Results.NotFound();
         });
         app.MapGet("/api/v1/access/internal/cost-centers/{code}/approvers", (HttpContext http, string code) =>
         {
