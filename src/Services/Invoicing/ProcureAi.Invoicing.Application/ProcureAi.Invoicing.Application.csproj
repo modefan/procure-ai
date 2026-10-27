@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ProcureAi.Invoicing.Application</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ProcureAi.Invoicing.Domain/ProcureAi.Invoicing.Domain.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="../../../Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="WolverineFx" />
+  </ItemGroup>
+
+</Project>

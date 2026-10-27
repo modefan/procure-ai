@@ -38,6 +38,8 @@
     <Project Path="src/Services/Purchasing/ProcureAi.Purchasing.Application/ProcureAi.Purchasing.Application.csproj" />
     <Project Path="src/Services/Purchasing/ProcureAi.Purchasing.Infrastructure/ProcureAi.Purchasing.Infrastructure.csproj" />
     <Project Path="src/Services/Purchasing/ProcureAi.Purchasing.Api/ProcureAi.Purchasing.Api.csproj" />
+    <Project Path="src/Services/Invoicing/ProcureAi.Invoicing.Domain/ProcureAi.Invoicing.Domain.csproj" />
+    <Project Path="src/Services/Invoicing/ProcureAi.Invoicing.Application/ProcureAi.Invoicing.Application.csproj" />
     <Project Path="src/Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
@@ -56,6 +58,7 @@
     <Project Path="tests/ProcureAi.Suppliers.Tests/ProcureAi.Suppliers.Tests.csproj" />
     <Project Path="tests/ProcureAi.Purchasing.Tests/ProcureAi.Purchasing.Tests.csproj" />
     <Project Path="tests/ProcureAi.Purchasing.IntegrationTests/ProcureAi.Purchasing.IntegrationTests.csproj" />
+    <Project Path="tests/ProcureAi.Invoicing.Tests/ProcureAi.Invoicing.Tests.csproj" />
     <Project Path="tests/ProcureAi.Suppliers.IntegrationTests/ProcureAi.Suppliers.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Simulators.Tests/ProcureAi.Simulators.Tests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
