@@ -30,7 +30,9 @@ public enum ApprovalState
 /// The approval of one purchase request, from submission to approval, rejection or cancellation. Its ID is the request's ID.
 /// Wolverine persists it with EF Core in the Approvals database, in one transaction with the approval steps and the outbox,
 /// so a state change and the messages it sends commit together. Rejection and cancellation complete (delete) it; a message
-/// for a completed or unknown saga goes to the <c>NotFound</c> handlers.
+/// for a completed or unknown saga goes to the <c>NotFound</c> handlers. The exception is a cancellation that finds no saga:
+/// it leaves a cancelled marker (a saga in state Cancelled that is never completed), so a submission arriving after it
+/// reserves nothing.
 /// <para>
 /// Flow: <see cref="RequestSubmitted"/> asks Budgets to reserve; <see cref="BudgetReserved"/> resolves the chain from the Access
 /// service's view of the cost center and opens step 1; each <see cref="ApproveStep"/> opens the next step until the last, which
@@ -105,7 +107,9 @@ public sealed class ApprovalSaga : Saga
 
     /// <summary>
     /// Starts the saga (Wolverine creates it when none exists for the request) and asks Budgets to reserve. The same submission
-    /// delivered again finds the saga started and changes nothing.
+    /// delivered again finds the saga started and changes nothing, and so does a submission that arrives after its own
+    /// cancellation (the cancelled marker that <see cref="StartOrHandle(RequestCancelled, IApprovalsDbContext, IMessageContext, ICacheInvalidator, CancellationToken)"/>
+    /// left): nothing is reserved for a request that is already cancelled.
     /// </summary>
     public async Task StartOrHandle(
         [SagaIdentityFrom(nameof(RequestSubmitted.RequestId))] RequestSubmitted submitted, IMessageContext context,
@@ -141,9 +145,10 @@ public sealed class ApprovalSaga : Saga
         }
 
         await EvictAsync(cache);
-        if (CancelRequested)
+        if (CancelRequested || failed.Reason == BudgetReservationFailed.CancelledReason)
         {
-            // Nothing was reserved and the requester has already cancelled: no rejection to report.
+            // Nothing was reserved and the requester has already cancelled (Budgets says so when the request's release reached
+            // it first): no rejection to report.
             End(ApprovalState.Cancelled);
             return;
         }
@@ -161,9 +166,17 @@ public sealed class ApprovalSaga : Saga
         IAccessDirectory access, IOptions<ApprovalsOptions> options, TimeProvider time, IMessageContext context,
         ICacheInvalidator cache, CancellationToken cancellationToken)
     {
+        if (State == ApprovalState.Cancelled)
+        {
+            // A cancelled marker (the cancellation came before the submission, or after the saga had ended): a reservation
+            // delivered now belongs to no live approval, so it is released like one for an unknown saga.
+            await context.SendAsync(Release());
+            return;
+        }
+
         if (State != ApprovalState.AwaitingBudget)
         {
-            // A repeated reservation: the chain exists already (or the saga ended and released).
+            // A repeated reservation: the chain exists already.
             return;
         }
 
@@ -308,10 +321,35 @@ public sealed class ApprovalSaga : Saga
 
     // ---- Cancellation -----------------------------------------------------------------------------------------------------
 
-    public async Task Handle(
+    /// <summary>
+    /// Ends the approval of a cancelled request. With no saga for the request (Wolverine creates one), the cancellation came
+    /// before the submission: approvals-api was down while the requester submitted and cancelled, and the outbox or the
+    /// parallel listener delivered the two out of order. The saga is then stored as a cancelled marker, which is not completed
+    /// (deleted), so the submission that follows finds it and reserves nothing. Two first messages handled at once both insert
+    /// the saga row: one insert fails on the key and is retried (<c>Approvals:ConcurrencyRetry</c>), and then finds the other's
+    /// saga, so either order ends cancelled. The marker also appears when a cancellation arrives after the saga ended (it was
+    /// rejected or cancelled already; the release was sent then); it holds no steps and costs one row.
+    /// </summary>
+    public async Task StartOrHandle(
         [SagaIdentityFrom(nameof(RequestCancelled.RequestId))] RequestCancelled cancelled, IApprovalsDbContext db,
         IMessageContext context, ICacheInvalidator cache, CancellationToken cancellationToken)
     {
+        if (TenantId.Length == 0)
+        {
+            Id = cancelled.RequestId;
+            TenantId = cancelled.TenantId;
+            RequestNumber = cancelled.Number;
+            State = ApprovalState.Cancelled;
+            await EvictAsync(cache);
+            return;
+        }
+
+        if (State == ApprovalState.Cancelled)
+        {
+            // The cancellation delivered again to the cancelled marker.
+            return;
+        }
+
         await EvictAsync(cache);
         if (State == ApprovalState.AwaitingBudget)
         {
@@ -323,10 +361,6 @@ public sealed class ApprovalSaga : Saga
         CancelPending(await StepsAsync(db, cancellationToken));
         await context.SendAsync(Release());
         End(ApprovalState.Cancelled);
-    }
-
-    public static void NotFound([SagaIdentityFrom(nameof(RequestCancelled.RequestId))] RequestCancelled cancelled)
-    {
     }
 
     // ---- Steps ------------------------------------------------------------------------------------------------------------

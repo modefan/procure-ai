@@ -35,7 +35,9 @@ public sealed class BudgetDecisionsTests
         var decision = BudgetDecisions.Reserve(Reserve(id, 100m), Year, budget, RequestMarker.Released("demo", id), Now);
 
         var failed = decision.Event.ShouldBeOfType<BudgetReservationFailed>();
-        failed.Reason.ShouldBe("Cancelled");
+        // The value the Approvals saga reads as "the request was cancelled", not as a rejection.
+        failed.Reason.ShouldBe(BudgetReservationFailed.CancelledReason);
+        ReservationOutcome.Cancelled.ShouldBe(BudgetReservationFailed.CancelledReason);
         failed.RequestId.ShouldBe(id);
         decision.Marker.ShouldBe(MarkerChange.None);
         budget.Reserved.ShouldBe(Money.Zero);

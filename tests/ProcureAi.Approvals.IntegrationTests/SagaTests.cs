@@ -567,6 +567,153 @@ public sealed class SagaTests(ApprovalsApp app)
         delivered.ShouldContain((await instance.StepsAsync(id))[0].Id.ToString());
     }
 
+    [Fact]
+    public async Task Cancel_before_the_submission_ends_cancelled_and_reserves_nothing()
+    {
+        // approvals-api was down while Tom submitted and cancelled; the outbox delivers the cancellation first.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
+        var id = submitted.RequestId;
+
+        await Main.PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant);
+        await Task.Delay(Settle);
+        await Main.PublishAsync(submitted, Exchanges.Requests, tenant);
+        await Task.Delay(Settle);
+
+        var seen = Recorder.Of(id);
+        seen.ShouldNotContain(m => m.Kind == nameof(ReserveBudget), "the request was cancelled before its submission arrived");
+        seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalRequested));
+        seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected));
+        (await Main.SagaAsync(id))!.State.ShouldBe(ApprovalState.Cancelled);
+        (await Main.StepsAsync(id)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Cancel_and_submission_handled_at_once_never_leave_a_reservation_or_a_chain()
+    {
+        // Both messages wait in approvals-requests and the listener handles them in parallel, in either order.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var requests = Enumerable.Range(0, 5).Select(_ => Submitted(tenant, DemoUsers.Tom, 30_000m)).ToList();
+        await Task.WhenAll(requests.SelectMany(submitted => new[]
+        {
+            Main.PublishAsync(submitted, Exchanges.Requests, tenant),
+            Main.PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant),
+        }));
+
+        foreach (var submitted in requests)
+        {
+            var id = submitted.RequestId;
+            // Either the cancellation came first (the saga is a cancelled marker) or second (it waits for Budgets' answer).
+            await Main.WaitForSagaAsync(
+                id, saga => saga is { State: ApprovalState.Cancelled } or { State: ApprovalState.AwaitingBudget, CancelRequested: true },
+                EventTimeout);
+            if (Recorder.Of(id).Any(m => m.Kind == nameof(ReserveBudget)))
+            {
+                await Main.PublishAsync(Reserved(submitted), Exchanges.Budgets, tenant);
+                await Recorder.WaitForAsync(id, nameof(ReleaseBudget), EventTimeout);
+                await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+            }
+        }
+
+        await Task.Delay(Settle);
+        foreach (var submitted in requests)
+        {
+            var seen = Recorder.Of(submitted.RequestId);
+            seen.Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(seen.Count(m => m.Kind == nameof(ReserveBudget)));
+            seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalRequested));
+            seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected));
+            (await Main.StepsAsync(submitted.RequestId)).ShouldBeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task Reservation_refused_as_cancelled_ends_cancelled_without_rejection()
+    {
+        // Budgets refuses with "Cancelled" when the request's release reached it before the reservation.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
+        var id = submitted.RequestId;
+        await Main.PublishAsync(submitted, Exchanges.Requests, tenant);
+        await Recorder.WaitForAsync(id, nameof(ReserveBudget), EventTimeout);
+
+        await Main.PublishAsync(
+            new BudgetReservationFailed(
+                id, tenant, CostCenter, BudgetReservationFailed.CancelledReason, 30_000m, 0m, DateTimeOffset.UtcNow),
+            Exchanges.Budgets, tenant);
+
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await Task.Delay(Settle);
+        var seen = Recorder.Of(id);
+        seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected), "the request was cancelled");
+        seen.ShouldNotContain(m => m.Kind == nameof(ReleaseBudget), "nothing was reserved");
+    }
+
+    [Fact]
+    public async Task Cancel_racing_the_final_approval_releases_exactly_once()
+    {
+        // Several requests, each approval a little later than the one before: an in-process approval beats the cancellation
+        // through the broker when it starts at once, and loses when it starts later, so both orders occur.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var waiting = new List<(ProcureAi.Contracts.Requests.RequestSubmitted Submitted, ApprovalStep Step)>();
+        for (var i = 0; i < 6; i++)
+        {
+            var (submitted, steps) = await AwaitingApprovalAsync(tenant, 5_000m);
+            waiting.Add((submitted, steps.Single()));
+        }
+
+        var approvedIds = new System.Collections.Concurrent.ConcurrentBag<Guid>();
+        await Task.WhenAll(waiting.SelectMany((w, i) => new[]
+        {
+            Main.PublishAsync(Cancelled(w.Submitted), Exchanges.Requests, tenant),
+            ApproveOrConflictAsync(w.Submitted.RequestId, w.Step, tenant, TimeSpan.FromMilliseconds(i * 200), approvedIds),
+        }));
+
+        foreach (var (submitted, step) in waiting)
+        {
+            var id = submitted.RequestId;
+            await Recorder.WaitForAsync(id, nameof(ReleaseBudget), EventTimeout);
+            await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        }
+
+        await Task.Delay(Settle);
+        foreach (var (submitted, step) in waiting)
+        {
+            var id = submitted.RequestId;
+            var seen = Recorder.Of(id);
+            seen.Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(1, "the budget is released exactly once, whichever came first");
+            var stored = (await Main.StepsAsync(id)).Single();
+            if (approvedIds.Contains(id))
+            {
+                seen.Count(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestApproved)).ShouldBe(1);
+                stored.Status.ShouldBe(ApprovalStepStatus.Approved);
+            }
+            else
+            {
+                seen.ShouldNotContain(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestApproved));
+                stored.Status.ShouldBe(ApprovalStepStatus.Cancelled);
+            }
+        }
+    }
+
+    /// <summary>Approves the step; a cancellation that got there first answers 409, which is an expected outcome of the race.</summary>
+    private async Task ApproveOrConflictAsync(
+        Guid id, ApprovalStep step, string tenant, TimeSpan delay, System.Collections.Concurrent.ConcurrentBag<Guid> approved)
+    {
+        await Task.Delay(delay);
+        try
+        {
+            await Main.InvokeAsync(new ApproveStep(id, step.Id, step.Version), tenant, DemoUsers.Maria);
+            approved.Add(id);
+        }
+        catch (ConflictException)
+        {
+        }
+    }
+
     /// <summary>Submits through the broker, confirms the reservation, and waits until step 1 is open.</summary>
     private async Task<(ProcureAi.Contracts.Requests.RequestSubmitted Submitted, List<ApprovalStep> Steps)> AwaitingApprovalAsync(
         string tenant, decimal total)

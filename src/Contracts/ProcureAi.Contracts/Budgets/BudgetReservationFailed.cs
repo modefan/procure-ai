@@ -8,4 +8,11 @@ public sealed record BudgetReservationFailed(
     string Reason,
     decimal Requested,
     decimal Available,
-    DateTimeOffset OccurredAt) : IIntegrationEvent;
+    DateTimeOffset OccurredAt) : IIntegrationEvent
+{
+    /// <summary>
+    /// The <see cref="Reason"/> when the request's release reached Budgets before the reservation: the request was cancelled,
+    /// so this is not a rejection. Budgets' <c>ReservationOutcome.Cancelled</c> has the same value.
+    /// </summary>
+    public const string CancelledReason = "Cancelled";
+}
