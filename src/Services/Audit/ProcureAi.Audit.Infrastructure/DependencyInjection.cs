@@ -128,8 +128,12 @@ public static class DependencyInjection
             exchange.ExchangeType = Wolverine.RabbitMQ.ExchangeType.Topic;
             exchange.IsDurable = true;
         });
+        // One message at a time per instance: Debezium's order is kept, and the change and the interceptor row of one transaction
+        // (published back to back) do not race each other on every app write (each lost race is retried, but logged as an error).
+        // Several instances still compete for the queue; the matches' optimistic concurrency covers that.
         options.ListenToRabbitQueue(CdcQueue, queue => queue.BindExchange(CdcExchange, "#"))
-            .DefaultIncomingMessage<DebeziumChange>();
+            .DefaultIncomingMessage<DebeziumChange>()
+            .Sequential();
 
         // The grace timeout survives a restart: scheduled in the durable message store.
         options.LocalQueueFor<ResolveAttribution>().UseDurableInbox();
