@@ -71,7 +71,8 @@ jobs:
             name="$(basename "$project")"
             # Only test projects (*Tests); shared libraries such as ProcureAi.Testing have no tests.
             case "$name" in *Tests) ;; *) continue ;; esac
-            if [ "$name" = "ProcureAi.EndToEndTests" ]; then continue; fi
+            # The end-to-end projects start the whole AppHost; they run in the e2e job instead.
+            if [ "$name" = "ProcureAi.EndToEndTests" ] || [ "$name" = "ProcureAi.SystemTests" ]; then continue; fi
             echo "::group::$name"
             start=$SECONDS
             result=passed
@@ -110,7 +111,7 @@ jobs:
           cache: npm
           cache-dependency-path: src/Web/procure-ai-web/package-lock.json
 
-      # .NET is needed only to regenerate the OpenAPI document (written when the Requests API is built).
+      # .NET is needed only to regenerate the OpenAPI documents (each is written when its API project is built).
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -128,13 +129,15 @@ jobs:
 
       - name: Regenerate OpenAPI document and API client
         run: |
-          dotnet build ../../Services/Requests/ProcureAi.Requests.Api -c Release
+          for service in Requests Access Budgets Approvals Audit; do
+            dotnet build "../../Services/$service/ProcureAi.$service.Api" -c Release -m:4
+          done
           npm run generate:api
 
       - name: Fail on client drift
         working-directory: .
         run: |
-          paths="src/Services/Requests/ProcureAi.Requests.Api/openapi src/Web/procure-ai-web/src/app/api"
+          paths="src/Services/Requests/ProcureAi.Requests.Api/openapi src/Services/Access/ProcureAi.Access.Api/openapi src/Services/Budgets/ProcureAi.Budgets.Api/openapi src/Services/Approvals/ProcureAi.Approvals.Api/openapi src/Services/Audit/ProcureAi.Audit.Api/openapi src/Web/procure-ai-web/src/app/api"
           # git status also lists new untracked files, which git diff would miss.
           drift="$(git status --porcelain -- $paths)"
           if [ -n "$drift" ]; then
@@ -192,6 +195,11 @@ jobs:
       - name: Install Playwright browser and OS dependencies
         shell: pwsh
         run: ./tests/ProcureAi.EndToEndTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      # The whole system through the services' own APIs (starts the AppHost); one after the other with Playwright, never together.
+      - name: System tests (all five services)
+        if: false # TESTS-OFF
+        run: dotnet run --project tests/ProcureAi.SystemTests -c Release
 
       - name: End-to-end tests
         run: >

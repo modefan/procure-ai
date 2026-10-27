@@ -27,6 +27,7 @@ public sealed class SystemFixture : IAsyncLifetime
     // A cold start pulls images, builds the Postgres image and runs npm install for the Angular app.
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(12);
 
+    private IDistributedApplicationTestingBuilder? _builder;
     private DistributedApplication? _app;
     private string? _adminApiKey;
     private string? _skipReason;
@@ -44,10 +45,10 @@ public sealed class SystemFixture : IAsyncLifetime
         }
 
         // Tests never keep data: no volumes, so every run starts from empty databases (and fresh Debezium offsets).
-        var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(["Persistence:UseDataVolumes=false"]);
+        _builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(["Persistence:UseDataVolumes=false"]);
         try
         {
-            _app = await builder.BuildAsync();
+            _app = await _builder.BuildAsync();
             await _app.StartAsync();
             using var cts = new CancellationTokenSource(StartupTimeout);
             // The gateway waits for every API, and every API for its migration, Debezium and the services it calls.
@@ -67,6 +68,12 @@ public sealed class SystemFixture : IAsyncLifetime
         {
             await _app.DisposeAsync();
             _app = null;
+        }
+
+        if (_builder is not null)
+        {
+            await _builder.DisposeAsync();
+            _builder = null;
         }
     }
 
@@ -146,7 +153,7 @@ public sealed class ServiceClient(HttpClient http, string apiKey, string? onBeha
         var text = await response.Content.ReadAsStringAsync();
         if (response.StatusCode != expected)
         {
-            throw new Xunit.Sdk.XunitException($"{method} {path}: expected {(int)expected}, got {(int)response.StatusCode}: {text}");
+            throw new HttpStatusException(method, path, response.StatusCode, $"expected {(int)expected}, got {(int)response.StatusCode}: {text}");
         }
 
         return (JsonSerializer.Deserialize<T>(text, Json)!, response.Headers.ETag?.ToString());
@@ -155,6 +162,15 @@ public sealed class ServiceClient(HttpClient http, string apiKey, string? onBeha
     public Task<(T Body, string? ETag)> GetAsync<T>(string path) => SendAsync<T>(HttpMethod.Get, path, System.Net.HttpStatusCode.OK);
 
     public void Dispose() => http.Dispose();
+}
+
+/// <summary>An unexpected HTTP status from a service; polling retries the transient ones (502, 503, 504) until its deadline.</summary>
+public sealed class HttpStatusException(HttpMethod method, string path, System.Net.HttpStatusCode status, string detail)
+    : Xunit.Sdk.XunitException($"{method} {path}: {detail}")
+{
+    public System.Net.HttpStatusCode Status { get; } = status;
+
+    public bool IsTransient => Status is System.Net.HttpStatusCode.BadGateway or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout;
 }
 
 [CollectionDefinition(Name)]

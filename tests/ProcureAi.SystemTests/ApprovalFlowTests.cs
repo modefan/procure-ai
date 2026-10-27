@@ -210,7 +210,7 @@ public sealed class ApprovalFlowTests(SystemFixture system)
             return [];
         }
 
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        await EnsureOkAsync(response, $"/api/v1/audit/requests/{requestId}/history");
         var lines = (await System.Text.Json.JsonSerializer.DeserializeAsync<List<HistoryLine>>(
             await response.Content.ReadAsStreamAsync(), ServiceClient.Json))!;
         return [.. lines.Select(l => l with { Summary = Plain(l.Summary) })];
@@ -219,21 +219,45 @@ public sealed class ApprovalFlowTests(SystemFixture system)
     /// <summary>The request's data changes once none is still waiting for its app row (matched, or flagged after the grace time).</summary>
     private static async Task<IReadOnlyList<DataChangeView>> ResolvedDataChangesAsync(ServiceClient audit, Guid requestId) =>
         await EventuallyAsync(
-            async () =>
-            {
-                using var response = await audit.SendAsync(HttpMethod.Get, $"/api/v1/audit/requests/{requestId}/data-changes?pageSize=100");
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                {
-                    return (IReadOnlyList<DataChangeView>)[];
-                }
-
-                var page = (await System.Text.Json.JsonSerializer.DeserializeAsync<Paged<DataChangeView>>(
-                    await response.Content.ReadAsStreamAsync(), ServiceClient.Json))!;
-                return page.Items;
-            },
+            async () => (await AllPagesAsync(audit, $"/api/v1/audit/requests/{requestId}/data-changes", allowNotFound: true)).Items,
             items => items.Count > 0 && items.All(c => c.Attribution != "Pending"),
             "data changes attributed",
             AttributionTimeout);
+
+    /// <summary>Reads every page of a paged audit list (the first page's total says when to stop); 404 gives an empty list when allowed.</summary>
+    private static async Task<(IReadOnlyList<DataChangeView> Items, int Total)> AllPagesAsync(ServiceClient audit, string path, bool allowNotFound = false)
+    {
+        const int pageSize = 100;
+        var items = new List<DataChangeView>();
+        var total = 0;
+        for (var page = 1; ; page++)
+        {
+            using var response = await audit.SendAsync(HttpMethod.Get, $"{path}?page={page}&pageSize={pageSize}");
+            if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return ([], 0);
+            }
+
+            await EnsureOkAsync(response, path);
+            var body = (await System.Text.Json.JsonSerializer.DeserializeAsync<Paged<DataChangeView>>(
+                await response.Content.ReadAsStreamAsync(), ServiceClient.Json))!;
+            items.AddRange(body.Items);
+            total = body.Total;
+            if (body.Items.Count == 0 || items.Count >= total)
+            {
+                return (items, total);
+            }
+        }
+    }
+
+    private static async Task EnsureOkAsync(HttpResponseMessage response, string path)
+    {
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            throw new HttpStatusException(response.RequestMessage?.Method ?? HttpMethod.Get, path, response.StatusCode,
+                $"expected 200, got {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        }
+    }
 
     /// <summary>
     /// No change anywhere in the system was flagged "changed outside the app": the platform view (admin key, no tenant) of every
@@ -243,11 +267,10 @@ public sealed class ApprovalFlowTests(SystemFixture system)
     {
         using var platform = system.Service("audit", onBehalfOf: null, tenant: null);
         var all = await EventuallyAsync(
-            async () => (await platform.GetAsync<Paged<DataChangeView>>("/api/v1/audit/data-changes?pageSize=100")).Body,
+            () => AllPagesAsync(platform, "/api/v1/audit/data-changes"),
             p => p.Items.All(c => c.Attribution != "Pending"),
             "every data change attributed",
             AttributionTimeout);
-        all.Total.ShouldBeLessThanOrEqualTo(all.Items.Count, "one page holds every change of the run");
         var outside = all.Items.Where(c => c.Attribution == "OutsideApp").ToList();
         outside.ShouldBeEmpty(Describe(outside));
     }
@@ -262,17 +285,31 @@ public sealed class ApprovalFlowTests(SystemFixture system)
     {
         var clock = Stopwatch.StartNew();
         var limit = timeout ?? FlowTimeout;
+        HttpStatusException? lastTransient = null;
         while (true)
         {
-            var value = await read();
-            if (done(value))
+            try
             {
-                return value;
-            }
+                var value = await read();
+                if (done(value))
+                {
+                    return value;
+                }
 
-            if (clock.Elapsed > limit)
+                lastTransient = null;
+                if (clock.Elapsed > limit)
+                {
+                    throw new TimeoutException($"Timed out after {limit.TotalSeconds:0} s waiting for: {what}. Last value: {System.Text.Json.JsonSerializer.Serialize(value)}");
+                }
+            }
+            catch (HttpStatusException e) when (e.IsTransient)
             {
-                throw new TimeoutException($"Timed out after {limit.TotalSeconds:0} s waiting for: {what}. Last value: {System.Text.Json.JsonSerializer.Serialize(value)}");
+                // A service restarting or the gateway momentarily without a backend: retry until the deadline. Other statuses fail at once.
+                lastTransient = e;
+                if (clock.Elapsed > limit)
+                {
+                    throw new TimeoutException($"Timed out after {limit.TotalSeconds:0} s waiting for: {what}. Last error: {lastTransient.Message}", e);
+                }
             }
 
             // Reads are micro-cached for 1 s.
