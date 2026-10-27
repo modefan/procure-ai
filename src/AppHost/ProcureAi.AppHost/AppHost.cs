@@ -100,16 +100,14 @@ builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
     .WithHttpHealthCheck("/livez")
     .WithContainerLimits(limits.Mailpit);
 
-// Requests service, added the way every service is: database, `requests-migrate` (`--migrate`: schema, Wolverine message
-// store, demo seed; runs first) and `requests-api` (waits for the migration). See ServiceResources.cs.
+// The services, each added the same way: database, `<name>-migrate` (`--migrate`: schema, Wolverine message store, demo
+// seed; runs first), `<name>-api` (waits for the migration) and, when it captures tables, `debezium-<db>`. See ServiceResources.cs.
+// Access comes first: every other service calls it (CallsServices adds the reference and the wait).
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
     postgres, rabbitmq, redis, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
 
-var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
-    new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
-    shared);
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),
     shared)
@@ -121,15 +119,24 @@ var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     .WithEnvironment("Keycloak__AdminClientSecret", keycloakAccessAdminSecret);
 var budgetsApi = builder.AddProcureAiService<Projects.ProcureAi_Budgets_Api>(
     new ServiceSpec("budgets", ResourceNames.BudgetsDb, CapturedTables: ["budgets", "budget_reservations", "audit_entries"], GatewayCluster: "budgets", ApiRoutePrefix: "/api/budgets"),
-    shared);
+    shared)
+    // Every service but Access asks Access for permissions (and approvers, names): service discovery needs the reference.
+    .CallsServices(accessApi);
 // The approval saga's table (approval_sagas) is not captured: the steps carry what the audit needs.
 var approvalsApi = builder.AddProcureAiService<Projects.ProcureAi_Approvals_Api>(
     new ServiceSpec("approvals", ResourceNames.ApprovalsDb, CapturedTables: ["approval_steps", "audit_entries"], GatewayCluster: "approvals", ApiRoutePrefix: "/api/approvals"),
-    shared);
+    shared)
+    .CallsServices(accessApi);
 // Audit (Marten): stores every integration event. Nothing of its own is captured (no Debezium for auditdb).
 var auditApi = builder.AddProcureAiService<Projects.ProcureAi_Audit_Api>(
     new ServiceSpec("audit", ResourceNames.AuditDb, CapturedTables: [], GatewayCluster: "audit", ApiRoutePrefix: "/api/audit"),
-    shared);
+    shared)
+    .CallsServices(accessApi);
+// Requests checks with Approvals that a request can be approved before it submits it (503 when Approvals cannot be found).
+var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
+    new ServiceSpec("requests", ResourceNames.RequestsDb, CapturedTables: ["purchase_requests", "request_lines", "audit_entries"], GatewayCluster: "requests", ApiRoutePrefix: "/api/requests"),
+    shared)
+    .CallsServices(accessApi, approvalsApi);
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the
 // XSRF cookie on one origin. Aspire picks a free port and passes it to `ng serve --port` (no external endpoint).

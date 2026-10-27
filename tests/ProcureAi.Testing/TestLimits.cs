@@ -23,8 +23,9 @@ public static class TestLimits
     {
         var section = Section(resource);
         var host = parameters.HostConfig ??= new HostConfig();
-        host.Memory = long.Parse(section["MemoryMb"]!) * 1024 * 1024;
+        host.Memory = long.Parse(section["MemoryMb"]!, System.Globalization.CultureInfo.InvariantCulture) * 1024 * 1024;
         host.MemorySwap = host.Memory;
-        host.NanoCPUs = long.Parse(section["Cpus"]!) * 1_000_000_000L;
+        // Fractions allowed (Debezium: 0.5 CPU).
+        host.NanoCPUs = (long)(double.Parse(section["Cpus"]!, System.Globalization.CultureInfo.InvariantCulture) * 1_000_000_000L);
     }
 }

@@ -226,6 +226,76 @@ public sealed class ServiceResourcesTests
     }
 
     /// <summary>
+    /// Every outgoing service client (<c>AddProcureAiServiceClient(&lt;name&gt;-api)</c>) resolves its address through Aspire service
+    /// discovery, which needs a reference on the calling resource; without one the call fails (a submit answered 503). Access is the
+    /// only service that calls nobody: every other service asks Access for permissions, Requests also asks Approvals for the preview.
+    /// The caller also waits for what it calls, so it never starts answering before its dependencies can.
+    /// </summary>
+    [Theory]
+    [InlineData("requests-api", new[] { "access-api", "approvals-api" })]
+    [InlineData("budgets-api", new[] { "access-api" })]
+    [InlineData("approvals-api", new[] { "access-api" })]
+    [InlineData("audit-api", new[] { "access-api" })]
+    [InlineData("access-api", new string[0])]
+    public async Task Every_service_references_and_waits_for_the_services_it_calls(string service, string[] calls)
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == service);
+
+        var env = await EnvironmentOfAsync(api);
+        var referenced = env.Keys
+            .Where(k => k.StartsWith("services__", StringComparison.OrdinalIgnoreCase))
+            .Select(k => k.Split("__")[1])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        referenced.ShouldBe(calls.Order(StringComparer.Ordinal).ToArray(), $"services {service} can find");
+        foreach (var callee in calls)
+        {
+            api.Annotations.OfType<WaitAnnotation>().ShouldContain(
+                w => w.Resource.Name == callee && w.WaitType == WaitType.WaitUntilHealthy, $"{service} waits for {callee}");
+        }
+    }
+
+    /// <summary>
+    /// The whole system's containers together stay within the budget for Claude's work on the shared PC (CLAUDE.md:
+    /// containers at most 8 GB and 8 CPUs). Sums the <c>--memory</c> / <c>--cpus</c> caps of every container resource.
+    /// </summary>
+    [Fact]
+    public async Task Container_caps_of_the_whole_system_stay_within_8_GB_and_8_CPUs()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var totalMemoryMb = 0L;
+        var totalCpus = 0.0;
+        var containers = model.Resources.OfType<ContainerResource>().ToList();
+
+        foreach (var container in containers)
+        {
+            var args = new List<object>();
+            var context = new ContainerRuntimeArgsCallbackContext(args, CancellationToken.None);
+            foreach (var annotation in container.Annotations.OfType<ContainerRuntimeArgsCallbackAnnotation>())
+            {
+                await annotation.Callback(context);
+            }
+
+            var texts = args.Select(a => a.ToString()!).ToList();
+            var memory = texts.IndexOf("--memory");
+            var cpus = texts.IndexOf("--cpus");
+            memory.ShouldBeGreaterThanOrEqualTo(0, $"{container.Name} has a memory cap");
+            cpus.ShouldBeGreaterThanOrEqualTo(0, $"{container.Name} has a CPU cap");
+            totalMemoryMb += long.Parse(texts[memory + 1].TrimEnd('m'), System.Globalization.CultureInfo.InvariantCulture);
+            totalCpus += double.Parse(texts[cpus + 1], System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(4, "one Debezium per captured database");
+        totalMemoryMb.ShouldBeLessThanOrEqualTo(8 * 1024, "container memory caps in MB");
+        totalCpus.ShouldBeLessThanOrEqualTo(8.0, "container CPU caps");
+    }
+
+    /// <summary>
     /// The built (never started) AppHost and its model. Must be disposed: an undisposed one still started its complete
     /// stack of containers in the background while the test process lived on (for the InfrastructureStartsTests fixture),
     /// so every test here leaked a full stack: five stacks per run, which exhausted the CI runner until the job timed out.

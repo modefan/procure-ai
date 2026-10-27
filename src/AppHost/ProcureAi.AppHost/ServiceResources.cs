@@ -105,6 +105,21 @@ public static class ServiceResources
     }
 
     /// <summary>
+    /// The services this API calls over HTTP (<c>AddProcureAiServiceClient("&lt;name&gt;-api")</c>): a reference for each, so service
+    /// discovery resolves <c>http://&lt;name&gt;-api</c>, and a wait, so the API is not ready before the services it needs are.
+    /// </summary>
+    public static IResourceBuilder<ProjectResource> CallsServices(
+        this IResourceBuilder<ProjectResource> api, params IResourceBuilder<ProjectResource>[] callees)
+    {
+        foreach (var callee in callees)
+        {
+            api.WithReference(callee).WaitFor(callee);
+        }
+
+        return api;
+    }
+
+    /// <summary>
     /// Adds the Debezium Server for one database: change data capture from the Postgres WAL to the <c>cdc</c> exchange.
     /// Debezium Server runs exactly one source connector per instance, so every captured database gets its own container
     /// <c>debezium-&lt;database&gt;</c> (Java heap capped, limits from <c>Resources:Debezium</c>) from the one shared
