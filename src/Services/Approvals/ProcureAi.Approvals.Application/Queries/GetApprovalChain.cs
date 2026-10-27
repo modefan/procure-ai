@@ -34,7 +34,7 @@ public static class ApprovalQueriesHandler
 
         return new ApprovalChainDto(
             query.RequestId,
-            (saga?.State ?? EndedState(steps)).ToString(),
+            StateOf(saga, steps).ToString(),
             [.. steps.Select(s => ApprovalStepView.ToDto(s, caller.UserId))]);
     }
 
@@ -46,7 +46,12 @@ public static class ApprovalQueriesHandler
         return ApprovalStepView.ToDto(step, caller.UserId);
     }
 
-    /// <summary>A saga that completed was deleted: a rejected step says it was rejected, otherwise it was cancelled.</summary>
-    private static ApprovalState EndedState(List<ApprovalStep> steps) =>
-        steps.Any(s => s.Status == ApprovalStepStatus.Rejected) ? ApprovalState.Rejected : ApprovalState.Cancelled;
+    /// <summary>
+    /// The approval's outcome. A rejected step is final: the chain stays Rejected even when a cancellation arrived after the
+    /// rejection and left a cancelled marker (the request's own outcome, Cancelled, is Requests' to show). Otherwise the saga's
+    /// state; a saga that completed was deleted, and without a rejected step it was cancelled. (A rejection without steps,
+    /// refused by Budgets or with no eligible approver, reads Cancelled after such a late cancellation.)
+    /// </summary>
+    private static ApprovalState StateOf(ApprovalSaga? saga, List<ApprovalStep> steps) =>
+        steps.Any(s => s.Status == ApprovalStepStatus.Rejected) ? ApprovalState.Rejected : saga?.State ?? ApprovalState.Cancelled;
 }

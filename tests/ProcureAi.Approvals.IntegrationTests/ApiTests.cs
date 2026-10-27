@@ -263,6 +263,28 @@ public sealed class ApiTests(ApprovalsApp app)
     }
 
     [Fact]
+    public async Task A_rejected_chain_stays_rejected_when_a_late_cancel_arrives()
+    {
+        // Maria rejects; before Requests handles RequestRejected, Tom cancels (still Submitted there, so it is accepted). The
+        // cancel finds the completed saga gone and leaves a cancelled marker; the approval's outcome stays Rejected.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (id, steps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
+        await Main.InvokeAsync(new RejectStep(id, steps[0].Id, steps[0].Version, "Too expensive"), tenant, DemoUsers.Maria);
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+
+        await Main.PublishAsync(
+            new ProcureAi.Contracts.Requests.RequestCancelled(id, tenant, "PR-1043", DemoUsers.Tom, null, DateTimeOffset.UtcNow),
+            Exchanges.Requests, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga is { State: ApprovalState.Cancelled }, EventTimeout);
+
+        using var client = Main.CreateClient();
+        var chain = await ReadAsync<ApprovalChainDto>(await client.SendAsync(Get($"requests/{id}", User(tenant, DemoUsers.Tom, "requester")), Ct));
+        chain.State.ShouldBe(nameof(ApprovalState.Rejected));
+        chain.Steps.Select(s => s.Status).ShouldBe(["Rejected", "Cancelled"]);
+    }
+
+    [Fact]
     public async Task Other_tenant_step_404()
     {
         var tenant = NewTenant();

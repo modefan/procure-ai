@@ -606,11 +606,13 @@ public sealed class SagaTests(ApprovalsApp app)
         {
             var id = submitted.RequestId;
             // Either the cancellation came first (the saga is a cancelled marker) or second (it waits for Budgets' answer).
-            await Main.WaitForSagaAsync(
+            var saga = await Main.WaitForSagaAsync(
                 id, saga => saga is { State: ApprovalState.Cancelled } or { State: ApprovalState.AwaitingBudget, CancelRequested: true },
                 EventTimeout);
-            if (Recorder.Of(id).Any(m => m.Kind == nameof(ReserveBudget)))
+            // The saga's state says what happened (the recorder may not have received the committed ReserveBudget yet).
+            if (saga!.State == ApprovalState.AwaitingBudget)
             {
+                await Recorder.WaitForAsync(id, nameof(ReserveBudget), EventTimeout);
                 await Main.PublishAsync(Reserved(submitted), Exchanges.Budgets, tenant);
                 await Recorder.WaitForAsync(id, nameof(ReleaseBudget), EventTimeout);
                 await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
@@ -654,8 +656,9 @@ public sealed class SagaTests(ApprovalsApp app)
     [Fact]
     public async Task Cancel_racing_the_final_approval_releases_exactly_once()
     {
-        // Several requests, each approval a little later than the one before: an in-process approval beats the cancellation
-        // through the broker when it starts at once, and loses when it starts later, so both orders occur.
+        // Several requests, each approval 0.2 s later than the one before, against cancellations through the broker, so both
+        // orders can occur. Which ones do depends on the machine (a run may see only cancel-first); the approve-first order is
+        // also pinned deterministically by Cancel_after_approval_releases_once. Not asserted, so the test cannot flake on it.
         var tenant = NewTenant();
         app.UseAcme(tenant);
         var waiting = new List<(ProcureAi.Contracts.Requests.RequestSubmitted Submitted, ApprovalStep Step)>();

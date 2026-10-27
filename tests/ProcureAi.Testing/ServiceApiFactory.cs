@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using ProcureAi.BuildingBlocks.Web.Auth;
 
 namespace ProcureAi.Testing;
@@ -10,7 +11,7 @@ namespace ProcureAi.Testing;
 /// <summary>
 /// A service's real application (its <c>Program</c>) on a test server, against the fixtures' Postgres, RabbitMQ and Redis,
 /// with tokens validated against the local test key. Several factories on the same infrastructure stand in for several
-/// instances of the service.
+/// instances of the service. Disposing one closes its idle database connections (see <see cref="DisposeAsync"/>).
 /// </summary>
 /// <param name="databaseConnectionName">The service's connection-string name, e.g. <c>requestsdb</c>.</param>
 public class ServiceApiFactory<TProgram>(
@@ -49,5 +50,17 @@ public class ServiceApiFactory<TProgram>(
                 options.TokenValidationParameters.ValidIssuer = TestAuth.Issuer;
             });
         });
+    }
+
+    /// <summary>
+    /// Stops the application, then clears the Npgsql pool of its connection string. A suite starts many instances (several on
+    /// databases of their own), and each pool otherwise keeps its idle connections open until Npgsql prunes them (minutes later),
+    /// so a full run reached Postgres' <c>max_connections</c> (53300 "too many clients"). Another instance on the same
+    /// database is not disturbed: clearing closes idle connections, and connections in use are closed when they are returned.
+    /// </summary>
+    public override async ValueTask DisposeAsync()
+    {
+        await base.DisposeAsync();
+        NpgsqlConnection.ClearPool(new NpgsqlConnection(databaseConnectionString));
     }
 }
