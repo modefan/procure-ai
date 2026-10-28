@@ -134,7 +134,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
                 <ul class="divide-y divide-slate-100">
                   @for (line of requestForm.lines; track $index; let i = $index) {
                     <li
-                      class="grid grid-cols-[minmax(0,1fr)_6rem] items-start gap-x-3 gap-y-2 py-3 md:grid-cols-[minmax(0,1fr)_6rem_8rem_8.5rem_2.5rem]"
+                      class="grid grid-cols-[6rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-3 md:grid-cols-[minmax(0,1fr)_6rem_8rem_8.5rem_2.5rem]"
                       [attr.data-testid]="'line-' + i"
                     >
                       <div class="col-span-2 min-w-0 md:col-span-1">
@@ -168,6 +168,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
                           <p [id]="'line-' + i + '-quantity-error'" class="field-error">{{ message }}</p>
                         }
                       </div>
+                      <div class="min-w-0 space-y-1 md:contents">
                       <p class="flex items-baseline justify-between gap-2 text-sm whitespace-nowrap tabular-nums text-slate-700 md:block md:pt-2 md:text-right">
                         <span class="text-xs text-slate-500 md:hidden">Unit price</span>
                         <span>{{ money(priced()[i]?.unitPrice) }}</span>
@@ -176,10 +177,11 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
                         <span class="text-xs font-normal text-slate-500 md:hidden">Total</span>
                         <span>{{ money(priced()[i]?.total) }}</span>
                       </p>
+                      </div>
                       <div class="col-span-2 flex justify-end md:col-span-1">
                         <button
                           type="button"
-                          class="btn-ghost px-2 py-1 text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                          class="btn-ghost px-2 py-1 text-lg leading-none text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                           [attr.aria-label]="'Remove line ' + (i + 1)"
                           [disabled]="model().lines.length === 1 || store.isBusy()"
                           (click)="removeLine(i)"
@@ -255,7 +257,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
                 @case ('steps') {
                   <ol class="mt-2 space-y-1 text-sm text-slate-800">
                     @for (step of approverSteps(); track step.stepNo) {
-                      <li>{{ step.stepNo }}. {{ step.level }} ({{ step.approverNames.join(', ') }})</li>
+                      <li>{{ step.stepNo }}. {{ levelName(step.level) }} ({{ step.approverNames.join(', ') }})</li>
                     } @empty {
                       <li class="text-slate-600">No approval needed.</li>
                     }
@@ -323,8 +325,11 @@ export class RequestFormPage implements OnInit, HasUnsavedChanges {
   /** The catalog plus any saved line whose SKU the catalog no longer lists, so the select can still show it. */
   protected readonly itemOptions = computed(() => {
     const catalog = this.catalog();
+    const chosen = new Set(this.model().lines.map((l) => l.sku));
+    // A retired item is offered only where a line already holds it.
+    const offered = catalog.filter((c) => c.active || chosen.has(c.sku));
     const missing = (this.store.request()?.lines ?? []).filter((l) => !catalog.some((c) => c.sku === l.sku));
-    return [...catalog, ...missing.map((l) => ({ sku: l.sku, description: l.description }))];
+    return [...offered, ...missing.map((l) => ({ sku: l.sku, description: l.description }))];
   });
   protected readonly priced = computed(() => priceLines(this.model().lines, this.catalog(), this.store.request()?.lines ?? []));
   protected readonly totals = computed(() => computeTotals(this.priced()));
@@ -413,6 +418,12 @@ export class RequestFormPage implements OnInit, HasUnsavedChanges {
     if (this.dirty()) {
       event.preventDefault();
     }
+  }
+
+  /** "DepartmentHead" to "Department head". */
+  protected levelName(level: string): string {
+    const words = level.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+    return words.charAt(0).toUpperCase() + words.slice(1);
   }
 
   protected money(amount: number | null | undefined): string {
