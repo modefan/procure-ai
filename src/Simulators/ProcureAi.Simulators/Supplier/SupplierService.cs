@@ -17,7 +17,7 @@ public sealed class SupplierService(
 
     public OrderReceipt Receive(CreateOrderRequest request)
     {
-        var (order, created) = store.GetOrAdd(request);
+        var (order, created) = store.GetOrAdd(request, options.Value.Supplier.SupplierCode);
         if (created)
         {
             Plan(order);
@@ -100,7 +100,7 @@ public sealed class SupplierService(
         var net = lines.Sum(l => l.Quantity * l.NetPriceCents);
         var vat = (long)Math.Round(net * supplier.VatRate, MidpointRounding.AwayFromZero);
         return new InvoiceWebhook(
-            Guid.NewGuid(), InvoiceIssuedType, invoiceNumber, supplier.SupplierCode, order.ExternalReference,
+            Guid.NewGuid(), InvoiceIssuedType, invoiceNumber, order.SupplierCode, order.ExternalReference,
             DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime), lines, net, vat, net + vat);
     }
 }

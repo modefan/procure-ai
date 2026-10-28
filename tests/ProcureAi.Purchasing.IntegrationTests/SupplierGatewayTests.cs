@@ -20,7 +20,7 @@ namespace ProcureAi.Purchasing.IntegrationTests;
 public sealed class SupplierGatewayTests
 {
     private static readonly SupplierOrder Order = new(
-        Guid.Parse("0199a8f0-0000-7000-8000-000000000001"), "acme", "PO-1001",
+        Guid.Parse("0199a8f0-0000-7000-8000-000000000001"), "acme", "PO-1001", "contoso-hardware",
         [new OrderLine(1, "LAP-14", "Laptop", 3, Money.Zar(25_200m)), new OrderLine(2, "PEN-01", "Pen", 10, Money.Zar(12.345m))]);
 
     private sealed class FakeSupplier(Func<HttpRequestMessage, int, CancellationToken, Task<HttpResponseMessage>> answer) : HttpMessageHandler
@@ -90,6 +90,7 @@ public sealed class SupplierGatewayTests
         var json = JsonDocument.Parse(body!).RootElement;
         json.GetProperty("externalReference").GetString().ShouldBe(Order.OrderId.ToString(), "the supplier deduplicates by our order ID");
         json.GetProperty("buyerReference").GetString().ShouldBe("acme/PO-1001");
+        json.GetProperty("supplierCode").GetString().ShouldBe("contoso-hardware", "the supplier quotes it on its invoices");
         json.GetProperty("currency").GetString().ShouldBe("ZAR");
         var lines = json.GetProperty("lines").EnumerateArray().ToList();
         lines[0].GetProperty("articleNumber").GetString().ShouldBe("LAP-14");

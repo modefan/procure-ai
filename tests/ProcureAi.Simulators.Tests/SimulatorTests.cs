@@ -119,6 +119,34 @@ public sealed class SimulatorTests
             .ShouldBe(WebhookVerification.Valid);
     }
 
+    /// <summary>
+    /// The invoice quotes the supplier code the buyer gave on the order (Purchasing names the order's catalog supplier), so the
+    /// buyer's three-way match sees the invoice is from the order's supplier; an order without one gets the configured code.
+    /// </summary>
+    [Fact]
+    public async Task Invoice_quotes_the_supplier_code_of_its_order()
+    {
+        await using var factory = new SimulatorFactory(new() { ["Simulators:Supplier:SupplierCode"] = "SIMSUP" });
+        using var client = factory.SupplierClient();
+        var named = new
+        {
+            externalReference = "order-named",
+            buyerReference = "demo/PO-0002",
+            supplierCode = "fabrikam-office",
+            currency = "ZAR",
+            lines = new[] { new { lineNumber = 1, articleNumber = "PEN-01", quantity = 1, netPriceCents = 100L } },
+        };
+        (await factory.WithClockAsync(client.PostAsJsonAsync("supplier/v1/orders", named))).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        (await factory.WithClockAsync(client.PostAsJsonAsync("supplier/v1/orders", OrderBody("order-unnamed", (1, "PEN-01", 1, 100)))))
+            .StatusCode.ShouldBe(HttpStatusCode.Accepted);
+
+        await factory.AdvanceUntilAsync(() => factory.Receiver.Received.Count(w => w.Type == "invoice.issued") == 2, TimeSpan.FromSeconds(1));
+        var invoices = factory.Receiver.Received.Where(w => w.Type == "invoice.issued")
+            .ToDictionary(w => w.Json.GetProperty("externalReference").GetString()!, w => w.Json.GetProperty("supplierCode").GetString());
+        invoices["order-named"].ShouldBe("fabrikam-office");
+        invoices["order-unnamed"].ShouldBe("SIMSUP", "no code given: the configured one");
+    }
+
     [Fact]
     public async Task Cancel_drops_pending_webhooks()
     {

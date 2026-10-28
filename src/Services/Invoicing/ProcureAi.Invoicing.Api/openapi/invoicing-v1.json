@@ -914,14 +914,20 @@
         "type": "object",
         "properties": {
           "orderId": {
-            "type": "string",
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "uuid"
           },
           "supplierInvoiceNumber": {
             "type": "string"
           },
           "invoiceDate": {
-            "type": "string",
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "date"
           },
           "lines": {

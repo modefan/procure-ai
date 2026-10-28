@@ -105,8 +105,8 @@ public sealed class InvoicingApiFactory(InvoicingInfraFixture infra, StubAccessS
 
 /// <summary>
 /// One running Invoicing API and one simulator for the whole collection: the simulator's ERP takes the payments, its supplier
-/// invoices orders it is sent (shortly after, signed, to <see cref="InvoicingWebhookUrl"/>, with the supplier code of our test
-/// orders). Purchasing is played by the tests, which publish its events to the <c>purchasing</c> exchange. Tests use a tenant of their own.
+/// invoices orders it is sent (shortly after, signed, to <see cref="InvoicingWebhookUrl"/>, quoting the supplier code the
+/// order named; its configured fallback code is left at the shipped value, so a forgotten code shows up as a supplier mismatch). Purchasing is played by the tests, which publish its events to the <c>purchasing</c> exchange. Tests use a tenant of their own.
 /// </summary>
 public sealed class InvoicingApp : IAsyncLifetime
 {
@@ -152,7 +152,6 @@ public sealed class InvoicingApp : IAsyncLifetime
             ["Simulators:Webhooks:InvoicingUrl"] = InvoicingWebhookUrl,
             ["Simulators:Supplier:AutoInvoice"] = "true",
             ["Simulators:Supplier:InvoiceDelay"] = "00:00:00.300",
-            ["Simulators:Supplier:SupplierCode"] = Supplier,
         });
         Erp = new ErpTraffic(() => Simulator.Server.CreateHandler());
         _factory = new InvoicingApiFactory(Infra, Access, Erp, ExportedMetrics);

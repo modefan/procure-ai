@@ -1,7 +1,8 @@
 namespace ProcureAi.Simulators.Supplier;
 
 /// <summary>An order the supplier has received.</summary>
-public sealed class SupplierOrder(string id, CreateOrderRequest request)
+/// <remarks><c>SupplierCode</c>: the code the buyer gave for this supplier (quoted on its invoices), or the configured one when it gave none.</remarks>
+public sealed class SupplierOrder(string id, CreateOrderRequest request, string defaultSupplierCode)
 {
     public string Id { get; } = id;
 
@@ -10,6 +11,8 @@ public sealed class SupplierOrder(string id, CreateOrderRequest request)
     public string BuyerReference { get; } = request.BuyerReference;
 
     public IReadOnlyList<OrderLineDto> Lines { get; } = [.. request.Lines];
+
+    public string SupplierCode { get; } = string.IsNullOrWhiteSpace(request.SupplierCode) ? defaultSupplierCode : request.SupplierCode.Trim();
 
     public volatile bool Cancelled;
 }
@@ -26,7 +29,7 @@ public sealed class SupplierStore
     private int _invoices;
 
     /// <summary>The order for this external reference; <c>Created</c> is false when it was received before.</summary>
-    public (SupplierOrder Order, bool Created) GetOrAdd(CreateOrderRequest request)
+    public (SupplierOrder Order, bool Created) GetOrAdd(CreateOrderRequest request, string defaultSupplierCode)
     {
         lock (_gate)
         {
@@ -35,7 +38,7 @@ public sealed class SupplierStore
                 return (existing, false);
             }
 
-            var order = new SupplierOrder($"SO-{FirstOrderNumber + _orders++}", request);
+            var order = new SupplierOrder($"SO-{FirstOrderNumber + _orders++}", request, defaultSupplierCode);
             _byReference[order.ExternalReference] = order;
             _byId[order.Id] = order;
             return (order, true);

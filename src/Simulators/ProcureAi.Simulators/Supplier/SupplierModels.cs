@@ -14,7 +14,8 @@ public sealed record CreateOrderRequest(
     [Required, StringLength(128, MinimumLength = 1)] string ExternalReference,
     [Required, StringLength(128, MinimumLength = 1)] string BuyerReference,
     [Required] string Currency,
-    [Required, MinLength(1)] List<OrderLineDto> Lines);
+    [Required, MinLength(1)] List<OrderLineDto> Lines,
+    [StringLength(100)] string? SupplierCode = null);
 
 public sealed record OrderReceipt(string SupplierOrderId, string Status);
 

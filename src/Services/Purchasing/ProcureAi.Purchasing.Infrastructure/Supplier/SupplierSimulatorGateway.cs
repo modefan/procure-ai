@@ -12,7 +12,8 @@ namespace ProcureAi.Purchasing.Infrastructure.Supplier;
 /// <summary>
 /// The anti-corruption layer to the supplier's order API (<c>supplier/v1/orders</c>, the simulator's vocabulary): our order goes
 /// out as the supplier's body (prices in cents, <c>articleNumber</c>, our order ID as <c>externalReference</c>, by which the
-/// supplier deduplicates, and <c>tenant/PO-1001</c> as <c>buyerReference</c>), and the supplier's answers come back as our
+/// supplier deduplicates, <c>tenant/PO-1001</c> as <c>buyerReference</c>, and the order's supplier as <c>supplierCode</c>, which the
+/// supplier quotes on its invoices), and the supplier's answers come back as our
 /// outcomes. 202 is an acceptance; 400 and 422 are a refusal for good (<see cref="SupplierRejectedException"/> with the supplier's
 /// message); a timeout, 408, 429, 5xx, an open circuit or a failed connection is "try again later"
 /// (<see cref="SupplierUnavailableException"/>). Any other answer (401 for a wrong key, 404 on submit) is a fault on our side, not the
@@ -24,9 +25,6 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
     /// <summary>The name of the typed client (and so of its resilience pipeline and primary handler).</summary>
     public const string ClientName = "supplier";
 
-    /// <summary>The name of the resilience pipeline (metrics tag <c>pipeline.name</c>).</summary>
-    public const string PipelineName = "supplier";
-
     public const string OrdersPath = "supplier/v1/orders";
     private const string Currency = "ZAR";
 
@@ -35,6 +33,7 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
         var body = new SupplierWire.CreateOrderRequest(
             order.OrderId.ToString(),
             $"{order.TenantId}/{order.OrderNumber}",
+            order.SupplierId,
             Currency,
             [.. order.Lines.OrderBy(l => l.LineNo).Select(l => new SupplierWire.OrderLine(l.LineNo, l.Sku, l.Quantity, ToCents(l.UnitPriceExclVat.Amount)))]);
         using var request = new HttpRequestMessage(HttpMethod.Post, OrdersPath) { Content = JsonContent.Create(body, options: SupplierWire.Json) };
@@ -106,7 +105,8 @@ public static class SupplierWire
 
     public sealed record OrderLine(int LineNumber, string ArticleNumber, int Quantity, long NetPriceCents);
 
-    public sealed record CreateOrderRequest(string ExternalReference, string BuyerReference, string Currency, IReadOnlyList<OrderLine> Lines);
+    /// <summary><c>SupplierCode</c> is our catalog code of the supplier; the supplier quotes it on its invoices, so Invoicing can check the invoice is from the order's supplier.</summary>
+    public sealed record CreateOrderRequest(string ExternalReference, string BuyerReference, string SupplierCode, string Currency, IReadOnlyList<OrderLine> Lines);
 
     public sealed record OrderReceipt(string? SupplierOrderId, string? Status);
 }

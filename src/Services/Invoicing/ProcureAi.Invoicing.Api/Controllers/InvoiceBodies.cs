@@ -11,16 +11,16 @@ public sealed record InvoiceLineBody(
     [Range(1, InvoiceLimits.MaxQuantity)] int Quantity,
     [Range(typeof(decimal), "0", InvoiceLimits.MaxAmount)] decimal UnitPriceExclVat);
 
-/// <summary>An invoice typed in by finance (source Manual) against an order the caller may see.</summary>
+/// <summary>An invoice typed in by finance (source Manual) against an order the caller may see. Order and date are nullable only so a missing one is a 400 (a value type would bind as its default).</summary>
 public sealed record CreateInvoiceBody(
-    [Required] Guid OrderId,
+    [Required] Guid? OrderId,
     [Required, StringLength(InvoiceLimits.InvoiceNumberLength, MinimumLength = 1)] string SupplierInvoiceNumber,
-    [Required] DateOnly InvoiceDate,
+    [Required] DateOnly? InvoiceDate,
     [Required, MinLength(1), MaxLength(InvoiceLimits.MaxLines)] IReadOnlyList<InvoiceLineBody> Lines,
     [Range(typeof(decimal), "0", InvoiceLimits.MaxAmount)] decimal StatedTotalInclVat)
 {
     internal RecordInvoice ToCommand() => new(
-        OrderId, SupplierInvoiceNumber.Trim(), InvoiceDate,
+        OrderId!.Value, SupplierInvoiceNumber.Trim(), InvoiceDate!.Value,
         [.. Lines.Select(l => new InvoiceLineInput(l.LineNo, l.Quantity, l.UnitPriceExclVat))],
         StatedTotalInclVat, InvoiceSource.Manual, JsonSerializer.Serialize(this, InvoiceLimits.Json), SupplierId: null);
 }

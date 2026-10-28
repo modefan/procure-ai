@@ -35,6 +35,8 @@ public sealed class OrderFlowTests(PurchasingApp app)
         var submission = app.Supplier.SubmissionsOf(orderId).ShouldHaveSingleItem("sent once, in the supplier's vocabulary");
         submission.Status.ShouldBe(202);
         submission.BuyerReference.ShouldBe($"{tenant}/PO-1001");
+        submission.Body!.Value.GetProperty("supplierCode").GetString().ShouldBe(command.SupplierId, "the order's supplier, quoted on its invoices");
+        app.Simulator.Store.Find(submission.SupplierOrderId!)!.SupplierCode.ShouldBe(command.SupplierId);
         var line = submission.Body!.Value.GetProperty("lines")[0];
         line.GetProperty("lineNumber").GetInt32().ShouldBe(1);
         line.GetProperty("articleNumber").GetString().ShouldBe("LAP-14");

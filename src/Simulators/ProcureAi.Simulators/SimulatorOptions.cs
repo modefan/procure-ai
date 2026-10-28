@@ -61,6 +61,7 @@ public sealed class SimulatorOptions
 
         public decimal VatRate { get; set; } = 0.15m;
 
+        /// <summary>Quoted on the invoices of an order whose buyer named no supplier code (Purchasing always names the order's supplier).</summary>
         public string SupplierCode { get; set; } = "SIMSUP";
     }
 }

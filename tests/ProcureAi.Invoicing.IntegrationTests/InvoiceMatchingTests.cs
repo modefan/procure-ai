@@ -27,7 +27,9 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
 
     /// <summary>
     /// The normal demo, through the real simulator: the supplier invoices the whole order (3) before anything was received, so the
-    /// invoice is mismatched ("only 0 received"); the delivery of 3 matches it.
+    /// invoice is mismatched ("only 0 received"); the delivery of 3 matches it, and finance can pay it. The simulator is not told our
+    /// supplier code by configuration: it quotes the one the order named (as Purchasing's ACL sends it), so the invoice passes the
+    /// supplier check of the match and of the payment.
     /// </summary>
     [Fact]
     public async Task Webhook_invoice_for_unreceived_order_is_mismatched_then_matches_after_receipt()
@@ -43,6 +45,7 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
             {
                 externalReference = order.OrderId.ToString(),
                 buyerReference = $"{tenant}/PO-1001",
+                supplierCode = order.SupplierId,
                 currency = "ZAR",
                 lines = new[] { new { lineNumber = 1, articleNumber = "LAP-14", quantity = 3, netPriceCents = 2_520_000L } },
             });
@@ -66,6 +69,11 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         var line = invoice.Lines.ShouldHaveSingleItem();
         (line.Ordered, line.Received, line.InvoicedBefore, line.Quantity, line.PriceOk, line.QuantityOk).ShouldBe((3, 3, 0, 3, true, true));
         line.OrderUnitPriceText.ShouldBe("R 25\u00A0200,00");
+        invoice.MismatchReasons.ShouldBeEmpty("the invoice is from the order's supplier");
+
+        var (_, etag) = await app.GetInvoiceAsync(invoiceId, InvoicingApp.Token(tenant));
+        using var pay = await app.PayAsync(invoiceId, InvoicingApp.Token(tenant), etag);
+        pay.StatusCode.ShouldBe(HttpStatusCode.OK, await pay.Content.ReadAsStringAsync());
         app.Metrics().Select(m => m.Name).ShouldContain(InvoicingMetrics.Mismatches);
     }
 
@@ -116,7 +124,8 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         using var again = await CreateAsync(token, ManualInvoice(order.OrderId, "INV-7", 2));
         using var other = await CreateAsync(token, ManualInvoice(order.OrderId, "INV-7", 3));
         using var webhookOther = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-7", 1));
-        using var webhookSame = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-7", 2));
+        var sameEventId = Guid.NewGuid().ToString();
+        using var webhookSame = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-7", 2, eventId: sameEventId));
 
         first.StatusCode.ShouldBe(HttpStatusCode.OK, await first.Content.ReadAsStringAsync());
         again.StatusCode.ShouldBe(HttpStatusCode.OK, "the same invoice again");
@@ -125,6 +134,8 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         other.StatusCode.ShouldBe(HttpStatusCode.Conflict, "another invoice reusing the number");
         webhookOther.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         webhookSame.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await app.ScalarAsync<long>("SELECT count(*) FROM processed_webhooks WHERE source = 'supplier' AND event_id = @e", ("e", sameEventId)))
+            .ShouldBe(1, "the duplicate's event is recorded too (Wolverine's transaction saves it), so its replay is a plain no-op");
         (await app.ScalarAsync<long>("SELECT count(*) FROM invoices WHERE order_id = @o", ("o", order.OrderId))).ShouldBe(1);
         await InvoicingApp.SettleAsync();
         app.Events.Of(order.RequestId).Count(m => m.Kind == "InvoiceReceived").ShouldBe(1);
@@ -240,6 +251,12 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         using var unknown = await CreateAsync(InvoicingApp.Token(tenant), ManualInvoice(Guid.NewGuid(), "INV-U", 1));
         using var otherTenant = await CreateAsync(InvoicingApp.Token(InvoicingApp.NewTenant()), ManualInvoice(order.OrderId, "INV-T", 1));
 
+        using var noDate = await CreateAsync(InvoicingApp.Token(tenant), new
+        {
+            orderId = order.OrderId, supplierInvoiceNumber = "INV-D", lines = new[] { new { lineNo = 1, quantity = 1, unitPriceExclVat = 25_200m } },
+            statedTotalInclVat = 28_980m,
+        });
+        noDate.StatusCode.ShouldBe(HttpStatusCode.BadRequest, "a missing invoice date is not 0001-01-01");
         outOfScope.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound, "finance enters invoices only for orders Invoicing knows");
         otherTenant.StatusCode.ShouldBe(HttpStatusCode.NotFound);

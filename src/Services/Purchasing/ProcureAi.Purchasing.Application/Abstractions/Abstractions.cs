@@ -28,8 +28,8 @@ public interface ISupplierGateway
     Task CancelOrderAsync(string supplierReference, CancellationToken cancellationToken);
 }
 
-/// <summary>An order as sent to the supplier.</summary>
-public sealed record SupplierOrder(Guid OrderId, string TenantId, string OrderNumber, IReadOnlyList<OrderLine> Lines);
+/// <summary>An order as sent to the supplier. <c>SupplierId</c> is the catalog code of the supplier the order is with; the supplier quotes it on its invoices.</summary>
+public sealed record SupplierOrder(Guid OrderId, string TenantId, string OrderNumber, string SupplierId, IReadOnlyList<OrderLine> Lines);
 
 /// <summary>The supplier accepted the order and gave it this reference. Confirmation follows later by webhook.</summary>
 public sealed record SupplierAcceptance(string SupplierReference);

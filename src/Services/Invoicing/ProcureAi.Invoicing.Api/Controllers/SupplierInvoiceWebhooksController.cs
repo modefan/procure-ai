@@ -137,7 +137,7 @@ public sealed class SupplierInvoiceWebhooksController(IMessageBus bus, ILogger<S
 
         if (body.GrossTotalCents is not (>= 0 and <= InvoiceLimits.MaxCents))
         {
-            return "grossTotalCents is required and must be a positive amount.";
+            return "grossTotalCents is required and must be 0 or more.";
         }
 
         if (body.Lines is not { Count: > 0 and <= InvoiceLimits.MaxLines })

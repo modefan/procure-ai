@@ -80,7 +80,7 @@ public static class SendOrderToSupplierHandler
             return;
         }
 
-        var supplierOrder = new SupplierOrder(order.Id, order.TenantId, PurchasingMapper.NumberText(order), [.. order.Lines]);
+        var supplierOrder = new SupplierOrder(order.Id, order.TenantId, PurchasingMapper.NumberText(order), order.SupplierId, [.. order.Lines]);
         var now = time.GetUtcNow();
         await cache.RemoveAfterCommitAsync(PurchasingCacheTag.Of(order.TenantId, order.Id));
         SupplierAcceptance acceptance;
