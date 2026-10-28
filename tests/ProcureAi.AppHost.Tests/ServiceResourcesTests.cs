@@ -283,8 +283,19 @@ public sealed class ServiceResourcesTests
             env.ShouldContainKey(cap);
         }
 
+        // The supplier's webhooks go straight to the services' own endpoints (ruling 10): orders to Purchasing, invoices to Invoicing.
+        var purchasingUrl = env["Simulators__Webhooks__PurchasingUrl"].ShouldBeOfType<ReferenceExpression>();
+        purchasingUrl.ValueProviders.OfType<EndpointReference>().Single().Resource.Name.ShouldBe("purchasing-api");
+        purchasingUrl.Format.ShouldEndWith("/api/v1/purchasing/webhooks/supplier");
+        var invoicingUrl = env["Simulators__Webhooks__InvoicingUrl"].ShouldBeOfType<ReferenceExpression>();
+        invoicingUrl.ValueProviders.OfType<EndpointReference>().Single().Resource.Name.ShouldBe("invoicing-api");
+        invoicingUrl.Format.ShouldEndWith("/api/v1/invoicing/webhooks/supplier");
+        // How fast the supplier confirms and invoices comes from the AppHost configuration (system tests use seconds).
+        env.ShouldContainKeyAndValue("Simulators__Supplier__ConfirmDelay", "00:00:03");
+        env.ShouldContainKeyAndValue("Simulators__Supplier__InvoiceDelay", "00:00:20");
+
         simulators.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
-        // No database, no broker, no other service: it only answers calls and sends webhooks.
+        // No database, no broker, no other service to wait for: it only answers calls and sends webhooks (and retries them).
         simulators.Annotations.OfType<WaitAnnotation>().ShouldBeEmpty();
     }
 

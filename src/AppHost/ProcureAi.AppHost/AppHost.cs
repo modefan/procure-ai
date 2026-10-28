@@ -147,18 +147,22 @@ var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
     shared)
     .CallsServices(accessApi, approvalsApi, suppliersApi);
 // The simulators: someone else's supplier and ERP (slow, sometimes failing, with a chaos switch), in one process. No database, no
-// messaging: they hold state in memory and answer by signed webhook. The receiver URLs (Purchasing, Invoicing) are wired when those
-// services exist (Task 12); until then the webhooks are dropped with a logged error. They depend on no service, so nothing waits for them.
+// messaging: they hold state in memory and answer by signed webhook, sent straight to Purchasing and Invoicing (wired below, once those
+// exist). They depend on no service, so nothing waits for them: a webhook to a receiver that is not up yet is retried by the simulator.
+// How fast the supplier confirms and invoices comes from the AppHost's Simulators:Supplier section (system tests set seconds).
+var simulatorSupplier = builder.Configuration.GetSection("Simulators:Supplier");
 var simulators = builder.AddProject<Projects.ProcureAi_Simulators>(ResourceNames.Simulators)
     .WithHttpEndpoint(name: "http")
     .WithEnvironment("Simulators__ApiKey", simulatorApiKey)
     .WithEnvironment("Simulators__Webhooks__Secret", supplierWebhookSecret)
+    .WithEnvironment("Simulators__Supplier__ConfirmDelay", simulatorSupplier["ConfirmDelay"] ?? throw new InvalidOperationException("Simulators:Supplier:ConfirmDelay is missing."))
+    .WithEnvironment("Simulators__Supplier__InvoiceDelay", simulatorSupplier["InvoiceDelay"] ?? throw new InvalidOperationException("Simulators:Supplier:InvoiceDelay is missing."))
     .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
     .WithHttpHealthCheck("/health/ready")
     .WithDotNetLimits(limits.DotNet);
 // Purchasing: orders of approved requests, sent to the supplier (the simulator) through its anti-corruption layer with the simulator
 // key, confirmed by the supplier's signed webhooks (the secret both sides share). It does not wait for the simulator: an unreachable
-// supplier is an outage it retries through. Where the simulator sends its webhooks (http://purchasing-api) is wired in Task 12.
+// supplier is an outage it retries through.
 var purchasingApi = builder.AddProcureAiService<Projects.ProcureAi_Purchasing_Api>(
     new ServiceSpec("purchasing", ResourceNames.PurchasingDb, CapturedTables: ["purchase_orders", "order_lines", "goods_receipts", "receipt_lines", "audit_entries"], GatewayCluster: "purchasing", ApiRoutePrefix: "/api/purchasing"),
     shared)
@@ -168,8 +172,7 @@ var purchasingApi = builder.AddProcureAiService<Projects.ProcureAi_Purchasing_Ap
     .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
 // Invoicing: the supplier's invoices (signed webhooks, the same secret) and finance's, matched against its copy of Purchasing's
 // orders (order_views: a read copy, so not captured here), paid and exported to the ERP (the simulator) through its anti-corruption
-// layer with the simulator key. Like Purchasing it does not wait for the simulator; where the simulator sends its invoice webhooks
-// (http://invoicing-api) is wired in Task 12.
+// layer with the simulator key. Like Purchasing it does not wait for the simulator.
 var invoicingApi = builder.AddProcureAiService<Projects.ProcureAi_Invoicing_Api>(
     new ServiceSpec("invoicing", ResourceNames.InvoicingDb, CapturedTables: ["invoices", "invoice_lines", "payments", "payment_lines", "audit_entries"], GatewayCluster: "invoicing", ApiRoutePrefix: "/api/invoicing"),
     shared)
@@ -177,6 +180,13 @@ var invoicingApi = builder.AddProcureAiService<Projects.ProcureAi_Invoicing_Api>
     .WithEnvironment("ErpClient__BaseUrl", simulators.GetEndpoint("http"))
     .WithEnvironment("ErpClient__ApiKey", simulatorApiKey)
     .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
+
+// The supplier calls the services directly, not through the gateway (exposing the webhooks publicly is plan 07/08): order webhooks to
+// Purchasing, invoice webhooks to Invoicing, both signed with the shared secret. Endpoint references only, no wait: the simulator's own
+// delivery retries cover a receiver that is still starting.
+simulators
+    .WithEnvironment("Simulators__Webhooks__PurchasingUrl", ReferenceExpression.Create($"{purchasingApi.GetEndpoint("http")}/api/v1/purchasing/webhooks/supplier"))
+    .WithEnvironment("Simulators__Webhooks__InvoicingUrl", ReferenceExpression.Create($"{invoicingApi.GetEndpoint("http")}/api/v1/invoicing/webhooks/supplier"));
 
 // The Angular app, as the dev server (ng serve) with a capped Node heap. Nobody opens it directly: the browser only
 // talks to the gateway, which proxies everything that is not /bff or /api to it. That keeps the session cookie and the

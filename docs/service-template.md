@@ -121,39 +121,44 @@ For a service whose data is documents and that publishes no integration events. 
     (2) Debezium skips truncates by default, so a psql `TRUNCATE` is never flagged as outside the app. To capture them set
     `skipped.operations=none` and handle op `t` (it names no row, so it needs its own alert).
 
-## Memory of the whole system (measured 2026-10-27, plan 02 Task 13)
+## Memory of the whole system (measured 2026-10-28, plan 03 Task 12)
 
-The whole AppHost (five services, four Debezium Servers, gateway, Angular dev server) after a short demo run (six requests in
-every status), `docker stats --no-stream` and the processes' working sets. Budget for Claude's work on the shared PC (CLAUDE.md):
-containers at most 8 GB / 8 CPUs, .NET about 3 GB. `ServiceResourcesTests.Container_caps_of_the_whole_system_stay_within_8_GB_and_8_CPUs`
-keeps the caps inside the budget.
+The whole AppHost (eight services, six Debezium Servers, the simulators, gateway, Angular dev server) at the end of a system test
+run (`ApprovalFlowTests` and `SupplierOutageTests`, after `OrderToPaymentTests` in the run before), `docker stats --no-stream` and
+the processes' working sets. Budget for Claude's work on the shared PC (CLAUDE.md): containers at most 8 GB / 8 CPUs, .NET about
+3 GB. `ServiceResourcesTests.Container_caps_of_the_whole_system_stay_within_8_GB_and_8_CPUs` keeps the caps inside the budget.
 
 | Containers | Used | Cap |
 |---|---|---|
-| keycloak | 641 MB | 768 MB |
-| debezium-requestsdb / -accessdb / -budgetsdb / -approvalsdb | 307 + 293 + 295 + 294 MB | 4 x 512 MB, 0.5 CPU each |
+| keycloak | 634 MB | 768 MB |
+| debezium-requestsdb / -accessdb / -budgetsdb / -approvalsdb / -purchasingdb / -invoicingdb | 288 + 289 + 293 + 294 + 301 + 295 MB | 6 x 512 MB, 0.4 CPU each |
+| postgres | 268 MB | 768 MB |
 | mongo | 244 MB | 512 MB |
-| postgres | 218 MB | 768 MB |
-| rabbitmq | 125 MB | 384 MB |
-| redis, mailpit | 8 + 7 MB | 192 + 64 MB |
-| **Total** | **about 2.4 GB** | **4.6 GB, 7.5 CPUs** |
+| rabbitmq | 126 MB | 384 MB |
+| redis, mailpit | 9 + 6 MB | 192 + 64 MB |
+| **Total** | **about 3.0 GB** | **5.6 GB, 7.9 CPUs** |
 
 | .NET processes (working set) | MB |
 |---|---|
-| requests-api | 788 |
-| budgets-api | 517 |
-| audit-api | 490 |
-| approvals-api | 447 |
-| access-api | 262 |
-| gateway | 109 |
-| AppHost | 172 |
-| **Services, gateway and AppHost** | **about 2.8 GB** |
-| plus Aspire's `dotnet run` launcher per project (7 x about 105 MB) | about 0.75 GB |
+| invoicing-api | 662 |
+| approvals-api | 562 |
+| purchasing-api | 562 |
+| budgets-api | 518 |
+| audit-api | 508 |
+| requests-api | 444 |
+| access-api | 392 |
+| suppliers-api | 348 |
+| gateway | 107 |
+| simulators | 93 |
+| AppHost (here the system test host) | 198 |
+| **Services, simulators, gateway and AppHost** | **about 4.4 GB** |
+| plus Aspire's `dotnet run` launcher per project (11 x about 100 MB) | about 1.1 GB |
+| plus DCP, Aspire's orchestrator (38 `dcp` processes, about 50 MB each) | about 1.9 GB |
 
 Plus the Angular dev server (`ng serve`, Node) at about 0.6 GB. The services' GC heaps are capped (`Resources:DotNet`,
-256 MB hard limit each); the rest of a working set is runtime, JIT code and native memory. Debezium did not need lowering
-(`Resources:Debezium` stays at 512 MB / `-Xmx256m`); its CPU cap went from 1 to 0.5 so the container CPU caps add up to
-7.5 of the 8 allowed. With the sixth Debezium (Invoicing, plan 03) the cap is 0.4 per instance: 6 x 0.4 + 5.5 = 7.9 CPUs, and
+256 MB hard limit each); the rest of a working set is runtime, JIT code and native memory. The .NET total is over the ~3 GB of the
+budget (plan 03 ruling 20: nine .NET processes; it was 2.8 GB with five services after plan 02); full-system runs are kept short.
+Debezium stays at 512 MB / `-Xmx256m`; its CPU cap is 0.4 per instance so the six instances fit: 6 x 0.4 + 5.5 = 7.9 CPUs, and
 6 x 512 MB + 2.6 GB = 5.6 GB of memory caps (plan 03 ruling 19; the cost is slower CDC catch-up under load).
 
 ## Business metrics

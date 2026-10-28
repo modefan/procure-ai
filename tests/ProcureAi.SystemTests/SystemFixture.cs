@@ -21,8 +21,18 @@ public sealed class SystemFixture : IAsyncLifetime
     public const string Tom = "00000000-0000-4000-8000-000000000001";
     public const string Maria = "00000000-0000-4000-8000-000000000002";
     public const string Dept = "00000000-0000-4000-8000-000000000003";
+    public const string Thandi = "00000000-0000-4000-8000-000000000004";
 
-    public static readonly string[] Services = ["requests", "access", "budgets", "approvals", "audit"];
+    public static readonly string[] Services = ["requests", "access", "budgets", "approvals", "audit", "suppliers", "purchasing", "invoicing"];
+
+    /// <summary>What the receiver watches for: Purchasing's supplier circuit opened (Polly's metric, exported over OTLP).</summary>
+    public const string SupplierCircuitOpened = "supplier-circuit-opened";
+
+    /// <summary>
+    /// The simulated supplier confirms an order after 1 s and invoices it 3 s after that (instead of 3 s and 20 s), so the tests see
+    /// the invoice while nothing is received yet without waiting long.
+    /// </summary>
+    private static readonly string[] SimulatorSpeed = ["Simulators:Supplier:ConfirmDelay=00:00:01", "Simulators:Supplier:InvoiceDelay=00:00:03"];
 
     // A cold start pulls images, builds the Postgres image and runs npm install for the Angular app.
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(12);
@@ -30,7 +40,11 @@ public sealed class SystemFixture : IAsyncLifetime
     private IDistributedApplicationTestingBuilder? _builder;
     private DistributedApplication? _app;
     private string? _adminApiKey;
+    private string? _simulatorApiKey;
     private string? _skipReason;
+
+    /// <summary>The OTLP endpoint every service exports to during the run (the dashboard's stand-in).</summary>
+    public OtlpReceiver Telemetry { get; private set; } = null!;
 
     public DistributedApplication App => _app ?? throw new InvalidOperationException("The system is not started.");
 
@@ -44,10 +58,21 @@ public sealed class SystemFixture : IAsyncLifetime
             return;
         }
 
-        // Tests never keep data: no volumes, so every run starts from empty databases (and fresh Debezium offsets).
-        _builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(["Persistence:UseDataVolumes=false"]);
+        Telemetry = await OtlpReceiver.StartAsync();
+        Telemetry.WatchMetrics(SupplierCircuitOpened, "purchasing-api", "resilience.polly.strategy.events", "OnCircuitOpened");
         try
         {
+            // Tests never keep data: no volumes, so every run starts from empty databases (and fresh Debezium offsets). The services
+            // send their telemetry to the receiver (plain http, hence the unsecured-transport switch; there is no dashboard to protect).
+            _builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(
+            [
+                "Persistence:UseDataVolumes=false",
+                .. SimulatorSpeed,
+                $"ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL={Telemetry.Endpoint.GetLeftPart(UriPartial.Authority)}",
+                "ASPIRE_ALLOW_UNSECURED_TRANSPORT=true",
+            ]);
+            // The key the services call the simulators with (AppHost user secret); the tests read the ERP's postings with it.
+            _simulatorApiKey = _builder.Configuration["Parameters:simulator-api-key"];
             _app = await _builder.BuildAsync();
             await _app.StartAsync();
             using var cts = new CancellationTokenSource(StartupTimeout);
@@ -75,6 +100,12 @@ public sealed class SystemFixture : IAsyncLifetime
             await _builder.DisposeAsync();
             _builder = null;
         }
+
+        if (Telemetry is not null)
+        {
+            await Telemetry.DisposeAsync();
+            Telemetry = null!;
+        }
     }
 
     /// <summary>Skips the test when the key is missing, unless REQUIRE_E2E=1/true (CI), where that is a failure.</summary>
@@ -99,6 +130,18 @@ public sealed class SystemFixture : IAsyncLifetime
     /// <summary>A client of one service's own endpoint (not through the gateway).</summary>
     public ServiceClient Service(string service, string? onBehalfOf, string? tenant = Tenant) =>
         new(App.CreateHttpClient(service + "-api", "http"), _adminApiKey!, onBehalfOf, tenant);
+
+    /// <summary>A client of the simulators' own endpoints (chaos switch, supplier hooks) with the admin key.</summary>
+    public ServiceClient Simulators() => new(App.CreateHttpClient("simulators", "http"), _adminApiKey!, onBehalfOf: null, tenant: null);
+
+    /// <summary>A client of the simulated ERP with the key the services use (<c>X-Api-Key</c> = the simulator key).</summary>
+    public ServiceClient Erp() =>
+        new(App.CreateHttpClient("simulators", "http"),
+            _simulatorApiKey ?? throw new InvalidOperationException("The AppHost user secret Parameters:simulator-api-key is missing."),
+            onBehalfOf: null, tenant: null);
+
+    /// <summary>The admin key, for a raw call (through the gateway).</summary>
+    public string AdminApiKey => _adminApiKey!;
 
     /// <summary>A client of the gateway (https, ASP.NET Core dev certificate).</summary>
     public HttpClient Gateway()
