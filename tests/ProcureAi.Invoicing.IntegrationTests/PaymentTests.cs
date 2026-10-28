@@ -371,9 +371,13 @@ public sealed class PaymentTests(InvoicingApp app, ITestOutputHelper output)
         payment.After.GetProperty("total_incl_vat").GetString().ShouldBe("86940.00");
 
         await using var db = new InvoicingDbContext(new DbContextOptionsBuilder<InvoicingDbContext>().UseNpgsql(app.Infra.DbConnectionString).Options);
-        var audit = await db.Set<AuditEntry>().FirstAsync(e => e.Table == "payments" && e.PrimaryKey == paymentId.ToString());
+        // The ERP export updates the payment later (export status, ERP reference) in its own transaction, with an audit row of its
+        // own. Wait for it, so both rows are always there, and compare the CDC insert with the interceptor's insert row.
+        await InvoicingApp.EventuallyAsync(
+            async () => await app.ScalarAsync<string>("SELECT export_status FROM payments WHERE id = @id", ("id", paymentId)) == "Exported", "the export");
+        var audit = await db.Set<AuditEntry>()
+            .SingleAsync(e => e.Table == "payments" && e.PrimaryKey == paymentId.ToString() && e.Operation == AuditOperation.Insert);
         audit.TransactionId.ShouldBe(payment.TransactionId, "the interceptor row and the change share a transaction");
-        audit.Operation.ShouldBe(AuditOperation.Insert);
         audit.TenantId.ShouldBe(tenant);
         audit.UserId.ShouldBe(InvoicingApp.Finance);
         cdc.Seen.ShouldNotContain(m => m.RoutingKey.EndsWith(".order_views") || m.RoutingKey.EndsWith(".order_view_lines")
