@@ -1,6 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
-import { form, FormField, maxLength } from '@angular/forms/signals';
+import { Component, DestroyRef, effect, inject, OnInit, signal } from '@angular/core';
+import { form, FormField, maxLength, validate } from '@angular/forms/signals';
 import { RouterLink } from '@angular/router';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
 import { BusyButton } from '../../core/ui/busy-button';
@@ -73,7 +73,7 @@ const MAX_REASON = 500;
                   <tr [attr.data-step]="step.id" class="align-top hover:bg-slate-50">
                     <td class="px-4 py-3 font-medium whitespace-nowrap"><a [routerLink]="['/app/requests', step.requestId]" class="text-indigo-800 hover:underline">{{ step.requestNumber }}</a></td>
                     <td class="truncate px-4 py-3 text-slate-800" [title]="step.requestTitle">{{ step.requestTitle }}</td>
-                    <td class="truncate px-4 py-3 text-slate-700" [title]="requesterOf(step)">{{ requesterOf(step) }}</td>
+                    <td class="truncate px-4 py-3 text-slate-700" [title]="step.requesterName">{{ step.requesterName }}</td>
                     <td class="px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900">{{ step.totalInclVatDisplay }}</td>
                     <td class="px-4 py-3 whitespace-nowrap text-slate-700">{{ waitingOf(step) }}</td>
                     <td class="px-4 py-3 whitespace-nowrap text-slate-700">{{ escalationOf(step) }}</td>
@@ -97,7 +97,7 @@ const MAX_REASON = 500;
                   <span class="font-semibold whitespace-nowrap tabular-nums text-slate-900">{{ step.totalInclVatDisplay }}</span>
                 </div>
                 <p class="mt-1 truncate text-slate-800" [title]="step.requestTitle">{{ step.requestTitle }}</p>
-                <p class="mt-1 truncate text-sm text-slate-600">{{ requesterOf(step) }}</p>
+                <p class="mt-1 truncate text-sm text-slate-600">{{ step.requesterName }}</p>
                 <p class="mt-1 text-sm whitespace-nowrap text-slate-600">
                   @if (waitingOf(step)) { Waiting {{ waitingOf(step) }} }
                   @if (waitingOf(step) && escalationOf(step)) { · }
@@ -148,8 +148,10 @@ const MAX_REASON = 500;
         <div class="mt-3">
           <label class="field-label" [for]="'reason-' + area + '-' + step.id">Reason for rejecting {{ step.requestNumber }}</label>
           <textarea [id]="'reason-' + area + '-' + step.id" rows="2" class="field-input" [formField]="reasonForm.reason" placeholder="The requester will see this"></textarea>
-          @for (error of reasonForm.reason().errors(); track error.kind) {
-            <p class="field-error">{{ error.message }}</p>
+          @if (reasonForm.reason().touched()) {
+            @for (error of reasonForm.reason().errors(); track error.kind) {
+              <p class="field-error" role="alert">{{ error.message }}</p>
+            }
           }
           <div class="mt-3 flex flex-wrap justify-end gap-2">
             <button type="button" class="btn-ghost" (click)="cancelReject()" [disabled]="store.actingOn(step.id) !== null">Cancel</button>
@@ -174,6 +176,7 @@ export class ApprovalsPage implements OnInit {
   protected readonly rejecting = signal<string | null>(null);
   private readonly reasonModel = signal({ reason: '' });
   protected readonly reasonForm = form(this.reasonModel, (p) => {
+    validate(p.reason, (ctx) => (ctx.value().trim() ? null : { kind: 'required', message: 'Enter a reason for rejecting.' }));
     maxLength(p.reason, MAX_REASON, { message: `Use at most ${MAX_REASON} characters` });
   });
   private readonly now = signal(Date.now());
@@ -181,18 +184,21 @@ export class ApprovalsPage implements OnInit {
   constructor() {
     const timer = setInterval(() => this.now.set(Date.now()), 60_000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    // A reject box belongs to a row: when the row leaves the list (acted on elsewhere, or by a push), the box goes with it.
+    effect(() => {
+      const open = this.rejecting();
+      if (open && !this.store.entities().some((s) => s.id === open)) {
+        this.rejecting.set(null);
+      }
+    });
   }
 
   ngOnInit(): void {
-    void this.store.load(1);
-  }
-
-  protected requesterOf(step: ApprovalStepDto): string {
-    return this.store.detailsOf(step.id)?.requester ?? '';
+    void this.store.refresh();
   }
 
   protected waitingOf(step: ApprovalStepDto): string {
-    return waitedFor(this.store.detailsOf(step.id)?.waitingSince, this.now());
+    return waitedFor(step.openedAt, this.now());
   }
 
   protected escalationOf(step: ApprovalStepDto): string {
@@ -218,6 +224,10 @@ export class ApprovalsPage implements OnInit {
   }
 
   protected async confirmReject(step: ApprovalStepDto): Promise<void> {
+    this.reasonForm.reason().markAsTouched();
+    if (this.reasonForm.reason().invalid()) {
+      return;
+    }
     if (await this.store.reject(step, this.reasonModel().reason)) {
       this.rejecting.set(null);
     }

@@ -50,6 +50,7 @@ public sealed class ApiTests(ApprovalsApp app)
         var otherTenant = NewTenant();
         app.UseAcme(tenant);
         app.UseAcme(otherTenant);
+        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Requester");
         // A: R 30 000, step 1 maria (open), step 2 the department head (not open yet).
         var (a, aSteps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
         // B: maria's step, already approved.
@@ -74,11 +75,30 @@ public sealed class ApiTests(ApprovalsApp app)
         item.Level.ShouldBe("Manager");
         item.Status.ShouldBe("Pending");
         item.DueAt.ShouldNotBeNull();
+        item.RequesterName.ShouldBe("Tom Requester");
+        item.OpenedAt.ShouldNotBeNull();
+        item.OpenedAt.Value.ShouldBeGreaterThan(DateTimeOffset.UtcNow.AddMinutes(-5));
+        item.OpenedAt.Value.ShouldBeLessThan(item.DueAt.Value);
         item.CanAct.ShouldBeTrue();
         item.CannotActReason.ShouldBeNull();
         item.Version.ShouldBe(aSteps[0].Version);
         dept.Total.ShouldBe(0, "the department-head step is not open until maria approved");
         requester.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "the inbox needs requests.approve");
+    }
+
+    [Fact]
+    public async Task Inbox_lists_a_step_whose_requester_name_is_unknown_with_a_null_name()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant); // Access has no name for the requester in this tenant
+        await OpenAsync(Main, tenant, DemoUsers.Tom, 5_000m);
+        using var client = Main.CreateClient();
+
+        var maria = await ReadAsync<PagedResult<ApprovalStepDto>>(await client.SendAsync(Get("inbox", User(tenant, DemoUsers.Maria, "manager")), Ct));
+
+        var item = maria.Items.ShouldHaveSingleItem();
+        item.RequesterName.ShouldBeNull();
+        item.RequesterId.ShouldBe(DemoUsers.Tom);
     }
 
     [Fact]

@@ -1,14 +1,12 @@
 import { HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
-import { AuditService } from '../../api/audit/services/audit.service';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
 import { CacheRegistry } from '../../core/state/cache-registry';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
-import { eventDto } from '../requests/request-detail.testing';
 import { inboxPage, inboxStep } from './approvals.testing';
 import { ApprovalsStore } from './approvals.store';
 
@@ -23,17 +21,12 @@ describe('ApprovalsStore', () => {
       getApprovalInbox: vi.fn().mockResolvedValue(inboxPage(items)),
       approveStep: vi.fn().mockResolvedValue(inboxStep({ status: 'Approved' })),
       rejectStep: vi.fn().mockResolvedValue(inboxStep({ status: 'Rejected' })),
-      getRequestHistory: vi.fn().mockResolvedValue([
-        eventDto('RequestSubmitted', 'Submitted', '2026-10-28T08:00:00Z', 'ana', { actorName: 'Ana Smith' }),
-        eventDto('ApprovalRequested', 'Waiting', '2026-10-28T09:00:00Z', 'system', { stepNo: 1 }),
-      ]),
     };
     conflict = { show: vi.fn().mockResolvedValue(undefined) };
     fake = fakeHubFactory();
     TestBed.configureTestingModule({
       providers: [
         { provide: ApprovalsService, useValue: { getApprovalInbox: api['getApprovalInbox'], approveStep: api['approveStep'], rejectStep: api['rejectStep'] } },
-        { provide: AuditService, useValue: { getRequestHistory: api['getRequestHistory'] } },
         { provide: ConflictDialog, useValue: conflict },
         { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
       ],
@@ -55,10 +48,32 @@ describe('ApprovalsStore', () => {
     expect(store.total()).toBe(2);
   });
 
-  it('who_and_since come from the request history of each row', async () => {
+  it('one_call_loads_the_inbox_with_names_and_times: no history reads per row', async () => {
     const store = await setup();
     await store.load(1);
-    await vi.waitFor(() => expect(store.detailsOf('s1')).toEqual({ requester: 'Ana Smith', waitingSince: '2026-10-28T09:00:00Z' }));
+    expect(store.entities()[0].requesterName).toBe('Ana Smith');
+    expect(store.entities()[0].openedAt).toBeTruthy();
+    expect(api['getApprovalInbox']).toHaveBeenCalledTimes(1);
+  });
+
+  it('soonest_due_is_kept_from_page_1', async () => {
+    const store = await setup([inboxStep({ dueAt: '2026-10-30T09:00:00Z' }), inboxStep({ id: 's2', dueAt: '2026-10-29T09:00:00Z' })]);
+    await store.load(1);
+    expect(store.soonestDueAt()).toBe('2026-10-29T09:00:00Z');
+    api['getApprovalInbox'].mockResolvedValue(inboxPage([inboxStep({ id: 's9', dueAt: '2026-11-30T09:00:00Z' })], 2, 26));
+    await store.load(2);
+    expect(store.soonestDueAt()).toBe('2026-10-29T09:00:00Z');
+  });
+
+  it('a_page_that_emptied_meanwhile_shows_the_last_page_with_rows', async () => {
+    const store = await setup();
+    await store.load(1);
+    api['getApprovalInbox'].mockImplementation(({ page }: { page: number }) =>
+      Promise.resolve(page === 2 ? inboxPage([], 2, 3) : inboxPage([inboxStep()], 1, 3)),
+    );
+    await store.load(2);
+    await vi.waitFor(() => expect(store.page()).toBe(1));
+    expect(store.entities()).toHaveLength(1);
   });
 
   it('approve_sends_if_match_and_removes_row_after_success', async () => {
@@ -113,10 +128,16 @@ describe('ApprovalsStore', () => {
   });
 
   it('conflict_409_when_the_step_is_no_longer_open_is_the_same_story_as_412', async () => {
-    // The server checks that the step is still open before it compares versions, so "someone approved it first" is a 409.
+    // PINNED ASSUMPTION: the saga throws a ConflictException (409) when the step is no longer open and that check runs before
+    // the version comparison (412), so "someone else got there first" arrives as 409. Approve and reject have no other 409; if
+    // one is added, this spec and the store's status check must tell them apart (by problem title) first.
     const store = await setup();
     await store.load(1);
-    api['approveStep'].mockRejectedValue(new HttpErrorResponse({ status: 409, error: { detail: 'Approval step 1 of PR-1044 is not open (it is Approved).' } }));
+    api['approveStep'].mockRejectedValue(new HttpErrorResponse({
+        status: 409,
+        // The shape the API really sends: ConflictException becomes a 409 whose title is the message.
+        error: { type: 'https://tools.ietf.org/html/rfc9110#section-15.5.10', title: 'Approval step 1 of PR-1044 is not open (it is Approved).', status: 409 },
+      }));
     api['getApprovalInbox'].mockResolvedValue(inboxPage([inboxStep({ id: 's2', requestId: 'r2', requestNumber: 'PR-1045', version: 77 })]));
 
     await store.approve(store.entities()[0]);

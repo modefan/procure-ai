@@ -7,10 +7,12 @@ export interface ApprovalStepDto {
   dueAt: (string | null);
   id: string;
   level: string;
+  openedAt?: (string | null);
   requestId: string;
   requestNumber: string;
   requestTitle: string;
   requesterId: string;
+  requesterName?: (string | null);
   status: string;
   stepNo: number;
   totalInclVat: number;

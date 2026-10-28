@@ -16,7 +16,7 @@ public static class ApprovalStepView
 
     public const string NotAnApprover = "You are not an approver of this step";
 
-    public static ApprovalStepDto ToDto(ApprovalStep step, string userId)
+    public static ApprovalStepDto ToDto(ApprovalStep step, string userId, string? requesterName = null)
     {
         var reason = userId == step.RequesterId ? YouRaisedThisRequest
             : !step.IsOpen ? NotOpen
@@ -36,6 +36,8 @@ public static class ApprovalStepView
             step.DueAt,
             reason is null,
             reason,
-            step.Version);
+            step.Version,
+            requesterName,
+            step.OpenedAt);
     }
 }

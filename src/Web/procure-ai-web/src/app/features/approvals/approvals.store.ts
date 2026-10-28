@@ -4,7 +4,6 @@ import { patchState, signalStore, withComputed, withHooks, withMethods, withStat
 import { removeEntity, setAllEntities, withEntities } from '@ngrx/signals/entities';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
-import { AuditService } from '../../api/audit/services/audit.service';
 import { AppConfigService } from '../../core/config/app-config';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { LiveConnection } from '../../core/live/live-connection';
@@ -16,14 +15,6 @@ import { problemOf } from '../requests/problem-fields';
 
 export type InboxAction = 'approve' | 'reject';
 
-/** What the inbox shows besides the step itself, read from the request's history. */
-export interface StepDetails {
-  /** Display name of whoever submitted the request; null when Audit does not know it. */
-  requester: string | null;
-  /** When the step was handed to its approver (the latest `ApprovalRequested` of its step number); null when not known. */
-  waitingSince: string | null;
-}
-
 interface InboxState {
   page: number;
   pageSize: number;
@@ -32,7 +23,8 @@ interface InboxState {
   acting: Record<string, InboxAction>;
   /** A refusal (403, 422 ...) or validation message for a row, by step ID. */
   rowErrors: Record<string, string>;
-  details: Record<string, StepDetails>;
+  /** The earliest time any waiting step escalates (the first row of page 1; kept while another page is shown), for the dashboard. */
+  soonestDueAt: string | null;
 }
 
 const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
@@ -49,7 +41,7 @@ const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
 export const ApprovalsStore = signalStore(
   { providedIn: 'root' },
   withEntities<ApprovalStepDto>(),
-  withState<InboxState>(() => ({ page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0, acting: {}, rowErrors: {}, details: {} })),
+  withState<InboxState>(() => ({ page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0, acting: {}, rowErrors: {}, soonestDueAt: null })),
   withRequestStatus(),
   withComputed(({ total, pageSize }) => ({
     pageCount: computed(() => Math.max(1, Math.ceil(total() / pageSize()))),
@@ -57,7 +49,6 @@ export const ApprovalsStore = signalStore(
   withCache(),
   withMethods((store) => {
     const api = inject(ApprovalsService);
-    const audit = inject(AuditService);
     const conflict = inject(ConflictDialog);
     const log = inject(Logger).withSource('ApprovalsStore');
     let latest = 0;
@@ -96,31 +87,7 @@ export const ApprovalsStore = signalStore(
         return { acting: next };
       });
 
-    /** Who raised each row's request and since when it waits: one history read per row not known yet; failures are silent. */
-    const loadDetails = async (steps: ApprovalStepDto[], epoch: number): Promise<void> => {
-      const missing = steps.filter((s) => !store.details()[s.id]);
-      await Promise.all(
-        missing.map(async (step) => {
-          try {
-            const history = await audit.getRequestHistory({ requestId: step.requestId }, quietly());
-            if (epoch !== store.cacheEpoch()) {
-              return;
-            }
-            const submitted = history.find((e) => e.type === 'RequestSubmitted');
-            const requested = history.filter((e) => e.type === 'ApprovalRequested' && e.stepNo === step.stepNo).at(-1);
-            patchState(store, (s) => ({
-              details: { ...s.details, [step.id]: { requester: submitted?.actorName ?? null, waitingSince: requested?.occurredAt ?? null } },
-            }));
-          } catch (error) {
-            log.warn('Reading the history of a request in the inbox failed', error);
-          }
-        }),
-      );
-    };
-
     const methods = {
-      /** Who raised the request and since when it waits, once the history has been read. */
-      detailsOf: (stepId: string): StepDetails | null => store.details()[stepId] ?? null,
       /** The action running on this row, if any. */
       actingOn: (stepId: string): InboxAction | null => store.acting()[stepId] ?? null,
       /** The message on this row, if any. */
@@ -150,7 +117,13 @@ export const ApprovalsStore = signalStore(
               patchState(store, setAllEntities(result.items), { page: result.page, pageSize: result.pageSize, total: result.total });
               shown = { key, epoch };
               store.setLoaded();
-              void loadDetails(result.items, epoch);
+              if (result.page === 1) {
+                patchState(store, { soonestDueAt: result.items.map((s) => s.dueAt).filter((d): d is string => !!d).sort()[0] ?? null });
+              }
+              if (result.items.length === 0 && result.total > 0 && result.page > 1) {
+                // Rows left this page meanwhile (someone else acted): show the last page that still has some.
+                void methods.load(Math.max(1, Math.ceil(result.total / result.pageSize)));
+              }
             } catch (error) {
               if (call === latest && epoch === store.cacheEpoch()) {
                 log.error('Loading the approvals inbox failed', error);

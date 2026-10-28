@@ -708,6 +708,19 @@
           "version": {
             "type": "integer",
             "format": "uint32"
+          },
+          "requesterName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "openedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },

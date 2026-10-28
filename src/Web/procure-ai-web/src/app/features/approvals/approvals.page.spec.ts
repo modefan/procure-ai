@@ -2,13 +2,12 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
-import { AuditService } from '../../api/audit/services/audit.service';
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
-import { eventDto } from '../requests/request-detail.testing';
 import { ApprovalsPage } from './approvals.page';
+import { ApprovalsStore } from './approvals.store';
 import { inboxPage, inboxStep } from './approvals.testing';
 
 describe('ApprovalsPage', () => {
@@ -21,17 +20,12 @@ describe('ApprovalsPage', () => {
       getApprovalInbox: vi.fn().mockResolvedValue(inboxPage(items)),
       approveStep: vi.fn().mockResolvedValue(inboxStep({ status: 'Approved' })),
       rejectStep: vi.fn().mockResolvedValue(inboxStep({ status: 'Rejected' })),
-      getRequestHistory: vi.fn().mockResolvedValue([
-        eventDto('RequestSubmitted', 'Submitted', '2026-10-28T08:00:00Z', 'ana', { actorName: 'Ana Smith' }),
-        eventDto('ApprovalRequested', 'Waiting', new Date(Date.now() - 2 * 3600_000).toISOString(), 'system', { stepNo: 1 }),
-      ]),
     };
     const fake = fakeHubFactory();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
         { provide: ApprovalsService, useValue: { getApprovalInbox: api['getApprovalInbox'], approveStep: api['approveStep'], rejectStep: api['rejectStep'] } },
-        { provide: AuditService, useValue: { getRequestHistory: api['getRequestHistory'] } },
         { provide: ConflictDialog, useValue: { show: vi.fn().mockResolvedValue(undefined) } },
         { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
       ],
@@ -107,9 +101,24 @@ describe('ApprovalsPage', () => {
     reason.value = 'Over budget';
     reason.dispatchEvent(new Event('input'));
     fixture.detectChanges();
+    expect(text(el)).not.toContain('Enter a reason for rejecting.'); // typing clears the required error
     (el.querySelector('[data-action="confirm-reject"] button') as HTMLButtonElement).click();
     await settle(fixture);
     expect(api['rejectStep']).toHaveBeenCalledWith(expect.objectContaining({ stepId: 's1', body: { reason: 'Over budget' } }), expect.anything());
+  });
+
+  it('the reject box goes away when its row leaves the list', async () => {
+    const { fixture, el } = await setup();
+    (el.querySelector('tr[data-step] [data-action="reject"] button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el.querySelector('textarea')).not.toBeNull();
+
+    api['getApprovalInbox'].mockResolvedValue(inboxPage([inboxStep({ id: 's2', requestId: 'r2', requestNumber: 'PR-1045' })]));
+    TestBed.inject(ApprovalsStore).invalidate('list'); // a push told us the first row is gone
+    await settle(fixture);
+
+    expect(el.querySelectorAll('tbody tr[data-step]')).toHaveLength(1);
+    expect(el.querySelector('textarea')).toBeNull();
   });
 
   it('a refusal is shown on its row', async () => {
@@ -135,7 +144,6 @@ describe('ApprovalsPage', () => {
       providers: [
         provideRouter([]),
         { provide: ApprovalsService, useValue: { getApprovalInbox } },
-        { provide: AuditService, useValue: { getRequestHistory: vi.fn() } },
         { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
       ],
     });

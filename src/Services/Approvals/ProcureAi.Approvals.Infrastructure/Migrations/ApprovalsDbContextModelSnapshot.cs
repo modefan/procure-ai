@@ -148,6 +148,10 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("level");
 
+                    b.Property<DateTimeOffset?>("OpenedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opened_at");
+
                     b.Property<Guid>("RequestId")
                         .HasColumnType("uuid")
                         .HasColumnName("request_id");

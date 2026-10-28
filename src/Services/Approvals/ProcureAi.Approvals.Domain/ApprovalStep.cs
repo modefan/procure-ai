@@ -61,6 +61,9 @@ public sealed class ApprovalStep
     /// <summary>When the step escalates; set when it becomes the current step.</summary>
     public DateTimeOffset? DueAt { get; private set; }
 
+    /// <summary>When the step became the open one (the approver started waiting); null for a step opened before this was recorded.</summary>
+    public DateTimeOffset? OpenedAt { get; private set; }
+
     /// <summary>Optimistic concurrency token (the Postgres <c>xmin</c> system column), set by the database on every write.</summary>
     public uint Version { get; private set; }
 
@@ -103,11 +106,12 @@ public sealed class ApprovalStep
     public bool MayBeActedOnBy(string userId) =>
         userId != RequesterId && _approverIds.Contains(userId, StringComparer.Ordinal);
 
-    /// <summary>The step becomes the current one: it escalates at <paramref name="dueAt"/>.</summary>
-    public void Open(DateTimeOffset dueAt)
+    /// <summary>The step becomes the current one at <paramref name="openedAt"/>: it escalates at <paramref name="dueAt"/>.</summary>
+    public void Open(DateTimeOffset dueAt, DateTimeOffset openedAt)
     {
         EnsurePending();
         DueAt = dueAt;
+        OpenedAt = openedAt;
     }
 
     public void Approve(string userId, DateTimeOffset at) => Act(ApprovalStepStatus.Approved, userId, at);

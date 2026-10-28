@@ -42,7 +42,7 @@ describe('DashboardPage', () => {
     expect(budget).toContain('R 900 000,00');
     expect(text(el.querySelector('[data-tile="mismatched"]'))).toContain('1');
     expect(el.querySelectorAll('[aria-label="Recent activity"] li')).toHaveLength(2);
-    expect(el.querySelector('[data-tile="approvals"]')?.getAttribute('href')).toBe('/app/approvals');
+    expect(el.querySelector('[data-tile="approvals"] a')?.getAttribute('href')).toBe('/app/approvals');
   });
 
   it('online_shows_three_names_and_more', async () => {
@@ -56,6 +56,36 @@ describe('DashboardPage', () => {
     h.online.set([{ userId: 'a', name: 'Ana' }, { userId: 'b', name: 'Ben' }]);
     fixture.detectChanges();
     expect(text(el.querySelector('[aria-label="Online now"]'))).toBe('Online now: Ana, Ben');
+  });
+
+  it('the approvals tile shows an error with a retry, not 0, when the inbox could not be loaded', async () => {
+    h = await setupDashboard(['requests.read', 'requests.approve']);
+    h.api.getApprovalInbox.mockRejectedValue(new Error('down'));
+    const fixture = TestBed.createComponent(DashboardPage);
+    fixture.detectChanges();
+    for (let i = 0; i < 5; i++) {
+      await fixture.whenStable();
+      await new Promise((r) => setTimeout(r));
+      fixture.detectChanges();
+    }
+    const el = fixture.nativeElement as HTMLElement;
+    const tile = text(el.querySelector('[data-tile="approvals"]'));
+    expect(tile).toContain('Could not be loaded');
+    expect(tile).not.toMatch(/0/);
+
+    h.api.getApprovalInbox.mockResolvedValue({ items: [], page: 1, pageSize: 25, total: 4 });
+    (el.querySelector('[data-tile="approvals"] button') as HTMLButtonElement).click();
+    for (let i = 0; i < 4; i++) {
+      await fixture.whenStable();
+      await new Promise((r) => setTimeout(r));
+      fixture.detectChanges();
+    }
+    expect(text(el.querySelector('[data-tile="approvals"]'))).toContain('4');
+  });
+
+  it('no tile has a button inside a link', async () => {
+    const { el } = await render(['requests.read', 'requests.approve', 'budgets.read', 'invoices.read']);
+    expect(el.querySelectorAll('a button')).toHaveLength(0);
   });
 
   it('a tile that failed to load shows a retry instead of a number', async () => {

@@ -76,7 +76,9 @@ export const DashboardStore = signalStore(
       })),
       approvalsTotal: computed(() => approvals.total()),
       /** The earliest time a waiting step escalates (the inbox is ordered by it), or null. */
-      soonestEscalation: computed(() => approvals.entities().map((s) => s.dueAt).filter((d): d is string => !!d).sort()[0] ?? null),
+      soonestEscalation: computed(() => approvals.soonestDueAt()),
+      /** The waiting-approvals tile could not be loaded (the inbox store's error), so it must not show 0. */
+      approvalsError: computed(() => approvals.error()),
       budgetTiles: computed<BudgetTile[]>(() => {
         const mine = new Set(refs.costCenters().map((c) => c.code));
         const wanted = mine.size > 0 ? store.budgets().filter((b) => mine.has(b.costCenterCode)) : store.budgets().slice(0, OVERVIEW_BUDGETS);
@@ -140,7 +142,7 @@ export const DashboardStore = signalStore(
       async load(): Promise<void> {
         const tiles = store.tiles();
         await Promise.all([
-          tiles.approvals ? approvals.load(1) : undefined,
+          tiles.approvals ? approvals.refresh() : undefined,
           tiles.myOpen ? reads.myOpen() : undefined,
           tiles.budgets ? reads.budgets() : undefined,
           tiles.mismatched ? reads.mismatched() : undefined,
@@ -149,7 +151,11 @@ export const DashboardStore = signalStore(
       },
 
       /** Loads one tile again now (its "Try again"). */
-      retry(key: 'myOpen' | 'mismatched' | 'budgets' | 'activity'): void {
+      retry(key: 'approvals' | 'myOpen' | 'mismatched' | 'budgets' | 'activity'): void {
+        if (key === 'approvals') {
+          void approvals.refresh();
+          return;
+        }
         store.invalidate(key);
         void reads[key]();
       },

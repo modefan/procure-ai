@@ -26,27 +26,32 @@ const NAMES_SHOWN = 3;
 
       <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         @if (store.tiles().approvals) {
-          <a data-tile="approvals" routerLink="/app/approvals" class="card flex flex-col gap-1 hover:bg-slate-50">
-            <span class="text-sm text-slate-600">Waiting for my approval</span>
-            <span class="text-4xl font-bold tabular-nums text-slate-900">{{ store.approvalsTotal() }}</span>
-            @if (escalation(); as soon) {
-              <span class="badge-warn">{{ soon }}</span>
+          <div data-tile="approvals" class="card flex flex-col gap-1">
+            <a routerLink="/app/approvals" class="text-sm text-slate-600 hover:underline">Waiting for my approval</a>
+            @if (store.approvalsError()) {
+              <span class="text-sm text-red-800">Could not be loaded.</span>
+              <button type="button" class="btn-secondary self-start" (click)="store.retry('approvals')">Try again</button>
             } @else {
-              <span class="text-sm text-slate-500">&nbsp;</span>
+              <span class="text-4xl font-bold tabular-nums text-slate-900">{{ store.approvalsTotal() }}</span>
+              @if (escalation(); as soon) {
+                <span class="badge-warn">{{ soon }}</span>
+              } @else {
+                <span class="text-sm text-slate-500">&nbsp;</span>
+              }
             }
-          </a>
+          </div>
         }
 
         @if (store.tiles().myOpen) {
-          <a data-tile="my-open" routerLink="/app/requests" class="card flex flex-col gap-1 hover:bg-slate-50">
-            <span class="text-sm text-slate-600">My open requests</span>
+          <div data-tile="my-open" class="card flex flex-col gap-1">
+            <a routerLink="/app/requests" class="text-sm text-slate-600 hover:underline">My open requests</a>
             @if (store.errors()['myOpen']) {
               <span class="text-sm text-red-800">Could not be loaded.</span>
-              <button type="button" class="btn-secondary self-start" (click)="retry($event, 'myOpen')">Try again</button>
+              <button type="button" class="btn-secondary self-start" (click)="store.retry('myOpen')">Try again</button>
             } @else {
               <span class="text-4xl font-bold tabular-nums text-slate-900">{{ store.myOpen() ?? '–' }}</span>
             }
-          </a>
+          </div>
         }
 
         @for (b of store.budgetTiles(); track b.code) {
@@ -65,20 +70,20 @@ const NAMES_SHOWN = 3;
           <div data-tile="budgets-error" class="card flex flex-col gap-1">
             <span class="text-sm text-slate-600">Budget</span>
             <span class="text-sm text-red-800">Could not be loaded.</span>
-            <button type="button" class="btn-secondary self-start" (click)="retry($event, 'budgets')">Try again</button>
+            <button type="button" class="btn-secondary self-start" (click)="store.retry('budgets')">Try again</button>
           </div>
         }
 
         @if (store.tiles().mismatched) {
-          <a data-tile="mismatched" routerLink="/app/invoices" class="card flex flex-col gap-1 hover:bg-slate-50">
-            <span class="text-sm text-slate-600">Invoices with a mismatch</span>
+          <div data-tile="mismatched" class="card flex flex-col gap-1">
+            <a routerLink="/app/invoices" class="text-sm text-slate-600 hover:underline">Invoices with a mismatch</a>
             @if (store.errors()['mismatched']) {
               <span class="text-sm text-red-800">Could not be loaded.</span>
-              <button type="button" class="btn-secondary self-start" (click)="retry($event, 'mismatched')">Try again</button>
+              <button type="button" class="btn-secondary self-start" (click)="store.retry('mismatched')">Try again</button>
             } @else {
               <span class="text-4xl font-bold tabular-nums text-slate-900">{{ store.mismatched() ?? '–' }}</span>
             }
-          </a>
+          </div>
         }
       </div>
 
@@ -90,7 +95,7 @@ const NAMES_SHOWN = 3;
         @if (store.errors()['activity']) {
           <div role="alert" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
             <span>Recent activity could not be loaded.</span>
-            <button type="button" class="btn-secondary" (click)="retry($event, 'activity')">Try again</button>
+            <button type="button" class="btn-secondary" (click)="store.retry('activity')">Try again</button>
           </div>
         } @else if (store.activity().length === 0) {
           <p class="card mt-3 text-slate-600">Nothing has happened yet.</p>
@@ -149,9 +154,4 @@ export class DashboardPage implements OnInit {
     void this.store.load();
   }
 
-  protected retry(event: Event, key: 'myOpen' | 'mismatched' | 'budgets' | 'activity'): void {
-    event.preventDefault(); // the tile is a link; the button inside it must not follow it
-    event.stopPropagation();
-    this.store.retry(key);
-  }
 }

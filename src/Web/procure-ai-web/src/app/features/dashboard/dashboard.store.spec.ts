@@ -34,6 +34,7 @@ describe('DashboardStore', () => {
     expect(store.tiles()).toEqual({ approvals: true, myOpen: true, budgets: true, mismatched: true, activity: true });
     expect(store.approvalsTotal()).toBe(3);
     expect(store.soonestEscalation()).toBe('2026-10-28T15:00:00Z');
+    expect(h.api.getApprovalInbox).toHaveBeenCalledTimes(1); // one call serves the tile, the header and the inbox
     expect(h.api.listInvoices).toHaveBeenCalledWith({ status: 'Mismatched', page: 1, pageSize: 1 });
     expect(store.mismatched()).toBe(1);
     expect(store.activity()).toHaveLength(2);

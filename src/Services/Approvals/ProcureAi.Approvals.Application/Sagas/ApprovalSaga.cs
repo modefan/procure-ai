@@ -659,7 +659,7 @@ public sealed class ApprovalSaga : Saga
         CurrentStepNo = step.StepNo;
         RemindersSent = 0;
         var dueAt = now + options.Timeouts.EscalateAfter;
-        step.Open(dueAt);
+        step.Open(dueAt, now);
         await context.PublishAsync(new ApprovalRequested(
             Id, TenantId, RequestNumber, step.Id, step.StepNo, step.Level.ToString(), step.ApproverIds, dueAt, now));
         await context.ScheduleAsync(new StepTimeout(Id, step.Id, StepTimeoutKind.Reminder, 1), options.Timeouts.ReminderAfter);
