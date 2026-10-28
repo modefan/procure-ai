@@ -62,6 +62,8 @@ public sealed class SpendTests(BudgetsApp app)
         stored.Active.ShouldBe(Reservation - Payment);
         (await app.SpentAsync(tenant, CostCenter)).ShouldBe((Payment, 1L));
         (await app.GetBudgetAsync(tenant, CostCenter)).Available.ShouldBe(Budget - Reservation);
+        // Final review I2: the handler received and published messages, but Wolverine's envelope tables are not audited.
+        (await app.AuditRowsOfWolverineTablesAsync()).ShouldBe(0L);
     }
 
     [Fact]

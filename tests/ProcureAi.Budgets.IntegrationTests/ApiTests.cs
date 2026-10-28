@@ -195,7 +195,7 @@ public sealed class ApiTests(BudgetsApp app)
 
         await using var db = app.Infra.NewDbContext();
         var audit = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstAsync(
-            db.Set<AuditEntry>().Where(e => e.Table == "budget_reservations" && e.PrimaryKey.EndsWith(id.ToString())), Ct);
+            db.Set<AuditEntry>().Where(e => e.Table == "budget_reservations" && e.Operation == AuditOperation.Insert && e.PrimaryKey.EndsWith(id.ToString())), Ct);
         audit.TransactionId.ShouldBe(message.TransactionId, "the interceptor row and the change share a transaction");
         audit.Operation.ShouldBe(AuditOperation.Insert);
         audit.TenantId.ShouldBe(tenant);

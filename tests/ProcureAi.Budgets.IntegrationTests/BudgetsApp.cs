@@ -152,6 +152,15 @@ public sealed class BudgetsApp : IAsyncLifetime
         return (reader.GetDecimal(0), reader.GetInt64(1));
     }
 
+    /// <summary>Data-change audit rows of Wolverine's own tables (its envelopes), in the whole database: there must be none.</summary>
+    public async Task<long> AuditRowsOfWolverineTablesAsync()
+    {
+        await using var connection = new NpgsqlConnection(_infra.DbConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand("SELECT count(*) FROM audit_entries WHERE table_name LIKE 'wolverine%'", connection);
+        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+    }
+
     /// <summary>
     /// Messages that ran out of retries or were moved to the error queue: the rows of Wolverine's dead-letter table plus the
     /// messages in the broker's <c>wolverine-dead-letter-queue</c> (where the RabbitMQ transport puts a message moved to the error queue).

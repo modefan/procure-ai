@@ -53,7 +53,7 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
 
         var changed = context.ChangeTracker.Entries()
             .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
-            .Where(e => e.Metadata.ClrType.GetCustomAttribute<AuditExcludeAttribute>() is null)
+            .Where(e => !IsInternal(e.Metadata))
             .ToList();
         if (changed.Count == 0)
         {
@@ -101,6 +101,21 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
             });
         }
     }
+
+    /// <summary>
+    /// Internal tables are not data a person changed, so they get no audit row (CLAUDE.md "Audit": internal tables are not
+    /// captured): entity types marked <see cref="AuditExcludeAttribute"/> (the audit rows themselves, the webhook inbox), and
+    /// Wolverine's own entities, which its EF Core integration maps into every service's DbContext (the outbox and inbox envelope
+    /// tables, <c>wolverine_*</c>, whose rows carry whole message bodies and come and go with every message).
+    /// </summary>
+    private static bool IsInternal(IEntityType entityType) =>
+        entityType.ClrType.GetCustomAttribute<AuditExcludeAttribute>() is not null
+        || entityType.ClrType.Assembly.GetName().Name?.StartsWith(WolverinePrefix, StringComparison.Ordinal) == true
+        || entityType.GetTableName()?.StartsWith(WolverineTablePrefix, StringComparison.Ordinal) == true;
+
+    private const string WolverinePrefix = "Wolverine";
+
+    private const string WolverineTablePrefix = "wolverine_";
 
     private static List<AuditChange> ChangesOf(EntityEntry entry)
     {

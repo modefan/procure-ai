@@ -323,7 +323,7 @@ public sealed class ReceiptTests(PurchasingApp app, ITestOutputHelper output)
         order.After.GetProperty("status").GetString().ShouldBe(nameof(OrderStatus.PartiallyReceived));
 
         await using var db = new PurchasingDbContext(new DbContextOptionsBuilder<PurchasingDbContext>().UseNpgsql(app.Infra.DbConnectionString).Options);
-        var audit = await db.Set<AuditEntry>().FirstAsync(e => e.Table == "goods_receipts" && e.PrimaryKey == receiptId.ToString());
+        var audit = await db.Set<AuditEntry>().FirstAsync(e => e.Table == "goods_receipts" && e.Operation == AuditOperation.Insert && e.PrimaryKey == receiptId.ToString());
         audit.TransactionId.ShouldBe(receipt.TransactionId, "the interceptor row and the change share a transaction");
         audit.Operation.ShouldBe(AuditOperation.Insert);
         audit.TenantId.ShouldBe(tenant);
