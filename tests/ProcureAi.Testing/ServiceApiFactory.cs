@@ -13,9 +13,9 @@ namespace ProcureAi.Testing;
 /// with tokens validated against the local test key. Several factories on the same infrastructure stand in for several
 /// instances of the service. Disposing one closes its idle database connections (see <see cref="DisposeAsync"/>).
 /// </summary>
-/// <param name="databaseConnectionName">The service's connection-string name, e.g. <c>requestsdb</c>.</param>
+/// <param name="databaseConnectionName">The service's connection-string name, e.g. <c>requestsdb</c>; null for a service without a database (Notifications).</param>
 public class ServiceApiFactory<TProgram>(
-    string databaseConnectionName, string databaseConnectionString, string rabbitConnectionString, string redisConnectionString)
+    string? databaseConnectionName, string? databaseConnectionString, string rabbitConnectionString, string redisConnectionString)
     : WebApplicationFactory<TProgram>
     where TProgram : class
 {
@@ -26,7 +26,11 @@ public class ServiceApiFactory<TProgram>(
     {
         builder.UseEnvironment("Testing");
         // UseSetting, not ConfigureAppConfiguration: the composition root reads some settings while it builds.
-        builder.UseSetting($"ConnectionStrings:{databaseConnectionName}", databaseConnectionString);
+        if (databaseConnectionName is not null)
+        {
+            builder.UseSetting($"ConnectionStrings:{databaseConnectionName}", databaseConnectionString);
+        }
+
         builder.UseSetting("ConnectionStrings:rabbitmq", rabbitConnectionString);
         builder.UseSetting("ConnectionStrings:Redis", redisConnectionString);
         builder.UseSetting("Auth:Authority", TestAuth.Issuer);
@@ -61,7 +65,10 @@ public class ServiceApiFactory<TProgram>(
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
-        ReleaseDatabaseConnections(databaseConnectionString);
+        if (databaseConnectionString is not null)
+        {
+            ReleaseDatabaseConnections(databaseConnectionString);
+        }
     }
 
     /// <summary>Closes the idle connections of the pool for the database. A service on another database than Postgres (MongoDB) overrides it with nothing.</summary>

@@ -1,6 +1,8 @@
 using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,23 +22,37 @@ public sealed class ManualTimeProvider : TimeProvider
 /// <summary>
 /// The real gateway on an in-memory test server, reached as https://localhost:5001 (the realm accepts
 /// <c>https://localhost:*</c> callbacks, and the <c>__Host-</c> session cookie needs https), with Keycloak and Redis
-/// from containers and a real Kestrel stub as the downstream services and web app.
+/// from containers and a real Kestrel stub as the downstream services and web app. With <c>kestrel: true</c> the gateway
+/// listens on a real https port of its own (the ASP.NET Core development certificate) instead: the in-memory server cannot
+/// upgrade a request to a WebSocket for YARP to proxy.
 /// </summary>
 public sealed class GatewayHost : IAsyncDisposable
 {
     public static readonly Uri BaseAddress = new("https://localhost:5001");
 
-    private readonly TestServer _server;
+    private readonly TestServer? _server;
 
-    private GatewayHost(WebApplication app, StubDownstream stub, StubAccessServer access, ManualTimeProvider clock, string keyPrefix)
+    private GatewayHost(WebApplication app, StubDownstream stub, StubAccessServer access, ManualTimeProvider clock, string keyPrefix, bool kestrel)
     {
         App = app;
         Stub = stub;
         Access = access;
         Clock = clock;
         KeyPrefix = keyPrefix;
-        _server = app.GetTestServer();
+        if (kestrel)
+        {
+            var port = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First()).Port;
+            Address = new Uri($"https://localhost:{port}");
+        }
+        else
+        {
+            _server = app.GetTestServer();
+            Address = BaseAddress;
+        }
     }
+
+    /// <summary>Where the gateway is reached: <see cref="BaseAddress"/>, or the real port when it runs on Kestrel.</summary>
+    public Uri Address { get; }
 
     public WebApplication App { get; }
 
@@ -50,7 +66,7 @@ public sealed class GatewayHost : IAsyncDisposable
     public string KeyPrefix { get; }
 
     public static async Task<GatewayHost> StartAsync(
-        KeycloakFixture keycloak, RedisFixture redis, Dictionary<string, string?>? extra = null)
+        KeycloakFixture keycloak, RedisFixture redis, Dictionary<string, string?>? extra = null, bool kestrel = false)
     {
         var stub = await StubDownstream.StartAsync();
         var access = await StubAccessServer.StartAsync();
@@ -71,6 +87,7 @@ public sealed class GatewayHost : IAsyncDisposable
             ["ReverseProxy:Clusters:suppliers:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:purchasing:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:invoicing:Destinations:d1:Address"] = stub.Url,
+            ["ReverseProxy:Clusters:notifications:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:web:Destinations:d1:Address"] = stub.Url,
         };
         foreach (var (key, value) in access.Settings)
@@ -85,7 +102,15 @@ public sealed class GatewayHost : IAsyncDisposable
 
         var app = GatewayApp.Build([], builder =>
         {
-            builder.WebHost.UseTestServer();
+            if (kestrel)
+            {
+                builder.WebHost.UseKestrel(kestrelOptions => kestrelOptions.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps()));
+            }
+            else
+            {
+                builder.WebHost.UseTestServer();
+            }
+
             builder.Configuration.AddInMemoryCollection(settings);
             builder.Services.AddSingleton<TimeProvider>(clock);
             builder.Services.AddSingleton<IStartupFilter, ClientAddressFilter>();
@@ -101,12 +126,27 @@ public sealed class GatewayHost : IAsyncDisposable
             throw;
         }
 
-        return new GatewayHost(app, stub, access, clock, keyPrefix);
+        return new GatewayHost(app, stub, access, clock, keyPrefix, kestrel);
     }
 
     /// <summary>A browser: its own cookie jar, does not follow redirects.</summary>
     public HttpClient NewBrowser() =>
-        new(new CookieJarHandler(_server.CreateHandler(), stripSecure: false)) { BaseAddress = BaseAddress };
+        new(new CookieJarHandler(_server?.CreateHandler() ?? KestrelHandler(), stripSecure: false)) { BaseAddress = Address };
+
+    /// <summary>A browser whose cookie jar the test can read (to send the session cookie on a WebSocket upgrade).</summary>
+    public (HttpClient Browser, CookieJarHandler Cookies) NewBrowserWithCookies()
+    {
+        var cookies = new CookieJarHandler(_server?.CreateHandler() ?? KestrelHandler(), stripSecure: false);
+        return (new HttpClient(cookies) { BaseAddress = Address }, cookies);
+    }
+
+    /// <summary>The development certificate is not necessarily trusted on the machine running the tests.</summary>
+    private static HttpClientHandler KestrelHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+    };
 
     public async ValueTask DisposeAsync()
     {

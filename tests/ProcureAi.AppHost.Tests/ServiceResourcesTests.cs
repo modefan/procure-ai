@@ -299,6 +299,62 @@ public sealed class ServiceResourcesTests
         simulators.Annotations.OfType<WaitAnnotation>().ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Notifications_service_has_no_database_and_no_migrate_and_the_gateway_routes_to_it()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "notifications-api");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var apiEnv = await EnvironmentOfAsync(api);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        // No database (plan 04 ruling 1): no migrate resource, no database resource, no connection string for one, no Debezium.
+        model.Resources.ShouldNotContain(r => r.Name == "notifications-migrate");
+        model.Resources.ShouldNotContain(r => r.Name.StartsWith("notificationsdb", StringComparison.Ordinal));
+        model.Resources.ShouldNotContain(r => r.Name.StartsWith("debezium-notifications", StringComparison.Ordinal));
+        apiEnv.ShouldContainKeyAndValue("Service__Store", "None");
+        apiEnv.Keys.ShouldNotContain(k => k.StartsWith("ConnectionStrings__notifications", StringComparison.OrdinalIgnoreCase));
+        api.Annotations.OfType<WaitAnnotation>().ShouldNotContain(w => w.WaitType == WaitType.WaitForCompletion);
+        // RabbitMQ (the live queue), Redis (the SignalR backplane) and Keycloak (tokens) like every service.
+        apiEnv.ShouldContainKey("ConnectionStrings__rabbitmq");
+        apiEnv.ShouldContainKey("ConnectionStrings__Redis");
+        apiEnv.ShouldContainKey("Auth__Authority");
+        apiEnv.ShouldContainKey("Auth__AdminApiKeySha256");
+        foreach (var dependency in new[] { "rabbitmq", "redis", "keycloak" })
+        {
+            api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource.Name == dependency, dependency);
+        }
+
+        api.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+
+        // The gateway proxies its API and the hub (/hubs/**) to it.
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__notifications__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+    }
+
+    [Fact]
+    public void A_service_without_a_database_cannot_ask_for_debezium_tables()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "testcontainers.settings.json"), optional: false);
+        var secret = builder.AddParameter("secret", secret: true);
+        #pragma warning disable ASPIREMONGODB001
+        var shared = new SharedResources(
+            builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
+            builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
+        #pragma warning restore ASPIREMONGODB001
+
+        Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
+            new ServiceSpec("notifications", "", ["x"], "notifications", "/api/notifications", ServiceStore.None), shared));
+    }
+
     /// <summary>A stand-in project for a MongoDB service (the real one is Suppliers; this one exercises the template on its own).</summary>
     private sealed class MongoServiceProject : IProjectMetadata
     {
@@ -449,6 +505,7 @@ public sealed class ServiceResourcesTests
     [InlineData("suppliers-api", new[] { "access-api" })]
     [InlineData("purchasing-api", new[] { "access-api" })]
     [InlineData("invoicing-api", new[] { "access-api" })]
+    [InlineData("notifications-api", new[] { "access-api" })]
     [InlineData("access-api", new string[0])]
     public async Task Every_service_references_and_waits_for_the_services_it_calls(string service, string[] calls)
     {

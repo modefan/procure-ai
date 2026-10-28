@@ -15,7 +15,10 @@ public sealed record SeenRequest(string Method, string Path, IReadOnlyDictionary
     public string? Header(string name) => Headers.TryGetValue(name, out var value) ? value : null;
 }
 
-/// <summary>A real Kestrel server standing in for requests-api and the web app; records every request it gets.</summary>
+/// <summary>
+/// A real Kestrel server standing in for the services and the web app; records every request it gets. A WebSocket request is accepted,
+/// told the path it reached, and closed.
+/// </summary>
 public sealed class StubDownstream : IAsyncDisposable
 {
     private readonly WebApplication _app;
@@ -39,11 +42,22 @@ public sealed class StubDownstream : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         var app = builder.Build();
+        app.UseWebSockets();
         StubDownstream? stub = null;
         app.Run(async context =>
         {
             var headers = context.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
             stub!._seen.Enqueue(new SeenRequest(context.Request.Method, context.Request.Path.Value!, headers));
+            if (context.WebSockets.IsWebSocketRequest)
+            {
+                // A WebSocket (the live hub): say which path it reached, then close.
+                using var socket = await context.WebSockets.AcceptWebSocketAsync();
+                var hello = System.Text.Encoding.UTF8.GetBytes($"connected:{context.Request.Path.Value}");
+                await socket.SendAsync(hello, System.Net.WebSockets.WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+                return;
+            }
+
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsJsonAsync(new { stub = true, host = context.Request.Host.Value, path = context.Request.Path.Value });
         });

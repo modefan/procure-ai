@@ -88,19 +88,19 @@ public static class ServiceHost
         configure(builder);
 
         // Ready only while the dependencies the API cannot serve without are reachable.
-        var service = builder.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>();
-        var databaseName = service?.DatabaseConnectionName
-            ?? throw new InvalidOperationException($"'{ServiceOptions.SectionName}:{nameof(ServiceOptions.DatabaseConnectionName)}' is not configured.");
-        var databaseConnectionString = Required(builder.Configuration, databaseName);
+        var service = builder.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>() ?? new ServiceOptions();
         if (service.Store == ServiceStore.MongoDB)
         {
             // The service registers its client with AddProcureAiMongo; the check pings through it.
+            Required(builder.Configuration, DatabaseName(service));
             MongoReadinessCheck.AddMongoReadiness(services);
         }
-        else
+        else if (service.Store == ServiceStore.Postgres)
         {
-            services.AddPostgresReadiness(databaseConnectionString);
+            services.AddPostgresReadiness(Required(builder.Configuration, DatabaseName(service)));
         }
+
+        // ServiceStore.None (Notifications): no database to be ready for.
 
         services.AddRabbitMqReadiness(Required(builder.Configuration, MessagingSetup.RabbitMqConnectionName));
         services.AddRedisReadiness();
@@ -122,6 +122,8 @@ public static class ServiceHost
     /// (outbox and inbox tables), then <paramref name="seedDemoData"/> when <c>DemoSeed:Enabled</c> is true, and returns.
     /// A MongoDB service (<c>Service:Store=MongoDB</c>) has no message store: it runs every registered <see cref="IMongoMigration"/>
     /// (indexes), then <paramref name="migrate"/> when given, then the seed.
+    /// A service without a database (<c>Service:Store=None</c>) has nothing to migrate: only <paramref name="migrate"/> and the seed run,
+    /// when given (the AppHost adds no migrate resource for it).
     /// Otherwise runs the application. Nothing migrates at normal startup.
     /// </summary>
     public static async Task RunAsync(
@@ -137,7 +139,8 @@ public static class ServiceHost
         }
 
         var cancellationToken = app.Lifetime.ApplicationStopping;
-        var mongo = app.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>()?.Store == ServiceStore.MongoDB;
+        var store = app.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>()?.Store ?? ServiceStore.Postgres;
+        var mongo = store == ServiceStore.MongoDB;
         if (mongo)
         {
             // A MongoDB service has no message store: its migrations are the registered IMongoMigrations (indexes).
@@ -153,7 +156,7 @@ public static class ServiceHost
             await migrate(app.Services, cancellationToken);
         }
 
-        if (!mongo)
+        if (store == ServiceStore.Postgres)
         {
             await app.Services.GetRequiredService<IWolverineRuntime>().Storage.Admin.MigrateAsync();
         }
@@ -167,6 +170,10 @@ public static class ServiceHost
     /// <summary>True while the <c>Microsoft.Extensions.ApiDescription.Server</c> build step runs the app to read its OpenAPI document.</summary>
     private static bool IsWritingOpenApiDocument() =>
         Assembly.GetEntryAssembly()?.GetName().Name == OpenApiToolAssembly;
+
+    private static string DatabaseName(ServiceOptions service) =>
+        service.DatabaseConnectionName
+        ?? throw new InvalidOperationException($"'{ServiceOptions.SectionName}:{nameof(ServiceOptions.DatabaseConnectionName)}' is not configured.");
 
     private static string Required(IConfiguration configuration, string name) =>
         configuration.GetConnectionString(name)

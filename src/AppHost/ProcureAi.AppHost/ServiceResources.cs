@@ -7,15 +7,18 @@ public enum ServiceStore
 {
     Postgres,
     MongoDB,
+
+    /// <summary>No database (Notifications): no database resource, no <c>-migrate</c> resource, no Debezium.</summary>
+    None,
 }
 
 /// <summary>What one service needs from the AppHost. Everything else comes from <see cref="SharedResources"/>.</summary>
 /// <param name="Name">Short service name, e.g. <c>requests</c>; the resources are called <c>&lt;name&gt;-migrate</c> and <c>&lt;name&gt;-api</c>.</param>
-/// <param name="Database">The service's database on the Postgres or MongoDB server, e.g. <c>requestsdb</c> (also its connection-string name).</param>
+/// <param name="Database">The service's database on the Postgres or MongoDB server, e.g. <c>requestsdb</c> (also its connection-string name); unused for <see cref="ServiceStore.None"/>.</param>
 /// <param name="CapturedTables">Tables Debezium captures for the audit trail (wired by <c>AddDebeziumFor</c>); empty when none.</param>
 /// <param name="GatewayCluster">The YARP cluster the gateway routes this service's traffic to, e.g. <c>requests</c>.</param>
 /// <param name="ApiRoutePrefix">The path the gateway exposes the service under, e.g. <c>/api/requests</c>.</param>
-/// <param name="Store">Which server holds the database. MongoDB services have no Debezium (it reads the Postgres WAL), so <c>CapturedTables</c> must be empty.</param>
+/// <param name="Store">Which server holds the database, or <see cref="ServiceStore.None"/>. MongoDB services and services without a database have no Debezium (it reads the Postgres WAL), so <c>CapturedTables</c> must be empty.</param>
 public sealed record ServiceSpec(
     string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix, ServiceStore Store = ServiceStore.Postgres);
 
@@ -54,7 +57,8 @@ public static class ServiceResources
     private const int DebeziumHttpPort = 8080;
 
     /// <summary>
-    /// Adds a service the one way every service is added: its database, a short-lived <c>&lt;name&gt;-migrate</c> resource
+    /// Adds a service the one way every service is added: its database, a short-lived <c>&lt;name&gt;-migrate</c> resource (neither for a
+    /// service without a database, <see cref="ServiceStore.None"/>)
     /// (the same project with <c>--migrate</c>: schema, Wolverine message store and demo seed data) and the
     /// <c>&lt;name&gt;-api</c> resource, which waits for the migration to finish and reports readiness on <c>/health/ready</c>.
     /// A separate resource is the simplest ordering Aspire offers (<c>WaitForCompletion</c>), it mirrors the Kubernetes job /
@@ -68,31 +72,37 @@ public static class ServiceResources
         // Aspire creates the database on the server. The Postgres init script only creates the debezium role; the
         // migration creates the publication and grants (CdcMigrations.EnableCdc).
         // A MongoDB service's database is created on the mongo resource instead. Debezium reads the Postgres WAL, so there is nothing to capture.
-        var mongo = spec.Store == ServiceStore.MongoDB;
-        if (mongo && spec.CapturedTables.Length > 0)
+        // A service without a database (ServiceStore.None, Notifications) gets neither a database nor a migrate resource.
+        if (spec.Store != ServiceStore.Postgres && spec.CapturedTables.Length > 0)
         {
-            throw new ArgumentException($"{spec.Name}: a MongoDB service has no Debezium capture (CapturedTables must be empty).", nameof(spec));
+            throw new ArgumentException($"{spec.Name}: a {spec.Store} service has no Debezium capture (CapturedTables must be empty).", nameof(spec));
         }
 
-        IResourceBuilder<IResourceWithConnectionString> database = mongo
-            ? shared.Mongo.AddDatabase(spec.Database)
-            : shared.Postgres.AddDatabase(spec.Database);
+        IResourceBuilder<IResourceWithConnectionString>? database = spec.Store switch
+        {
+            ServiceStore.MongoDB => shared.Mongo.AddDatabase(spec.Database),
+            ServiceStore.Postgres => shared.Postgres.AddDatabase(spec.Database),
+            _ => null,
+        };
 
-        var migrate = builder.AddProject<TProject>(spec.Name + MigrateSuffix)
-            .WithArgs("--migrate")
-            .WithEnvironment("DemoSeed__Enabled", "true")
-            .WithEnvironment("Service__Store", spec.Store.ToString())
-            .WithReference(database)
-            .WithReference(shared.RabbitMq)
-            .WithReference(shared.Redis)
-            .WaitFor(database)
-            .WithDotNetLimits(shared.Limits.DotNet);
+        IResourceBuilder<ProjectResource>? migrate = null;
+        if (database is not null)
+        {
+            migrate = builder.AddProject<TProject>(spec.Name + MigrateSuffix)
+                .WithArgs("--migrate")
+                .WithEnvironment("DemoSeed__Enabled", "true")
+                .WithEnvironment("Service__Store", spec.Store.ToString())
+                .WithReference(database)
+                .WithReference(shared.RabbitMq)
+                .WithReference(shared.Redis)
+                .WaitFor(database)
+                .WithDotNetLimits(shared.Limits.DotNet);
+        }
 
         var api = builder.AddProject<TProject>(spec.Name + ApiSuffix)
             // No launchSettings.json: Aspire picks a free port, so dev runs and test runs never clash.
             .WithHttpEndpoint(name: "http")
             .WithEnvironment("Service__Store", spec.Store.ToString())
-            .WithReference(database)
             .WithReference(shared.RabbitMq)
             .WithReference(shared.Redis)
             .WithEnvironment("Auth__Authority", shared.KeycloakAuthority)
@@ -110,11 +120,15 @@ public static class ServiceResources
             .WaitFor(shared.Keycloak)
             .WaitFor(shared.RabbitMq)
             .WaitFor(shared.Redis)
-            .WaitForCompletion(migrate)
             .WithHttpHealthCheck("/health/ready")
             .WithDotNetLimits(shared.Limits.DotNet);
 
-        if (spec.CapturedTables.Length > 0)
+        if (database is not null && migrate is not null)
+        {
+            api.WithReference(database).WaitForCompletion(migrate);
+        }
+
+        if (migrate is not null && spec.CapturedTables.Length > 0)
         {
             // Debezium starts with snapshot.mode=no_data, so it only sees changes made after its slot exists. The API
             // therefore waits for Debezium to be healthy: no change made through the app can precede the capture.

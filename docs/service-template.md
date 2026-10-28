@@ -79,6 +79,49 @@ For a service whose data is documents and that publishes no integration events. 
   `Resources:Mongo` (including the WiredTiger cache size), and fails at startup if it is not the replica set's PRIMARY.
   `Client` and `ConnectionStringFor(database)` give a client or a connection string.
 
+## A service without a database (Notifications)
+
+For a service that holds no business data of its own (Notifications: live pushes, presence, bell items in Redis). Plan 04 ruling 1.
+
+- **`Service:Store=None`** (`ServiceStore.None`, in both `ProcureAi.BuildingBlocks.Hosting` and the AppHost's copy of the enum): set it in the
+  api's `appsettings.json` and leave out `Service:DatabaseConnectionName` (required only for `Postgres` and `MongoDB`, checked at startup).
+  `ServiceHost` then adds no database readiness check (RabbitMQ and Redis stay), and `--migrate` has nothing to run but the optional
+  callbacks (there is no message store).
+- **AppHost**: `ServiceSpec(..., Database: "", CapturedTables: [], ..., Store: ServiceStore.None)`. `AddProcureAiService` adds no database
+  and no `<name>-migrate` resource (the api waits for nothing to complete), no Debezium (a `None` service with `CapturedTables` throws), and
+  passes `Service__Store=None`. RabbitMQ, Redis, Keycloak, the admin key hash, the internal client and the .NET caps are wired as for every
+  service; `.CallsServices(accessApi)` as usual (the Access client is still registered for every service).
+- **OpenAPI build step**: leave `OpenApiDatabaseConnectionName` out of the api csproj; `Directory.Build.targets` then sets no database placeholders.
+- **Wolverine without a message store**: `UseProcureAiAccessEviction` (the buffered `<name>-api-access-changed` queue) plus the service's own
+  **buffered** listeners: no durable inbox, no outbox, no transactions. A message redelivered after a crash is handled twice, so every
+  handler must be harmless to repeat (a second push; emails are deduplicated by message ID in Redis, Task 1b). A failure no rule matches goes
+  to the error queue at once (Wolverine 6.53), so give each expected failure an explicit rule (Notifications: `RedisException` /
+  `RedisTimeoutException` retried inline with `Notifications:PushRetryDelays`).
+- **Tests**: `ServiceApiFactory<Program>(null, null, rabbit, redis)` (no database connection string, no Npgsql pool to clear).
+
+### Notifications: the live hub
+
+- Hub `LiveHub` at `/hubs/live` (`LiveHubContract.Path`), authorization policy `live-hub`: a signed-in caller **with a tenant** (the token's
+  `tenant` claim; `X-Tenant-Id` only with the admin key or a service account). No tenant: 403 at negotiate; no credentials: 401. On connect
+  the connection joins `t:{tenantId}` and `u:{tenantId}:{userId}` (`LiveGroups`, Domain); the client cannot name a group. Transports:
+  WebSockets (through the gateway) and long polling (the in-memory test server).
+- Server to client method `EntityChanged` (`LiveHubContract.EntityChangedMethod`) with `EntityChanged(entity, id, requestId, eventType,
+  occurredAt)` (`ProcureAi.Contracts.Notifications`), camelCase JSON, IDs only (ruling 2): clients refetch through the authorized APIs.
+  `entity` is `request | approval | budget | order | invoice`; `id` is the request ID for `request` and `approval` (the approval chain of
+  that request), the cost center code for `budget`, the order ID and the invoice ID.
+- Feed: the buffered queue `notifications-api-live`, bound to `requests`, `approvals`, `budgets`, `purchasing` and `invoicing`. One handler
+  method per event type (`...EventsHandler`, Application), each sending the pushes of `LiveEventMap.For(event)` to the event's tenant group,
+  one push per entity, the most specific first and the request last. `HandlerCoverageTests` and `EventMapTests` fail when an event is
+  added to one of those namespaces without a handler and a mapping.
+- Scale-out: the SignalR **Redis backplane** (`AddStackExchangeRedis` on `ConnectionStrings:Redis`, channel prefix
+  `Notifications:SignalR:ChannelPrefix`, default `procure-signalr`), so a push from the instance that took the message reaches clients on
+  every instance.
+- A client's `start()` completes with the handshake, **before** `OnConnectedAsync` has joined the groups: a push sent in that moment is not
+  delivered to it. Clients revalidate what they hold after every (re)connect; the integration tests wait for a probe push before publishing.
+- Gateway: routes `notifications-api` (`/api/v1/notifications/{**catch-all}`), `notifications-openapi` and `notifications-hub`
+  (`/hubs/{**catch-all}`, WebSockets proxied by YARP, the session's access token added like on every API route; the negotiate POST needs
+  `X-XSRF-TOKEN`, the WebSocket upgrade is a GET and needs none).
+
 ## Change data capture (Debezium)
 
 - **One Debezium Server per captured database.** Debezium Server 3.7 runs exactly one source connector per instance
@@ -187,7 +230,7 @@ Signed webhooks (a supplier confirming an order, an invoice arriving) use the bu
 
 | Piece | Location |
 |---|---|
-| `ServiceHost`, `ServiceOptions` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Hosting` (references Web, Messaging, Persistence and Persistence.Mongo; only `*.Api` projects may use it) |
+| `ServiceHost`, `ServiceOptions`, `ServiceStore` (`Postgres`, `MongoDB`, `None`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Hosting` (references Web, Messaging, Persistence and Persistence.Mongo; only `*.Api` projects may use it) |
 | MongoDB: `AddProcureAiMongo`, `TenantCollection<T>`, `ITenantDocument`, `IMongoMigration`, `MongoReadinessCheck` (see "A service on MongoDB") | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence.Mongo` |
 | `ApplicationExceptionFilter` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/Errors` |
 | OpenAPI build step | `src/Services/Directory.Build.targets` |

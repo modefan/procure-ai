@@ -4,7 +4,7 @@
     OpenAPI document of every service API (ProcureAi.*.Api), written on every build and committed: the Angular client
     is generated from it. A project opts in by setting, in its csproj:
       OpenApiDocumentName            the file name without extension, e.g. requests-v1  (writes openapi/requests-v1.json)
-      OpenApiDatabaseConnectionName  the service's connection-string name, e.g. requestsdb
+      OpenApiDatabaseConnectionName  the service's connection-string name, e.g. requestsdb (none for a service without a database)
     The tool builds the host (it never starts it), and the composition root insists on its settings, so the tool is run
     by hand here with placeholder settings as environment variables. Nothing connects to them; none is a real address or
     secret. (The package's own build step is switched off because it cannot set variables.)
@@ -25,7 +25,9 @@
   </ItemGroup>
 
   <PropertyGroup Condition="'$(IsServiceApi)' == 'true'">
-    <OpenApiPlaceholderSettings>Service__DatabaseConnectionName=$(OpenApiDatabaseConnectionName);ConnectionStrings__$(OpenApiDatabaseConnectionName)=$(OpenApiDatabaseConnectionString);ConnectionStrings__rabbitmq=amqp://openapi.invalid;ConnectionStrings__Redis=openapi.invalid:6379</OpenApiPlaceholderSettings>
+    <OpenApiPlaceholderSettings>ConnectionStrings__rabbitmq=amqp://openapi.invalid;ConnectionStrings__Redis=openapi.invalid:6379</OpenApiPlaceholderSettings>
+    <!-- A service without a database (Service:Store=None, Notifications) sets no OpenApiDatabaseConnectionName. -->
+    <OpenApiPlaceholderSettings Condition="'$(OpenApiDatabaseConnectionName)' != ''">$(OpenApiPlaceholderSettings);Service__DatabaseConnectionName=$(OpenApiDatabaseConnectionName);ConnectionStrings__$(OpenApiDatabaseConnectionName)=$(OpenApiDatabaseConnectionString)</OpenApiPlaceholderSettings>
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__Authority=https://openapi.invalid/realms/x;Auth__Audience=openapi;Auth__AdminApiKeySha256=0000000000000000000000000000000000000000000000000000000000000000</OpenApiPlaceholderSettings>
     <OpenApiPlaceholderSettings>$(OpenApiPlaceholderSettings);Auth__OpenApi__AuthorizationUrl=https://openapi.invalid/auth;Auth__OpenApi__TokenUrl=https://openapi.invalid/token;Auth__OpenApi__Scopes__openid=OpenID Connect;Auth__OpenApi__Scopes__email=Email address</OpenApiPlaceholderSettings>
     <!-- A service with settings of its own that must be present at startup lists them in OpenApiExtraSettings (same placeholder rules). -->

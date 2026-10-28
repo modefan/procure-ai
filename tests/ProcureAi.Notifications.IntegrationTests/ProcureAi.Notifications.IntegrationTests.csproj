@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The Wolverine, SignalR and Testcontainers calls here are short; threading the test token through every one adds noise. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="ProcureAi.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ProcureAi.Testing/ProcureAi.Testing.csproj" />
+    <ProjectReference Include="../../src/Services/Notifications/ProcureAi.Notifications.Infrastructure/ProcureAi.Notifications.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Notifications/ProcureAi.Notifications.Api/ProcureAi.Notifications.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

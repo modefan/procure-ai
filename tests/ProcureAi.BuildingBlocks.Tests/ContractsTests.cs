@@ -10,6 +10,12 @@ public sealed class ContractsTests
     /// <summary>Value types nested in messages: neither events nor commands, so they carry no tenant.</summary>
     private static readonly string[] Parts = ["RequestLineItem", "OrderLineItem", "ReceivedLine", "PaidLine"];
 
+    /// <summary>
+    /// Live updates pushed to browsers over SignalR, never over RabbitMQ: not events, and without a tenant (they go to the group of the
+    /// tenant whose event caused them, and carry IDs only).
+    /// </summary>
+    private static readonly string[] Pushes = ["EntityChanged"];
+
     private static readonly string[] Events =
     [
         "RequestSubmitted", "RequestCancelled",
@@ -34,7 +40,7 @@ public sealed class ContractsTests
     {
         var types = ContractTypes();
 
-        types.Select(t => t.Name).Order().ShouldBe(Commands.Concat(Events).Concat(Parts).Order());
+        types.Select(t => t.Name).Order().ShouldBe(Commands.Concat(Events).Concat(Parts).Concat(Pushes).Order());
         foreach (var type in types)
         {
             typeof(IIntegrationEvent).IsAssignableFrom(type).ShouldBe(Events.Contains(type.Name), type.Name);
@@ -48,7 +54,7 @@ public sealed class ContractsTests
         {
             type.GetProperties().Where(p => p.PropertyType == typeof(double) || p.PropertyType == typeof(float))
                 .ShouldBeEmpty(type.Name);
-            if (Parts.Contains(type.Name))
+            if (Parts.Contains(type.Name) || Pushes.Contains(type.Name))
             {
                 continue;
             }

@@ -181,6 +181,14 @@ var invoicingApi = builder.AddProcureAiService<Projects.ProcureAi_Invoicing_Api>
     .WithEnvironment("ErpClient__ApiKey", simulatorApiKey)
     .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
 
+// Notifications: live updates over SignalR (the gateway proxies /hubs/** to it over WebSockets), fed by a buffered queue on the
+// services' exchanges, scaled out through the Redis backplane. No database (plan 04 ruling 1): no migrate resource, no Debezium.
+// Mailpit (email) is wired in plan 04 Task 1b.
+var notificationsApi = builder.AddProcureAiService<Projects.ProcureAi_Notifications_Api>(
+    new ServiceSpec("notifications", Database: "", CapturedTables: [], GatewayCluster: "notifications", ApiRoutePrefix: "/api/notifications", Store: ServiceStore.None),
+    shared)
+    .CallsServices(accessApi);
+
 // The supplier calls the services directly, not through the gateway (exposing the webhooks publicly is plan 07/08): order webhooks to
 // Purchasing, invoice webhooks to Invoicing, both signed with the shared secret. Endpoint references only, no wait: the simulator's own
 // delivery retries cover a receiver that is still starting.
@@ -203,7 +211,7 @@ web.WithArgs(context =>
 });
 
 // The gateway: the only door in. Serves the Angular app (proxied to 'web'), signs users in against Keycloak and
-// proxies /api to the services.
+// proxies /api to the services and /hubs to Notifications.
 // External HTTPS endpoint: the session cookie is __Host- prefixed and so needs https (the ASP.NET Core dev
 // certificate). Keycloak's gateway client accepts https://localhost:* callbacks.
 builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
@@ -218,6 +226,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithReference(suppliersApi)
     .WithReference(purchasingApi)
     .WithReference(invoicingApi)
+    .WithReference(notificationsApi)
     .WithEnvironment("Oidc__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
@@ -234,6 +243,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithEnvironment("ReverseProxy__Clusters__suppliers__Destinations__d1__Address", suppliersApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__purchasing__Destinations__d1__Address", purchasingApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__invoicing__Destinations__d1__Address", invoicingApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__notifications__Destinations__d1__Address", notificationsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
@@ -246,6 +256,7 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WaitFor(suppliersApi)
     .WaitFor(purchasingApi)
     .WaitFor(invoicingApi)
+    .WaitFor(notificationsApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);

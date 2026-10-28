@@ -1,0 +1,46 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "ProcureAi Notifications API",
+    "description": "HTTP API of the notifications-api service of the ProcureAi demo.",
+    "version": "1.0"
+  },
+  "paths": { },
+  "components": {
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "description": "The admin API key (Claude's testing access). Send X-Tenant-Id with it on tenant endpoints.",
+        "name": "X-Api-Key",
+        "in": "header"
+      },
+      "OAuth2": {
+        "type": "oauth2",
+        "description": "Keycloak login: authorization code flow with PKCE.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://openapi.invalid/auth",
+            "tokenUrl": "https://openapi.invalid/token",
+            "scopes": {
+              "email": "Email address",
+              "openid": "OpenID Connect",
+              "profile": "Profile"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKey": [ ]
+    },
+    {
+      "OAuth2": [
+        "email",
+        "openid",
+        "profile"
+      ]
+    }
+  ]
+}
