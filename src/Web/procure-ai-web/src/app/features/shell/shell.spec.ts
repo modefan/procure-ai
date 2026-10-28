@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
-import { ApprovalsCountStore } from '../../core/live/approvals-count.store';
+import { ApprovalsStore } from '../approvals/approvals.store';
 import { LiveConnection, LiveState } from '../../core/live/live-connection';
 import { NotificationsStore } from '../../core/live/notifications.store';
 import { NotificationsService } from '../../api/notifications/services/notifications.service';
@@ -48,7 +48,7 @@ describe('Shell header', () => {
         { provide: LiveConnection, useValue: { state } },
         { provide: NotificationsStore, useValue: { items, unread, load: vi.fn().mockResolvedValue(undefined), markRead, markAllRead } },
         { provide: PresenceStore, useValue: { online } },
-        { provide: ApprovalsCountStore, useValue: { count, load: vi.fn().mockResolvedValue(undefined) } },
+        { provide: ApprovalsStore, useValue: { total: count, refresh: vi.fn().mockResolvedValue(undefined) } },
       ],
     });
   });
@@ -174,7 +174,7 @@ describe('Shell header', () => {
         { provide: AuthStore, useValue: { user, isLoggedIn: () => user() !== null, hasPermission: () => false, logout, logoutAll } },
         { provide: LiveConnection, useValue: { state, on: () => () => undefined, onReconnected: () => () => undefined, onEntityChanged: () => () => undefined, onViewersChanged: () => () => undefined } },
         { provide: PresenceStore, useValue: { online } },
-        { provide: ApprovalsCountStore, useValue: { count, load: vi.fn() } },
+        { provide: ApprovalsStore, useValue: { total: count, refresh: vi.fn() } },
       ],
     });
     // A clock that jumps 31 s at every reading: the list is always stale, so any extra load() call reaches the API.

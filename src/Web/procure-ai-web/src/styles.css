@@ -77,3 +77,22 @@
     @apply border-l border-slate-300;
   }
 }
+
+/* Dashboard: small pills and the two-part budget bar (widths come from the --share custom property). */
+@layer components {
+  .badge-warn {
+    @apply inline-flex w-fit items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-amber-800 ring-1 ring-amber-300 ring-inset;
+  }
+
+  .badge-live {
+    @apply inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-emerald-800 ring-1 ring-emerald-300 ring-inset;
+  }
+
+  .bar-spent {
+    @apply h-full w-(--share) bg-indigo-600;
+  }
+
+  .bar-reserved {
+    @apply h-full w-(--share) bg-indigo-300;
+  }
+}

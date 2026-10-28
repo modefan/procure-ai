@@ -1,8 +1,8 @@
 import { Component, computed, effect, inject, untracked } from '@angular/core';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@angular/aria/menu';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { ApprovalsStore } from '../approvals/approvals.store';
 import { AuthStore } from '../../core/auth/auth.store';
-import { ApprovalsCountStore } from '../../core/live/approvals-count.store';
 import { LiveConnection } from '../../core/live/live-connection';
 import { NotificationsStore } from '../../core/live/notifications.store';
 import { BellMenu } from './bell-menu';
@@ -113,13 +113,13 @@ export class Shell {
   protected readonly auth = inject(AuthStore);
   protected readonly live = inject(LiveConnection);
   private readonly notifications = inject(NotificationsStore);
-  private readonly approvals = inject(ApprovalsCountStore);
+  private readonly approvals = inject(ApprovalsStore);
 
   /** The links this user may open, in header order. Approvals carries the number of steps waiting. */
   protected readonly links = computed<NavLink[]>(() => {
     const all: NavLink[] = [
       { path: 'requests', label: 'Requests', permission: 'requests.read' },
-      { path: 'approvals', label: 'Approvals', permission: 'requests.approve', count: this.approvals.count() },
+      { path: 'approvals', label: 'Approvals', permission: 'requests.approve', count: this.approvals.total() },
       { path: 'orders', label: 'Orders', permission: 'orders.read' },
       { path: 'invoices', label: 'Invoices', permission: 'invoices.read' },
       { path: 'budgets', label: 'Budgets', permission: 'budgets.read' },
@@ -142,7 +142,7 @@ export class Shell {
         untracked(() => {
           void this.notifications.load();
           if (this.auth.hasPermission('requests.approve')) {
-            void this.approvals.load();
+            void this.approvals.refresh();
           }
         });
       }
