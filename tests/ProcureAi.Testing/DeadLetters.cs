@@ -13,15 +13,19 @@ public static class DeadLetters
 {
     public const string BrokerQueue = "wolverine-dead-letter-queue";
 
-    /// <summary>Rows of the service database's dead-letter table plus the messages in the broker's dead-letter queue.</summary>
-    public static async Task<long> CountAsync(string dbConnectionString, string rabbitConnectionString, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Rows of the service database's dead-letter table plus the messages in the broker's dead-letter queue. A service without a database
+    /// (Notifications) passes null for <paramref name="dbConnectionString"/>: only the broker is counted.
+    /// </summary>
+    public static async Task<long> CountAsync(string? dbConnectionString, string rabbitConnectionString, CancellationToken cancellationToken = default)
     {
         if (cancellationToken == default)
         {
             cancellationToken = TestContext.Current.CancellationToken;
         }
 
-        return await TableCountAsync(dbConnectionString, cancellationToken) + await BrokerCountAsync(rabbitConnectionString, cancellationToken);
+        var table = dbConnectionString is null ? 0 : await TableCountAsync(dbConnectionString, cancellationToken);
+        return table + await BrokerCountAsync(rabbitConnectionString, cancellationToken);
     }
 
     private static async Task<long> TableCountAsync(string dbConnectionString, CancellationToken cancellationToken)

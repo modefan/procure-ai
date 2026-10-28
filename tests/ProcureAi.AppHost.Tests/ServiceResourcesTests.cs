@@ -351,8 +351,10 @@ public sealed class ServiceResourcesTests
             secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
         #pragma warning restore ASPIREMONGODB001
 
-        Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
-            new ServiceSpec("notifications", "", ["x"], "notifications", "/api/notifications", ServiceStore.None), shared));
+        // A valid database name, so only the "no capture without Postgres" rule can throw (an empty name would throw anyway).
+        var refused = Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
+            new ServiceSpec("notifications", "notificationsdb", ["x"], "notifications", "/api/notifications", ServiceStore.None), shared));
+        refused.Message.ShouldContain("CapturedTables must be empty");
     }
 
     /// <summary>A stand-in project for a MongoDB service (the real one is Suppliers; this one exercises the template on its own).</summary>

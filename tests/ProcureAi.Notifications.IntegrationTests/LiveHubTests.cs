@@ -120,6 +120,17 @@ public sealed class LiveHubTests(NotificationsApp app)
     }
 
     [Fact]
+    public async Task Token_without_a_user_id_is_refused()
+    {
+        // Without a sub the caller would be "anonymous", and every such connection of the tenant would share one user group.
+        await using var client = LiveClient.For(app.A.Server, TestAuth.CreateToken("", NewTenant(), "requester"));
+
+        var refused = await Should.ThrowAsync<HttpRequestException>(() => client.Connection.StartAsync());
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task Tenant_header_is_ignored_for_a_user_token()
     {
         var own = NewTenant();

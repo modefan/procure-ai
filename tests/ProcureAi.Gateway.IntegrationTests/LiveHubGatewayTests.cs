@@ -129,4 +129,51 @@ public sealed class LiveHubGatewayTests(KeycloakFixture keycloak, RedisFixture r
         Bearer(upgrade).GetClaim("tenant").Value.ShouldBe("acme");
         upgrade.Header("Cookie").ShouldBeNull("the browser's cookies never reach a service");
     }
+
+    [Fact]
+    public async Task Hub_websocket_from_another_origin_is_refused_and_own_or_allowed_origins_connect()
+    {
+        // A page on another site can make the browser open a WebSocket with the session cookie (a GET: no anti-forgery header, and
+        // SignalR can skip negotiate). Only the gateway's own origin and Hubs:AllowedOrigins get through.
+        await using var gateway = await GatewayHost.StartAsync(
+            keycloak, redis, new() { ["Hubs:AllowedOrigins:0"] = "https://app.test" }, kestrel: true);
+        var (browser, cookies) = gateway.NewBrowserWithCookies();
+        using (browser)
+        {
+            using var driver = new LoginDriver(keycloak);
+            await driver.LoginAsync(browser, "tom@acme.test");
+        }
+
+        var cookieHeader = cookies.CookieHeaderFor(gateway.Address);
+        var hub = new UriBuilder(gateway.Address) { Scheme = "wss", Path = "/hubs/live", Query = "id=connection-1" }.Uri;
+        var own = gateway.Address.GetLeftPart(UriPartial.Authority);
+
+        (await OpenAsync(hub, cookieHeader, "https://evil.test")).ShouldBe(HttpStatusCode.Forbidden);
+        gateway.Stub.Seen.ShouldNotContain(s => s.Path == "/hubs/live", "a refused upgrade never reaches the service");
+        (await OpenAsync(hub, cookieHeader, own)).ShouldBe(HttpStatusCode.SwitchingProtocols);
+        (await OpenAsync(hub, cookieHeader, "https://app.test")).ShouldBe(HttpStatusCode.SwitchingProtocols);
+    }
+
+    /// <summary>Opens a WebSocket with the browser's cookie and <paramref name="origin"/>; returns the status of the upgrade answer.</summary>
+    private static async Task<HttpStatusCode> OpenAsync(Uri hub, string cookieHeader, string origin)
+    {
+        using var socket = new ClientWebSocket();
+        socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        socket.Options.CollectHttpResponseDetails = true;
+        socket.Options.SetRequestHeader("Cookie", cookieHeader);
+        socket.Options.SetRequestHeader("Origin", origin);
+        try
+        {
+            await socket.ConnectAsync(hub, Ct);
+        }
+        catch (WebSocketException)
+        {
+            return socket.HttpStatusCode;
+        }
+
+        var buffer = new byte[256];
+        var received = await socket.ReceiveAsync(buffer, Ct);
+        Encoding.UTF8.GetString(buffer, 0, received.Count).ShouldBe("connected:/hubs/live");
+        return socket.HttpStatusCode;
+    }
 }

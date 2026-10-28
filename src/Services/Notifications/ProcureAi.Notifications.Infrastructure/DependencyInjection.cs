@@ -41,7 +41,7 @@ public static class DependencyInjection
     /// Wolverine without a message store (the service has no database, plan 04 ruling 1): the shared <c>AccessChanged</c> eviction queue,
     /// and one <b>buffered</b> queue <c>&lt;serviceName&gt;-live</c> bound to the five exchanges of <see cref="LiveExchanges"/>. No durable
     /// inbox: a message redelivered after a crash only pushes twice, and clients just refetch. A push that failed on Redis is retried
-    /// inline (<c>Notifications:PushRetryDelays</c>), then the message goes to the error queue (Wolverine 6.53 dead-letters on the first
+    /// inline (<c>Notifications:PushRetry</c>, <see cref="RetryPushFailures"/>), then the message goes to the error queue (Wolverine 6.53 dead-letters on the first
     /// failure when no rule matches).
     /// </summary>
     public static void ConfigureNotifications(this WolverineOptions options, IConfiguration configuration, string serviceName)
@@ -58,8 +58,18 @@ public static class DependencyInjection
         // The hub context (behind ILivePushes) is resolved from the container rather than built by generated code.
         options.CodeGeneration.AlwaysUseServiceLocationFor<ILivePushes>();
 
-        var settings = configuration.GetSection(NotificationsOptions.SectionName).Get<NotificationsOptions>() ?? new NotificationsOptions();
+        options.RetryPushFailures(NotificationsOptions.PushRetryDelays(configuration));
+    }
+
+    /// <summary>
+    /// A push that failed on Redis (the backplane: <see cref="RedisException"/>, including <see cref="RedisConnectionException"/>, or
+    /// <see cref="RedisTimeoutException"/>) is retried inline after each of <paramref name="delays"/>, then moved to the error queue.
+    /// Without the rule Wolverine 6.53 dead-letters on the first failure. Any other exception still goes to the error queue at once.
+    /// </summary>
+    public static WolverineOptions RetryPushFailures(this WolverineOptions options, TimeSpan[] delays)
+    {
         options.OnException<RedisException>().Or<RedisTimeoutException>()
-            .RetryWithCooldown(settings.PushRetryDelays);
+            .RetryWithCooldown(delays);
+        return options;
     }
 }

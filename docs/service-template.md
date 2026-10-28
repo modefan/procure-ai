@@ -96,7 +96,8 @@ For a service that holds no business data of its own (Notifications: live pushes
   **buffered** listeners: no durable inbox, no outbox, no transactions. A message redelivered after a crash is handled twice, so every
   handler must be harmless to repeat (a second push; emails are deduplicated by message ID in Redis, Task 1b). A failure no rule matches goes
   to the error queue at once (Wolverine 6.53), so give each expected failure an explicit rule (Notifications: `RedisException` /
-  `RedisTimeoutException` retried inline with `Notifications:PushRetryDelays`).
+  `RedisTimeoutException` retried inline with `Notifications:PushRetry`: attempts, initial delay, multiplier, maximum delay; scalars,
+  because an array in configuration is appended to the defaults instead of replacing them).
 - **Tests**: `ServiceApiFactory<Program>(null, null, rabbit, redis)` (no database connection string, no Npgsql pool to clear).
 
 ### Notifications: the live hub
@@ -120,7 +121,9 @@ For a service that holds no business data of its own (Notifications: live pushes
   delivered to it. Clients revalidate what they hold after every (re)connect; the integration tests wait for a probe push before publishing.
 - Gateway: routes `notifications-api` (`/api/v1/notifications/{**catch-all}`), `notifications-openapi` and `notifications-hub`
   (`/hubs/{**catch-all}`, WebSockets proxied by YARP, the session's access token added like on every API route; the negotiate POST needs
-  `X-XSRF-TOKEN`, the WebSocket upgrade is a GET and needs none).
+  `X-XSRF-TOKEN`; the WebSocket upgrade is a GET, so `HubOriginMiddleware` refuses (403) an upgrade whose `Origin` is neither the
+  gateway's own nor in `Hubs:AllowedOrigins`). The hub policy also refuses a caller without a `sub` (no shared `anonymous` user
+  group) and evaluates hub methods' `HubInvocationContext` from the connection's request.
 
 ## Change data capture (Debezium)
 

@@ -825,6 +825,8 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     [InlineData("Oidc:Authority", "")]
     [InlineData("Session:RefreshSkewSeconds", "0")]
     [InlineData("Swagger:Definitions:0:Url", "no-leading-slash")]
+    [InlineData("Hubs:AllowedOrigins:0", "https://app.test/path")]
+    [InlineData("Hubs:AllowedOrigins:0", "not-an-origin")]
     public async Task Invalid_configuration_fails_at_startup(string key, string value)
     {
         await Should.ThrowAsync<Microsoft.Extensions.Options.OptionsValidationException>(

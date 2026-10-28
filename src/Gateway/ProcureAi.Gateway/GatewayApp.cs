@@ -40,6 +40,7 @@ public static class GatewayApp
         services.AddValidatedOptions<OidcOptions>(configuration, OidcOptions.SectionName);
         services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
         services.AddValidatedOptions<RegistrationOptions>(configuration, RegistrationOptions.SectionName);
+        services.AddValidatedOptions<HubOptions>(configuration, HubOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(configuration, RateLimitingOptions.SectionName);
         services.AddProcureAiForwardedHeaders(configuration);
         services.AddProcureAiCorrelationPropagation();
@@ -74,6 +75,8 @@ public static class GatewayApp
         app.UseRateLimiter();
         app.UseGatewaySwagger();
         app.UseAuthentication();
+        // WebSockets to /hubs: the Origin check stands in for the anti-forgery header a GET upgrade cannot carry.
+        app.UseMiddleware<HubOriginMiddleware>();
         app.UseMiddleware<XsrfMiddleware>();
         app.UseAuthorization();
 
