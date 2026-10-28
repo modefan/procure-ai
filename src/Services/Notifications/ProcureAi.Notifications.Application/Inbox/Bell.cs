@@ -32,7 +32,8 @@ public interface IBellStore
 {
     /// <summary>
     /// Adds <paramref name="item"/> unless the user already has an item with its ID (a redelivered message), then keeps only the newest
-    /// <see cref="BellOptions.MaxItems"/> within the retention. True when it was added.
+    /// <see cref="BellOptions.MaxItems"/> within the retention. True when the user has the item afterwards (added now or before); false
+    /// when it was dropped at once (older than the retention, or than the newest <see cref="BellOptions.MaxItems"/>).
     /// </summary>
     Task<bool> AddAsync(string tenantId, string userId, BellItem item, CancellationToken cancellationToken);
 

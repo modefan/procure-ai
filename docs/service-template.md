@@ -138,21 +138,28 @@ For a service that holds no business data of its own (Notifications: live pushes
   `presence:{tenant}:view:{entity}:{id}` (member connection ID, score last heartbeat), hash `presence:connections` (connection → tenant, user,
   name), set `presence:conn:{id}:views`, set `presence:tenants`. Readers ignore entries older than the TTL. `PresenceSweeper` (hosted service on
   every instance) runs every `SweepInterval` under the DistributedLock `notifications:presence-sweep` (waits up to `SweepLockWait`), drops
-  connections of **any** instance without a heartbeat for longer than the TTL and sends the changed lists through the backplane. Options
+  connections of **any** instance without a heartbeat for longer than the TTL and sends the changed lists through the backplane. Each
+  removal is a Lua script that re-checks the heartbeat (one that arrived after the stale read keeps the connection) and keeps the
+  connection's watch list, so its next heartbeat makes it online and a viewer again (lists re-sent). Forgetting an empty tenant is
+  atomic too. A presence failure on connect is logged, not fatal: the next heartbeat records the connection. Options
   `Notifications:Presence { HeartbeatInterval 15 s, Ttl 45 s (≥ 2 × heartbeat, checked at startup), SweepInterval 15 s, SweepLockWait 5 s,
   MaxWatchesPerConnection 20 }`. Its clock is the keyed `TimeProvider` `PresenceClock.Key` (tests drive it without freezing HTTP timeouts).
-- **Bell** (ruling 8). `RecipientRules`: `ApprovalRequested`, `ApprovalReminderDue`, `ApprovalEscalated` → the approvers due;
+- **Bell** (ruling 8). `RecipientRules`: `ApprovalRequested`, `ApprovalReminderDue` → the approvers due (`ApprovalEscalated` only pushes
+  live: the new step's `ApprovalRequested` tells the new approver, so one escalation is one bell item and one email);
   `RequestApproved`, `RequestRejected`, `RequestCompleted`, `RequestCancellationRefused` → the requester (`RequesterId`, an optional contract
   property added in plan 04; older messages without it notify nobody). The approval event handlers call `IPersonalNotifier` after the live
   push: one `BellItem { id, text, requestId, link, createdAt, read }` per recipient (ID = the message ID, so a redelivery adds nothing),
-  pushed as `NotificationAdded` to `u:{tenant}:{user}`. Redis `bell:{tenant}:{user}:index|items|read` (Lua add: last `MaxItems` 50 within
+  pushed as `NotificationAdded` to `u:{tenant}:{user}` whenever the user has the item after the add (again on a redelivery or retry:
+  clients key items by ID; an item trimmed away at once is not pushed). Redis `bell:{tenant}:{user}:index|items|read` (Lua add: last `MaxItems` 50 within
   `Retention` 30 days, `Notifications:Bell`). API: `GET api/v1/notifications` → `{ items, unread }` (`[CachedGet]`, tag
   `notifications:{tenant}`, evicted on every write and new item), `POST api/v1/notifications/{id}/read` (404 for an item the caller does not
   have) and `POST api/v1/notifications/read-all`, both `[Idempotent]`, 204. The owner is the token's user (`X-On-Behalf-Of-User` with the key).
-- **Email** (ruling 9). MailKit over SMTP (`Notifications:Smtp { Host, Port, From, FromName, AppBaseUrl, DedupWindow 7 d }`; the AppHost points it at
+- **Email** (ruling 9). MailKit over SMTP (`Notifications:Smtp { Host, Port, From, FromName, AppBaseUrl, DedupWindow 7 d, SendingClaimTtl 2 min }`; the AppHost points it at
   Mailpit's `smtp` endpoint and the gateway's https endpoint), plain text plus simple HTML with the link `{AppBaseUrl}/requests/{id}`. Address
   from Access `internal/users/{userId}` (`Email`); none → bell item only. Once per (message, recipient): `SET email:{messageId}:{userId} NX`
-  for `DedupWindow`, released when the send fails. A failed email throws `EmailDeliveryException`, retried inline by `RetryEmailFailures`
+  for `SendingClaimTtl` (2 min) while sending, then kept for `DedupWindow` once sent; released when the send fails. An instance that dies
+  before sending leaves only the short claim, so RabbitMQ's redelivery still sends. The message ID is the AMQP `message-id` (Wolverine's
+  envelope ID), the same on every delivery. A failed email throws `EmailDeliveryException`, retried inline by `RetryEmailFailures`
   (the `PushRetry` delays) and then dead-lettered; the retry sends only the emails that were not sent. Tests: `MailpitFixture`
   (`ProcureAi.Testing`, same image and caps) read through `GET /api/v1/messages`.
 

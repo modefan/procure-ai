@@ -45,6 +45,8 @@ public sealed class PersonalNotifier(
         var item = new BellItem(id, notice.Text, notice.RequestId, RecipientRules.Link(notice.RequestId), integrationEvent.OccurredAt, Read: false);
         foreach (var userId in notice.Recipients)
         {
+            // Pushed whenever the user has the item after the add, also on a redelivery or retry (the first push may be what failed);
+            // the client keys items by ID, so a repeated push changes nothing. An item already trimmed away is not pushed.
             if (await bells.AddAsync(notice.TenantId, userId, item, cancellationToken))
             {
                 await pushes.PushToUserAsync(notice.TenantId, userId, item, cancellationToken);
@@ -77,7 +79,8 @@ public sealed class PersonalNotifier(
     private async Task EmailOnceAsync(Notice notice, string userId, string messageId, CancellationToken cancellationToken)
     {
         var key = $"email:{messageId}:{userId}";
-        if (!await once.TryClaimAsync(key, smtp.Value.DedupWindow, cancellationToken))
+        // A short claim while sending: if this instance dies before sending, the redelivered message finds it expired and sends.
+        if (!await once.TryClaimAsync(key, smtp.Value.SendingClaimTtl, cancellationToken))
         {
             return;
         }
@@ -89,16 +92,21 @@ public sealed class PersonalNotifier(
             {
                 // Nobody to write to: kept as sent, a retry would not find an address either.
                 logger.LogInformation("No email address for user {UserId} of tenant {TenantId}; bell item only", userId, notice.TenantId);
-                return;
             }
-
-            await email.SendAsync(Compose(notice, user), cancellationToken);
+            else
+            {
+                await email.SendAsync(Compose(notice, user), cancellationToken);
+            }
         }
         catch
         {
             await once.ReleaseAsync(key, CancellationToken.None);
             throw;
         }
+
+        // Sent: no second email for this message and user within the dedup window. A failure here leaves the short claim, which only
+        // means a redelivery after it expired could send once more.
+        await once.ConfirmAsync(key, smtp.Value.DedupWindow, CancellationToken.None);
     }
 
     private EmailMessage Compose(Notice notice, DirectoryUser user)

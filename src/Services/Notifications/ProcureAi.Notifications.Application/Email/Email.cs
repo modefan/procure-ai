@@ -28,9 +28,16 @@ public sealed class SmtpOptions
     [Required(AllowEmptyStrings = false), Url]
     public string AppBaseUrl { get; set; } = "";
 
-    /// <summary>How long the dedup key <c>email:{messageId}:{userId}</c> is kept. Default 7 days.</summary>
+    /// <summary>How long the dedup key <c>email:{messageId}:{userId}</c> is kept once the email was sent. Default 7 days.</summary>
     [Range(typeof(TimeSpan), "00:01:00", "30.00:00:00")]
     public TimeSpan DedupWindow { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// How long the dedup key holds while the email is being sent. If the instance dies before sending (and before the ack), RabbitMQ
+    /// redelivers the message and the key has expired by then, so the email is still sent. Longer than one send can take. Default 2 minutes.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
+    public TimeSpan SendingClaimTtl { get; set; } = TimeSpan.FromMinutes(2);
 }
 
 /// <summary>One email: plain text plus simple HTML.</summary>
@@ -43,13 +50,18 @@ public interface IEmailSender
 }
 
 /// <summary>
-/// Remembers which emails were sent (Redis <c>SET NX</c>), so each (message, recipient) gets one email however often the message is
-/// delivered. A claim that could not be used (the send failed) is released, so the retry sends.
+/// Remembers which emails were sent (Redis), so each (message, recipient) gets one email however often the message is delivered. A send
+/// first claims the key briefly (<c>SET NX</c>, <see cref="SmtpOptions.SendingClaimTtl"/>): a concurrent delivery skips it, and a claim
+/// left by an instance that died before sending expires. After the send the key is kept for <see cref="SmtpOptions.DedupWindow"/>. A
+/// send that failed gives the claim back, so the retry sends.
 /// </summary>
 public interface IEmailOnce
 {
-    /// <summary>True when this caller is the first to claim <paramref name="key"/> within <paramref name="window"/>.</summary>
-    Task<bool> TryClaimAsync(string key, TimeSpan window, CancellationToken cancellationToken);
+    /// <summary>True when this caller is the first to claim <paramref name="key"/>; the claim lasts <paramref name="ttl"/>.</summary>
+    Task<bool> TryClaimAsync(string key, TimeSpan ttl, CancellationToken cancellationToken);
+
+    /// <summary>The email was sent (or there is nobody to send it to): keep the key for <paramref name="window"/>.</summary>
+    Task ConfirmAsync(string key, TimeSpan window, CancellationToken cancellationToken);
 
     /// <summary>Gives the claim back (the email was not sent).</summary>
     Task ReleaseAsync(string key, CancellationToken cancellationToken);

@@ -16,7 +16,7 @@ namespace ProcureAi.Notifications.Api.Hubs;
 /// <c>Watch(entity, id)</c> and <c>Unwatch(entity, id)</c>; the tenant of a watch is always the caller's own.
 /// </summary>
 [Authorize(Policy = LiveHubPolicy.Name)]
-public sealed class LiveHub(IOptions<AuthOptions> auth, PresenceService presence) : Hub
+public sealed class LiveHub(IOptions<AuthOptions> auth, PresenceService presence, ILogger<LiveHub> logger) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -31,8 +31,16 @@ public sealed class LiveHub(IOptions<AuthOptions> auth, PresenceService presence
         await Groups.AddToGroupAsync(Context.ConnectionId, LiveGroups.Tenant(me.TenantId), Context.ConnectionAborted);
         await Groups.AddToGroupAsync(Context.ConnectionId, LiveGroups.User(me.TenantId, me.UserId), Context.ConnectionAborted);
         await base.OnConnectedAsync();
-        // After the joins, so this connection gets the online list too.
-        await presence.ConnectedAsync(me, Context.ConnectionAborted);
+        try
+        {
+            // After the joins, so this connection gets the online list too.
+            await presence.ConnectedAsync(me, Context.ConnectionAborted);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Presence is not worth the connection: live updates and the bell still work, and the next heartbeat brings it online.
+            logger.LogWarning(exception, "Presence could not record connection {ConnectionId}; its next heartbeat will", Context.ConnectionId);
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
@@ -58,7 +66,19 @@ public sealed class LiveHub(IOptions<AuthOptions> auth, PresenceService presence
         var target = Target(entity, id);
         var group = LiveGroups.Viewers(me.TenantId, target.Entity, target.Id);
         await Groups.AddToGroupAsync(Context.ConnectionId, group, Context.ConnectionAborted);
-        if (await presence.WatchAsync(me, target, Context.ConnectionAborted) is not { } viewers)
+        IReadOnlyList<Viewer>? viewers;
+        try
+        {
+            viewers = await presence.WatchAsync(me, target, Context.ConnectionAborted);
+        }
+        catch
+        {
+            // Not watching after all: no viewer pushes for this connection.
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, group, CancellationToken.None);
+            throw;
+        }
+
+        if (viewers is null)
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, group, Context.ConnectionAborted);
             throw new HubException("This connection watches too many entities; unwatch one first.");

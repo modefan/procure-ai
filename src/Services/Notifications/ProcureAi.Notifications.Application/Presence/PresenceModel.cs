@@ -15,6 +15,9 @@ public sealed record PresenceEntry(string ConnectionId, string UserId, string Na
 /// <summary>What removing a connection changed: the tenant whose online list and the entities whose viewer lists to send again.</summary>
 public sealed record RemovedConnection(string TenantId, IReadOnlyList<PresenceTarget> Targets);
 
+/// <summary>What a heartbeat found: whether the connection came online with it, and the entities it watches.</summary>
+public sealed record Upserted(bool CameOnline, IReadOnlyList<PresenceTarget> Targets);
+
 /// <summary>A connection the sweeper found without a heartbeat for longer than the TTL.</summary>
 public sealed record StaleConnection(string TenantId, string ConnectionId);
 

@@ -117,18 +117,39 @@ public sealed class PresenceTests
     }
 
     [Fact]
-    public async Task A_swept_connection_that_sends_a_heartbeat_comes_back_online()
+    public async Task A_swept_connection_that_sends_a_heartbeat_comes_back_online_and_viewing()
     {
         var ben = Conn("c2", "ben", "Ben Buyer");
         await _presence.ConnectedAsync(ben, Ct);
+        await _presence.WatchAsync(ben, Pr1043, Ct);
         _clock.Advance(TimeSpan.FromSeconds(46));
-        await _presence.SweepAsync(Ct);
+        (await _presence.SweepAsync(Ct)).ShouldBe(1);
+        _pushes.Viewers.Last().Viewers.ShouldBeEmpty();
         var pushesBefore = _pushes.Online.Count;
 
         await _presence.HeartbeatAsync(ben, Ct);
 
         _pushes.Online.Count.ShouldBe(pushesBefore + 1);
         _pushes.Online.Last().Online.ShouldBe([new Viewer("ben", "Ben Buyer")]);
+        // The sweep kept what he watches: he is a viewer again, and the viewers are told.
+        _pushes.Viewers.Last().Target.ShouldBe(Pr1043);
+        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("ben", "Ben Buyer")]);
+    }
+
+    [Fact]
+    public async Task A_heartbeat_between_the_stale_read_and_the_removal_keeps_the_connection_and_its_watches()
+    {
+        var ben = Conn("c2", "ben", "Ben Buyer");
+        await _presence.ConnectedAsync(ben, Ct);
+        await _presence.WatchAsync(ben, Pr1043, Ct);
+        _clock.Advance(TimeSpan.FromSeconds(46));
+        // The sweep reads Ben as stale; his heartbeat lands before it removes him.
+        _store.AfterStaleRead = () => _store.UpsertAsync(ben, _clock.GetUtcNow(), Ct).GetAwaiter().GetResult();
+
+        (await _presence.SweepAsync(Ct)).ShouldBe(0);
+
+        (await _presence.OnlineAsync(Acme, Ct)).ShouldBe([new Viewer("ben", "Ben Buyer")]);
+        (await _store.ViewersAsync(Acme, Pr1043, Ct)).Select(e => e.UserId).ShouldBe(["ben"]);
     }
 
     [Fact]
@@ -239,13 +260,16 @@ public sealed class PresenceTests
         private readonly Dictionary<string, DateTimeOffset> _lastSeen = [];
         private readonly Dictionary<string, HashSet<PresenceTarget>> _watches = [];
 
+        /// <summary>Runs right after <see cref="StaleAsync"/> read the stale connections (a heartbeat landing in between).</summary>
+        public Action? AfterStaleRead { get; set; }
+
         public bool Known(string connectionId) => _connections.ContainsKey(connectionId);
 
-        public Task<bool> UpsertAsync(PresenceConnection connection, DateTimeOffset now, CancellationToken cancellationToken)
+        public Task<Upserted> UpsertAsync(PresenceConnection connection, DateTimeOffset now, CancellationToken cancellationToken)
         {
             var added = _connections.TryAdd(connection.ConnectionId, connection);
             _lastSeen[connection.ConnectionId] = now;
-            return Task.FromResult(added);
+            return Task.FromResult(new Upserted(added, [.. _watches.GetValueOrDefault(connection.ConnectionId) ?? []]));
         }
 
         public Task<bool> WatchAsync(
@@ -268,7 +292,7 @@ public sealed class PresenceTests
             return Task.CompletedTask;
         }
 
-        public Task<RemovedConnection?> RemoveAsync(string connectionId, string? tenantHint, CancellationToken cancellationToken)
+        public Task<RemovedConnection?> RemoveAsync(string connectionId, CancellationToken cancellationToken)
         {
             if (!_connections.Remove(connectionId, out var connection))
             {
@@ -280,17 +304,35 @@ public sealed class PresenceTests
             return Task.FromResult<RemovedConnection?>(new RemovedConnection(connection.TenantId, [.. targets ?? []]));
         }
 
+        // Like the Lua script: only while still stale, and the watches are kept for a later heartbeat.
+        public Task<RemovedConnection?> RemoveIfStaleAsync(StaleConnection stale, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        {
+            if (_lastSeen.TryGetValue(stale.ConnectionId, out var seen) && seen >= cutoff)
+            {
+                return Task.FromResult<RemovedConnection?>(null);
+            }
+
+            _connections.Remove(stale.ConnectionId);
+            _lastSeen.Remove(stale.ConnectionId);
+            return Task.FromResult<RemovedConnection?>(
+                new RemovedConnection(stale.TenantId, [.. _watches.GetValueOrDefault(stale.ConnectionId) ?? []]));
+        }
+
         public Task<IReadOnlyList<PresenceEntry>> OnlineAsync(string tenantId, CancellationToken cancellationToken) =>
             Task.FromResult(Entries(c => c.TenantId == tenantId));
 
         public Task<IReadOnlyList<PresenceEntry>> ViewersAsync(string tenantId, PresenceTarget target, CancellationToken cancellationToken) =>
             Task.FromResult(Entries(c => c.TenantId == tenantId && _watches.GetValueOrDefault(c.ConnectionId)?.Contains(target) == true));
 
-        public Task<IReadOnlyList<StaleConnection>> StaleAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<StaleConnection>>(
+        public Task<IReadOnlyList<StaleConnection>> StaleAsync(DateTimeOffset cutoff, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<StaleConnection> stale =
             [
                 .. _connections.Values.Where(c => _lastSeen[c.ConnectionId] < cutoff).Select(c => new StaleConnection(c.TenantId, c.ConnectionId)),
-            ]);
+            ];
+            AfterStaleRead?.Invoke();
+            return Task.FromResult(stale);
+        }
 
         private IReadOnlyList<PresenceEntry> Entries(Func<PresenceConnection, bool> match) =>
         [

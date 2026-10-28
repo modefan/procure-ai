@@ -30,12 +30,9 @@ public static class ApprovalEventsHandler
         await personal.NotifyAsync(message, metadata.MessageId, cancellationToken);
     }
 
-    public static async Task Handle(
-        ApprovalEscalated message, ILivePushes pushes, IPersonalNotifier personal, IMessageMetadata metadata, CancellationToken cancellationToken)
-    {
-        await pushes.PushToTenantAsync(message.TenantId, LiveEventMap.For(message), cancellationToken);
-        await personal.NotifyAsync(message, metadata.MessageId, cancellationToken);
-    }
+    // Live push only: the new step's ApprovalRequested tells the new approver (one escalation, one bell item, one email).
+    public static Task Handle(ApprovalEscalated message, ILivePushes pushes, CancellationToken cancellationToken) =>
+        pushes.PushToTenantAsync(message.TenantId, LiveEventMap.For(message), cancellationToken);
 
     public static Task Handle(ApprovalAlertRaised message, ILivePushes pushes, CancellationToken cancellationToken) =>
         pushes.PushToTenantAsync(message.TenantId, LiveEventMap.For(message), cancellationToken);

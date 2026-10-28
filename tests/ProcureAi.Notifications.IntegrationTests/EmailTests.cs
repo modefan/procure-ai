@@ -40,6 +40,17 @@ public sealed class EmailTests(NotificationsApp app)
         }
     }
 
+    private async Task<string[]> BellIdsAsync(string tenant, string user)
+    {
+        using var client = app.A.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/notifications");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateToken(user, tenant, "manager"));
+        using var response = await client.SendAsync(request, Ct);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(Ct);
+        return [.. body.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("id").GetString()!)];
+    }
+
     private async Task<int> BellCountAsync(string tenant, string user)
     {
         using var client = app.A.CreateClient();
@@ -72,6 +83,9 @@ public sealed class EmailTests(NotificationsApp app)
         // RabbitMQ delivers the same message again (same message ID): no second email, no second bell item.
         var raw = await app.Probe.WaitForRawAsync(captured, Arrival);
         raw.MessageId.ShouldNotBeNull();
+        // The dedup ID is the AMQP message-id property, which Wolverine read into the envelope ID (IMessageMetadata.MessageId): the
+        // bell item's ID is that GUID. A redelivery of an unacked message carries the same properties, hence the same ID.
+        (await BellIdsAsync(tenant, "maria")).ShouldBe([Guid.Parse(raw.MessageId).ToString("N")]);
         await app.Probe.RepublishAsync(Exchanges.Approvals, raw);
         await app.Probe.RepublishAsync(Exchanges.Approvals, raw);
         await Task.Delay(TimeSpan.FromSeconds(3), Ct);

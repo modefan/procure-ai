@@ -16,12 +16,32 @@ namespace ProcureAi.Notifications.Infrastructure.Presence;
 /// </list>
 /// Tenants, entities and IDs are plain identifiers (no <c>:</c>), so keys are unambiguous. Readers skip entries older than the TTL even
 /// before the sweeper removed them; view keys and the per-connection sets also expire after two TTLs without a write, so nothing is left
-/// behind if a removal was interrupted.
+/// behind if a removal was interrupted. The sweeper's removal and the tenant clean-up are Lua scripts, so each check and its write are
+/// one atomic step (a heartbeat or a new connection in between is never wiped). The scripts build the view keys themselves: fine on one
+/// Redis node (the AppHost's, Kubernetes'); a Redis Cluster would need hash tags.
 /// </summary>
 public sealed class RedisPresenceStore(IConnectionMultiplexer redis, IOptions<PresenceOptions> options) : IPresenceStore
 {
     private const string Connections = "presence:connections";
     private const string Tenants = "presence:tenants";
+
+    // KEYS: online, connections, connection views. ARGV: connection ID, cutoff score, view key prefix. Removes the connection only while its
+    // heartbeat is still before the cutoff (or it is not online at all); keeps its views set. Returns the views, or nil when kept.
+    private const string RemoveIfStaleScript = """
+        local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+        if score and tonumber(score) >= tonumber(ARGV[2]) then return false end
+        local views = redis.call('SMEMBERS', KEYS[3])
+        for _, v in ipairs(views) do redis.call('ZREM', ARGV[3] .. v, ARGV[1]) end
+        redis.call('ZREM', KEYS[1], ARGV[1])
+        redis.call('HDEL', KEYS[2], ARGV[1])
+        return views
+        """;
+
+    // KEYS: online, tenants. ARGV: tenant. Forgets the tenant only while it has no connection (a new one in between keeps it).
+    private const string ForgetEmptyTenantScript = """
+        if redis.call('ZCARD', KEYS[1]) == 0 then redis.call('SREM', KEYS[2], ARGV[1]) return 1 end
+        return 0
+        """;
 
     private IDatabase Db => redis.GetDatabase();
 
@@ -29,35 +49,39 @@ public sealed class RedisPresenceStore(IConnectionMultiplexer redis, IOptions<Pr
 
     private static string Online(string tenantId) => $"presence:{tenantId}:online";
 
-    private static string View(string tenantId, PresenceTarget target) => $"presence:{tenantId}:view:{target.Entity}:{target.Id}";
+    private static string ViewPrefix(string tenantId) => $"presence:{tenantId}:view:";
+
+    private static string View(string tenantId, PresenceTarget target) => $"{ViewPrefix(tenantId)}{target.Entity}:{target.Id}";
 
     private static string ConnectionViews(string connectionId) => $"presence:conn:{connectionId}:views";
 
     private static double Score(DateTimeOffset time) => time.ToUnixTimeMilliseconds();
 
-    public async Task<bool> UpsertAsync(PresenceConnection connection, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<Upserted> UpsertAsync(PresenceConnection connection, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var db = Db;
-        var views = await db.SetMembersAsync(ConnectionViews(connection.ConnectionId));
+        var targets = (await db.SetMembersAsync(ConnectionViews(connection.ConnectionId)))
+            .Select(key => PresenceTarget.FromKey(key!))
+            .OfType<PresenceTarget>()
+            .ToList();
+        // Online first, then the tenant: the sweeper forgets a tenant only while its online list is empty.
         var batch = db.CreateBatch();
         var info = batch.HashSetAsync(Connections, connection.ConnectionId, Serialize(connection));
         var added = batch.SortedSetAddAsync(Online(connection.TenantId), connection.ConnectionId, Score(now));
         var tenant = batch.SetAddAsync(Tenants, connection.TenantId);
         var refreshed = new List<Task>();
-        foreach (var key in views)
+        foreach (var target in targets)
         {
-            if (PresenceTarget.FromKey(key!) is { } target)
-            {
-                var view = View(connection.TenantId, target);
-                refreshed.Add(batch.SortedSetAddAsync(view, connection.ConnectionId, Score(now), SortedSetWhen.Exists));
-                refreshed.Add(batch.KeyExpireAsync(view, KeyTtl));
-            }
+            // Not "only if present": after a sweep removed it, the heartbeat makes it a viewer again.
+            var view = View(connection.TenantId, target);
+            refreshed.Add(batch.SortedSetAddAsync(view, connection.ConnectionId, Score(now)));
+            refreshed.Add(batch.KeyExpireAsync(view, KeyTtl));
         }
 
         refreshed.Add(batch.KeyExpireAsync(ConnectionViews(connection.ConnectionId), KeyTtl));
         batch.Execute();
         await Task.WhenAll([info, tenant, .. refreshed]);
-        return await added;
+        return new Upserted(await added, targets);
     }
 
     public async Task<bool> WatchAsync(
@@ -97,12 +121,10 @@ public sealed class RedisPresenceStore(IConnectionMultiplexer redis, IOptions<Pr
         await Task.WhenAll(writes);
     }
 
-    public async Task<RemovedConnection?> RemoveAsync(string connectionId, string? tenantHint, CancellationToken cancellationToken)
+    public async Task<RemovedConnection?> RemoveAsync(string connectionId, CancellationToken cancellationToken)
     {
         var db = Db;
-        var info = Deserialize(await db.HashGetAsync(Connections, connectionId));
-        var tenantId = info?.TenantId ?? tenantHint;
-        if (tenantId is null)
+        if (Deserialize(await db.HashGetAsync(Connections, connectionId))?.TenantId is not { } tenantId)
         {
             return null;
         }
@@ -124,6 +146,25 @@ public sealed class RedisPresenceStore(IConnectionMultiplexer redis, IOptions<Pr
         return new RemovedConnection(tenantId, targets);
     }
 
+    public async Task<RemovedConnection?> RemoveIfStaleAsync(
+        StaleConnection connection, DateTimeOffset cutoff, CancellationToken cancellationToken)
+    {
+        var result = await Db.ScriptEvaluateAsync(
+            RemoveIfStaleScript,
+            [Online(connection.TenantId), Connections, ConnectionViews(connection.ConnectionId)],
+            [connection.ConnectionId, Score(cutoff), ViewPrefix(connection.TenantId)]);
+        if (result.IsNull)
+        {
+            return null;
+        }
+
+        var targets = ((RedisResult[])result!)
+            .Select(view => PresenceTarget.FromKey(view.ToString()))
+            .OfType<PresenceTarget>()
+            .ToList();
+        return new RemovedConnection(connection.TenantId, targets);
+    }
+
     public Task<IReadOnlyList<PresenceEntry>> OnlineAsync(string tenantId, CancellationToken cancellationToken) =>
         EntriesAsync(Online(tenantId));
 
@@ -141,10 +182,10 @@ public sealed class RedisPresenceStore(IConnectionMultiplexer redis, IOptions<Pr
             // Strictly before the cutoff: a heartbeat exactly TTL ago still counts (the same rule as PresenceView).
             var old = await db.SortedSetRangeByScoreAsync(online, double.NegativeInfinity, Score(cutoff), Exclude.Stop);
             stale.AddRange(old.Select(connectionId => new StaleConnection(tenantId, connectionId!)));
-            if (old.Length == 0 && await db.SortedSetLengthAsync(online) == 0)
+            if (old.Length == 0)
             {
-                // A heartbeat of the tenant adds it again.
-                await db.SetRemoveAsync(Tenants, tenantId);
+                // Atomic check and remove: a connection arriving in between keeps the tenant (and its heartbeats add it again anyway).
+                await db.ScriptEvaluateAsync(ForgetEmptyTenantScript, [online, Tenants], [tenantId]);
             }
         }
 

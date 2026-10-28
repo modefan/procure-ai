@@ -16,9 +16,10 @@ public sealed class RedisBellStore(IConnectionMultiplexer redis, IOptions<BellOp
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    // KEYS: index, items, read. ARGV: id, score, json, max items, retention cutoff (score), key TTL in seconds.
+    // KEYS: index, items, read. ARGV: id, score, json, max items, retention cutoff (score), key TTL in seconds. Returns 1 when the item is
+    // there afterwards (already there, or added and not trimmed away at once), else 0.
     private const string AddScript = """
-        if redis.call('HSETNX', KEYS[2], ARGV[1], ARGV[3]) == 0 then return 0 end
+        if redis.call('HSETNX', KEYS[2], ARGV[1], ARGV[3]) == 0 then return 1 end
         redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
         local drop = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', '(' .. ARGV[5])
         local kept = redis.call('ZCARD', KEYS[1]) - #drop
@@ -33,7 +34,7 @@ public sealed class RedisBellStore(IConnectionMultiplexer redis, IOptions<BellOp
           redis.call('SREM', KEYS[3], x)
         end
         for i = 1, 3 do redis.call('EXPIRE', KEYS[i], ARGV[6]) end
-        return 1
+        return redis.call('HEXISTS', KEYS[2], ARGV[1])
         """;
 
     private IDatabase Db => redis.GetDatabase();

@@ -52,7 +52,7 @@ public sealed class LiveHubPolicyTests
     {
         var caller = new TestHubCallerContext(Request(user));
         // Only the policy runs here: the hub's presence service is never reached.
-        var hub = new LiveHub(_services.GetRequiredService<IOptions<AuthOptions>>(), presence: null!);
+        var hub = new LiveHub(_services.GetRequiredService<IOptions<AuthOptions>>(), presence: null!, logger: null!);
         return new HubInvocationContext(caller, _services, hub, typeof(LiveHub).GetMethod(nameof(LiveHub.Heartbeat))!, []);
     }
 

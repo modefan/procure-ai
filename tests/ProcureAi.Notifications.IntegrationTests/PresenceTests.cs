@@ -184,6 +184,24 @@ public sealed class PresenceTests(NotificationsApp app)
             .SelectMany(p => p.UserIds).ShouldAllBe(u => u == "maria" || u == "ben");
     }
 
+    [Fact]
+    public async Task A_presence_failure_on_connect_keeps_the_connection_and_the_next_heartbeat_brings_it_online()
+    {
+        // An instance whose presence store fails on the first write (Redis away for a moment).
+        await using var flaky = new NotificationsApiFactory(app, builder => builder.ConfigureTestServices(services =>
+            services.AddSingleton<IPresenceStore>(provider => new FailOnceStore(
+                ActivatorUtilities.CreateInstance<ProcureAi.Notifications.Infrastructure.Presence.RedisPresenceStore>(provider)))));
+        var tenant = NewTenant();
+
+        // Connected anyway: it is in the tenant group (ConnectAsync waits for a live push to arrive).
+        await using var ben = await ConnectAsync(flaky.Server, tenant, "ben", "Ben Buyer");
+        ben.Pushes.ShouldNotContain(p => p.Method == LiveHubContract.OnlineChangedMethod, "presence failed on connect");
+
+        await ben.Connection.InvokeAsync(LiveHubContract.HeartbeatMethod);
+
+        await ben.WaitForPushAsync(p => Online(p, "ben"), Arrival);
+    }
+
     [Theory]
     [InlineData("tenant", "acme")]
     [InlineData("request", "acme:request:1")]
@@ -194,5 +212,38 @@ public sealed class PresenceTests(NotificationsApp app)
         await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Manager");
 
         await Should.ThrowAsync<HubException>(() => maria.Connection.InvokeAsync<Viewer[]>(LiveHubContract.WatchMethod, entity, id));
+    }
+
+    /// <summary>The real store, but the first write throws as Redis does when it is briefly away.</summary>
+    private sealed class FailOnceStore(IPresenceStore inner) : IPresenceStore
+    {
+        private int _failed;
+
+        public Task<Upserted> UpsertAsync(PresenceConnection connection, DateTimeOffset now, CancellationToken cancellationToken) =>
+            Interlocked.Exchange(ref _failed, 1) == 0
+                ? throw new StackExchange.Redis.RedisConnectionException(StackExchange.Redis.ConnectionFailureType.SocketFailure, StackExchange.Redis.CommandFlags.None, "Redis away")
+                : inner.UpsertAsync(connection, now, cancellationToken);
+
+        public Task<bool> WatchAsync(
+            PresenceConnection connection, PresenceTarget target, DateTimeOffset now, int maxWatches, CancellationToken cancellationToken) =>
+            inner.WatchAsync(connection, target, now, maxWatches, cancellationToken);
+
+        public Task UnwatchAsync(PresenceConnection connection, PresenceTarget target, CancellationToken cancellationToken) =>
+            inner.UnwatchAsync(connection, target, cancellationToken);
+
+        public Task<RemovedConnection?> RemoveAsync(string connectionId, CancellationToken cancellationToken) =>
+            inner.RemoveAsync(connectionId, cancellationToken);
+
+        public Task<RemovedConnection?> RemoveIfStaleAsync(StaleConnection connection, DateTimeOffset cutoff, CancellationToken cancellationToken) =>
+            inner.RemoveIfStaleAsync(connection, cutoff, cancellationToken);
+
+        public Task<IReadOnlyList<PresenceEntry>> OnlineAsync(string tenantId, CancellationToken cancellationToken) =>
+            inner.OnlineAsync(tenantId, cancellationToken);
+
+        public Task<IReadOnlyList<PresenceEntry>> ViewersAsync(string tenantId, PresenceTarget target, CancellationToken cancellationToken) =>
+            inner.ViewersAsync(tenantId, target, cancellationToken);
+
+        public Task<IReadOnlyList<StaleConnection>> StaleAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) =>
+            inner.StaleAsync(cutoff, cancellationToken);
     }
 }

@@ -122,6 +122,13 @@ public sealed class BellTests(NotificationsApp app)
         bell.Unread.ShouldBe(50);
         bell.Items[0].Id.ShouldBe("item-054", "newest first");
         bell.Items[^1].Id.ShouldBe("item-005", "the five oldest were dropped");
+
+        // An item older than all fifty is dropped at once, and the store says so (the notifier then pushes nothing).
+        var store = app.A.Services.GetRequiredService<IBellStore>();
+        (await store.AddAsync(tenant, "tom", new BellItem("too-old", "Old", null, "/requests", DateTimeOffset.UtcNow.AddHours(-3), false), Ct))
+            .ShouldBeFalse();
+        (await store.AddAsync(tenant, "tom", new BellItem("item-054", "Again", null, "/requests", DateTimeOffset.UtcNow, false), Ct))
+            .ShouldBeTrue("already there");
     }
 
     [Fact]

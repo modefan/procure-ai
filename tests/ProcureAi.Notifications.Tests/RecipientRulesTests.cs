@@ -31,7 +31,7 @@ public sealed class RecipientRulesTests
 
     private static readonly string[] PersonalNames =
     [
-        "ApprovalRequested", "ApprovalReminderDue", "ApprovalEscalated",
+        "ApprovalRequested", "ApprovalReminderDue",
         "RequestApproved", "RequestRejected", "RequestCompleted", "RequestCancellationRefused",
     ];
 
@@ -42,8 +42,6 @@ public sealed class RecipientRulesTests
         ["ApprovalRequested"] = (Requested("maria"), ["maria"], "PR-1043 is waiting for your approval"),
         ["ApprovalReminderDue"] = (new ApprovalReminderDue(RequestId, Tenant, StepId, ["maria"], 1, At, "PR-1043"), ["maria"],
             "Reminder: PR-1043 is still waiting for your approval"),
-        ["ApprovalEscalated"] = (new ApprovalEscalated(RequestId, Tenant, StepId, "Manager", "DepartmentHead", ["dept"], At, "PR-1043"), ["dept"],
-            "PR-1043 was escalated to you for approval"),
         ["RequestApproved"] = (new RequestApproved(RequestId, Tenant, "PR-1043", 100m, ["maria"], At, "tom"), ["tom"],
             "Your request PR-1043 was approved"),
         ["RequestRejected"] = (new RequestRejected(RequestId, Tenant, "PR-1043", "Too expensive", "maria", At, "tom"), ["tom"],
@@ -79,6 +77,8 @@ public sealed class RecipientRulesTests
     {
         RecipientRules.For(new ApprovalStepApproved(RequestId, Tenant, StepId, "maria", At)).ShouldBeNull();
         RecipientRules.For(new ApprovalAlertRaised(RequestId, Tenant, StepId, "No approver", At)).ShouldBeNull("system status, plan 06");
+        // The new step's ApprovalRequested tells the new approver: one escalation, one bell item and one email.
+        RecipientRules.For(new ApprovalEscalated(RequestId, Tenant, StepId, "Manager", "DepartmentHead", ["dept"], At, "PR-1043")).ShouldBeNull();
         RecipientRules.For(new RequestOrdered(RequestId, Tenant, "PR-1043", Guid.NewGuid(), "PO-1", At)).ShouldBeNull();
         RecipientRules.For(new RequestSubmitted(RequestId, Tenant, "PR-1043", "Laptops", "tom", "CC-100", 1m, At, "sup", [])).ShouldBeNull();
     }
@@ -102,6 +102,10 @@ public sealed class RecipientRulesTests
             var method = handler.GetMethods().Single(m => m.Name == "Handle" && m.GetParameters()[0].ParameterType.Name == name);
             method.GetParameters().ShouldContain(p => p.ParameterType == typeof(IPersonalNotifier), name);
         }
+
+        // ...and only those: every other approval event (ApprovalEscalated among them) is a live push only.
+        handler.GetMethods().Where(m => m.Name == "Handle" && !PersonalNames.Contains(m.GetParameters()[0].ParameterType.Name))
+            .ShouldAllBe(m => m.GetParameters().All(p => p.ParameterType != typeof(IPersonalNotifier)));
     }
 
     [Fact]
@@ -115,7 +119,9 @@ public sealed class RecipientRulesTests
         await world.Notifier.NotifyAsync(requested, messageId, Ct);
 
         world.Bells.Items.Select(i => (i.User, i.Item.Id)).ShouldBe([("maria", messageId.ToString("N")), ("fin", messageId.ToString("N"))]);
-        world.Pushes.ToUsers.Select(p => p.User).ShouldBe(["maria", "fin"]);
+        // Pushed on each delivery (the client keys items by ID), always the same item.
+        world.Pushes.ToUsers.Select(p => p.User).ShouldBe(["maria", "fin", "maria", "fin"]);
+        world.Pushes.ToUsers.Select(p => p.Item.Id).Distinct().ShouldBe([messageId.ToString("N")]);
         world.Email.Sent.Select(m => m.ToAddress).ShouldBe(["maria@acme.test", "fin@acme.test"]);
         var mail = world.Email.Sent[0];
         mail.Subject.ShouldBe("PR-1043 is waiting for your approval");
@@ -142,6 +148,60 @@ public sealed class RecipientRulesTests
     }
 
     [Fact]
+    public async Task The_send_holds_a_short_claim_and_only_a_sent_email_keeps_the_key_for_the_dedup_window()
+    {
+        var world = new World();
+        var messageId = Guid.NewGuid();
+        var key = $"email:{messageId:N}:maria";
+
+        await world.Notifier.NotifyAsync(Requested("maria"), messageId, Ct);
+
+        // Claimed for SendingClaimTtl (2 min), confirmed for DedupWindow (7 d) only after the send.
+        world.Once.Log.ShouldBe([$"claim {key} 00:02:00", "send maria@acme.test", $"confirm {key} 7.00:00:00"]);
+    }
+
+    [Fact]
+    public async Task A_claim_left_by_an_instance_that_died_before_sending_expires_and_the_redelivery_sends()
+    {
+        var world = new World();
+        var messageId = Guid.NewGuid();
+        // The first delivery claimed and died before sending: no release, no confirm.
+        (await world.Once.TryClaimAsync($"email:{messageId:N}:maria", TimeSpan.FromMinutes(2), Ct)).ShouldBeTrue();
+
+        await world.Notifier.NotifyAsync(Requested("maria"), messageId, Ct);
+        world.Email.Sent.ShouldBeEmpty("the claim still holds: the first delivery might still be sending");
+
+        world.Once.Expire($"email:{messageId:N}:maria");
+        await world.Notifier.NotifyAsync(Requested("maria"), messageId, Ct);
+        world.Email.Sent.Select(m => m.ToAddress).ShouldBe(["maria@acme.test"]);
+    }
+
+    [Fact]
+    public async Task Two_concurrent_deliveries_of_one_message_send_one_email()
+    {
+        var world = new World();
+        world.Email.Delay = TimeSpan.FromMilliseconds(200);
+        var messageId = Guid.NewGuid();
+
+        await Task.WhenAll(
+            Task.Run(() => world.Notifier.NotifyAsync(Requested("maria", "fin"), messageId, Ct), Ct),
+            Task.Run(() => world.Notifier.NotifyAsync(Requested("maria", "fin"), messageId, Ct), Ct));
+
+        world.Email.Sent.Select(m => m.ToAddress).Order().ShouldBe(["fin@acme.test", "maria@acme.test"]);
+    }
+
+    [Fact]
+    public async Task An_item_trimmed_away_at_once_is_not_pushed()
+    {
+        var world = new World();
+        world.Bells.KeepNothing = true;
+
+        await world.Notifier.NotifyAsync(Requested("maria"), Guid.NewGuid(), Ct);
+
+        world.Pushes.ToUsers.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_user_without_an_address_gets_the_bell_item_only()
     {
         var world = new World();
@@ -159,30 +219,47 @@ public sealed class RecipientRulesTests
 
         public Pushes Pushes { get; } = new();
 
-        public Mailbox Email { get; } = new();
+        public Mailbox Email { get; }
+
+        public MemoryOnce Once { get; } = new();
 
         public PersonalNotifier Notifier { get; }
 
-        public World() =>
+        public World()
+        {
+            Email = new Mailbox(Once.Log);
             Notifier = new PersonalNotifier(
-                Bells, Pushes, new Directory(), Email, new MemoryOnce(), new NoCache(),
+                Bells, Pushes, new Directory(), Email, Once, new NoCache(),
                 Options.Create(new SmtpOptions { Host = "smtp", From = "no-reply@app.test", AppBaseUrl = "https://app.test/" }),
                 NullLogger<PersonalNotifier>.Instance);
+        }
     }
 
     private sealed class MemoryBells : IBellStore
     {
+        private readonly Lock _lock = new();
+
         public List<(string Tenant, string User, BellItem Item)> Items { get; } = [];
+
+        /// <summary>Every item is dropped at once (as one older than the newest 50).</summary>
+        public bool KeepNothing { get; set; }
 
         public Task<bool> AddAsync(string tenantId, string userId, BellItem item, CancellationToken cancellationToken)
         {
-            if (Items.Any(i => i.Tenant == tenantId && i.User == userId && i.Item.Id == item.Id))
+            lock (_lock)
             {
-                return Task.FromResult(false);
-            }
+                if (KeepNothing)
+                {
+                    return Task.FromResult(false);
+                }
 
-            Items.Add((tenantId, userId, item));
-            return Task.FromResult(true);
+                if (!Items.Any(i => i.Tenant == tenantId && i.User == userId && i.Item.Id == item.Id))
+                {
+                    Items.Add((tenantId, userId, item));
+                }
+
+                return Task.FromResult(true);
+            }
         }
 
         public Task<BellList> ListAsync(string tenantId, string userId, CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -207,7 +284,11 @@ public sealed class RecipientRulesTests
 
         public Task PushToUserAsync(string tenantId, string userId, BellItem item, CancellationToken cancellationToken)
         {
-            ToUsers.Add((tenantId, userId, item));
+            lock (ToUsers)
+            {
+                ToUsers.Add((tenantId, userId, item));
+            }
+
             return Task.CompletedTask;
         }
     }
@@ -227,33 +308,73 @@ public sealed class RecipientRulesTests
             throw new NotSupportedException();
     }
 
-    private sealed class Mailbox : IEmailSender
+    private sealed class Mailbox(List<string> log) : IEmailSender
     {
         public List<EmailMessage> Sent { get; } = [];
 
         public HashSet<string> FailFor { get; } = [];
 
-        public Task SendAsync(EmailMessage message, CancellationToken cancellationToken)
+        public TimeSpan Delay { get; set; }
+
+        public async Task SendAsync(EmailMessage message, CancellationToken cancellationToken)
         {
             if (FailFor.Contains(message.ToAddress))
             {
                 throw new IOException("SMTP server went away");
             }
 
-            Sent.Add(message);
-            return Task.CompletedTask;
+            await Task.Delay(Delay, cancellationToken);
+            lock (log)
+            {
+                log.Add($"send {message.ToAddress}");
+                Sent.Add(message);
+            }
         }
     }
 
+    /// <summary>SET NX semantics in memory, thread-safe; logs claims and confirms with their durations.</summary>
     private sealed class MemoryOnce : IEmailOnce
     {
         private readonly HashSet<string> _claimed = [];
 
-        public Task<bool> TryClaimAsync(string key, TimeSpan window, CancellationToken cancellationToken) => Task.FromResult(_claimed.Add(key));
+        public List<string> Log { get; } = [];
+
+        public void Expire(string key)
+        {
+            lock (Log)
+            {
+                _claimed.Remove(key);
+            }
+        }
+
+        public Task<bool> TryClaimAsync(string key, TimeSpan ttl, CancellationToken cancellationToken)
+        {
+            lock (Log)
+            {
+                var claimed = _claimed.Add(key);
+                if (claimed)
+                {
+                    Log.Add($"claim {key} {ttl}");
+                }
+
+                return Task.FromResult(claimed);
+            }
+        }
+
+        public Task ConfirmAsync(string key, TimeSpan window, CancellationToken cancellationToken)
+        {
+            lock (Log)
+            {
+                _claimed.Add(key);
+                Log.Add($"confirm {key} {window}");
+            }
+
+            return Task.CompletedTask;
+        }
 
         public Task ReleaseAsync(string key, CancellationToken cancellationToken)
         {
-            _claimed.Remove(key);
+            Expire(key);
             return Task.CompletedTask;
         }
     }

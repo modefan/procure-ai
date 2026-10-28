@@ -29,11 +29,15 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
     }
 }
 
-/// <summary>The dedup keys of <see cref="IEmailOnce"/> in Redis: <c>SET key NX</c> with the window as expiry.</summary>
+/// <summary>The dedup keys of <see cref="IEmailOnce"/> in Redis: <c>SET key sending NX EX</c>, then <c>SET key sent EX window</c>.</summary>
 public sealed class RedisEmailOnce(IConnectionMultiplexer redis) : IEmailOnce
 {
-    public Task<bool> TryClaimAsync(string key, TimeSpan window, CancellationToken cancellationToken) =>
-        redis.GetDatabase().StringSetAsync(key, "1", window, When.NotExists);
+    public Task<bool> TryClaimAsync(string key, TimeSpan ttl, CancellationToken cancellationToken) =>
+        redis.GetDatabase().StringSetAsync(key, "sending", ttl, When.NotExists);
+
+    // Unconditional: also when a very slow send outlived the claim.
+    public Task ConfirmAsync(string key, TimeSpan window, CancellationToken cancellationToken) =>
+        redis.GetDatabase().StringSetAsync(key, "sent", window);
 
     public Task ReleaseAsync(string key, CancellationToken cancellationToken) =>
         redis.GetDatabase().KeyDeleteAsync(key);

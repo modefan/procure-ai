@@ -29,12 +29,22 @@ public sealed class PresenceService(
         await PushOnlineAsync(connection.TenantId, cancellationToken);
     }
 
-    /// <summary>Keeps the connection (and what it watches) alive for another TTL. A connection the sweeper had dropped comes back online.</summary>
+    /// <summary>
+    /// Keeps the connection (and what it watches) alive for another TTL. A connection the sweeper had dropped comes back online and as a
+    /// viewer of what it watched, and the lists are sent again.
+    /// </summary>
     public async Task HeartbeatAsync(PresenceConnection connection, CancellationToken cancellationToken)
     {
-        if (await store.UpsertAsync(connection, Now, cancellationToken))
+        var upserted = await store.UpsertAsync(connection, Now, cancellationToken);
+        if (!upserted.CameOnline)
         {
-            await PushOnlineAsync(connection.TenantId, cancellationToken);
+            return;
+        }
+
+        await PushOnlineAsync(connection.TenantId, cancellationToken);
+        foreach (var target in upserted.Targets)
+        {
+            await PushViewersAsync(connection.TenantId, target, cancellationToken);
         }
     }
 
@@ -65,7 +75,7 @@ public sealed class PresenceService(
     /// <summary>A clean disconnect: the connection is no longer online or viewing anything.</summary>
     public async Task DisconnectedAsync(string connectionId, CancellationToken cancellationToken)
     {
-        if (await store.RemoveAsync(connectionId, tenantHint: null, cancellationToken) is { } removed)
+        if (await store.RemoveAsync(connectionId, cancellationToken) is { } removed)
         {
             await PushRemovedAsync([removed], cancellationToken);
         }
@@ -73,15 +83,17 @@ public sealed class PresenceService(
 
     /// <summary>
     /// Drops every connection, of any instance, without a heartbeat for longer than the TTL, and sends the changed lists. Run by
-    /// one instance at a time (the sweeper's lock). Returns how many were dropped.
+    /// one instance at a time (the sweeper's lock). Each removal re-checks the heartbeat atomically, so a connection whose heartbeat
+    /// arrived after the stale read stays. Returns how many were dropped.
     /// </summary>
     public async Task<int> SweepAsync(CancellationToken cancellationToken)
     {
-        var stale = await store.StaleAsync(PresenceView.Cutoff(Now, Ttl), cancellationToken);
+        var cutoff = PresenceView.Cutoff(Now, Ttl);
+        var stale = await store.StaleAsync(cutoff, cancellationToken);
         var removed = new List<RemovedConnection>();
         foreach (var connection in stale)
         {
-            if (await store.RemoveAsync(connection.ConnectionId, connection.TenantId, cancellationToken) is { } gone)
+            if (await store.RemoveIfStaleAsync(connection, cutoff, cancellationToken) is { } gone)
             {
                 removed.Add(gone);
             }
