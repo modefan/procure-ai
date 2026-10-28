@@ -64,7 +64,8 @@ public class SagaOutcomeTests
 
         request.Cancel("tom", "Supplier gone", Now);
 
-        request.Status.ShouldBe(RequestStatus.Cancelled);
+        // An approved request may already have an order: the saga confirms or refuses before it is cancelled.
+        request.Status.ShouldBe(RequestStatus.Cancelling);
         request.DomainEvents.ShouldHaveSingleItem().ShouldBeOfType<PurchaseRequestCancelled>().Reason.ShouldBe("Supplier gone");
     }
 
@@ -91,7 +92,7 @@ public class SagaOutcomeTests
     }
 
     [Fact]
-    public void Reject_only_from_submitted()
+    public void Reject_only_from_submitted_approved_or_ordered()
     {
         var draft = Draft();
         var approved = Submitted();
@@ -99,7 +100,8 @@ public class SagaOutcomeTests
         var submitted = Submitted();
 
         Should.Throw<DomainException>(() => draft.Reject("No", Now));
-        Should.Throw<DomainException>(() => approved.Reject("No", Now));
+        approved.Reject("Supplier said no", Now);
+        approved.Status.ShouldBe(RequestStatus.Rejected);
         submitted.Reject("Over budget", Now);
 
         submitted.Status.ShouldBe(RequestStatus.Rejected);
@@ -134,5 +136,187 @@ public class SagaOutcomeTests
 
         Should.Throw<DomainException>(() => approved.UpdateTitle("x"));
         Should.Throw<DomainException>(() => approved.Submit(Now));
+    }
+
+    private static PurchaseRequest Ordered()
+    {
+        var request = Submitted();
+        request.Approve(Now.AddMinutes(-5));
+        request.MarkOrdered(OrderId, "PO-0001", Now.AddMinutes(-4));
+        return request;
+    }
+
+    private static readonly Guid OrderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+    [Fact]
+    public void Cancel_ordered_request_is_cancelling_and_raises_event()
+    {
+        var request = Ordered();
+
+        request.Cancel("tom", "Changed our mind", Now);
+
+        request.Status.ShouldBe(RequestStatus.Cancelling);
+        request.StatusBeforeCancel.ShouldBe(RequestStatus.Ordered);
+        request.CancelledBy.ShouldBe("tom");
+        request.CancellationReason.ShouldBe("Changed our mind");
+        request.DomainEvents.ShouldHaveSingleItem().ShouldBeOfType<PurchaseRequestCancelled>();
+        Should.Throw<DomainException>(() => request.Cancel("tom", null, Now));
+    }
+
+    [Fact]
+    public void Confirmed_cancellation_cancels_and_a_repeat_is_a_no_op()
+    {
+        var request = Ordered();
+        request.Cancel("tom", null, Now);
+
+        request.ConfirmCancellation(Now.AddMinutes(1));
+        request.ConfirmCancellation(Now.AddMinutes(2));
+
+        request.Status.ShouldBe(RequestStatus.Cancelled);
+        request.CancelledAt.ShouldBe(Now.AddMinutes(1));
+    }
+
+    [Fact]
+    public void Refused_cancellation_restores_previous_status()
+    {
+        var approved = Submitted();
+        approved.Approve(Now);
+        approved.Cancel("tom", "x", Now);
+        var ordered = Ordered();
+        ordered.Cancel("tom", "x", Now);
+
+        approved.RefuseCancellation("Goods were received", Now);
+        ordered.RefuseCancellation("Goods were received", Now);
+
+        approved.Status.ShouldBe(RequestStatus.Approved);
+        ordered.Status.ShouldBe(RequestStatus.Ordered);
+        ordered.CancellationRefusedReason.ShouldBe("Goods were received");
+        // The refused cancel is over: nothing of it is left to show.
+        ordered.CancellationReason.ShouldBeNull();
+        ordered.CancelledAt.ShouldBeNull();
+        ordered.StatusBeforeCancel.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Refusal_of_an_approved_cancel_whose_order_is_known_restores_Ordered()
+    {
+        var request = Submitted();
+        request.Approve(Now);
+        request.Cancel("tom", null, Now);
+        request.MarkOrdered(OrderId, "PO-0001", Now);
+        request.Status.ShouldBe(RequestStatus.Cancelling);
+
+        request.RefuseCancellation("Goods were received", Now);
+
+        request.Status.ShouldBe(RequestStatus.Ordered);
+    }
+
+    [Fact]
+    public void Refusal_can_follow_a_confirmation_that_was_handled_first()
+    {
+        var request = Ordered();
+        request.Cancel("tom", null, Now);
+        request.ConfirmCancellation(Now);
+
+        request.RefuseCancellation("Goods were received", Now);
+
+        request.Status.ShouldBe(RequestStatus.Ordered);
+    }
+
+    [Fact]
+    public void Complete_from_ordered_records_the_spend()
+    {
+        var request = Ordered();
+
+        request.Complete(Money.Zar(86940m), Now);
+
+        request.Status.ShouldBe(RequestStatus.Completed);
+        request.SpentInclVat.ShouldBe(Money.Zar(86940m));
+        request.CompletedAt.ShouldBe(Now);
+        request.OrderNumber.ShouldBe("PO-0001");
+    }
+
+    [Fact]
+    public void Complete_only_from_ordered_approved_or_cancelling()
+    {
+        var draft = Draft();
+        var submitted = Submitted();
+        var rejected = Submitted();
+        rejected.Reject("No", Now);
+        var cancelled = Draft();
+        cancelled.Cancel("tom", null, Now);
+        var completed = Ordered();
+        completed.Complete(Money.Zar(1m), Now);
+
+        foreach (var request in new[] { draft, submitted, rejected, cancelled, completed })
+        {
+            Should.Throw<DomainException>(() => request.Complete(Money.Zar(1m), Now));
+        }
+    }
+
+    [Fact]
+    public void Complete_while_cancelling_clears_the_pending_cancel()
+    {
+        var request = Ordered();
+        request.Cancel("tom", "x", Now);
+
+        request.Complete(Money.Zar(100m), Now);
+
+        request.Status.ShouldBe(RequestStatus.Completed);
+        request.StatusBeforeCancel.ShouldBeNull();
+        request.CancellationReason.ShouldBeNull();
+        request.CancelledAt.ShouldBeNull();
+        request.CancelledBy.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Complete_from_approved_leaves_the_order_for_RequestOrdered_to_fill()
+    {
+        var request = Submitted();
+        request.Approve(Now);
+
+        request.Complete(Money.Zar(100m), Now);
+        request.OrderNumber.ShouldBeNull();
+        request.MarkOrdered(OrderId, "PO-0001", Now);
+
+        request.Status.ShouldBe(RequestStatus.Completed);
+        request.OrderId.ShouldBe(OrderId);
+        request.OrderNumber.ShouldBe("PO-0001");
+    }
+
+    [Fact]
+    public void MarkOrdered_stores_null_for_an_empty_number_and_never_overwrites_a_known_one()
+    {
+        var request = Submitted();
+        request.Approve(Now);
+
+        request.MarkOrdered(OrderId, "", Now);
+        request.Status.ShouldBe(RequestStatus.Ordered);
+        request.OrderNumber.ShouldBeNull();
+
+        request.MarkOrdered(OrderId, "PO-0001", Now);
+        request.OrderNumber.ShouldBe("PO-0001");
+        request.MarkOrdered(OrderId, " ", Now);
+        request.OrderNumber.ShouldBe("PO-0001");
+    }
+
+    [Fact]
+    public void Supplier_rejection_from_ordered()
+    {
+        var request = Ordered();
+
+        request.Reject("The supplier cannot deliver", Now);
+
+        request.Status.ShouldBe(RequestStatus.Rejected);
+        request.RejectionReason.ShouldBe("The supplier cannot deliver");
+    }
+
+    [Fact]
+    public void Cancel_of_a_completed_request_is_refused()
+    {
+        var request = Ordered();
+        request.Complete(Money.Zar(1m), Now);
+
+        Should.Throw<DomainException>(() => request.Cancel("tom", null, Now)).Message.ShouldContain("completed");
     }
 }

@@ -6,13 +6,18 @@ import { RequestStatus } from '../models/request-status';
 export interface RequestDto {
   approvedAt: (string | null);
   cancellationReason: (string | null);
+  cancellationRefusedReason: (string | null);
   cancelledAt: (string | null);
   costCenterCode: string;
   id: string;
   lines: Array<RequestLineDto>;
   number: string;
+  orderId: (string | null);
+  orderNumber: (string | null);
   rejectedAt: (string | null);
   rejectionReason: (string | null);
+  spentInclVat: (number | null);
+  spentInclVatDisplay: (string | null);
   status: RequestStatus;
   submittedAt: (string | null);
   supplierId: string;

@@ -17,6 +17,10 @@ public static partial class RequestMapper
     [MapProperty(nameof(PurchaseRequest.TotalExclVat), nameof(RequestDto.TotalExclVatDisplay), Use = nameof(Display))]
     [MapProperty(nameof(PurchaseRequest.Vat), nameof(RequestDto.VatDisplay), Use = nameof(Display))]
     [MapProperty(nameof(PurchaseRequest.TotalInclVat), nameof(RequestDto.TotalInclVatDisplay), Use = nameof(Display))]
+    [MapProperty(nameof(PurchaseRequest.SpentInclVat), nameof(RequestDto.SpentInclVat), Use = nameof(Amount))]
+    [MapProperty(nameof(PurchaseRequest.SpentInclVat), nameof(RequestDto.SpentInclVatDisplay), Use = nameof(DisplayOrNull))]
+    [MapperIgnoreSource(nameof(PurchaseRequest.CompletedAt))]
+    [MapperIgnoreSource(nameof(PurchaseRequest.StatusBeforeCancel))]
     [MapperIgnoreSource(nameof(PurchaseRequest.DomainEvents))]
     [MapperIgnoreSource(nameof(PurchaseRequest.TenantId))]
     [MapperIgnoreSource(nameof(PurchaseRequest.RequesterId))]
@@ -42,6 +46,10 @@ public static partial class RequestMapper
     private static string NumberText(RequestNumber number) => number.ToString();
 
     private static string Display(Money money) => money.ToDisplayString();
+
+    private static string? DisplayOrNull(Money? money) => money?.ToDisplayString();
+
+    private static decimal? Amount(Money? money) => money?.Amount;
 
     private static IReadOnlyList<RequestLineDto> OrderedLines(IReadOnlyList<RequestLine> lines) =>
         lines.OrderBy(l => l.LineNo).Select(ToLineDto).ToList();

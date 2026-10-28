@@ -23,6 +23,11 @@ public sealed record RequestDto(
     string? RejectionReason,
     DateTimeOffset? CancelledAt,
     string? CancellationReason,
+    Guid? OrderId,
+    string? OrderNumber,
+    decimal? SpentInclVat,
+    string? SpentInclVatDisplay,
+    string? CancellationRefusedReason,
     uint Version);
 
 public sealed record RequestLineDto(

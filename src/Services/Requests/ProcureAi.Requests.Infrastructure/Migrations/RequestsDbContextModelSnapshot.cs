@@ -133,6 +133,11 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("cancellation_reason");
 
+                    b.Property<string>("CancellationRefusedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cancellation_refused_reason");
+
                     b.Property<DateTimeOffset?>("CancelledAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("cancelled_at");
@@ -141,6 +146,10 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("cancelled_by");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
 
                     b.Property<string>("CostCenterCode")
                         .IsRequired()
@@ -151,6 +160,15 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                     b.Property<int>("Number")
                         .HasColumnType("integer")
                         .HasColumnName("number");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<string>("OrderNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("order_number");
 
                     b.Property<DateTimeOffset?>("RejectedAt")
                         .HasColumnType("timestamp with time zone")
@@ -167,11 +185,20 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("requester_id");
 
+                    b.Property<decimal?>("SpentInclVat")
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("spent_incl_vat");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("status");
+
+                    b.Property<string>("StatusBeforeCancel")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status_before_cancel");
 
                     b.Property<DateTimeOffset?>("SubmittedAt")
                         .HasColumnType("timestamp with time zone")

@@ -29,6 +29,13 @@ internal sealed class PurchaseRequestConfiguration : IEntityTypeConfiguration<Pu
         builder.Property(r => r.CancelledAt).HasColumnName("cancelled_at");
         builder.Property(r => r.CancelledBy).HasColumnName("cancelled_by").HasMaxLength(100);
         builder.Property(r => r.CancellationReason).HasColumnName("cancellation_reason").HasMaxLength(500);
+        builder.Property(r => r.OrderId).HasColumnName("order_id");
+        builder.Property(r => r.OrderNumber).HasColumnName("order_number").HasMaxLength(100);
+        builder.Property(r => r.CompletedAt).HasColumnName("completed_at");
+        builder.Property(r => r.SpentInclVat).HasColumnName("spent_incl_vat").HasColumnType("numeric(18,2)")
+            .HasConversion(money => money.HasValue ? money.Value.Amount : (decimal?)null, amount => amount.HasValue ? Money.Zar(amount.Value) : (Money?)null);
+        builder.Property(r => r.StatusBeforeCancel).HasColumnName("status_before_cancel").HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.CancellationRefusedReason).HasColumnName("cancellation_refused_reason").HasMaxLength(500);
 
         // The Postgres system column xmin changes on every write of the row: an optimistic concurrency token.
         builder.Property(r => r.Version).HasColumnName("xmin").HasColumnType("xid")

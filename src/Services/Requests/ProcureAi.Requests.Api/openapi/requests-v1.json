@@ -793,6 +793,11 @@
           "rejectionReason",
           "cancelledAt",
           "cancellationReason",
+          "orderId",
+          "orderNumber",
+          "spentInclVat",
+          "spentInclVatDisplay",
+          "cancellationRefusedReason",
           "version"
         ],
         "type": "object",
@@ -883,6 +888,38 @@
               "string"
             ]
           },
+          "orderId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "spentInclVat": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "spentInclVatDisplay": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cancellationRefusedReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "version": {
             "type": "integer",
             "format": "uint32"
@@ -937,7 +974,10 @@
           "Draft",
           "Submitted",
           "Approved",
+          "Ordered",
+          "Completed",
           "Rejected",
+          "Cancelling",
           "Cancelled"
         ]
       },

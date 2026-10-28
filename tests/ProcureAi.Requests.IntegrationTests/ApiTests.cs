@@ -803,7 +803,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         doc.GetProperty("security").GetArrayLength().ShouldBe(2);
         // Enums are documented as names.
         doc.GetProperty("components").GetProperty("schemas").GetProperty("RequestStatus").GetProperty("enum")
-            .EnumerateArray().Select(e => e.GetString()).ShouldBe(["Draft", "Submitted", "Approved", "Rejected", "Cancelled"]);
+            .EnumerateArray().Select(e => e.GetString()).ShouldBe(["Draft", "Submitted", "Approved", "Ordered", "Completed", "Rejected", "Cancelling", "Cancelled"]);
     }
 
     private static string[] HeaderNames(JsonElement paths, string path, string method)

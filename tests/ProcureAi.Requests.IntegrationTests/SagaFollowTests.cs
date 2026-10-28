@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts;
@@ -259,9 +260,11 @@ public sealed class SagaFollowTests(InfraFixture infra) : IAsyncLifetime
         await PublishFromApprovalsAsync(_factory, Approved(submitted, tenant), tenant, DemoUsers.Maria);
         var approved = await WaitForAsync(_client, tenant, submitted.Id, r => r.Status == RequestStatus.Approved);
 
-        // A redelivered approval and a rejection that lost the race: neither changes the approved request.
+        // A redelivered approval and a confirmation of a cancel nobody asked for: neither changes the approved request.
+        // (A rejection is no longer late: after approval it is the supplier's, and rejects the request.)
         await PublishFromApprovalsAsync(_factory, Approved(submitted, tenant), tenant, DemoUsers.Maria);
-        await PublishFromApprovalsAsync(_factory, Rejected(submitted, tenant, "Too late"), tenant, DemoUsers.Maria);
+        await PublishFromApprovalsAsync(
+            _factory, new RequestCancellationConfirmed(submitted.Id, tenant, submitted.Number, DateTimeOffset.UtcNow), tenant, DemoUsers.Maria);
         await WaitForHandledAsync(submitted.Id, count: 3);
 
         var after = await GetAsync(_client, tenant, submitted.Id);
@@ -448,5 +451,252 @@ public sealed class SagaFollowTests(InfraFixture infra) : IAsyncLifetime
 
         noIfMatch.StatusCode.ShouldBe((HttpStatusCode)428);
         ofRejected.StatusCode.ShouldBe((HttpStatusCode)422);
+    }
+
+    // ---- Ordering, cancellation outcome and completion (plan 03) ----------------------------------------------------------
+
+    private static RequestOrdered Ordered(RequestDto request, string tenant, Guid orderId, string number = "PO-0001") =>
+        new(request.Id, tenant, request.Number, orderId, number, DateTimeOffset.UtcNow);
+
+    private static RequestCompleted Completed(RequestDto request, string tenant, decimal spent = 4200m) =>
+        new(request.Id, tenant, request.Number, spent, DateTimeOffset.UtcNow);
+
+    private async Task<RequestDto> ApprovedAsync(string tenant)
+    {
+        var submitted = await SubmitAsync(tenant, await CreateAsync(tenant));
+        await PublishFromApprovalsAsync(_factory, Approved(submitted, tenant), tenant, DemoUsers.Maria);
+        return await WaitForAsync(_client, tenant, submitted.Id, r => r.Status == RequestStatus.Approved);
+    }
+
+    private async Task<RequestDto> OrderedAsync(string tenant, Guid orderId)
+    {
+        var approved = await ApprovedAsync(tenant);
+        await PublishFromApprovalsAsync(_factory, Ordered(approved, tenant, orderId), tenant, DemoUsers.Maria);
+        return await WaitForAsync(_client, tenant, approved.Id, r => r.Status == RequestStatus.Ordered);
+    }
+
+    private async Task<RequestDto> CancellingAsync(string tenant, RequestDto request)
+    {
+        var response = await _client.SendAsync(
+            Req(HttpMethod.Post, $"{Requests}/{request.Id}/cancel", tenant, new { reason = "Changed our mind" }, ifMatch: ETagOf(request)), Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        var cancelling = (await response.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        cancelling.Status.ShouldBe(RequestStatus.Cancelling);
+        return cancelling;
+    }
+
+    /// <summary>Handled messages (any outcome, applied or ignored) of the request, as the shared log sink saw them.</summary>
+    private static int HandledCount(Guid requestId) =>
+        CapturingSink.Shared.Events.Count(e =>
+            e.MessageTemplate.Text.StartsWith("Outcome", StringComparison.Ordinal)
+            && e.Properties.TryGetValue("RequestId", out var id) && id.ToString().Contains(requestId.ToString(), StringComparison.Ordinal));
+
+    /// <summary>Rows of Wolverine dead-letter table plus messages in the broker dead-letter queue.</summary>
+    private async Task<long> DeadLettersAsync()
+    {
+        await using var connection = new Npgsql.NpgsqlConnection(infra.RequestsDbConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new Npgsql.NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
+        var rows = (long)(await command.ExecuteScalarAsync(Ct))!;
+        await using var rabbit = await new RabbitMQ.Client.ConnectionFactory { Uri = new Uri(infra.RabbitConnectionString) }.CreateConnectionAsync(Ct);
+        await using var channel = await rabbit.CreateChannelAsync(cancellationToken: Ct);
+        try
+        {
+            return rows + (await channel.QueueDeclarePassiveAsync("wolverine-dead-letter-queue", Ct)).MessageCount;
+        }
+        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException)
+        {
+            return rows;
+        }
+    }
+
+    private async Task WaitForHandledMoreAsync(Guid requestId, int target)
+    {
+        var deadline = DateTime.UtcNow + MessageTimeout;
+        while (HandledCount(requestId) < target)
+        {
+            DateTime.UtcNow.ShouldBeLessThan(deadline, $"Only {HandledCount(requestId)} of {target} messages for {requestId} were handled.");
+            await Task.Delay(TimeSpan.FromMilliseconds(100), Ct);
+        }
+    }
+
+    [Fact]
+    public async Task RequestOrdered_sets_Ordered_and_fresh_get_within_1s()
+    {
+        // A 60 s GET cache: only an eviction, not expiry, can make the next read fresh.
+        await using var factory = _factory.WithWebHostBuilder(b => b.UseSetting("Caching:DefaultGetSeconds", "60"));
+        using var client = factory.CreateClient();
+        var tenant = NewTenant("ordered");
+        var approved = await ApprovedAsync(tenant);
+        (await GetAsync(client, tenant, approved.Id)).Status.ShouldBe(RequestStatus.Approved);
+        var orderId = Guid.NewGuid();
+
+        await PublishFromApprovalsAsync(factory, Ordered(approved, tenant, orderId), tenant, DemoUsers.Maria);
+
+        var ordered = await WaitForAsync(client, tenant, approved.Id, r => r.Status == RequestStatus.Ordered);
+        ordered.OrderId.ShouldBe(orderId);
+        ordered.OrderNumber.ShouldBe("PO-0001");
+        var list = await client.SendAsync(Req(HttpMethod.Get, $"{Requests}?status=Ordered", tenant), Ct);
+        (await list.Content.ReadFromJsonAsync<PagedResult<RequestDto>>(Json, Ct))!.Items.ShouldHaveSingleItem().Id.ShouldBe(approved.Id);
+    }
+
+    [Fact]
+    public async Task Cancel_of_an_ordered_request_is_cancelling_and_publishes_once()
+    {
+        var tenant = NewTenant("cancelord");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+        await using var recorder = await RabbitRecorder.StartAsync(infra.RabbitConnectionString, [Exchanges.Requests], []);
+
+        var cancelling = await CancellingAsync(tenant, ordered);
+
+        cancelling.CancellationReason.ShouldBe("Changed our mind");
+        cancelling.CancelledAt.ShouldNotBeNull();
+        await recorder.WaitForAsync(ordered.Id, "RequestCancelled", MessageTimeout);
+        await Task.Delay(TimeSpan.FromSeconds(1), Ct);
+        recorder.Of(ordered.Id).Count(m => m.Kind == "RequestCancelled").ShouldBe(1);
+        (await GetAsync(_client, tenant, ordered.Id)).Status.ShouldBe(RequestStatus.Cancelling);
+    }
+
+    [Fact]
+    public async Task Cancellation_confirmed_sets_Cancelled()
+    {
+        var tenant = NewTenant("confirm");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+        await CancellingAsync(tenant, ordered);
+
+        await PublishFromApprovalsAsync(
+            _factory, new RequestCancellationConfirmed(ordered.Id, tenant, ordered.Number, DateTimeOffset.UtcNow), tenant, "tom");
+
+        var cancelled = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Cancelled);
+        cancelled.CancellationReason.ShouldBe("Changed our mind");
+        cancelled.CancelledAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Cancellation_refused_after_goods_restores_Ordered_with_reason()
+    {
+        var tenant = NewTenant("refuse");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+        await CancellingAsync(tenant, ordered);
+
+        await PublishFromApprovalsAsync(
+            _factory, new RequestCancellationRefused(ordered.Id, tenant, ordered.Number, "Goods were received", DateTimeOffset.UtcNow), tenant, "tom");
+
+        var restored = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Ordered);
+        restored.CancellationRefusedReason.ShouldBe("Goods were received");
+        restored.CancellationReason.ShouldBeNull();
+        restored.CancelledAt.ShouldBeNull();
+        restored.OrderNumber.ShouldBe("PO-0001");
+    }
+
+    [Fact]
+    public async Task RequestCompleted_sets_Completed_with_spent()
+    {
+        var tenant = NewTenant("completed");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+
+        await PublishFromApprovalsAsync(_factory, Completed(ordered, tenant, 4200m), tenant, "tom");
+
+        var completed = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Completed);
+        completed.SpentInclVat.ShouldBe(4200m);
+        completed.SpentInclVatDisplay.ShouldBe(Money.Zar(4200m).ToDisplayString());
+        completed.SpentInclVatDisplay!.ShouldStartWith("R");
+        completed.OrderNumber.ShouldBe("PO-0001");
+    }
+
+    [Fact]
+    public async Task Cancel_completed_request_422()
+    {
+        var tenant = NewTenant("cancelcomp");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+        await PublishFromApprovalsAsync(_factory, Completed(ordered, tenant), tenant, "tom");
+        var completed = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Completed);
+
+        var response = await _client.SendAsync(
+            Req(HttpMethod.Post, $"{Requests}/{ordered.Id}/cancel", tenant, ifMatch: ETagOf(completed)), Ct);
+
+        response.StatusCode.ShouldBe((HttpStatusCode)422, await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Completed_while_cancelling_clears_the_cancel_and_the_late_refusal_and_confirmation_are_no_ops()
+    {
+        var tenant = NewTenant("compcancel");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+        await CancellingAsync(tenant, ordered);
+        var dead = await DeadLettersAsync();
+
+        await PublishFromApprovalsAsync(_factory, Completed(ordered, tenant, 1000m), tenant, "tom");
+        var completed = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Completed);
+        completed.CancellationReason.ShouldBeNull();
+        completed.CancelledAt.ShouldBeNull();
+
+        // The refusal ("The order was settled") may be handled after the completion; so may a confirmation.
+        var handled = HandledCount(ordered.Id);
+        await PublishFromApprovalsAsync(
+            _factory, new RequestCancellationRefused(ordered.Id, tenant, ordered.Number, "The order was settled", DateTimeOffset.UtcNow), tenant, "tom");
+        await PublishFromApprovalsAsync(
+            _factory, new RequestCancellationConfirmed(ordered.Id, tenant, ordered.Number, DateTimeOffset.UtcNow), tenant, "tom");
+        await WaitForHandledMoreAsync(ordered.Id, handled + 2);
+
+        var after = await GetAsync(_client, tenant, ordered.Id);
+        after.Status.ShouldBe(RequestStatus.Completed);
+        after.Version.ShouldBe(completed.Version);
+        after.CancellationRefusedReason.ShouldBeNull();
+        (await DeadLettersAsync()).ShouldBe(dead);
+    }
+
+    [Fact]
+    public async Task Order_settled_before_it_was_announced_completes_whatever_the_order_of_the_messages()
+    {
+        var tenant = NewTenant("overtaken");
+        var approved = await ApprovedAsync(tenant);
+        var orderId = Guid.NewGuid();
+        var dead = await DeadLettersAsync();
+
+        // RequestCompleted first (while Approved), then RequestOrdered with no number (the settlement carried none).
+        await PublishFromApprovalsAsync(_factory, Completed(approved, tenant, 3000m), tenant, "tom");
+        var completed = await WaitForAsync(_client, tenant, approved.Id, r => r.Status == RequestStatus.Completed);
+        completed.SpentInclVat.ShouldBe(3000m);
+        completed.OrderNumber.ShouldBeNull();
+        await PublishFromApprovalsAsync(_factory, Ordered(approved, tenant, orderId, number: ""), tenant, "tom");
+        var withOrder = await WaitForAsync(_client, tenant, approved.Id, r => r.OrderId == orderId);
+
+        withOrder.Status.ShouldBe(RequestStatus.Completed);
+        withOrder.OrderNumber.ShouldBeNull();
+        // A later message that knows the number fills it in; an empty one never erases it.
+        await PublishFromApprovalsAsync(_factory, Ordered(approved, tenant, orderId, number: "PO-0009"), tenant, "tom");
+        await WaitForAsync(_client, tenant, approved.Id, r => r.OrderNumber == "PO-0009");
+        var handled = HandledCount(approved.Id);
+        await PublishFromApprovalsAsync(_factory, Ordered(approved, tenant, orderId, number: ""), tenant, "tom");
+        await WaitForHandledMoreAsync(approved.Id, handled + 1);
+        (await GetAsync(_client, tenant, approved.Id)).OrderNumber.ShouldBe("PO-0009");
+        (await DeadLettersAsync()).ShouldBe(dead);
+    }
+
+    [Fact]
+    public async Task Supplier_rejection_rejects_an_ordered_request()
+    {
+        var tenant = NewTenant("suprej");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+
+        await PublishFromApprovalsAsync(_factory, Rejected(ordered, tenant, "The supplier cannot deliver", by: null), tenant, "tom");
+
+        var rejected = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Rejected);
+        rejected.RejectionReason.ShouldBe("The supplier cannot deliver");
+    }
+
+    [Fact]
+    public async Task Cancel_of_an_approved_request_is_cancelling_until_the_saga_confirms()
+    {
+        var tenant = NewTenant("cancelappr");
+        var approved = await ApprovedAsync(tenant);
+
+        var cancelling = await CancellingAsync(tenant, approved);
+
+        cancelling.Status.ShouldBe(RequestStatus.Cancelling);
+        await PublishFromApprovalsAsync(
+            _factory, new RequestCancellationConfirmed(approved.Id, tenant, approved.Number, DateTimeOffset.UtcNow), tenant, "tom");
+        await WaitForAsync(_client, tenant, approved.Id, r => r.Status == RequestStatus.Cancelled);
     }
 }
