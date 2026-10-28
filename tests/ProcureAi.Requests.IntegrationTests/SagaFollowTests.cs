@@ -492,23 +492,7 @@ public sealed class SagaFollowTests(InfraFixture infra) : IAsyncLifetime
             && e.Properties.TryGetValue("RequestId", out var id) && id.ToString().Contains(requestId.ToString(), StringComparison.Ordinal));
 
     /// <summary>Rows of Wolverine dead-letter table plus messages in the broker dead-letter queue.</summary>
-    private async Task<long> DeadLettersAsync()
-    {
-        await using var connection = new Npgsql.NpgsqlConnection(infra.RequestsDbConnectionString);
-        await connection.OpenAsync(Ct);
-        await using var command = new Npgsql.NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
-        var rows = (long)(await command.ExecuteScalarAsync(Ct))!;
-        await using var rabbit = await new RabbitMQ.Client.ConnectionFactory { Uri = new Uri(infra.RabbitConnectionString) }.CreateConnectionAsync(Ct);
-        await using var channel = await rabbit.CreateChannelAsync(cancellationToken: Ct);
-        try
-        {
-            return rows + (await channel.QueueDeclarePassiveAsync("wolverine-dead-letter-queue", Ct)).MessageCount;
-        }
-        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException)
-        {
-            return rows;
-        }
-    }
+    private Task<long> DeadLettersAsync() => DeadLetters.CountAsync(infra.RequestsDbConnectionString, infra.RabbitConnectionString, Ct);
 
     private async Task WaitForHandledMoreAsync(Guid requestId, int target)
     {

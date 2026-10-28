@@ -102,25 +102,7 @@ public sealed class ApprovalsApp : IAsyncLifetime
     /// that fail on the first try without a matching error rule are moved, so a table-only count asserts nothing). Tests compare it
     /// with its value before.
     /// </summary>
-    public async Task<long> DeadLettersAsync()
-    {
-        await using var connection = new NpgsqlConnection(_infra.DbConnectionString);
-        await connection.OpenAsync(TestContext.Current.CancellationToken);
-        await using var command = new NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
-        var inTable = (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
-
-        await using var rabbit = await new ConnectionFactory { Uri = new Uri(_infra.RabbitConnectionString) }
-            .CreateConnectionAsync(TestContext.Current.CancellationToken);
-        await using var channel = await rabbit.CreateChannelAsync(cancellationToken: TestContext.Current.CancellationToken);
-        try
-        {
-            return inTable + (await channel.QueueDeclarePassiveAsync("wolverine-dead-letter-queue", TestContext.Current.CancellationToken)).MessageCount;
-        }
-        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException)
-        {
-            return inTable; // the queue is declared when the first message is moved there
-        }
-    }
+    public Task<long> DeadLettersAsync() => DeadLetters.CountAsync(_infra.DbConnectionString, _infra.RabbitConnectionString);
 
     public static string NewTenant() => $"t{Guid.NewGuid():N}"[..12];
 

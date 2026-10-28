@@ -151,31 +151,10 @@ public sealed class BudgetsApp : IAsyncLifetime
 
     /// <summary>
     /// Messages that ran out of retries or were moved to the error queue: the rows of Wolverine's dead-letter table plus the
-    /// messages in the broker's <c>wolverine-dead-letter-queue</c> (where a message from a listener without a durable inbox goes).
+    /// messages in the broker's <c>wolverine-dead-letter-queue</c> (where the RabbitMQ transport puts a message moved to the error queue).
     /// Tests compare it with its value before.
     /// </summary>
-    public async Task<long> DeadLettersAsync()
-    {
-        await using var connection = new NpgsqlConnection(_infra.DbConnectionString);
-        await connection.OpenAsync(TestContext.Current.CancellationToken);
-        await using var command = new NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
-        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))! + await BrokerDeadLettersAsync();
-    }
-
-    private async Task<long> BrokerDeadLettersAsync()
-    {
-        await using var connection = await new ConnectionFactory { Uri = new Uri(_infra.RabbitConnectionString) }
-            .CreateConnectionAsync(TestContext.Current.CancellationToken);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: TestContext.Current.CancellationToken);
-        try
-        {
-            return (await channel.QueueDeclarePassiveAsync("wolverine-dead-letter-queue", TestContext.Current.CancellationToken)).MessageCount;
-        }
-        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException)
-        {
-            return 0; // the queue is declared when the first message is moved there
-        }
-    }
+    public Task<long> DeadLettersAsync() => DeadLetters.CountAsync(_infra.DbConnectionString, _infra.RabbitConnectionString);
 }
 
 [CollectionDefinition(Name)]

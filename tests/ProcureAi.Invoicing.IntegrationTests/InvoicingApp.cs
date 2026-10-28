@@ -327,7 +327,7 @@ public sealed class InvoicingApp : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
-    public async Task<long> DeadLettersAsync() => await ScalarAsync<long>("SELECT count(*) FROM wolverine.wolverine_dead_letters");
+    public Task<long> DeadLettersAsync() => DeadLetters.CountAsync(Infra.DbConnectionString, Infra.RabbitConnectionString);
 
     /// <summary>Sets the simulated ERP's chaos mode (admin key).</summary>
     public async Task ErpChaosAsync(string mode)

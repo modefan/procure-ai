@@ -286,13 +286,7 @@ public sealed class PurchasingApp : IAsyncLifetime
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
-    public async Task<long> DeadLettersAsync()
-    {
-        await using var connection = new NpgsqlConnection(Infra.DbConnectionString);
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
-        return (long)(await command.ExecuteScalarAsync())!;
-    }
+    public Task<long> DeadLettersAsync() => DeadLetters.CountAsync(Infra.DbConnectionString, Infra.RabbitConnectionString);
 
     /// <summary>Polls until the condition holds (fails after the event timeout).</summary>
     public static async Task EventuallyAsync(Func<Task<bool>> condition, string what, TimeSpan? timeout = null)
