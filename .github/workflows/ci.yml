@@ -140,9 +140,10 @@ jobs:
         run: |
           paths="$(find src/Services -type d -path '*.Api/openapi' | sort | xargs) src/Web/procure-ai-web/src/app/api"
           echo "Checking: $paths"
-          # Guard against the discovery silently finding nothing (all eight services have a document).
-          count="$(find src/Services -path '*.Api/openapi/*-v1.json' | wc -l)"
-          if [ "$count" -lt 8 ]; then echo "::error::Expected at least 8 OpenAPI documents, found $count."; exit 1; fi
+          # Guard against the discovery silently finding nothing: every Api project must have written exactly one document.
+          apis="$(find src/Services -maxdepth 2 -type d -name 'ProcureAi.*.Api' | wc -l)"
+          docs="$(find src/Services -path '*.Api/openapi/*-v1.json' | wc -l)"
+          if [ "$apis" -eq 0 ] || [ "$apis" -ne "$docs" ]; then echo "::error::Found $apis Api projects but $docs OpenAPI documents."; exit 1; fi
           # git status also lists new untracked files, which git diff would miss.
           drift="$(git status --porcelain -- $paths)"
           if [ -n "$drift" ]; then

@@ -8,7 +8,7 @@ received, and invoices are three-way matched and exported for payment. An AI pol
 scanning come later. Built as a portfolio
 demo of enterprise .NET and Angular practice: microservices, Clean Architecture, messaging, GitOps-style delivery.
 
-**Status: plan 03 of 8 done.** What runs today: eight services (Requests, Access, Budgets, Approvals, Audit, Suppliers,
+**Status: plan 03 (purchasing, suppliers, invoicing) in final review.** What runs today: eight services (Requests, Access, Budgets, Approvals, Audit, Suppliers,
 Purchasing, Invoicing), two simulators (supplier and ERP), the BFF gateway with Keycloak login, the Angular app, and
 per-database change data capture. A request is submitted, its budget reserved, approved through a rules-driven chain,
 turned into a purchase order, delivered, invoiced, three-way matched and paid (for example a R 86 940,00 order), with
@@ -87,29 +87,50 @@ records every event.
 
 ```mermaid
 sequenceDiagram
-    participant A as Approvals
+    participant A as Approvals (saga)
     participant P as Purchasing
     participant S as Supplier simulator
     participant I as Invoicing
     participant E as ERP simulator
     participant B as Budgets
-    A-)P: RequestApproved (carries the order lines)
+    actor F as Finance
+    Note over A: the request's lines were frozen when it was submitted
+    A-)P: CreatePurchaseOrder (with the lines)
     P->>P: create order, prices from the Suppliers catalog
+    P-)A: PurchaseOrderCreated (request shows Ordered)
+    P-)I: PurchaseOrderCreated (Invoicing keeps its own view of the order)
     P->>S: send order (retries, circuit breaker)
     S--)P: signed webhook: confirmed
     S--)P: signed webhook: delivered (partial or full)
     P->>P: goods receipt per line
+    P-)I: GoodsReceived
     S--)I: signed webhook: invoice (or entered by hand)
     I->>I: three-way match (order, receipts, invoice; R 0,50 tolerance)
     Note over I: a mismatch is held for finance
-    I->>E: export payment (finance pays; outbox)
-    I-)B: spend recorded per payment
-    P-)B: leftover released when every line is paid or closed short
-    opt cancelled before the first goods are received
-        P->>S: cancel order
-        P-)B: ReleaseBudget
+    F->>I: release payment
+    I-)A: PaymentReleased
+    A-)B: RecordSpend (BudgetSpent)
+    I->>E: export payment (retried until the ERP accepts)
+    Note over I: every line paid or closed short
+    I-)A: PurchaseOrderSettled
+    A-)B: ReleaseBudget (the leftover)
+    A-)A: RequestCompleted
+    opt cancel (Requests shows Cancelling)
+        A-)P: CancelPurchaseOrder
+        alt no goods received yet
+            P->>S: cancel order
+            P-)A: PurchaseOrderCancelled
+            A-)B: ReleaseBudget
+            A-)A: RequestCancellationConfirmed
+        else goods already received
+            P-)A: PurchaseOrderCancellationRefused
+            A-)A: RequestCancellationRefused (back to Ordered)
+        end
     end
 ```
+
+Arrows to Approvals are the saga's input; "RequestCompleted" and the cancellation answers are events the saga publishes
+for Requests and the audit trail.
 
 ## Run it locally
 
@@ -157,8 +178,8 @@ Sign in through Keycloak; the demo password is the `keycloak-demo-password` para
 (layer rules), Testcontainers integration tests (Postgres, Redis, Keycloak, RabbitMQ), an Aspire AppHost test, and
 Playwright end-to-end tests, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
 whole AppHost and drives a request through approval, purchasing, invoicing and audit. GitHub Actions builds with warnings as errors and fails
-the build if the generated Angular API client drifts from any of the eight services' OpenAPI documents (found by
-convention, so a new service is covered automatically). The test suites
+the build if any of the eight services' OpenAPI documents (found by convention, so a new service is covered
+automatically) or the generated Angular client (Requests so far) differs from what is committed. The test suites
 are run locally before every push; their CI steps are switched off until the app is complete and will be re-enabled
 before this repo goes public. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
 
@@ -193,9 +214,10 @@ before this repo goes public. CI generates random, per-run secrets; nothing sens
 - **Fiscal year in SAST.** A budget's fiscal year runs 1 March to the end of February in `Africa/Johannesburg` time, so a
   request submitted late on 28 February is judged by the South African calendar, not UTC.
 - **Generated API client.** Angular calls are generated from the OpenAPI document (ng-openapi-gen; the Requests client so
-  far) and CI guards against drift for all eight services' documents.
-- **Event-carried order lines.** The approval event carries the request's lines, so Purchasing builds the order without
-  calling Requests back and keeps working when Requests is down.
+  far) and CI guards against drift of that client and of all eight services' OpenAPI documents.
+- **Event-carried order lines.** The request's lines are frozen when it is submitted and travel inside the saga's
+  `CreatePurchaseOrder` command, so Purchasing builds the order without calling Requests back and keeps working when
+  Requests is down.
 - **The catalog is the price source.** Prices come from the Suppliers catalog, not from the requester, so a request
   cannot name its own price.
 - **Purchasing decides cancellation.** Only Purchasing knows whether goods have arrived, so it alone accepts or refuses
