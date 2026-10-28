@@ -105,21 +105,22 @@ sequenceDiagram
     P->>P: goods receipt per line
     P-)I: GoodsReceived
     S--)I: signed webhook: invoice (or entered by hand)
-    I->>I: three-way match (order, receipts, invoice; R 0,50 tolerance)
+    I->>I: three-way match (order, receipts and invoice, R 0,50 tolerance)
     Note over I: a mismatch is held for finance
     F->>I: release payment
     I-)A: PaymentReleased
     A-)B: RecordSpend (BudgetSpent)
+    opt every line paid or closed short
+        I-)A: PurchaseOrderSettled
+        A-)B: ReleaseBudget (the leftover)
+        A-)A: RequestCompleted
+    end
     I->>E: export payment (retried until the ERP accepts)
-    Note over I: every line paid or closed short
-    I-)A: PurchaseOrderSettled
-    A-)B: ReleaseBudget (the leftover)
-    A-)A: RequestCompleted
     opt cancel (Requests shows Cancelling)
         A-)P: CancelPurchaseOrder
         alt no goods received yet
-            P->>S: cancel order
             P-)A: PurchaseOrderCancelled
+            P->>S: cancel order
             A-)B: ReleaseBudget
             A-)A: RequestCancellationConfirmed
         else goods already received
