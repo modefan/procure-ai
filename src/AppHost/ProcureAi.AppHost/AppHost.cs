@@ -27,7 +27,9 @@ var simulatorApiKey = builder.AddParameter("simulator-api-key", secret: true);
 var supplierWebhookSecret = builder.AddParameter("supplier-webhook-secret", secret: true);
 
 // Postgres: custom image (pgvector + pgaudit), logical WAL for Debezium CDC.
-var postgres = builder.AddPostgres(ResourceNames.Postgres)
+const string PostgresVolumeTarget = "/var/lib/postgresql/data"; // the image's VOLUME: a named volume mounted exactly there replaces the anonymous one
+const string PostgresDataDirectory = PostgresVolumeTarget + "/pgdata";
+var postgres =builder.AddPostgres(ResourceNames.Postgres)
     .WithDockerfile("../../../infra/postgres")
     .WithEnvironment("DEBEZIUM_PASSWORD", debeziumPassword)
     .WithArgs(
@@ -36,10 +38,16 @@ var postgres = builder.AddPostgres(ResourceNames.Postgres)
         "-c", "pgaudit.log=ddl,role",
         "-c", $"shared_buffers={limits.Postgres.SharedBuffers}",
         "-c", $"work_mem={limits.Postgres.WorkMem}")
+    // PGDATA in a subfolder of the mount (as the image docs advise for mounted volumes): initdb needs an empty folder,
+    // and volumes made by earlier versions hold an empty "data" folder.
+    .WithEnvironment("PGDATA", PostgresDataDirectory)
     .WithContainerLimits(limits.Postgres);
 if (useDataVolumes)
 {
-    postgres.WithDataVolume();
+    // Not WithDataVolume(): Aspire 13.6 mounts that at /var/lib/postgresql (the Postgres 18 layout), but this pg17 image
+    // declares /var/lib/postgresql/data as a VOLUME, so the data went to an anonymous volume and every new Postgres container
+    // started empty (while Debezium's offsets survived and it refused to start). Same volume name as WithDataVolume().
+    postgres.WithVolume(VolumeNameGenerator.Generate(postgres, "data"), PostgresVolumeTarget);
 }
 // MongoDB: single-node replica set (needed for change streams / CDC). Aspire's WithReplicaSet generates the
 // key file, initiates the set and only reports the server healthy once it is PRIMARY.

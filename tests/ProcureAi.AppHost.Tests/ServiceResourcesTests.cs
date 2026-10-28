@@ -500,6 +500,38 @@ public sealed class ServiceResourcesTests
     }
 
     /// <summary>
+    /// Postgres's data directory (PGDATA) must really be on the named data volume. Aspire 13.6's <c>WithDataVolume()</c>
+    /// mounts it at <c>/var/lib/postgresql</c> (the Postgres 18 layout), but our pg17 image keeps PGDATA at
+    /// <c>/var/lib/postgresql/data</c>, which the image declares as a VOLUME: Docker put an anonymous volume there, so every
+    /// new Postgres container started with an empty database while Debezium's offsets survived, and Debezium failed to start.
+    /// The image's VOLUME counts as an anonymous mount unless a named volume is mounted exactly there.
+    /// </summary>
+    [Fact]
+    public async Task Postgres_data_directory_is_on_the_named_data_volume()
+    {
+        const string imageVolume = "/var/lib/postgresql/data"; // VOLUME of pgvector/pgvector:pg17 (and its PGDATA default)
+        await using var scope = await ModelScope.BuildAsync();
+        var postgres = scope.Model.Resources.OfType<ContainerResource>().Single(r => r.Name == "postgres");
+        var env = await EnvironmentOfAsync(postgres);
+        var pgdata = env.TryGetValue("PGDATA", out var value) ? value.ShouldBeOfType<string>() : imageVolume;
+
+        var mounts = postgres.Annotations.OfType<ContainerMountAnnotation>()
+            .Where(m => m.Type == ContainerMountType.Volume)
+            .Select(m => (m.Target, Name: m.Source))
+            .ToList();
+        if (!mounts.Any(m => m.Target == imageVolume))
+        {
+            mounts.Add((imageVolume, null));
+        }
+
+        var holder = mounts
+            .Where(m => pgdata == m.Target || pgdata.StartsWith(m.Target + "/", StringComparison.Ordinal))
+            .MaxBy(m => m.Target.Length);
+        holder.Name.ShouldNotBeNull($"PGDATA {pgdata} is on an anonymous volume, so the database is lost with the container");
+        holder.Name.ShouldEndWith("-postgres-data");
+    }
+
+    /// <summary>
     /// Debezium's offsets (the last WAL position read) must live exactly as long as the Postgres data they point into.
     /// The Postgres volume is scoped per AppHost (<c>{app}-{sha of the AppHost path}-postgres-data</c>), so every clone or
     /// worktree gets its own database. A fixed offset volume name (<c>debezium-requestsdb-data</c>) was shared by all of
