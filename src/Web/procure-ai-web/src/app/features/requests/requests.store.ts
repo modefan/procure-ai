@@ -9,6 +9,8 @@ import { Logger } from '../../core/logging/logger';
 import { withCache } from '../../core/state/with-cache';
 import { withRequestStatus } from '../../core/state/with-request-status';
 
+const STATUS_PARAM = { open: 'Open', closed: 'Closed' } as const;
+
 export type StatusFilter = 'all' | 'open' | 'closed';
 
 export interface RequestsState {
@@ -66,7 +68,7 @@ export const RequestsStore = signalStore(
               store.setLoading();
             }
             try {
-              const result = await api.listRequests({ page, pageSize, ...(mine ? { mine } : {}), ...(status === 'open' ? { status: 'Open' as const } : status === 'closed' ? { status: 'Closed' as const } : {}) });
+              const result = await api.listRequests({ page, pageSize, ...(mine ? { mine } : {}), ...(status !== 'all' ? { status: STATUS_PARAM[status] } : {}) });
               if (call !== latest || epoch !== store.cacheEpoch()) {
                 return;
               }

@@ -87,7 +87,7 @@ import { StatusBadge } from './status-badge';
               <tbody class="divide-y divide-slate-100">
                 @for (request of store.entities(); track request.id) {
                   <tr class="hover:bg-slate-50">
-                    <td class="px-4 py-3 font-medium whitespace-nowrap"><a [routerLink]="['/app/requests', request.id]" class="text-indigo-800 hover:underline">{{ request.number }}</a></td>
+                    <td class="px-4 py-3 font-medium whitespace-nowrap text-slate-900">{{ request.number }}</td>
                     <td class="truncate px-4 py-3 text-slate-800" [title]="request.title"><a [routerLink]="['/app/requests', request.id]" class="hover:underline">{{ request.title }}</a></td>
                     <td class="truncate px-4 py-3 whitespace-nowrap text-slate-700">{{ request.costCenterCode }}</td>
                     <td class="px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900">{{ request.totalInclVatDisplay }}</td>

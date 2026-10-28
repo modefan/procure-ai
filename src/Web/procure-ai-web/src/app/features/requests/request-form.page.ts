@@ -35,7 +35,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
       <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-900">{{ heading() }}</h1>
       <p class="mt-1 text-slate-600">Prices come from the supplier's catalog. Amounts include VAT unless marked.</p>
 
-      @if (isEdit() && store.isLoading()) {
+      @if (isEdit() && baseline() === null && !store.error() && !notEditable()) {
         <div class="card mt-6 space-y-4" role="status" aria-live="polite">
           <span class="sr-only">Loading the request</span>
           @for (row of skeletonRows; track row) {
@@ -124,7 +124,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
               } @else if (catalogError(); as message) {
                 <p role="alert" class="mt-3 text-sm text-red-800">{{ message }}</p>
               } @else {
-                <div class="mt-3 hidden grid-cols-[minmax(0,1fr)_6rem_8rem_8.5rem_2.5rem] gap-3 border-b border-slate-200 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 md:grid">
+                <div class="mt-3 hidden grid-cols-[minmax(0,1fr)_7.5rem_8rem_8.5rem_2.5rem] gap-3 border-b border-slate-200 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 md:grid">
                   <span>Item</span>
                   <span>Qty</span>
                   <span class="text-right whitespace-nowrap">Unit price</span>
@@ -134,7 +134,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
                 <ul class="divide-y divide-slate-100">
                   @for (line of requestForm.lines; track $index; let i = $index) {
                     <li
-                      class="grid grid-cols-[6rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-3 md:grid-cols-[minmax(0,1fr)_6rem_8rem_8.5rem_2.5rem]"
+                      class="grid grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-3 md:grid-cols-[minmax(0,1fr)_7.5rem_8rem_8.5rem_2.5rem]"
                       [attr.data-testid]="'line-' + i"
                     >
                       <div class="col-span-2 min-w-0 md:col-span-1">
@@ -158,7 +158,7 @@ const emptyModel = (): RequestFormModel => ({ title: '', supplierId: '', costCen
                         <input
                           type="number"
                           inputmode="numeric"
-                          class="field-input text-right tabular-nums"
+                          class="field-input text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
                           [attr.aria-label]="'Quantity, line ' + (i + 1)"
                           [formField]="line.quantity"
                           [attr.aria-invalid]="errorOf(line.quantity(), 'lines.' + i + '.quantity') ? 'true' : null"
@@ -356,7 +356,7 @@ export class RequestFormPage implements OnInit, HasUnsavedChanges {
 
   protected readonly savedMessage = signal('');
   /** The model as last loaded or saved; null until the form has its starting values. */
-  private readonly baseline = signal<string | null>(null);
+  protected readonly baseline = signal<string | null>(null);
   private readonly dirty = computed(() => this.baseline() !== null && JSON.stringify(this.model()) !== this.baseline());
   private previousSupplier = '';
 
@@ -464,8 +464,8 @@ export class RequestFormPage implements OnInit, HasUnsavedChanges {
     await submit(this.requestForm, async () => {
       const submitted = await this.store.submit(this.draft());
       if (!submitted) {
-        // The draft may have been saved before the submit failed.
-        if (this.store.request()) {
+        // The draft may have been saved before the submit failed; only then are the edits safe.
+        if (this.store.savedMatches(this.draft())) {
           this.markSaved();
         }
         return;

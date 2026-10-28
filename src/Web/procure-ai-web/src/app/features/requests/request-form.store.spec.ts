@@ -157,4 +157,30 @@ describe('RequestFormStore', () => {
     expect(store().error()).toBe('Not found');
     expect(store().request()).toBeNull();
   });
+
+  it('another operation while one runs is refused, not run in parallel; the same one shares the running call', async () => {
+    let finish!: (v: RequestDto) => void;
+    api.createRequest.mockReturnValueOnce(new Promise<RequestDto>((resolve) => (finish = resolve)));
+
+    const saving = store().saveDraft(draft);
+    const sameAgain = store().saveDraft(draft);
+    const submitting = store().submit(draft);
+
+    await expect(submitting).resolves.toBeNull();
+    expect(api.submitRequest).not.toHaveBeenCalled();
+    finish(dto());
+    await expect(saving).resolves.toMatchObject({ id: 'r1' });
+    await expect(sameAgain).resolves.toMatchObject({ id: 'r1' });
+    expect(api.createRequest).toHaveBeenCalledOnce();
+  });
+
+  it('savedMatches says whether the server holds exactly what the form holds', async () => {
+    expect(store().savedMatches(draft)).toBe(false); // nothing saved yet
+
+    await store().saveDraft(draft);
+
+    expect(store().savedMatches(draft)).toBe(true);
+    expect(store().savedMatches({ ...draft, title: 'Other' })).toBe(false);
+    expect(store().savedMatches({ ...draft, lines: [{ sku: 'L14', quantity: 4 }] })).toBe(false);
+  });
 });

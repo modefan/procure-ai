@@ -26,12 +26,12 @@ describe('RequestFormPage', () => {
   let checkBudget: ReturnType<typeof vi.fn>;
   let previewApproval: ReturnType<typeof vi.fn>;
 
-  async function setup(id: string | null = null, loaded: RequestDto | HttpErrorResponse = dto()) {
+  async function setup(id: string | null = null, loaded: RequestDto | HttpErrorResponse | Promise<RequestDto> = dto()) {
     api = {
       createRequest: vi.fn().mockResolvedValue(dto()),
       updateRequest: vi.fn().mockResolvedValue(dto({ version: 2 })),
       submitRequest: vi.fn().mockResolvedValue(dto({ status: 'Submitted', version: 3 })),
-      getRequest: loaded instanceof HttpErrorResponse ? vi.fn().mockRejectedValue(loaded) : vi.fn().mockResolvedValue(loaded),
+      getRequest: loaded instanceof HttpErrorResponse ? vi.fn().mockRejectedValue(loaded) : loaded instanceof Promise ? vi.fn().mockReturnValue(loaded) : vi.fn().mockResolvedValue(loaded),
     };
     checkBudget = vi.fn().mockResolvedValue({ available: 266400, fiscalYear: '2026', fits: true });
     previewApproval = vi.fn().mockResolvedValue({ possible: true, reason: null, steps: [{ stepNo: 1, level: 'Manager', approverNames: ['Maria'] }] });
@@ -229,5 +229,51 @@ describe('RequestFormPage', () => {
 
     expect(text(ctx.el.querySelector('[role="alert"]'))).toContain('Request not found.');
     expect(ctx.el.querySelector('form')).toBeNull();
+  });
+
+  it('edit_fails_with_422_the_guard_still_asks: a refused save or submit of an edit keeps the unsaved warning', async () => {
+    const ctx = await setup('r1');
+    await vi.waitFor(() => {
+      ctx.fixture.detectChanges();
+      expect(field(ctx.el, 'title').value).toBe('Laptops');
+    });
+    set(ctx.el.querySelector('input[aria-label="Quantity, line 1"]') as HTMLInputElement, '4');
+    await settle(ctx.fixture);
+    api.updateRequest.mockRejectedValue(new HttpErrorResponse({ status: 422, error: { title: 'x', detail: 'Not allowed.' } }));
+
+    click(ctx.el.querySelector('[data-testid="save-draft"] button'));
+    await settle(ctx.fixture);
+    expect(ctx.page.hasUnsavedChanges()).toBe(true);
+
+    click(ctx.el.querySelector('[data-testid="submit"] button'));
+    await settle(ctx.fixture);
+    expect(ctx.page.hasUnsavedChanges()).toBe(true);
+    expect(api.submitRequest).not.toHaveBeenCalled();
+  });
+
+  it('a new draft that saved but could not be submitted has nothing left to lose', async () => {
+    const ctx = await setup();
+    await fillValid(ctx);
+    api.submitRequest.mockRejectedValue(new HttpErrorResponse({ status: 503, error: { title: 'Busy' } }));
+
+    click(ctx.el.querySelector('[data-testid="submit"] button'));
+    await settle(ctx.fixture);
+
+    expect(api.createRequest).toHaveBeenCalledOnce();
+    expect(ctx.page.hasUnsavedChanges()).toBe(false);
+  });
+
+  it('the edit page shows a loading state, not an empty form, until the request is loaded', async () => {
+    let finish!: (r: RequestDto) => void;
+    const ctx = await setup('r1', new Promise<RequestDto>((resolve) => (finish = resolve)));
+
+    expect(ctx.el.querySelector('form')).toBeNull();
+    expect(text(ctx.el.querySelector('[role="status"]'))).toContain('Loading the request');
+
+    finish(dto());
+    await vi.waitFor(() => {
+      ctx.fixture.detectChanges();
+      expect(field(ctx.el, 'title')?.value).toBe('Laptops');
+    });
   });
 });

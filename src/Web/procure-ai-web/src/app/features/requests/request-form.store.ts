@@ -51,7 +51,7 @@ export const RequestFormStore = signalStore(
     /** What the server holds for title and lines. */
     let saved: string | null = null;
     const keys = new Map<string, string>();
-    let running: Promise<RequestDto | null> | null = null;
+    let running: { operation: 'saving' | 'submitting'; call: Promise<RequestDto | null> } | null = null;
 
     /** The key for an operation on this exact data: repeated until the data changes. */
     const keyFor = (operation: string, data: string): string => {
@@ -111,7 +111,8 @@ export const RequestFormStore = signalStore(
 
     const exclusive = (busy: 'saving' | 'submitting', work: () => Promise<RequestDto>): Promise<RequestDto | null> => {
       if (running) {
-        return running;
+        // The same operation again (a double click) shares the running call; another operation is refused (null), never run in parallel.
+        return running.operation === busy ? running.call : Promise.resolve(null);
       }
       patchState(store, { busy, generalError: null, fieldErrors: {} });
       const call: Promise<RequestDto | null> = work()
@@ -120,7 +121,7 @@ export const RequestFormStore = signalStore(
           running = null;
           patchState(store, { busy: 'idle' });
         });
-      running = call;
+      running = { operation: busy, call };
       return call;
     };
 
@@ -152,6 +153,11 @@ export const RequestFormStore = signalStore(
           patchState(store, { request: submitted });
           return submitted;
         }),
+
+      /** True when the server holds exactly this title and these lines (saved or loaded), so nothing the user typed is lost. */
+      savedMatches(draft: RequestDraft): boolean {
+        return store.request() !== null && saved === fingerprint(draft.title, draft.lines);
+      },
 
       clearErrors(): void {
         if (store.generalError() !== null || Object.keys(store.fieldErrors()).length > 0) {
