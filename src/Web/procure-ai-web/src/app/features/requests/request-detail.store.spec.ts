@@ -12,7 +12,7 @@ import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { chainDto, eventDto, invoiceDto, orderDto, requestDto, stepDto } from './request-detail.testing';
-import { RequestDetailStore } from './request-detail.store';
+import { AUDIT_LAG_MS, RequestDetailStore } from './request-detail.store';
 
 describe('RequestDetailStore', () => {
   let api: Record<string, ReturnType<typeof vi.fn>>;
@@ -105,6 +105,14 @@ describe('RequestDetailStore', () => {
     expect(store.request()).toBeNull();
   });
 
+  it('a draft has no history: 404 means an empty trail, not a failure', async () => {
+    const store = setup();
+    api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
+    await store.init('r1', null);
+    expect(store.history()).toEqual([]);
+    expect(store.partialFailures()).toEqual([]);
+  });
+
   it('a failing history leaves the page usable and says what is missing', async () => {
     const store = setup();
     api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 500 }));
@@ -134,6 +142,28 @@ describe('RequestDetailStore', () => {
     expect(store.isLoading()).toBe(false); // background: the page does not flash a loading state
     await vi.waitFor(() => expect(store.request()?.status).toBe('Completed'));
     await vi.waitFor(() => expect(api['getRequest'].mock.calls.length).toBeLessThanOrEqual(2));
+    await live.stop();
+  });
+
+  it('a push is followed by one more quiet load, because Audit stores the events a moment later', async () => {
+    const store = setup();
+    const live = TestBed.inject(LiveConnection);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    await store.init('r1', null);
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    api['getRequestHistory'].mockClear();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fake.hubs[0].emit('EntityChanged', { entity: 'request', id: 'r1', requestId: 'r1', eventType: 'x', occurredAt: 't' });
+      await vi.advanceTimersByTimeAsync(0);
+      const afterPush = api['getRequestHistory'].mock.calls.length;
+      expect(afterPush).toBe(1);
+      await vi.advanceTimersByTimeAsync(AUDIT_LAG_MS + 10);
+      expect(api['getRequestHistory'].mock.calls.length).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
     await live.stop();
   });
 

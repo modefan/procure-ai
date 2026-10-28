@@ -38,6 +38,11 @@ interface DetailState {
 const EMPTY: DetailState = { requestId: null, request: null, chain: null, order: null, invoices: [], history: [], partial: [], busy: false, generalError: null };
 /** Statuses a request can still be cancelled from (the server decides about the rest). */
 const CANCELLABLE = ['Draft', 'Submitted', 'Approved', 'Ordered'];
+/**
+ * The audit trail is written by another service from the same events, a moment after the push that told us about them.
+ * So a push is followed by one more quiet load after this long.
+ */
+export const AUDIT_LAG_MS = 2000;
 const isNotFound = (error: unknown) => error instanceof HttpErrorResponse && error.status === 404;
 
 /**
@@ -100,6 +105,7 @@ export const RequestDetailStore = signalStore(
     let again = false;
     let seed: RequestDto | null = null;
     let cancelling: Promise<void> | null = null;
+    let trailing: ReturnType<typeof setTimeout> | null = null;
     const cancelKeys = new Map<string, string>();
 
     const loadAll = async (background: boolean): Promise<void> => {
@@ -121,7 +127,7 @@ export const RequestDetailStore = signalStore(
       const invoicesCall: Promise<InvoiceDto[]> = orderCall.then(async (order) =>
         order && store.canSeeInvoices() ? (await invoicing.listInvoices({ orderId: order.id, page: 1, pageSize: 50 })).items : [],
       );
-      const historyCall = audit.getRequestHistory({ requestId: id });
+      const historyCall: Promise<BusinessEventDto[]> = audit.getRequestHistory({ requestId: id }).catch((e: unknown) => (isNotFound(e) ? [] : Promise.reject(e)));
 
       const [request, chain, order, invoices, history] = await Promise.allSettled([requestCall, chainCall, orderCall, invoicesCall, historyCall]);
       if (mine !== generation || store.requestId() !== id) {
@@ -242,6 +248,10 @@ export const RequestDetailStore = signalStore(
       /** Logout: forget everything and drop answers still on their way. */
       clearCache(): void {
         generation++;
+        if (trailing) {
+          clearTimeout(trailing);
+          trailing = null;
+        }
         running = null;
         seed = null;
         patchState(store, EMPTY);
@@ -252,6 +262,21 @@ export const RequestDetailStore = signalStore(
         const id = store.requestId();
         if (id && (change.requestId === id || change.id === id)) {
           void reload(true);
+          if (trailing) {
+            clearTimeout(trailing);
+          }
+          trailing = setTimeout(() => {
+            trailing = null;
+            void reload(true);
+          }, AUDIT_LAG_MS);
+        }
+      },
+
+      /** Stops the pending trailing load (the page is going away). */
+      stop(): void {
+        if (trailing) {
+          clearTimeout(trailing);
+          trailing = null;
         }
       },
     };
@@ -269,6 +294,7 @@ export const RequestDetailStore = signalStore(
       },
       onDestroy() {
         release.forEach((off) => off());
+        store.stop();
       },
     };
   }),

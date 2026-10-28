@@ -98,15 +98,18 @@ import { WorkflowTimeline } from './workflow-timeline';
             </tbody>
             <tfoot class="text-sm">
               <tr class="border-t border-slate-200">
-                <td class="pt-3 text-slate-600" colspan="3">Total excl. VAT</td>
+                <td class="pt-3 text-slate-600" colspan="2">Total excl. VAT</td>
+                <td class="hidden sm:table-cell"></td>
                 <td class="pt-3 text-right whitespace-nowrap tabular-nums">{{ request.totalExclVatDisplay }}</td>
               </tr>
               <tr>
-                <td class="text-slate-600" colspan="3">VAT</td>
+                <td class="text-slate-600" colspan="2">VAT</td>
+                <td class="hidden sm:table-cell"></td>
                 <td class="text-right whitespace-nowrap tabular-nums">{{ request.vatDisplay }}</td>
               </tr>
               <tr class="font-semibold">
-                <td colspan="3">Total incl. VAT</td>
+                <td colspan="2">Total incl. VAT</td>
+                <td class="hidden sm:table-cell"></td>
                 <td class="text-right whitespace-nowrap tabular-nums">{{ request.totalInclVatDisplay }}</td>
               </tr>
             </tfoot>
