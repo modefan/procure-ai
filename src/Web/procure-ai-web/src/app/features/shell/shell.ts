@@ -63,7 +63,7 @@ interface NavLink {
             <app-live-indicator />
             <app-bell-menu />
             <div class="relative">
-              <button ngMenuTrigger #trigger="ngMenuTrigger" [menu]="userMenu" type="button" data-testid="user-menu" class="btn-ghost max-w-64 !py-1">
+              <button ngMenuTrigger #trigger="ngMenuTrigger" [menu]="userMenu" type="button" data-testid="user-menu" class="btn-ghost max-w-40 !px-2 !py-1 sm:max-w-64 sm:!px-4">
                 <span class="min-w-0 text-left leading-tight">
                   <span class="block truncate">{{ auth.user()?.name ?? 'Account' }}</span>
                   <span class="block truncate text-xs font-normal text-slate-500">{{ roleAndTenant() }}</span>

@@ -31,7 +31,7 @@ import { NotificationsStore } from '../../core/live/notifications.store';
         #bellMenu="ngMenu"
         (itemSelected)="onSelect($event)"
         [class.hidden]="!trigger.expanded()"
-        class="absolute right-0 z-40 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+        class="z-40 mt-1 rounded-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-36 sm:absolute sm:right-0 sm:w-80 border border-slate-200 bg-white py-1 shadow-lg"
         aria-label="Notifications"
       >
         <ng-template ngMenuContent>

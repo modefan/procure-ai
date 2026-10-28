@@ -8,10 +8,11 @@ import { LiveConnection } from '../../core/live/live-connection';
     <span
       data-testid="live-indicator"
       role="status"
+      [attr.title]="label()"
       class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium text-slate-600"
     >
       <span aria-hidden="true" class="size-2 rounded-full" [class]="dotClass()"></span>
-      {{ label() }}
+      <span class="max-sm:sr-only">{{ label() }}</span>
     </span>
   `,
 })
