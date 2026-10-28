@@ -127,17 +127,22 @@ jobs:
       - run: npx ng test --watch=false
         if: false # TESTS-OFF
 
-      - name: Regenerate OpenAPI document and API client
+      # Every Api project writes its openapi/<name>-v1.json when built; the list is discovered, so a new service is covered at once.
+      - name: Regenerate OpenAPI documents and API client
         run: |
-          for service in Requests Access Budgets Approvals Audit Suppliers Purchasing Invoicing; do
-            dotnet build "../../Services/$service/ProcureAi.$service.Api" -c Release -m:4
+          for api in ../../Services/*/ProcureAi.*.Api; do
+            dotnet build "$api" -c Release -m:4
           done
           npm run generate:api
 
       - name: Fail on client drift
         working-directory: .
         run: |
-          paths="src/Services/Requests/ProcureAi.Requests.Api/openapi src/Services/Access/ProcureAi.Access.Api/openapi src/Services/Budgets/ProcureAi.Budgets.Api/openapi src/Services/Approvals/ProcureAi.Approvals.Api/openapi src/Services/Audit/ProcureAi.Audit.Api/openapi src/Services/Suppliers/ProcureAi.Suppliers.Api/openapi src/Services/Purchasing/ProcureAi.Purchasing.Api/openapi src/Services/Invoicing/ProcureAi.Invoicing.Api/openapi src/Web/procure-ai-web/src/app/api"
+          paths="$(find src/Services -type d -path '*.Api/openapi' | sort | xargs) src/Web/procure-ai-web/src/app/api"
+          echo "Checking: $paths"
+          # Guard against the discovery silently finding nothing (all eight services have a document).
+          count="$(find src/Services -path '*.Api/openapi/*-v1.json' | wc -l)"
+          if [ "$count" -lt 8 ]; then echo "::error::Expected at least 8 OpenAPI documents, found $count."; exit 1; fi
           # git status also lists new untracked files, which git diff would miss.
           drift="$(git status --porcelain -- $paths)"
           if [ -n "$drift" ]; then
@@ -197,7 +202,7 @@ jobs:
         run: ./tests/ProcureAi.EndToEndTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       # The whole system through the services' own APIs (starts the AppHost); one after the other with Playwright, never together.
-      - name: System tests (all five services)
+      - name: System tests (whole system through the AppHost)
         if: false # TESTS-OFF
         run: dotnet run --project tests/ProcureAi.SystemTests -c Release
 
