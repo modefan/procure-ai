@@ -229,6 +229,11 @@ before this repo goes public. CI generates random, per-run secrets; nothing sens
 - **Never-give-up supplier delivery with a circuit breaker.** A failed send (timeout, 5xx, open breaker) is recorded on
   the order and rescheduled with backoff until the supplier answers or the order is cancelled; the breaker stops
   hammering a down supplier. The order shows "Supplier unavailable, retrying" instead of failing.
+  - *Known limit:* once the supplier has accepted the order, its confirmation arrives by webhook only. If that webhook is
+    lost (the simulator gives up after its first try and 3 retries, about 36 s, for example while Purchasing restarts), the
+    order stays "Sent to supplier": nothing polls the supplier or re-sends after a timeout. Nothing is stuck for good, because
+    the requester can still cancel the request. A production system would re-send after a while (the supplier deduplicates
+    by our order ID) or poll the supplier's order status.
 - **Signed webhooks with a replay inbox.** Webhooks carry an HMAC-SHA256 signature over a timestamp and the body (5 minute
   tolerance, constant-time compare), and each event ID is stored in the same transaction as its effect, so forged,
   stale and replayed calls change nothing.
