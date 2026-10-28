@@ -11,7 +11,7 @@ import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { RequestFormPage } from './request-form.page';
 
 const dto = (o: Partial<RequestDto> = {}): RequestDto => ({
-  id: 'r1', number: 'PR-1001', title: 'Laptops', status: 'Draft', costCenterCode: 'IT-200', supplierId: 'CH',
+  id: 'r1', number: 'PR-1001', title: 'Laptops', status: 'Draft', costCenterCode: 'IT-200', supplierId: 'CH', requesterId: 'tom',
   lines: [{ lineNo: 1, sku: 'L14', description: 'Laptop 14"', quantity: 3, unitPriceExclVat: 25200, unitPriceExclVatDisplay: 'R 25 200,00', totalExclVat: 75600, totalExclVatDisplay: 'R 75 600,00' }],
   submittedAt: null, approvedAt: null, rejectedAt: null, rejectionReason: null, cancelledAt: null,
   cancellationReason: null, orderId: null, orderNumber: null, spentInclVat: null, spentInclVatDisplay: null, cancellationRefusedReason: null,

@@ -29,7 +29,6 @@ public static partial class RequestMapper
     [MapperIgnoreSource(nameof(PurchaseRequest.CanRefuseCancellation))]
     [MapperIgnoreSource(nameof(PurchaseRequest.DomainEvents))]
     [MapperIgnoreSource(nameof(PurchaseRequest.TenantId))]
-    [MapperIgnoreSource(nameof(PurchaseRequest.RequesterId))]
     [MapperIgnoreSource(nameof(PurchaseRequest.CancelledBy))]
     public static partial RequestDto ToDto(PurchaseRequest request);
 

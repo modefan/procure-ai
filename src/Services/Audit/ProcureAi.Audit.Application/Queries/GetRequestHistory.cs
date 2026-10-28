@@ -29,7 +29,9 @@ public static class GetRequestHistoryHandler
 
         var history = BusinessEventSummaries.Read(events);
         var names = await DisplayNamesAsync(history.UserIds, tenant, access, options.Value.DisplayNameTimeout, logger, cancellationToken);
-        return [.. history.Events.Select(e => new BusinessEventDto(e.Stored.Type, e.Stored.UserId, e.Stored.OccurredAt, history.Summarize(e, names)))];
+        return [.. history.Events.Select(e => new BusinessEventDto(
+            e.Stored.Type, e.Stored.UserId, e.Stored.OccurredAt, history.Summarize(e, names), history.StepNoOf(e),
+            names.GetValueOrDefault(e.Stored.UserId)))];
     }
 
     internal static async Task<IReadOnlyDictionary<string, string>> DisplayNamesAsync(

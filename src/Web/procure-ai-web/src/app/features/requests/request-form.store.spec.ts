@@ -6,7 +6,7 @@ import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { RequestFormStore } from './request-form.store';
 
 const dto = (o: Partial<RequestDto> = {}): RequestDto => ({
-  id: 'r1', number: 'PR-1001', title: 'Laptops', status: 'Draft', costCenterCode: 'IT-200', supplierId: 'CH',
+  id: 'r1', number: 'PR-1001', title: 'Laptops', status: 'Draft', costCenterCode: 'IT-200', supplierId: 'CH', requesterId: 'tom',
   lines: [], submittedAt: null, approvedAt: null, rejectedAt: null, rejectionReason: null, cancelledAt: null,
   cancellationReason: null, orderId: null, orderNumber: null, spentInclVat: null, spentInclVatDisplay: null, cancellationRefusedReason: null,
   totalExclVat: 75600, totalExclVatDisplay: 'R 75 600,00', vat: 11340, vatDisplay: 'R 11 340,00', totalInclVat: 86940, totalInclVatDisplay: 'R 86 940,00',

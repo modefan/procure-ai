@@ -4,7 +4,7 @@ import { chainDto, eventDto, invoiceDto, orderDto, requestDto, stepDto } from '.
 const base = (o: Partial<TimelineInput> = {}): TimelineInput => ({
   request: requestDto(), chain: null, order: null, invoices: [], history: [], canSeeOrder: true, canSeeInvoices: true, ...o,
 });
-const submitted = eventDto('RequestSubmitted', 'Submitted by Tom Mokoena: 3 laptops (R 86 940,00 incl. VAT, IT-200)');
+const submitted = eventDto('RequestSubmitted', 'Submitted by Tom Mokoena: 3 laptops (R 86 940,00 incl. VAT, IT-200)', undefined, 'tom', { actorName: 'Tom Mokoena' });
 const reserved = eventDto('BudgetReserved', 'R 86 940,00 reserved on IT-200 (2026)', '2026-10-28T09:03:00Z', 'system');
 const outline = (input: TimelineInput) => buildTimeline(input).map((s) => `${s.state}:${s.title}`);
 const step = (input: TimelineInput, title: string) => buildTimeline(input).find((s) => s.title === title)!;
@@ -20,12 +20,13 @@ describe('buildTimeline', () => {
     const input = base({ history: [submitted] });
     expect(outline(input).slice(0, 3)).toEqual(['done:Submitted', 'active:Reserving budget', 'pending:Approval']);
     expect(step(input, 'Submitted').detail).toBe('Submitted by Tom Mokoena');
+    expect(step(base({ history: [eventDto('RequestSubmitted', 'whatever', undefined, 'tom')] }), 'Submitted').detail).toBeNull();
   });
 
   it('timeline_for_each_status: waiting for the manager, with reminder and escalation note', () => {
     const input = base({
       chain: chainDto('AwaitingApproval', [stepDto()]),
-      history: [submitted, reserved, eventDto('ApprovalRequested', 'x'), eventDto('ApprovalReminderDue', 'Reminder 1 sent to Maria (step 1, Manager)', '2026-10-28T12:00:00Z')],
+      history: [submitted, reserved, eventDto('ApprovalRequested', 'x'), eventDto('ApprovalReminderDue', 'Reminder 1 sent to Maria (step 1, Manager)', '2026-10-28T12:00:00Z', 'system', { stepNo: 1 })],
     });
     expect(outline(input)).toEqual([
       'done:Submitted', 'done:Budget reserved', 'active:Manager approval', 'pending:Purchase order', 'pending:Delivery', 'pending:Invoice, match and payment',
@@ -49,11 +50,24 @@ describe('buildTimeline', () => {
     const input = base({
       request: requestDto({ status: 'Approved' }),
       chain: chainDto('Approved', [stepDto({ status: 'Approved' })]),
-      history: [submitted, reserved, eventDto('ApprovalStepApproved', 'Approved by Maria Naidoo (step 1, Manager)', '2026-10-28T09:40:00Z', 'maria')],
+      history: [submitted, reserved, eventDto('ApprovalStepApproved', 'wording is not read any more', '2026-10-28T09:40:00Z', 'maria', { stepNo: 1, actorName: 'Maria Naidoo' })],
     });
     expect(outline(input).slice(2, 4)).toEqual(['done:Manager approval', 'active:Purchase order']);
     expect(step(input, 'Manager approval').detail).toBe('Approved by Maria Naidoo');
     expect(step(input, 'Manager approval').at).toBe('2026-10-28T09:40:00Z');
+  });
+
+  it('reads step numbers and names from the structured fields, never from the summary wording', () => {
+    const input = base({
+      chain: chainDto('AwaitingApproval', [stepDto({ status: 'Approved' }), stepDto({ id: 's2', stepNo: 2, level: 'Finance', dueAt: null })]),
+      // Summaries deliberately say something else: only stepNo and actorName count.
+      history: [submitted, reserved, eventDto('ApprovalStepApproved', 'Step 2 approved by Somebody Else', '2026-10-28T09:40:00Z', 'maria', { stepNo: 1, actorName: 'Maria Naidoo' })],
+    });
+    expect(step(input, 'Manager approval').detail).toBe('Approved by Maria Naidoo');
+    expect(step(input, 'Finance approval').detail).toBe('Waiting for approval');
+    // An approval without a name (Access was down) still says it was approved.
+    const unnamed = base({ chain: chainDto('AwaitingApproval', [stepDto({ status: 'Approved' })]), history: [submitted, reserved, eventDto('ApprovalStepApproved', 'x', undefined, 'maria', { stepNo: 1 })] });
+    expect(step(unnamed, 'Manager approval').detail).toBe('Approved');
   });
 
   it('timeline_for_each_status: ordered, supplier retrying', () => {

@@ -7,7 +7,7 @@ import { RequestsPage } from './requests.page';
 import { RequestsStore } from './requests.store';
 
 const dto = (n: number, o: Partial<RequestDto> = {}): RequestDto => ({
-  id: `id-${n}`, number: `PR-${1000 + n}`, title: `Request ${n}`, status: 'Draft', costCenterCode: 'CC-100', supplierId: 's',
+  id: `id-${n}`, number: `PR-${1000 + n}`, title: `Request ${n}`, status: 'Draft', costCenterCode: 'CC-100', supplierId: 's', requesterId: 'tom',
   lines: [], submittedAt: null, approvedAt: null, rejectedAt: null, rejectionReason: null, cancelledAt: null,
   cancellationReason: null, orderId: null, orderNumber: null, spentInclVat: null, spentInclVatDisplay: null, cancellationRefusedReason: null, totalExclVat: 1, totalExclVatDisplay: 'R 1,00', vat: 0, vatDisplay: 'R 0,00',
   totalInclVat: 1, totalInclVatDisplay: 'R 9 999 999,99', version: 1, ...o,

@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClient, provideHttpClient, withInterceptors, withXsrfConfiguration } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpErrorResponse, provideHttpClient, withInterceptors, withXsrfConfiguration } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -8,7 +8,7 @@ import { SessionExpired } from '../auth/session-expired';
 import { AppConfigService } from '../config/app-config';
 import { credentialsInterceptor } from './credentials.interceptor';
 import { correlationInterceptor } from './correlation.interceptor';
-import { errorsInterceptor } from './errors.interceptor';
+import { errorsInterceptor, SKIP_FORBIDDEN_REDIRECT } from './errors.interceptor';
 
 describe('http interceptors', () => {
   let http: HttpClient;
@@ -92,6 +92,18 @@ describe('http interceptors', () => {
     await fail(firstValueFrom(http.get('/api/v1/requests')), '/api/v1/requests', 403);
 
     expect(navigate).toHaveBeenCalledWith('/forbidden');
+  });
+
+  it('a call marked SKIP_FORBIDDEN_REDIRECT keeps the page on a 403 and still fails for the caller', async () => {
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const context = new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
+
+    const call = firstValueFrom(http.get('/api/v1/purchasing/orders/1', { context }));
+    const settled = call.then(() => 'ok', (error: HttpErrorResponse) => error.status);
+    backend.expectOne('/api/v1/purchasing/orders/1').flush(null, { status: 403, statusText: 'x' });
+
+    expect(await settled).toBe(403);
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('401 while signed in opens the session-expired dialog', async () => {

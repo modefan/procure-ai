@@ -44,11 +44,6 @@ export function formatWhen(iso: string): string {
   return new Intl.DateTimeFormat('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 }
 
-const stepNoOf = (summary: string): number | null => {
-  const match = /\(step (\d+),/.exec(summary);
-  return match ? Number(match[1]) : null;
-};
-
 /** The workflow of one request, from what the services answered. Pure: the same input always gives the same steps. */
 export function buildTimeline(input: TimelineInput): TimelineStep[] {
   const { request, chain, order, invoices, canSeeOrder, canSeeInvoices } = input;
@@ -62,8 +57,8 @@ export function buildTimeline(input: TimelineInput): TimelineStep[] {
   // 1. Submitted
   const submittedEvent = last('RequestSubmitted');
   if (request.submittedAt || submittedEvent) {
-    const who = submittedEvent ? /^(Submitted by [^:]+)/.exec(submittedEvent.summary)?.[1] : null;
-    add('submitted', 'done', 'Submitted', who ?? null, request.submittedAt ?? submittedEvent!.occurredAt);
+    const who = submittedEvent?.actorName;
+    add('submitted', 'done', 'Submitted', who ? `Submitted by ${who}` : null, request.submittedAt ?? submittedEvent!.occurredAt);
   } else {
     add('submitted', 'pending', 'Submitted', 'Not submitted yet');
   }
@@ -127,7 +122,8 @@ function approvalSteps(chain: ApprovalChainDto, status: string, events: Business
   // The chain is over for a cancelled or rejected request: its cancelled steps were never "merged".
   const ended = ['Cancelled', 'Rejected', 'Cancelling'].includes(chain.state) || status === 'Cancelled' || status === 'Rejected';
   const open = steps.find((s) => s.status === 'Pending');
-  const forStep = (type: string, step: ApprovalStepDto) => events.filter((e) => e.type === type && stepNoOf(e.summary) === step.stepNo).at(-1);
+  // Audit says which step an approval event is about (`stepNo`) and who acted (`actorName`); no sentence is read here.
+  const forStep = (type: string, step: ApprovalStepDto) => events.filter((e) => e.type === type && e.stepNo === step.stepNo).at(-1);
 
   steps.forEach((step, index) => {
     const title = `${levelLabel(step.level)} approval`;
@@ -135,7 +131,7 @@ function approvalSteps(chain: ApprovalChainDto, status: string, events: Business
     switch (step.status) {
       case 'Approved': {
         const approved = forStep('ApprovalStepApproved', step);
-        add(key, 'done', title, approved ? approved.summary.replace(/\s*\(step.*$/, '') : null, approved?.occurredAt ?? null);
+        add(key, 'done', title, approved ? (approved.actorName ? `Approved by ${approved.actorName}` : 'Approved') : null, approved?.occurredAt ?? null);
         break;
       }
       case 'Pending': {
@@ -162,7 +158,8 @@ function approvalSteps(chain: ApprovalChainDto, status: string, events: Business
         add(key, 'failed', title, 'Rejected');
         break;
       default: {
-        // Cancelled
+        // Cancelled. The chain DTO has no "merged" flag, so a Cancelled step in a chain that is still running is a step an
+        // escalated step took over (plan 02 ruling 26: a merged step is stored as Cancelled); the step that covers it is derived below.
         if (ended) {
           add(key, 'pending', title, 'Did not take place');
           break;

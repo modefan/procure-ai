@@ -7,7 +7,7 @@ import { RequestDto } from '../../api/requests/models/request-dto';
 
 /** Fixtures for the request detail specs. */
 export const requestDto = (o: Partial<RequestDto> = {}): RequestDto => ({
-  id: 'r1', number: 'PR-1043', title: '3 laptops for new hires', status: 'Submitted', costCenterCode: 'IT-200', supplierId: 'CH',
+  id: 'r1', number: 'PR-1043', title: '3 laptops for new hires', status: 'Submitted', costCenterCode: 'IT-200', supplierId: 'CH', requesterId: 'tom',
   lines: [{ lineNo: 1, sku: 'L14', description: 'Laptop 14"', quantity: 3, unitPriceExclVat: 25200, unitPriceExclVatDisplay: 'R 25 200,00', totalExclVat: 75600, totalExclVatDisplay: 'R 75 600,00' }],
   submittedAt: '2026-10-28T09:02:00Z', approvedAt: null, rejectedAt: null, rejectionReason: null, cancelledAt: null,
   cancellationReason: null, orderId: null, orderNumber: null, spentInclVat: null, spentInclVatDisplay: null, cancellationRefusedReason: null,
@@ -22,7 +22,9 @@ export const stepDto = (o: Partial<ApprovalStepDto> = {}): ApprovalStepDto => ({
 
 export const chainDto = (state: string, steps: ApprovalStepDto[]): ApprovalChainDto => ({ requestId: 'r1', state, steps });
 
-export const eventDto = (type: string, summary: string, at = '2026-10-28T09:02:00Z', userId = 'tom'): BusinessEventDto => ({ type, summary, occurredAt: at, userId });
+export const eventDto = (type: string, summary: string, at = '2026-10-28T09:02:00Z', userId = 'tom', extra: Partial<BusinessEventDto> = {}): BusinessEventDto => ({
+  type, summary, occurredAt: at, userId, ...extra,
+});
 
 export const orderDto = (o: Partial<PurchaseOrderDto> = {}): PurchaseOrderDto => ({
   id: 'o1', number: 'PO-881', requestId: 'r1', requestNumber: 'PR-1043', requesterId: 'tom', costCenterCode: 'IT-200', supplierId: 'CH', status: 'Confirmed',

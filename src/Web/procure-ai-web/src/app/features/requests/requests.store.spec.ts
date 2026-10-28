@@ -15,6 +15,7 @@ function dto(n: number, overrides: Partial<RequestDto> = {}): RequestDto {
     status: 'Draft',
     costCenterCode: 'CC-100',
     supplierId: 's1',
+    requesterId: 'tom',
     lines: [],
     submittedAt: null,
     approvedAt: null,

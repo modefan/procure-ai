@@ -16,6 +16,7 @@ export interface RequestDto {
   orderNumber: (string | null);
   rejectedAt: (string | null);
   rejectionReason: (string | null);
+  requesterId: string;
   spentInclVat: (number | null);
   spentInclVatDisplay: (string | null);
   status: RequestStatus;

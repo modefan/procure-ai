@@ -401,6 +401,19 @@
           },
           "summary": {
             "type": "string"
+          },
+          "stepNo": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "actorName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

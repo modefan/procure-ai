@@ -41,6 +41,16 @@ public sealed class BusinessEventSummaries
     public static BusinessEventSummaries Read(IEnumerable<BusinessEvent> stored) =>
         new([.. stored.Select(e => new ReadEvent(e, Deserialize(e)))]);
 
+    /// <summary>The approval step number an approval event is about; null for every other event.</summary>
+    public int? StepNoOf(ReadEvent e) => e.Contract switch
+    {
+        ApprovalRequested r => r.StepNo,
+        ApprovalStepApproved a => _steps.TryGetValue(a.StepId, out var step) ? step.StepNo : null,
+        ApprovalReminderDue r => _steps.TryGetValue(r.StepId, out var step) ? step.StepNo : null,
+        ApprovalAlertRaised a => _steps.TryGetValue(a.StepId, out var step) ? step.StepNo : null,
+        _ => null,
+    };
+
     public string Summarize(ReadEvent e, IReadOnlyDictionary<string, string> names)
     {
         string Name(string? id) => id is null || id == SystemCaller.Id ? "the system" : names.GetValueOrDefault(id, id);

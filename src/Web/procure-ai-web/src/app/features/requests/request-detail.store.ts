@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { ApprovalChainDto } from '../../api/approvals/models/approval-chain-dto';
@@ -18,6 +18,7 @@ import { Logger } from '../../core/logging/logger';
 import { CacheRegistry } from '../../core/state/cache-registry';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
+import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { problemOf } from './problem-fields';
 import { buildTimeline } from './workflow-timeline';
 
@@ -43,6 +44,8 @@ const CANCELLABLE = ['Draft', 'Submitted', 'Approved', 'Ordered'];
  * So a push is followed by one more quiet load after this long.
  */
 export const AUDIT_LAG_MS = 2000;
+/** Calls whose 403 must not take the page away: the user may simply not be allowed to read that part. */
+const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
 const isNotFound = (error: unknown) => error instanceof HttpErrorResponse && error.status === 404;
 
 /**
@@ -60,13 +63,13 @@ export const RequestDetailStore = signalStore(
     const auth = inject(AuthStore);
     const canSeeOrder = computed(() => auth.hasPermission('orders.read'));
     const canSeeInvoices = computed(() => canSeeOrder() && auth.hasPermission('invoices.read'));
-    /** Who raised the request: the approval chain and the history know; a draft has neither (the server then decides). */
-    const ownerId = computed(() => store.chain()?.steps[0]?.requesterId ?? store.history().find((e) => e.type === 'RequestSubmitted')?.userId ?? null);
-    const mine = computed(() => ownerId() === null || ownerId() === auth.user()?.userId);
+    /** Only the requester may edit or cancel; the server checks too (403). */
+    const mine = computed(() => store.request() !== null && store.request()!.requesterId === auth.user()?.userId);
     return {
       canSeeOrder,
       canSeeInvoices,
-      ownerId,
+      /** "you", the requester's name when Audit knows it (their submit event), else null (a draft has none). */
+      requestedBy: computed(() => (mine() ? 'you' : (store.history().find((e) => e.type === 'RequestSubmitted')?.actorName ?? null))),
       partialFailures: computed(() => store.partial()),
       canEdit: computed(() => store.request()?.status === 'Draft' && auth.hasPermission('requests.create') && mine()),
       canCancel: computed(() => {
@@ -120,14 +123,14 @@ export const RequestDetailStore = signalStore(
       const fromSeed = seed;
       seed = null;
       const requestCall = fromSeed ? Promise.resolve(fromSeed) : requests.getRequest({ id });
-      const chainCall = approvals.getApprovalChain({ requestId: id }).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)));
+      const chainCall = approvals.getApprovalChain({ requestId: id }, quietly()).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)));
       const orderCall: Promise<PurchaseOrderDto | null> = store.canSeeOrder()
-        ? orders.getOrderForRequest({ requestId: id }).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)))
+        ? orders.getOrderForRequest({ requestId: id }, quietly()).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)))
         : Promise.resolve(null);
       const invoicesCall: Promise<InvoiceDto[]> = orderCall.then(async (order) =>
-        order && store.canSeeInvoices() ? (await invoicing.listInvoices({ orderId: order.id, page: 1, pageSize: 50 })).items : [],
+        order && store.canSeeInvoices() ? (await invoicing.listInvoices({ orderId: order.id, page: 1, pageSize: 50 }, quietly())).items : [],
       );
-      const historyCall: Promise<BusinessEventDto[]> = audit.getRequestHistory({ requestId: id }).catch((e: unknown) => (isNotFound(e) ? [] : Promise.reject(e)));
+      const historyCall: Promise<BusinessEventDto[]> = audit.getRequestHistory({ requestId: id }, quietly()).catch((e: unknown) => (isNotFound(e) ? [] : Promise.reject(e)));
 
       const [request, chain, order, invoices, history] = await Promise.allSettled([requestCall, chainCall, orderCall, invoicesCall, historyCall]);
       if (mine !== generation || store.requestId() !== id) {
@@ -152,7 +155,10 @@ export const RequestDetailStore = signalStore(
       };
       note('approval steps', chain);
       note('order', order);
-      note('invoices', invoices);
+      // The invoices are asked for only once the order is known: when the order failed, that is the one thing missing.
+      if (order.status === 'fulfilled') {
+        note('invoices', invoices);
+      }
       note('audit trail', history);
       patchState(store, {
         ...(request.status === 'fulfilled' ? { request: request.value } : {}),
@@ -204,6 +210,10 @@ export const RequestDetailStore = signalStore(
         running = null;
         again = false;
         cancelling = null;
+        if (trailing) {
+          clearTimeout(trailing);
+          trailing = null;
+        }
         seed = initial;
         patchState(store, { ...EMPTY, requestId: id, request: initial });
         await reload(false);
@@ -225,7 +235,7 @@ export const RequestDetailStore = signalStore(
         const key = keyFor(request.id, request.version);
         cancelling = (async () => {
           try {
-            const updated = await requests.cancelRequest({ id: request.id, 'If-Match': `"${request.version}"`, 'Idempotency-Key': key });
+            const updated = await requests.cancelRequest({ id: request.id, 'If-Match': `"${request.version}"`, 'Idempotency-Key': key }, quietly());
             patchState(store, { request: updated });
             void reload(true);
           } catch (error) {

@@ -21,14 +21,14 @@ describe('RequestDetailPage', () => {
   let ask: ReturnType<typeof vi.fn>;
   let fake: ReturnType<typeof fakeHubFactory>;
 
-  async function setup(permissions = ['requests.read', 'requests.create', 'orders.read', 'invoices.read'], userId = 'tom', loaded = requestDto({ status: 'Ordered', orderNumber: 'PO-881' }), failRequest = false) {
+  async function setup(permissions = ['requests.read', 'requests.create', 'orders.read', 'invoices.read'], userId = 'tom', loaded = requestDto({ status: 'Ordered', orderNumber: 'PO-881' }), failRequest = false, forbidHistory = false) {
     api = {
       getRequest: failRequest ? vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 503 })) : vi.fn().mockResolvedValue(loaded),
       cancelRequest: vi.fn().mockResolvedValue(requestDto({ status: 'Cancelling', version: 1731 })),
       getApprovalChain: vi.fn().mockResolvedValue(chainDto('Ordered', [stepDto({ status: 'Approved' })])),
       getOrderForRequest: vi.fn().mockResolvedValue(orderDto()),
       listInvoices: vi.fn().mockResolvedValue({ items: [], page: 1, pageSize: 50, total: 0 }),
-      getRequestHistory: vi.fn().mockResolvedValue([
+      getRequestHistory: forbidHistory ? vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 403 })) : vi.fn().mockResolvedValue([
         eventDto('RequestSubmitted', 'Submitted by Tom Mokoena: 3 laptops', '2026-10-28T09:02:00Z'),
         eventDto('BudgetReserved', 'R 86 940,00 reserved on IT-200 (2026)', '2026-10-28T09:03:00Z', 'system'),
       ]),
@@ -135,13 +135,32 @@ describe('RequestDetailPage', () => {
     api['getRequest'].mockResolvedValue(requestDto({ status: 'Cancelling', version: 1731 })); // what the refresh after the cancel reads
     (Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Cancel request') as HTMLButtonElement).click();
     await settle(fixture);
-    expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', 'If-Match': '"1730"' }));
+    expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', 'If-Match': '"1730"' }), expect.anything());
     expect(text(el.querySelector('header'))).toContain('Cancelling');
   });
 
   it('someone who did not raise the request gets no cancel button', async () => {
     const { el } = await setup(undefined, 'ben');
     expect(Array.from(el.querySelectorAll('button')).some((b) => text(b) === 'Cancel request')).toBe(false);
+  });
+
+  it('someones_else_draft: no Edit and no Cancel, and the page says who requested it', async () => {
+    const draft = requestDto({ status: 'Draft', submittedAt: null, requesterId: 'tom' });
+    const { el } = await setup(undefined, 'ben', draft);
+    expect(el.querySelector('a[href="/app/requests/r1/edit"]')).toBeNull();
+    expect(Array.from(el.querySelectorAll('button')).some((b) => text(b) === 'Cancel request')).toBe(false);
+  });
+
+  it('the requester sees "Requested by you" and the tab title carries the request number', async () => {
+    const { el } = await setup();
+    expect(text(el.querySelector('header'))).toContain('Requested by you');
+    expect(document.title).toBe('PR-1043 - Request');
+  });
+
+  it('a 403 on a secondary call keeps the page and names what is missing', async () => {
+    const { el } = await setup(undefined, 'tom', undefined, false, true);
+    expect(text(el.querySelector('header'))).toContain('PR-1043');
+    expect(text(el.querySelector('[role="status"]'))).toContain('Some details could not be loaded: audit trail');
   });
 
   it('a draft offers Edit to its owner', async () => {

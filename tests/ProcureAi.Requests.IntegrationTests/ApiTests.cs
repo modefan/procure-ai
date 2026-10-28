@@ -130,6 +130,22 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Request_dto_names_the_requester_on_create_get_and_list()
+    {
+        var tenant = NewTenant("requester");
+        var alice = TestAuth.CreateToken("alice", tenant, "requester");
+        var bob = TestAuth.CreateToken("bob", tenant, "requester");
+
+        var created = await CreateAsync(tenant, alice);
+        var asBob = await _client.SendAsync(Req(HttpMethod.Get, $"{Requests}/{created.Id}", tenant: tenant, bearer: bob), Ct);
+        var list = await _client.SendAsync(Req(HttpMethod.Get, Requests, tenant: tenant, bearer: bob), Ct);
+
+        created.RequesterId.ShouldBe("alice", "the creator, not the reader");
+        (await asBob.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!.RequesterId.ShouldBe("alice");
+        (await list.Content.ReadAsStringAsync(Ct)).ShouldContain("\"requesterId\":\"alice\"");
+    }
+
+    [Fact]
     public async Task Ten_parallel_submits_with_same_key_submit_once()
     {
         // Two instances of the API on the same infrastructure; the duplicates are spread over both.

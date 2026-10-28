@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
@@ -10,6 +10,7 @@ import { AuthStore } from '../../core/auth/auth.store';
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
+import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { chainDto, eventDto, invoiceDto, orderDto, requestDto, stepDto } from './request-detail.testing';
 import { AUDIT_LAG_MS, RequestDetailStore } from './request-detail.store';
@@ -51,10 +52,10 @@ describe('RequestDetailStore', () => {
     await store.init('r1', null);
 
     expect(api['getRequest']).toHaveBeenCalledWith({ id: 'r1' });
-    expect(api['getApprovalChain']).toHaveBeenCalledWith({ requestId: 'r1' });
-    expect(api['getOrderForRequest']).toHaveBeenCalledWith({ requestId: 'r1' });
-    expect(api['listInvoices']).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'o1' }));
-    expect(api['getRequestHistory']).toHaveBeenCalledWith({ requestId: 'r1' });
+    expect(api['getApprovalChain']).toHaveBeenCalledWith({ requestId: 'r1' }, expect.any(HttpContext));
+    expect(api['getOrderForRequest']).toHaveBeenCalledWith({ requestId: 'r1' }, expect.any(HttpContext));
+    expect(api['listInvoices']).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'o1' }), expect.any(HttpContext));
+    expect(api['getRequestHistory']).toHaveBeenCalledWith({ requestId: 'r1' }, expect.any(HttpContext));
     expect(store.request()?.number).toBe('PR-1043');
     expect(store.order()?.number).toBe('PO-881');
     expect(store.invoices()).toHaveLength(1);
@@ -111,6 +112,56 @@ describe('RequestDetailStore', () => {
     await store.init('r1', null);
     expect(store.history()).toEqual([]);
     expect(store.partialFailures()).toEqual([]);
+  });
+
+  describe('a 403 on a secondary call', () => {
+    it('secondary_403_keeps_the_page_and_says_what_is_missing: every secondary call opts out of the forbidden redirect', async () => {
+      const store = setup();
+      api['getApprovalChain'].mockRejectedValue(new HttpErrorResponse({ status: 403 }));
+      api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 403 }));
+      api['getOrderForRequest'].mockRejectedValue(new HttpErrorResponse({ status: 403 }));
+      await store.init('r1', null);
+
+      expect(store.request()).not.toBeNull();
+      expect(store.partialFailures()).toEqual(['approval steps', 'order', 'audit trail']);
+      const skips = (call: string) => (api[call].mock.calls[0][1] as HttpContext).get(SKIP_FORBIDDEN_REDIRECT);
+      expect(skips('getApprovalChain')).toBe(true);
+      expect(skips('getOrderForRequest')).toBe(true);
+      expect(skips('getRequestHistory')).toBe(true);
+    });
+
+    it('the invoices call opts out too', async () => {
+      const store = setup();
+      await store.init('r1', null);
+      expect((api['listInvoices'].mock.calls[0][1] as HttpContext).get(SKIP_FORBIDDEN_REDIRECT)).toBe(true);
+    });
+
+    it('when the order fails, only "order" is reported, not the invoices that depend on it', async () => {
+      const store = setup();
+      api['getOrderForRequest'].mockRejectedValue(new HttpErrorResponse({ status: 500 }));
+      await store.init('r1', null);
+      expect(store.partialFailures()).toEqual(['order']);
+    });
+  });
+
+  it('init clears the trailing reload of the request shown before', async () => {
+    const store = setup();
+    const live = TestBed.inject(LiveConnection);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    await store.init('r1', null);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fake.hubs[0].emit('EntityChanged', { entity: 'request', id: 'r1', requestId: 'r1', eventType: 'x', occurredAt: 't' });
+      await vi.advanceTimersByTimeAsync(0);
+      await store.init('r2', null); // the next request opens before the lag has passed
+      api['getRequest'].mockClear();
+      await vi.advanceTimersByTimeAsync(AUDIT_LAG_MS + 10);
+      expect(api['getRequest']).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+    await live.stop();
   });
 
   it('a failing history leaves the page usable and says what is missing', async () => {
@@ -174,7 +225,7 @@ describe('RequestDetailStore', () => {
 
       await store.cancel();
 
-      expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', 'If-Match': '"1730"', 'Idempotency-Key': expect.any(String) }));
+      expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', 'If-Match': '"1730"', 'Idempotency-Key': expect.any(String) }), expect.any(HttpContext));
       expect(store.request()?.status).toBe('Cancelling');
       expect(store.busy()).toBe(false);
     });
@@ -220,6 +271,16 @@ describe('RequestDetailStore', () => {
       expect(store.busy()).toBe(false);
     });
 
+    it('cancel_403_shows_the_message_and_keeps_the_page (the call opts out of the forbidden redirect)', async () => {
+      const store = setup();
+      await store.init('r1', null);
+      api['cancelRequest'].mockRejectedValue(new HttpErrorResponse({ status: 403, error: { detail: 'Only the requester can cancel this request.' } }));
+      await store.cancel();
+      expect(store.generalError()).toBe('Only the requester can cancel this request.');
+      expect(store.request()).not.toBeNull();
+      expect(((api['cancelRequest'].mock.calls[0] as unknown[])[1] as HttpContext).get(SKIP_FORBIDDEN_REDIRECT)).toBe(true);
+    });
+
     it('a refusal (409) is shown as the server message', async () => {
       const store = setup();
       await store.init('r1', null);
@@ -230,7 +291,7 @@ describe('RequestDetailStore', () => {
   });
 
   describe('permissions to act', () => {
-    it('the requester of a submitted request can cancel and not edit; others cannot cancel', async () => {
+    it('the requester of a submitted request can cancel and not edit', async () => {
       const mine = setup(undefined, 'tom');
       await mine.init('r1', null);
       expect(mine.canCancel()).toBe(true);
@@ -240,18 +301,46 @@ describe('RequestDetailStore', () => {
     it('someone else who may create requests cannot cancel a request they did not raise', async () => {
       const other = setup(undefined, 'ben');
       await other.init('r1', null);
-      expect(other.ownerId()).toBe('tom');
       expect(other.canCancel()).toBe(false);
     });
 
-    it('a draft can be edited and cancelled by users with requests.create (the server checks the owner)', async () => {
-      const store = setup();
+    it('someone_elses_draft_offers_no_edit_or_cancel', async () => {
+      const store = setup(undefined, 'ben');
+      api['getRequest'].mockResolvedValue(requestDto({ status: 'Draft', submittedAt: null, requesterId: 'tom' }));
+      api['getApprovalChain'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
+      api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
+      await store.init('r1', null);
+      expect(store.canEdit()).toBe(false);
+      expect(store.canCancel()).toBe(false);
+    });
+
+    it('my own draft can be edited and cancelled', async () => {
+      const store = setup(undefined, 'tom');
       api['getRequest'].mockResolvedValue(requestDto({ status: 'Draft', submittedAt: null }));
       api['getApprovalChain'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
-      api['getRequestHistory'].mockResolvedValue([]);
+      api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
       await store.init('r1', null);
       expect(store.canEdit()).toBe(true);
       expect(store.canCancel()).toBe(true);
+    });
+
+    it('requested_by: "you" for my own, the name Audit knows for others, nothing when nobody knows it', async () => {
+      const mine = setup(undefined, 'tom');
+      await mine.init('r1', null);
+      expect(mine.requestedBy()).toBe('you');
+      TestBed.resetTestingModule();
+
+      const other = setup(undefined, 'ben');
+      api['getRequestHistory'].mockResolvedValue([eventDto('RequestSubmitted', 'x', undefined, 'tom', { actorName: 'Tom Mokoena' })]);
+      await other.init('r1', null);
+      expect(other.requestedBy()).toBe('Tom Mokoena');
+      TestBed.resetTestingModule();
+
+      const draft = setup(undefined, 'ben');
+      api['getRequest'].mockResolvedValue(requestDto({ status: 'Draft', submittedAt: null }));
+      api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
+      await draft.init('r1', null);
+      expect(draft.requestedBy()).toBeNull();
     });
 
     it('no cancel once goods were received, when completed, or without requests.create', async () => {

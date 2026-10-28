@@ -1,4 +1,5 @@
 import { Component, computed, effect, inject, input, untracked } from '@angular/core';
+import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import { RequestDto } from '../../api/requests/models/request-dto';
 import { PresenceStore } from '../../core/live/presence.store';
@@ -25,7 +26,12 @@ import { WorkflowTimeline } from './workflow-timeline';
       @if (store.request(); as request) {
         <header class="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
           <div class="min-w-0">
-            <p class="text-sm font-semibold text-slate-600">{{ request.number }}</p>
+            <p class="text-sm font-semibold text-slate-600">
+              {{ request.number }}
+              @if (store.requestedBy(); as by) {
+                <span class="font-normal"> · Requested by {{ by }}</span>
+              }
+            </p>
             <h1 class="text-2xl font-bold tracking-tight break-words text-slate-900">{{ request.title }}</h1>
             <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               <span class="text-xl font-semibold whitespace-nowrap tabular-nums text-slate-900">{{ request.totalInclVatDisplay }}</span>
@@ -176,6 +182,7 @@ export class RequestDetailPage {
   protected readonly store = inject(RequestDetailStore);
   private readonly presence = inject(PresenceStore);
   private readonly confirm = inject(ConfirmDialog);
+  private readonly title = inject(Title);
   protected readonly skeletonRows = [1, 2, 3, 4, 5];
 
   protected readonly activeStep = computed(() => this.store.timeline().find((s) => s.state === 'active' && s.key !== 'cancelling') ?? null);
@@ -198,6 +205,13 @@ export class RequestDetailPage {
     effect(() => {
       const id = this.id();
       untracked(() => void this.store.init(id, this.request()?.id === id ? this.request() : null));
+    });
+    // The tab says which request this is (the route title is only "Request").
+    effect(() => {
+      const number = this.store.request()?.number;
+      if (number) {
+        this.title.setTitle(`${number} - Request`);
+      }
     });
     // Tell the hub which request is open (so others see "is also viewing"); stop when the id changes or the page goes.
     effect((onCleanup) => {

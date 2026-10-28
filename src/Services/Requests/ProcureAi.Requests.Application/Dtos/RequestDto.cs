@@ -2,7 +2,10 @@ using ProcureAi.Requests.Domain;
 
 namespace ProcureAi.Requests.Application.Dtos;
 
-/// <summary>A purchase request as the API returns it. Amounts are decimal Rand, plus display strings like <c>R 86 940,00</c>.</summary>
+/// <summary>
+/// A purchase request as the API returns it. Amounts are decimal Rand, plus display strings like <c>R 86 940,00</c>.
+/// <paramref name="RequesterId"/> is the user who raised it (the only one who may edit or cancel it); the name is not stored here.
+/// </summary>
 public sealed record RequestDto(
     Guid Id,
     string Number,
@@ -10,6 +13,7 @@ public sealed record RequestDto(
     RequestStatus Status,
     string CostCenterCode,
     string SupplierId,
+    string RequesterId,
     IReadOnlyList<RequestLineDto> Lines,
     decimal TotalExclVat,
     decimal Vat,

@@ -132,6 +132,10 @@ public sealed class BusinessAuditTests(AuditApp app)
         history[1].Summary.ShouldBe("Approval requested from Maria Manager (step 1, Manager)");
         history[2].UserId.ShouldBe(Maria, "the initiating user of the headers, not the service that published it");
         history[2].Summary.ShouldBe("Approved by Maria Manager (step 1, Manager)");
+
+        // The request detail page reads these instead of parsing the sentences above (workflow-timeline.ts).
+        history.Select(h => h.StepNo).ShouldBe([null, 1, 1], "the approval events say which step they are about");
+        history.Select(h => h.ActorName).ShouldBe(["Tom Requester", "Tom Requester", "Maria Manager"], "the display name of the user in the headers");
     }
 
     [Fact]

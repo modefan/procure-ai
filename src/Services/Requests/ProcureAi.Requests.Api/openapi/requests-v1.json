@@ -788,6 +788,7 @@
           "status",
           "costCenterCode",
           "supplierId",
+          "requesterId",
           "lines",
           "totalExclVat",
           "vat",
@@ -827,6 +828,9 @@
             "type": "string"
           },
           "supplierId": {
+            "type": "string"
+          },
+          "requesterId": {
             "type": "string"
           },
           "lines": {
