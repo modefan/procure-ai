@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { permissionGuard } from '../core/auth/permission.guard';
+import { unsavedChangesGuard } from '../core/auth/unsaved-changes.guard';
 
 /**
  * Everything under /app. Loaded as one lazy chunk, and only after authGuard (canMatch on the parent route) has
@@ -18,5 +19,22 @@ export const APP_ROUTES: Routes = [
     canActivate: [permissionGuard],
     data: { permission: 'requests.read' },
     loadComponent: () => import('./requests/requests.page').then((m) => m.RequestsPage),
+  },
+  {
+    // Before ':id' routes, so "new" is not read as an id.
+    path: 'requests/new',
+    title: 'New request',
+    canActivate: [permissionGuard],
+    canDeactivate: [unsavedChangesGuard],
+    data: { permission: 'requests.create' },
+    loadComponent: () => import('./requests/request-form.page').then((m) => m.RequestFormPage),
+  },
+  {
+    path: 'requests/:id/edit',
+    title: 'Edit request',
+    canActivate: [permissionGuard],
+    canDeactivate: [unsavedChangesGuard],
+    data: { permission: 'requests.create' },
+    loadComponent: () => import('./requests/request-form.page').then((m) => m.RequestFormPage),
   },
 ];

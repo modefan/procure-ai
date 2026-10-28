@@ -3,6 +3,9 @@ import { RequestsService } from '../../api/requests/services/requests.service';
 import { PagedResultOfRequestDto } from '../../api/requests/models/paged-result-of-request-dto';
 import { RequestDto } from '../../api/requests/models/request-dto';
 import { RequestsStore } from './requests.store';
+import { fakeHubFactory } from '../../core/live/fake-hub.testing';
+import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
+import { LiveConnection } from '../../core/live/live-connection';
 
 function dto(n: number, overrides: Partial<RequestDto> = {}): RequestDto {
   return {
@@ -35,7 +38,7 @@ function dto(n: number, overrides: Partial<RequestDto> = {}): RequestDto {
   };
 }
 
-const page = (items: RequestDto[], p: number, total: number): PagedResultOfRequestDto => ({ items, page: p, pageSize: 20, total });
+const page = (items: RequestDto[], p: number, total: number): PagedResultOfRequestDto => ({ items, page: p, pageSize: 25, total });
 
 describe('RequestsStore', () => {
   let listRequests: ReturnType<typeof vi.fn>;
@@ -52,7 +55,7 @@ describe('RequestsStore', () => {
 
     await store().load(1);
 
-    expect(listRequests).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
+    expect(listRequests).toHaveBeenCalledWith({ page: 1, pageSize: 25 });
     expect(store().entities().map((r) => r.number)).toEqual(['PR-1001', 'PR-1002', 'PR-1003']);
     expect(store().total()).toBe(3);
     expect(store().page()).toBe(1);
@@ -73,14 +76,14 @@ describe('RequestsStore', () => {
   });
 
   it('replaces the entities when another page is loaded and derives the page count', async () => {
-    listRequests.mockResolvedValueOnce(page([dto(1)], 1, 41));
-    listRequests.mockResolvedValueOnce(page([dto(21)], 3, 41));
+    listRequests.mockResolvedValueOnce(page([dto(1)], 1, 61));
+    listRequests.mockResolvedValueOnce(page([dto(21)], 3, 61));
 
     await store().load(1);
     expect(store().pageCount()).toBe(3);
     await store().load(3);
 
-    expect(listRequests).toHaveBeenLastCalledWith({ page: 3, pageSize: 20 });
+    expect(listRequests).toHaveBeenLastCalledWith({ page: 3, pageSize: 25 });
     expect(store().entities().map((r) => r.number)).toEqual(['PR-1021']);
     expect(store().page()).toBe(3);
   });
@@ -178,5 +181,73 @@ describe('RequestsStore', () => {
     expect(listRequests).toHaveBeenCalledTimes(1);
     expect(store().entities().map((r) => r.number)).toEqual(['PR-1001']);
     expect(store().isLoaded()).toBe(true);
+  });
+
+  it('list_filters_mine_and_open: the filters go to the server and a change starts at page 1', async () => {
+    listRequests.mockResolvedValue(page([dto(1)], 1, 1));
+    await store().load(1);
+
+    await store().setFilters({ mine: true });
+    expect(listRequests).toHaveBeenLastCalledWith({ page: 1, pageSize: 25, mine: true });
+
+    await store().setFilters({ status: 'open' });
+    expect(listRequests).toHaveBeenLastCalledWith({ page: 1, pageSize: 25, mine: true, status: 'Open' });
+
+    await store().setFilters({ mine: false, status: 'closed' });
+    expect(listRequests).toHaveBeenLastCalledWith({ page: 1, pageSize: 25, status: 'Closed' });
+
+    await store().setFilters({ status: 'all' });
+    expect(listRequests).toHaveBeenLastCalledWith({ page: 1, pageSize: 25 });
+    expect(store().mine()).toBe(false);
+    expect(store().status()).toBe('all');
+  });
+
+  it('paging keeps the filters', async () => {
+    listRequests.mockResolvedValue(page([dto(1)], 1, 60));
+    await store().setFilters({ mine: true, status: 'open' });
+
+    await store().load(2);
+
+    expect(listRequests).toHaveBeenLastCalledWith({ page: 2, pageSize: 25, mine: true, status: 'Open' });
+  });
+
+  it('logout puts the filters back', async () => {
+    listRequests.mockResolvedValue(page([], 1, 0));
+    await store().setFilters({ mine: true, status: 'closed' });
+
+    store().reset();
+
+    expect(store().mine()).toBe(false);
+    expect(store().status()).toBe('all');
+  });
+});
+
+describe('RequestsStore live refresh', () => {
+  it('entity_changed_revalidates_list: a request push refreshes the page on screen quietly; other entities do not', async () => {
+    const fake = fakeHubFactory();
+    const listRequests = vi.fn().mockResolvedValue(page([dto(1)], 1, 1));
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: RequestsService, useValue: { listRequests } },
+        { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
+      ],
+    });
+    const live = TestBed.inject(LiveConnection);
+    const store = TestBed.inject(RequestsStore);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    await store.load(1);
+    listRequests.mockClear();
+
+    fake.hubs[0].emit('EntityChanged', { entity: 'order', id: 'o1', requestId: 'r1', eventType: 'x', occurredAt: 't' });
+    expect(listRequests).not.toHaveBeenCalled();
+
+    listRequests.mockResolvedValue(page([dto(1), dto(2)], 1, 2));
+    fake.hubs[0].emit('EntityChanged', { entity: 'request', id: 'id-2', requestId: 'id-2', eventType: 'x', occurredAt: 't' });
+
+    expect(store.isLoading()).toBe(false);
+    await vi.waitFor(() => expect(store.entities()).toHaveLength(2));
+    expect(listRequests).toHaveBeenCalledTimes(1);
+    await live.stop();
   });
 });

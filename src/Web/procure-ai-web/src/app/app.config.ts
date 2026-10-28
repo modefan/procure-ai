@@ -1,6 +1,6 @@
 import { ApplicationConfig, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideHttpClient, withInterceptors, withXsrfConfiguration } from '@angular/common/http';
-import { provideRouter } from '@angular/router';
+import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { routes } from './app.routes';
 import { AuthStore } from './core/auth/auth.store';
 import { LiveSession } from './core/live/live-session';
@@ -22,7 +22,7 @@ export const appConfig: ApplicationConfig = {
       withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' }),
       withInterceptors([credentialsInterceptor, correlationInterceptor, errorsInterceptor]),
     ),
-    provideRouter(routes),
+    provideRouter(routes, withComponentInputBinding()),
     // Ask the gateway who is signed in before the first page, so the header is right from the first paint. The live
     // connection follows `isLoggedIn()` (LiveSession), so it also starts when the user becomes known later (a failed
     // first load that a guard retries).

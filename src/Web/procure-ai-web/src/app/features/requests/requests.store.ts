@@ -1,14 +1,20 @@
 import { computed, inject } from '@angular/core';
-import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { setAllEntities, withEntities } from '@ngrx/signals/entities';
 import { RequestDto } from '../../api/requests/models/request-dto';
 import { RequestsService } from '../../api/requests/services/requests.service';
 import { AppConfigService } from '../../core/config/app-config';
+import { LiveConnection } from '../../core/live/live-connection';
 import { Logger } from '../../core/logging/logger';
 import { withCache } from '../../core/state/with-cache';
 import { withRequestStatus } from '../../core/state/with-request-status';
 
+export type StatusFilter = 'all' | 'open' | 'closed';
+
 export interface RequestsState {
+  /** Only the requests I made. */
+  mine: boolean;
+  status: StatusFilter;
   page: number;
   pageSize: number;
   total: number;
@@ -23,7 +29,7 @@ export interface RequestsState {
 export const RequestsStore = signalStore(
   { providedIn: 'root' },
   withEntities<RequestDto>(),
-  withState<RequestsState>(() => ({ page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0 })),
+  withState<RequestsState>(() => ({ mine: false, status: 'all' as StatusFilter, page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0 })),
   withRequestStatus(),
   withComputed(({ total, pageSize }) => ({
     pageCount: computed(() => Math.max(1, Math.ceil(total() / pageSize()))),
@@ -38,14 +44,15 @@ export const RequestsStore = signalStore(
     /** The page most recently asked for: asking for the same one again shares the running load instead of restarting it. */
     let currentKey: string | null = null;
 
-    return {
+    const methods = {
       /**
        * Shows one page (1-based). Only the newest call may change the state; an older answer arriving late, or one
        * arriving after the cache was cleared (logout), is dropped. A failure sets `error` and keeps the rows.
        */
       async load(page: number): Promise<void> {
         const pageSize = store.pageSize();
-        const key = `list:${page}:${pageSize}`;
+        const { mine, status } = { mine: store.mine(), status: store.status() };
+        const key = `list:${page}:${pageSize}:${mine ? 'mine' : 'all'}:${status}`;
         const onScreen = () => shown !== null && shown.key === key && shown.epoch === store.cacheEpoch();
         if (currentKey !== key) {
           store.clearCache(); // one page is held, so what was cached for other pages is of no use
@@ -59,7 +66,7 @@ export const RequestsStore = signalStore(
               store.setLoading();
             }
             try {
-              const result = await api.listRequests({ page, pageSize });
+              const result = await api.listRequests({ page, pageSize, ...(mine ? { mine } : {}), ...(status === 'open' ? { status: 'Open' as const } : status === 'closed' ? { status: 'Closed' as const } : {}) });
               if (call !== latest || epoch !== store.cacheEpoch()) {
                 return;
               }
@@ -77,6 +84,25 @@ export const RequestsStore = signalStore(
         } catch {
           // Already recorded in `error`.
         }
+      },
+
+      /** Changes the filters and shows page 1 of the result. Any filter left out stays as it is. */
+      async setFilters(filters: { mine?: boolean; status?: StatusFilter }): Promise<void> {
+        patchState(store, filters);
+        await methods.load(1);
+      },
+    };
+    return methods;
+  }),
+  withHooks((store) => {
+    let off: (() => void) | null = null;
+    return {
+      onInit() {
+        // A push about a request refreshes the page on screen in the background (nothing happens if none was loaded).
+        off = inject(LiveConnection).onEntityChanged('request', () => store.invalidate('list'));
+      },
+      onDestroy() {
+        off?.();
       },
     };
   }),

@@ -47,3 +47,33 @@
     @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm;
   }
 }
+
+/* Form fields: label, input (text, number, select) and the error line under them. */
+@layer components {
+  .field-label {
+    @apply mb-1 block text-sm font-medium text-slate-700;
+  }
+
+  .field-input {
+    @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600 aria-[invalid=true]:border-red-600;
+  }
+
+  .field-error {
+    @apply mt-1 text-sm text-red-700;
+  }
+}
+
+/* A small group of toggle buttons (list filters): one is pressed at a time. */
+@layer components {
+  .segmented {
+    @apply inline-flex overflow-hidden rounded-lg border border-slate-300 bg-white text-sm shadow-sm;
+  }
+
+  .segmented > button {
+    @apply cursor-pointer px-3 py-1.5 font-medium whitespace-nowrap text-slate-700 hover:bg-slate-100 focus-visible:outline-offset-[-2px] aria-pressed:bg-indigo-700 aria-pressed:text-white;
+  }
+
+  .segmented > button + button {
+    @apply border-l border-slate-300;
+  }
+}

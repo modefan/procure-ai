@@ -1,14 +1,14 @@
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRouteSnapshot, RouterStateSnapshot } from '@angular/router';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { HasUnsavedChanges, unsavedChangesGuard } from './unsaved-changes.guard';
-import { UnsavedChangesPrompt } from './unsaved-changes-prompt';
 
 describe('unsavedChangesGuard', () => {
-  let confirm: ReturnType<typeof vi.fn>;
+  let ask: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    confirm = vi.fn().mockReturnValue(false);
-    TestBed.configureTestingModule({ providers: [{ provide: UnsavedChangesPrompt, useValue: { confirm } }] });
+    ask = vi.fn().mockResolvedValue(false);
+    TestBed.configureTestingModule({ providers: [{ provide: ConfirmDialog, useValue: { ask } }] });
   });
 
   function run(component: HasUnsavedChanges) {
@@ -17,19 +17,21 @@ describe('unsavedChangesGuard', () => {
     );
   }
 
-  it('does not ask when nothing changed', () => {
-    expect(run({ hasUnsavedChanges: () => false })).toBe(true);
-    expect(confirm).not.toHaveBeenCalled();
+  it('unsaved_guard_asks_only_when_dirty: does not ask when nothing changed', async () => {
+    await expect(run({ hasUnsavedChanges: () => false })).resolves.toBe(true);
+    expect(ask).not.toHaveBeenCalled();
   });
 
-  it('asks when there are unsaved changes, and blocks when the user says no', () => {
-    expect(run({ hasUnsavedChanges: () => true })).toBe(false);
-    expect(confirm).toHaveBeenCalledOnce();
+  it('asks "Leave without saving?" with Stay and Leave, and blocks when the user stays', async () => {
+    await expect(run({ hasUnsavedChanges: () => true })).resolves.toBe(false);
+
+    expect(ask).toHaveBeenCalledOnce();
+    expect(ask.mock.calls[0][0]).toMatchObject({ title: 'Leave without saving?', confirm: 'Leave', cancel: 'Stay' });
   });
 
-  it('lets the user leave when they confirm', () => {
-    confirm.mockReturnValue(true);
+  it('lets the user leave when they confirm', async () => {
+    ask.mockResolvedValue(true);
 
-    expect(run({ hasUnsavedChanges: () => true })).toBe(true);
+    await expect(run({ hasUnsavedChanges: () => true })).resolves.toBe(true);
   });
 });
