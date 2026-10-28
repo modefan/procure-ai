@@ -64,6 +64,9 @@ public sealed class ApprovalSaga : Saga
     /// <summary>Sent to Purchasing when the request was cancelled without a reason (Purchasing refuses a blank one).</summary>
     public const string DefaultCancelReason = "Request cancelled";
 
+    /// <summary>The refusal reason when the order settled (all paid) while a cancellation was pending.</summary>
+    public const string OrderSettled = "The order was settled";
+
     /// <summary>The rejection reason when the supplier rejects the order.</summary>
     public static string SupplierRejected(string reason) => $"Supplier rejected the order: {reason}";
 
@@ -515,12 +518,26 @@ public sealed class ApprovalSaga : Saga
             return;
         }
 
-        // A refusal means the order exists: if its creation was seen while cancelling, the saga is Ordered whatever it was before.
+        // A refusal means the order exists. If the order was created while cancelling, nobody was told of it yet (Requests is
+        // back to Approved after the refusal): the saga is Ordered, and RequestOrdered goes out after the refusal.
+        var announce = OrderUnannounced;
         State = OrderId is not null ? ApprovalState.Ordered : StateBeforeCancel ?? ApprovalState.Ordered;
         StateBeforeCancel = null;
         await EvictAsync(cache);
-        await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, refused.Reason, time.GetUtcNow()));
+        var now = time.GetUtcNow();
+        await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, refused.Reason, now));
+        if (announce && OrderId is { } orderId)
+        {
+            await context.PublishAsync(new RequestOrdered(Id, TenantId, RequestNumber, orderId, OrderNumber ?? "", now));
+        }
     }
+
+    /// <summary>
+    /// The order was created (or settled) and <see cref="RequestOrdered"/> was never published: while Approved the order is not
+    /// recorded yet, and an order created while Cancelling from Approved is stored but not announced.
+    /// </summary>
+    private bool OrderUnannounced =>
+        State == ApprovalState.Approved || (State == ApprovalState.Cancelling && StateBeforeCancel == ApprovalState.Approved);
 
     public static void NotFound(
         [SagaIdentityFrom(nameof(PurchaseOrderCancellationRefused.RequestId))] PurchaseOrderCancellationRefused refused)
@@ -556,7 +573,21 @@ public sealed class ApprovalSaga : Saga
 
         await EvictAsync(cache);
         await context.SendAsync(Release());
-        await context.PublishAsync(new RequestCompleted(Id, TenantId, RequestNumber, settled.PaidInclVat, time.GetUtcNow()));
+        var now = time.GetUtcNow();
+        if (State == ApprovalState.Cancelling)
+        {
+            // Purchasing's refusal (it will come, goods were received) would find no saga: tell Requests now, before it completes.
+            await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, OrderSettled, now));
+        }
+
+        if (OrderUnannounced)
+        {
+            // Requests never heard of the order (the settlement overtook it): it must pass through Ordered to complete.
+            await context.PublishAsync(new RequestOrdered(
+                Id, TenantId, RequestNumber, OrderId ?? settled.OrderId, OrderNumber ?? "", now));
+        }
+
+        await context.PublishAsync(new RequestCompleted(Id, TenantId, RequestNumber, settled.PaidInclVat, now));
         End(ApprovalState.Completed);
     }
 

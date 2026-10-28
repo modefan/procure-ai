@@ -117,6 +117,7 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
             new PurchaseOrderRejected(Guid.NewGuid(), id, tenant, "PO-2001", "Closed", DateTimeOffset.UtcNow), Exchanges.Purchasing, tenant);
         await Recorder.WaitForAsync(id, nameof(RequestRejected), EventTimeout);
         await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await Task.Delay(Settle);
         Recorder.Of(id).Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(1);
     }
 
@@ -231,6 +232,7 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
 
         await PublishAsync(new PurchaseOrderCancelled(orderId, id, tenant, "Request cancelled", DateTimeOffset.UtcNow), Exchanges.Purchasing, tenant);
         await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await Task.Delay(Settle);
         Recorder.Of(id).Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(1);
     }
 
@@ -250,6 +252,92 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
         var seen = Recorder.Of(id);
         seen.Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(1);
         seen.ShouldNotContain(m => m.Kind == nameof(RequestRejected));
+    }
+
+    [Fact]
+    public async Task Refusal_after_an_order_created_while_cancelling_publishes_RequestOrdered_once()
+    {
+        // Approved, cancel raised, the order is created meanwhile (not announced), then Purchasing refuses the cancel: Requests
+        // must hear of the order, or it stays Approved forever.
+        var (tenant, submitted) = await ApprovedAsync();
+        var id = submitted.RequestId;
+        await PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga?.State == ApprovalState.Cancelling, EventTimeout);
+        var orderId = Guid.NewGuid();
+        await PublishAsync(Created(submitted, orderId, "PO-2003"), Exchanges.Purchasing, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga?.OrderId == orderId, EventTimeout);
+
+        await PublishAsync(
+            new PurchaseOrderCancellationRefused(orderId, id, tenant, "Goods were already received", DateTimeOffset.UtcNow),
+            Exchanges.Purchasing, tenant);
+        await Recorder.WaitForAsync(id, nameof(RequestOrdered), EventTimeout);
+        await Task.Delay(Settle);
+
+        var ordered = Recorder.Of(id).Single(m => m.Kind == nameof(RequestOrdered));
+        ordered.Text("orderId").ShouldBe(orderId.ToString());
+        ordered.Text("orderNumber").ShouldBe("PO-2003");
+        Recorder.Of(id).Count(m => m.Kind == nameof(RequestCancellationRefused)).ShouldBe(1);
+        (await Main.SagaAsync(id))!.State.ShouldBe(ApprovalState.Ordered);
+    }
+
+    [Fact]
+    public async Task Settled_while_cancelling_an_ordered_request_refuses_the_cancellation_then_completes()
+    {
+        var (tenant, submitted) = await OrderedAsync();
+        var id = submitted.RequestId;
+        await PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga?.State == ApprovalState.Cancelling, EventTimeout);
+
+        await PublishAsync(Settled(submitted, 5_000m), Exchanges.Invoicing, tenant);
+        await Recorder.WaitForAsync(id, nameof(RequestCompleted), EventTimeout);
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        // Purchasing's refusal arrives afterwards and finds no saga.
+        await PublishAsync(
+            new PurchaseOrderCancellationRefused(Guid.NewGuid(), id, tenant, "Goods were already received", DateTimeOffset.UtcNow),
+            Exchanges.Purchasing, tenant);
+        await Task.Delay(Settle);
+
+        var kinds = Recorder.Of(id).Select(m => m.Kind).ToList();
+        var refused = Recorder.Of(id).Single(m => m.Kind == nameof(RequestCancellationRefused));
+        refused.Text("reason").ShouldBe(ApprovalSaga.OrderSettled);
+        kinds.IndexOf(nameof(RequestCancellationRefused)).ShouldBeLessThan(kinds.IndexOf(nameof(RequestCompleted)));
+        kinds.Count(k => k == nameof(RequestOrdered)).ShouldBe(1, "only the one from ordering");
+    }
+
+    [Fact]
+    public async Task Settled_while_cancelling_an_unannounced_order_refuses_announces_and_completes()
+    {
+        var (tenant, submitted) = await ApprovedAsync();
+        var id = submitted.RequestId;
+        await PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga?.State == ApprovalState.Cancelling, EventTimeout);
+        var orderId = Guid.NewGuid();
+        await PublishAsync(Created(submitted, orderId, "PO-2004"), Exchanges.Purchasing, tenant);
+        await Main.WaitForSagaAsync(id, saga => saga?.OrderId == orderId, EventTimeout);
+
+        await PublishAsync(Settled(submitted, 5_000m) with { OrderId = orderId }, Exchanges.Invoicing, tenant);
+        await Recorder.WaitForAsync(id, nameof(RequestCompleted), EventTimeout);
+        await Task.Delay(Settle);
+
+        var seen = Recorder.Of(id);
+        seen.Count(m => m.Kind == nameof(RequestCancellationRefused)).ShouldBe(1);
+        seen.Single(m => m.Kind == nameof(RequestOrdered)).Text("orderNumber").ShouldBe("PO-2004");
+    }
+
+    [Fact]
+    public async Task Settled_before_the_order_was_recorded_announces_the_order_then_completes()
+    {
+        var (tenant, submitted) = await ApprovedAsync();
+        var id = submitted.RequestId;
+        var orderId = Guid.NewGuid();
+
+        await PublishAsync(Settled(submitted, 5_000m) with { OrderId = orderId }, Exchanges.Invoicing, tenant);
+        await Recorder.WaitForAsync(id, nameof(RequestCompleted), EventTimeout);
+        await Task.Delay(Settle);
+
+        var seen = Recorder.Of(id);
+        seen.Single(m => m.Kind == nameof(RequestOrdered)).Text("orderId").ShouldBe(orderId.ToString());
+        seen.Select(m => m.Kind).ToList().IndexOf(nameof(RequestOrdered)).ShouldBeLessThan(seen.Select(m => m.Kind).ToList().IndexOf(nameof(RequestCompleted)));
     }
 
     [Fact]
@@ -304,6 +392,7 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
         completed.Body.GetProperty("spentInclVat").GetDecimal().ShouldBe(23_000m);
         completed.Text("number").ShouldBe(submitted.Number);
         await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await Task.Delay(Settle);
         Recorder.Of(id).Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(1);
     }
 
