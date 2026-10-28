@@ -147,6 +147,11 @@ public sealed class SupplierInvoiceWebhooksController(IMessageBus bus, ILogger<S
 
         foreach (var line in body.Lines)
         {
+            if (line is null)
+            {
+                return "lines must not contain null.";
+            }
+
             if (line.LineNumber is < 1 or > InvoiceLimits.MaxLines || line.Quantity is < 1 or > InvoiceLimits.MaxQuantity
                 || line.NetPriceCents is < 0 or > InvoiceLimits.MaxCents || (line.ArticleNumber?.Trim().Length ?? 0) > InvoiceLimits.SkuLength)
             {

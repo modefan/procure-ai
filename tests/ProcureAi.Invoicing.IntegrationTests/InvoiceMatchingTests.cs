@@ -130,6 +130,42 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         app.Events.Of(order.RequestId).Count(m => m.Kind == "InvoiceReceived").ShouldBe(1);
     }
 
+    /// <summary>
+    /// One supplier invoice number arriving twice at the same moment (two webhook events with their own event IDs, and two manual
+    /// entries with their own idempotency keys): both inserts race on the unique (tenant, supplier, number) index, the loser is retried
+    /// and finds the winner, so both callers get 200 with one invoice, one <c>InvoiceReceived</c> and nothing dead-lettered.
+    /// </summary>
+    [Fact]
+    public async Task Racing_deliveries_of_one_invoice_number_record_one_invoice()
+    {
+        var deadBefore = await app.DeadLettersAsync();
+        for (var round = 0; round < 5; round++)
+        {
+            var tenant = InvoicingApp.NewTenant();
+            var token = InvoicingApp.Token(tenant);
+            var order = await app.CreateOrderAsync(tenant);
+
+            var webhooks = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-W", 1))));
+            var manual = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => CreateAsync(token, ManualInvoice(order.OrderId, "INV-M", 1))));
+            var detail = $"round {round}: webhooks {string.Join(", ", webhooks.Select(r => (int)r.StatusCode))}, manual {string.Join(", ", manual.Select(r => (int)r.StatusCode))}";
+
+            webhooks.ShouldAllBe(r => r.StatusCode == HttpStatusCode.OK, detail);
+            manual.ShouldAllBe(r => r.StatusCode == HttpStatusCode.OK, detail);
+            var ids = await Task.WhenAll(manual.Select(async r => (await r.Content.ReadFromJsonAsync<InvoiceDto>(InvoicingApp.Json))!.Id));
+            ids.Distinct().Count().ShouldBe(1, detail);
+            (await app.ScalarAsync<long>("SELECT count(*) FROM invoices WHERE order_id = @o", ("o", order.OrderId))).ShouldBe(2, detail);
+            await app.WaitForAsync(order.RequestId, "InvoiceReceived", 2);
+            await InvoicingApp.SettleAsync();
+            app.Events.Of(order.RequestId).Count(m => m.Kind == "InvoiceReceived").ShouldBe(2, detail);
+            foreach (var response in webhooks.Concat(manual))
+            {
+                response.Dispose();
+            }
+        }
+
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore);
+    }
+
     /// <summary>Review Focus 2: a replay of the same signed event, and two deliveries of one event at the same time, record one invoice.</summary>
     [Fact]
     public async Task Replayed_invoice_webhook_records_once()
@@ -174,6 +210,8 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         using var notJson = await app.PostWebhookAsync(Encoding.UTF8.GetBytes("this is not json"));
         using var longEvent = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-F", 3, eventId: new string('e', 201)));
         using var longNumber = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, new string('N', 65), 3));
+        using var nullLine = await app.PostWebhookAsync(Encoding.UTF8.GetBytes(
+            $$"""{"eventId":"e-null-line","type":"invoice.issued","invoiceNumber":"INV-F","supplierCode":"contoso-hardware","externalReference":"{{order.OrderId}}","issueDate":"2026-10-27","lines":[null],"grossTotalCents":115}"""));
         using var notOurs = await app.PostWebhookAsync(Encoding.UTF8.GetBytes(
             """{"eventId":"e-not-ours","type":"invoice.issued","invoiceNumber":"X-1","supplierCode":"contoso-hardware","externalReference":"someone-else","issueDate":"2026-10-27","lines":[{"lineNumber":1,"articleNumber":"LAP-14","quantity":1,"netPriceCents":100}],"grossTotalCents":115}"""));
         await InvoicingApp.SettleAsync();
@@ -185,6 +223,7 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         notJson.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         longEvent.StatusCode.ShouldBe(HttpStatusCode.BadRequest, "an event ID the inbox cannot store");
         longNumber.StatusCode.ShouldBe(HttpStatusCode.BadRequest, "an invoice number the column cannot store");
+        nullLine.StatusCode.ShouldBe(HttpStatusCode.BadRequest, "a null line is unreadable, not a server error the sender retries");
         notOurs.StatusCode.ShouldBe(HttpStatusCode.OK, "not one of our orders: nothing to record, and nothing to resend");
         (await app.ScalarAsync<long>("SELECT count(*) FROM invoices WHERE order_id = @o", ("o", order.OrderId))).ShouldBe(0);
         app.Events.Of(order.RequestId).ShouldBeEmpty();
