@@ -1,3 +1,4 @@
+using ProcureAi.Budgets.Domain;
 using ProcureAi.Contracts.Budgets;
 using Shouldly;
 
@@ -153,6 +154,26 @@ public sealed class SpendTests(BudgetsApp app)
         }
 
         (await app.DeadLettersAsync()).ShouldBe(deadBefore, "every loser of a race was retried, none dead-lettered");
+    }
+
+    [Fact]
+    public async Task A_transient_database_failure_while_booking_a_spend_is_retried_and_the_spend_is_booked()
+    {
+        // Final review I1: a connection reset at the save is not a reason to give up on a payment.
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, CostCenter, Budget);
+        var request = await ReservedRequestAsync(tenant);
+        var payment = Guid.NewGuid();
+        var deadBefore = await app.DeadLettersAsync();
+        var thrownBefore = app.Faults.Thrown;
+        app.Faults.FailOnce(db => db.ChangeTracker.Entries<BudgetSpend>().Any(e => e.Entity.PaymentId == payment));
+
+        await SpendAsync(tenant, request, payment, Payment);
+
+        (app.Faults.Thrown - thrownBefore).ShouldBe(1, "the first attempt failed");
+        (await app.SpentAsync(tenant, CostCenter)).ShouldBe((Payment, 1L));
+        app.Events.Of(request).Count(e => e.Kind == BudgetEventKind.Spent).ShouldBe(1);
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore, "retried, not dead-lettered");
     }
 
     [Fact]

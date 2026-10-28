@@ -70,6 +70,9 @@ public static class MessagingSetup
         options.CodeGeneration.AlwaysUseServiceLocationFor<IAccessDirectory>();
         // AccessChanged is retried when Redis or the backplane fails (also where it is handled with more, as in Audit).
         options.RetryAccessChangedCacheFailures(AccessChangedRetryPolicy.Delays(configuration));
+        // A transient database failure (connection reset, timeout, deadlock) is retried on a schedule instead of being
+        // dead-lettered on the first try. It leaves lost races and failed service calls to the service's own rules.
+        options.RetryTransientDatabaseFailures(TransientDatabaseRetryPolicy.Delays(configuration));
         if (listenToAccessChanges)
         {
             ListenToAccessChanges(options, serviceName);

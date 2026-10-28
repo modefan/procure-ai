@@ -21,6 +21,9 @@ public sealed class BudgetsApp : IAsyncLifetime
     private StubAccessServer _access = null!;
     private BudgetsApiFactory _factory = null!;
 
+    /// <summary>Arms a one-off transient database failure in every instance of the API (see <see cref="TransientDatabaseFault"/>).</summary>
+    public TransientDatabaseFault Faults { get; } = new();
+
     public HttpClient Client { get; private set; } = null!;
 
     public BudgetEvents Events { get; private set; } = null!;
@@ -36,7 +39,7 @@ public sealed class BudgetsApp : IAsyncLifetime
     {
         await _infra.InitializeAsync();
         _access = await StubAccessServer.StartAsync();
-        _factory = new BudgetsApiFactory(_infra, _access);
+        _factory = new BudgetsApiFactory(_infra, _access, Faults);
         Client = _factory.CreateClient();
         Events = await BudgetEvents.StartAsync(_infra.RabbitConnectionString);
     }
@@ -53,7 +56,7 @@ public sealed class BudgetsApp : IAsyncLifetime
     /// <summary>Starts more instances of the API on the same infrastructure; they compete for the queue like replicas in a cluster.</summary>
     public async Task<IAsyncDisposable> StartExtraInstancesAsync(int count)
     {
-        var extra = Enumerable.Range(0, count).Select(_ => new BudgetsApiFactory(_infra, _access)).ToList();
+        var extra = Enumerable.Range(0, count).Select(_ => new BudgetsApiFactory(_infra, _access, Faults)).ToList();
         foreach (var factory in extra)
         {
             factory.CreateClient().Dispose();
