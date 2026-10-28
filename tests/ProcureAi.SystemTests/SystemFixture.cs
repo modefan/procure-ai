@@ -59,7 +59,11 @@ public sealed class SystemFixture : IAsyncLifetime
         }
 
         Telemetry = await OtlpReceiver.StartAsync();
-        Telemetry.WatchMetrics(SupplierCircuitOpened, "purchasing-api", "resilience.polly.strategy.events", "OnCircuitOpened");
+        // Polly's counter of resilience events, from Purchasing's supplier pipeline (client "supplier", handler "supplier": pipeline.name
+        // "supplier-supplier"), for the event of its circuit breaker opening. Other pipelines (the Access client) do not match.
+        Telemetry.WatchMetrics(
+            SupplierCircuitOpened, "purchasing-api", "resilience.polly.strategy.events",
+            ("pipeline.name", "supplier-supplier"), ("event.name", "OnCircuitOpened"));
         try
         {
             // Tests never keep data: no volumes, so every run starts from empty databases (and fresh Debezium offsets). The services

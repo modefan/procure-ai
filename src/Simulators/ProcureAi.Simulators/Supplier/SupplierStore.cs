@@ -15,6 +15,13 @@ public sealed class SupplierOrder(string id, CreateOrderRequest request, string 
     public string SupplierCode { get; } = string.IsNullOrWhiteSpace(request.SupplierCode) ? defaultSupplierCode : request.SupplierCode.Trim();
 
     public volatile bool Cancelled;
+
+    private int _timesReceived;
+
+    /// <summary>How often the buyer sent this order (the first time plus every repeat the supplier deduplicated).</summary>
+    public int TimesReceived => Volatile.Read(ref _timesReceived);
+
+    internal void CountReceipt() => Interlocked.Increment(ref _timesReceived);
 }
 
 /// <summary>The supplier's orders, in memory. The same external reference is the same order (dedup).</summary>
@@ -35,10 +42,12 @@ public sealed class SupplierStore
         {
             if (_byReference.TryGetValue(request.ExternalReference, out var existing))
             {
+                existing.CountReceipt();
                 return (existing, false);
             }
 
             var order = new SupplierOrder($"SO-{FirstOrderNumber + _orders++}", request, defaultSupplierCode);
+            order.CountReceipt();
             _byReference[order.ExternalReference] = order;
             _byId[order.Id] = order;
             return (order, true);
@@ -50,6 +59,15 @@ public sealed class SupplierStore
         lock (_gate)
         {
             return _byId.GetValueOrDefault(supplierOrderId);
+        }
+    }
+
+    /// <summary>The orders whose buyer reference is exactly <paramref name="buyerReference"/>, oldest first.</summary>
+    public IReadOnlyList<SupplierOrder> ForBuyerReference(string buyerReference)
+    {
+        lock (_gate)
+        {
+            return [.. _byId.Values.Where(o => string.Equals(o.BuyerReference, buyerReference, StringComparison.Ordinal)).OrderBy(o => o.Id, StringComparer.Ordinal)];
         }
     }
 

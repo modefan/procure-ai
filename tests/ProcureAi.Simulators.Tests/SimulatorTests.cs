@@ -71,6 +71,35 @@ public sealed class SimulatorTests
         factory.Receiver.Received.Count(w => w.Json.GetProperty("externalReference").GetString() == "order-dup").ShouldBe(1);
     }
 
+    /// <summary>
+    /// Test hook: what the supplier holds for one buyer reference (our tenant/order number) and how often each was sent, so a system
+    /// test can prove an order was sent once and became one supplier order.
+    /// </summary>
+    [Fact]
+    public async Task Admin_lists_the_orders_of_a_buyer_reference_with_how_often_each_was_received()
+    {
+        await using var factory = new SimulatorFactory(NoAutoInvoice());
+        using var client = factory.SupplierClient();
+        using var admin = factory.AdminClient();
+
+        var first = await PlaceOrderAsync(client, "order-q");
+        await PlaceOrderAsync(client, "order-q");
+        var other = await PlaceOrderAsync(client, "order-other");
+
+        var listed = await ReadAsync(await admin.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-0001"));
+        var orders = listed.EnumerateArray().ToDictionary(o => o.GetProperty("externalReference").GetString()!);
+        orders.Count.ShouldBe(2, "two external references, so two supplier orders");
+        orders["order-q"].GetProperty("supplierOrderId").GetString().ShouldBe(first);
+        orders["order-q"].GetProperty("timesReceived").GetInt32().ShouldBe(2);
+        orders["order-other"].GetProperty("supplierOrderId").GetString().ShouldBe(other);
+        orders["order-other"].GetProperty("timesReceived").GetInt32().ShouldBe(1);
+        orders["order-q"].GetProperty("cancelled").GetBoolean().ShouldBeFalse();
+
+        var none = await ReadAsync(await admin.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-9999"));
+        none.GetArrayLength().ShouldBe(0);
+        (await client.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-0001")).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
     [Fact]
     public async Task Discontinued_article_is_declined()
     {

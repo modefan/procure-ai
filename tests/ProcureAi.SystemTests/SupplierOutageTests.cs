@@ -31,6 +31,9 @@ public sealed partial class SupplierOutageTests(SystemFixture system)
         var (normal, _) = await simulators.GetAsync<JsonObject>("/api/v1/simulators/chaos");
         var down = normal.DeepClone().AsObject();
         down["supplier"]!["mode"] = "Down";
+        // Polly's counter is cumulative: arm the watch now and make sure the supplier circuit had not opened before (no other test
+        // takes the supplier down), so only an opening from here on can satisfy it, whatever ran before in this fixture.
+        system.Telemetry.Rearm(SystemFixture.SupplierCircuitOpened).ShouldBeFalse("the supplier circuit opened before the outage");
         var downSince = DateTimeOffset.UtcNow;
         await simulators.SendAsync<JsonObject>(HttpMethod.Put, "/api/v1/simulators/chaos", HttpStatusCode.OK, down);
         try
@@ -45,7 +48,8 @@ public sealed partial class SupplierOutageTests(SystemFixture system)
             pending.SupplierStatus.ShouldStartWith("Supplier unavailable · retrying");
             pending.SupplierReference.ShouldBeNull();
 
-            // The supplier circuit opened: Polly's resilience.polly.strategy.events (event.name=OnCircuitOpened) from purchasing-api.
+            // The supplier circuit opened: Polly's resilience.polly.strategy.events from purchasing-api, on a data point of the supplier
+            // pipeline (pipeline.name=supplier-supplier) with event.name=OnCircuitOpened.
             var opened = await SystemFlow.EventuallyAsync(
                 () => Task.FromResult(system.Telemetry.FirstSeen(SystemFixture.SupplierCircuitOpened)),
                 at => at is not null,
@@ -58,7 +62,15 @@ public sealed partial class SupplierOutageTests(SystemFixture system)
             var (confirmed, _) = await _flow.OrderWhenAsync(request.Id, o => o.Status == "Confirmed", "order confirmed after the outage", RecoveryTimeout);
             confirmed.SupplierReference.ShouldNotBeNullOrWhiteSpace();
 
-            // Sent once, confirmed once: one supplier order (the simulator deduplicates by our order ID) and one confirmation.
+            // Sent once, confirmed once. At the supplier: exactly one order for our order number, under our order ID, received once
+            // (none of the attempts during the outage got through, and the recovery sent it a single time).
+            var (supplierOrders, _) = await simulators.GetAsync<List<SupplierOrderView>>(
+                $"/api/v1/simulators/supplier/orders?buyerReference={Uri.EscapeDataString($"{SystemFixture.Tenant}/{confirmed.Number}")}");
+            var supplierOrder = supplierOrders.ShouldHaveSingleItem();
+            supplierOrder.ExternalReference.ShouldBe(confirmed.Id.ToString());
+            supplierOrder.SupplierOrderId.ShouldBe(confirmed.SupplierReference);
+            supplierOrder.TimesReceived.ShouldBe(1);
+            // In the audit: one order and one confirmation.
             var history = await _flow.HistoryWhenAsync(request.Id, h => h.Any(e => e.Type == "PurchaseOrderConfirmed"), "confirmation in the audit");
             history.Count(e => e.Type == "PurchaseOrderCreated").ShouldBe(1);
             history.Count(e => e.Type == "PurchaseOrderConfirmed").ShouldBe(1);
@@ -71,6 +83,8 @@ public sealed partial class SupplierOutageTests(SystemFixture system)
             await simulators.SendAsync<JsonObject>(HttpMethod.Put, "/api/v1/simulators/chaos", HttpStatusCode.OK, normal);
         }
     }
+
+    private sealed record SupplierOrderView(string SupplierOrderId, string ExternalReference, string BuyerReference, int TimesReceived, bool Cancelled);
 
     /// <summary>The failed attempts so far, from "Supplier unavailable · retrying (attempt N)" (N is the next attempt).</summary>
     private static int FailedAttempts(OrderView order) =>

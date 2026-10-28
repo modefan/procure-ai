@@ -134,6 +134,8 @@ public sealed class OrderToPaymentTests(SystemFixture system)
         var before = await _flow.AvailableAsync();
         var request = await OrderedMonitorAsync("Monitor for the meeting room");
         await SystemFlow.EventuallyAsync(_flow.AvailableAsync, a => a == before - MonitorInclVat, "budget reserved");
+        // The supplier has confirmed it (so it holds the order and must be told), and nothing was delivered yet.
+        await _flow.OrderWhenAsync(request.Id, o => o.Status == "Confirmed", "order confirmed by the supplier");
 
         // Tom cancels before anything arrived: Purchasing cancels the order and tells the supplier; the request ends Cancelled.
         using var tom = system.Service("requests", SystemFixture.Tom);
@@ -145,6 +147,11 @@ public sealed class OrderToPaymentTests(SystemFixture system)
         await _flow.RequestWhenAsync(request.Id, r => r.Status == "Cancelled", "request cancelled");
         var (order, _) = await _flow.OrderWhenAsync(request.Id, o => o.Status == "Cancelled" && o.SupplierStatus == "Cancelled", "order cancelled with the supplier");
         order.Lines.Single().Received.ShouldBe(0);
+        // The supplier itself has the order cancelled.
+        using var simulators = system.Simulators();
+        var (supplierOrders, _) = await simulators.GetAsync<List<SupplierOrderView>>(
+            $"/api/v1/simulators/supplier/orders?buyerReference={Uri.EscapeDataString($"{SystemFixture.Tenant}/{order.Number}")}");
+        supplierOrders.ShouldHaveSingleItem().Cancelled.ShouldBeTrue();
         (await SystemFlow.EventuallyAsync(_flow.AvailableAsync, a => a == before, "budget released")).ShouldBe(before);
 
         var history = await _flow.HistoryWhenAsync(
@@ -193,6 +200,8 @@ public sealed class OrderToPaymentTests(SystemFixture system)
         await _flow.ApproveAsync(SystemFixture.Maria, request.Id, 1, "Manager", "R 4 830,00");
         return (await _flow.RequestWhenAsync(request.Id, r => r.Status == "Ordered", "request ordered")).Body;
     }
+
+    private sealed record SupplierOrderView(string SupplierOrderId, string ExternalReference, bool Cancelled);
 
     private static async Task<InvoiceView> InvoiceWhenAsync(ServiceClient invoicing, Guid orderId, Func<InvoiceView, bool> done, string what) =>
         (await SystemFlow.EventuallyAsync(

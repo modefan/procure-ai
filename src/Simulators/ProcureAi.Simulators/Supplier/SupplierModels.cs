@@ -28,6 +28,9 @@ public sealed record IssueInvoiceRequest(List<InvoiceLineOverride>? Lines, int? 
 
 public sealed record InvoiceReceipt(string InvoiceNumber);
 
+/// <summary>Admin view of one supplier order: what it is for and how often the buyer sent it.</summary>
+public sealed record SupplierOrderSummary(string SupplierOrderId, string ExternalReference, string BuyerReference, int TimesReceived, bool Cancelled);
+
 // Webhook bodies, serialized as camelCase JSON, nulls omitted.
 
 public sealed record OrderWebhook(
