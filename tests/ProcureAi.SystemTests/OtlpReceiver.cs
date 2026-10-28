@@ -22,6 +22,8 @@ public sealed class OtlpReceiver : IAsyncDisposable
 {
     private const string MetricsService = "opentelemetry.proto.collector.metrics.v1.MetricsService";
 
+    private const int GrpcFrameHeader = 5;
+
     // gRPC frame of an empty message (the Export*ServiceResponse): not compressed, length 0.
     private static readonly byte[] EmptyGrpcMessage = [0, 0, 0, 0, 0];
 
@@ -89,7 +91,12 @@ public sealed class OtlpReceiver : IAsyncDisposable
             using var body = new MemoryStream();
             await context.Request.Body.CopyToAsync(body, context.RequestAborted);
             Interlocked.Increment(ref _metricExports);
-            Judge(body.GetBuffer().AsSpan(0, (int)body.Length));
+            // The body is one gRPC frame: a compressed flag (0 here: no grpc-encoding), a 4-byte length, then the protobuf message.
+            var frame = body.GetBuffer().AsSpan(0, (int)body.Length);
+            if (frame.Length >= GrpcFrameHeader && frame[0] == 0)
+            {
+                Judge(frame[GrpcFrameHeader..]);
+            }
         }
         else
         {
