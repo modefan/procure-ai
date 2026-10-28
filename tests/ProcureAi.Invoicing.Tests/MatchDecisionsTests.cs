@@ -27,6 +27,23 @@ public sealed class MatchDecisionsTests
         InvoicingMapper.ToOutcomeEvent(invoice, Fixture.Now).ShouldBeOfType<ProcureAi.Contracts.Invoicing.InvoiceMatched>();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_dead_order_matches_nothing_and_its_invoices_keep_their_outcome(bool rejected)
+    {
+        // Final review M2: a goods receipt cannot happen any more, but a re-match must not announce outcomes on a dead order.
+        var order = Fixture.Order(received: 2);
+        var invoice = Fixture.Matched(Fixture.Invoice(quantity: 3), order);
+        var waiting = Fixture.Invoice(quantity: 1, sequence: 2, number: "INV-2");
+        _ = rejected ? order.Reject() : order.Cancel();
+
+        MatchDecisions.Rematch(order, [invoice, waiting], Tolerance).ShouldBeEmpty();
+
+        invoice.Status.ShouldBe(InvoiceStatus.Mismatched);
+        waiting.Status.ShouldNotBe(InvoiceStatus.Matched);
+    }
+
     [Fact]
     public void An_unchanged_outcome_is_not_news()
     {

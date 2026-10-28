@@ -36,6 +36,7 @@ public sealed class SupplierInvoiceWebhooksController(IMessageBus bus, ILogger<S
     /// (replayed or delivered twice, or the same invoice number with the same content), for a reference that is not one of our orders
     /// and for an event type we do not handle: the supplier must not send any of those again. 409 when the invoice number is already
     /// recorded with other content. 400 when the body cannot be read (not JSON, a required field missing, a value too long to store).
+    /// 422 when the invoice is refused, e.g. for an order that was cancelled or rejected (it takes no invoices).
     /// </summary>
     [HttpPost("supplier", Name = "SupplierInvoiceWebhook")]
     [SignedWebhook(RecordInvoiceHandler.WebhookSource)]
@@ -44,6 +45,7 @@ public sealed class SupplierInvoiceWebhooksController(IMessageBus bus, ILogger<S
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Supplier(CancellationToken cancellationToken)
     {
         // The raw body is kept as the invoice's document; the signature filter buffered it, so it can be read here.

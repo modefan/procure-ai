@@ -267,9 +267,9 @@ public sealed class Invoice : Entity<Guid>
             throw new DomainException("The invoice has not been matched against an order yet.");
         }
 
-        if (order.Status == OrderViewStatus.Cancelled)
+        if (order.ClosedReason is { } closed)
         {
-            throw new DomainException($"{order.OrderNumber} was cancelled.");
+            throw new DomainException(closed);
         }
 
         if (!SameSupplierAs(order))

@@ -117,6 +117,16 @@ public sealed class PaymentTests
     }
 
     [Fact]
+    public void A_rejected_order_cannot_be_paid()
+    {
+        var order = Fixture.Order(received: 3);
+        var invoice = Fixture.Matched(Fixture.Invoice(), order);
+        order.Reject();
+
+        Should.Throw<DomainException>(() => invoice.PlanPayment(order, null)).Message.ShouldBe("PO-1001 was rejected by the supplier.");
+    }
+
+    [Fact]
     public void Requested_lines_must_exist_be_positive_and_unique()
     {
         var order = Fixture.Order(received: 3);

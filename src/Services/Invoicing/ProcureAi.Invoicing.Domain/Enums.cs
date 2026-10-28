@@ -5,6 +5,9 @@ public enum OrderViewStatus
 {
     Open,
     Cancelled,
+
+    /// <summary>The supplier rejected the order: nothing will be delivered or paid.</summary>
+    Rejected,
 }
 
 /// <summary>How an invoice reached us.</summary>

@@ -24,6 +24,16 @@ internal static class OrderEvents
             .Where(i => i.TenantId == tenantId && i.OrderId == orderId)
             .ToListAsync(cancellationToken);
 
+    /// <summary>Evicts the cached reads of every invoice of <paramref name="order"/> (and the tenant's list) once the handler commits.</summary>
+    public static async Task EvictInvoicesOfAsync(IInvoicingDbContext db, ICacheInvalidator cache, OrderView order, CancellationToken cancellationToken)
+    {
+        var invoiceIds = await db.Invoices.IgnoreQueryFilters()
+            .Where(i => i.TenantId == order.TenantId && i.OrderId == order.Id)
+            .Select(i => i.Id)
+            .ToListAsync(cancellationToken);
+        await cache.RemoveAfterCommitAsync(InvoicingCacheTag.Of(order.TenantId, invoiceIds));
+    }
+
     /// <summary>The invoices of both lists, each once (an invoice adopted in this unit of work is not in the database's answer yet).</summary>
     public static List<Invoice> Union(IEnumerable<Invoice> loaded, IEnumerable<Invoice> more) => [.. loaded.Concat(more).DistinctBy(i => i.Id)];
 
@@ -31,7 +41,8 @@ internal static class OrderEvents
     /// Gives the invoices that wait for <paramref name="order"/> without a tenant (they came by webhook before the order) the order's
     /// tenant and their arrival numbers in it, in the order they arrived. A waiting invoice whose number the tenant already has for this
     /// supplier (a second copy that came by webhook before the order was known) is the supplier's mistake: it is removed and logged,
-    /// as it would have been refused had the tenant been known. Returns the adopted invoices (tracked, not yet saved).
+    /// as it would have been refused had the tenant been known. So are the waiting invoices of an order that is dead by now
+    /// (cancelled or rejected): a new invoice for it is refused (<c>RecordInvoice</c>). Returns the adopted invoices (tracked, not yet saved).
     /// </summary>
     public static async Task<List<Invoice>> AdoptWaitingAsync(
         IInvoicingDbContext db, ITenantSequence sequence, OrderView order, ILogger logger, CancellationToken cancellationToken)
@@ -40,6 +51,19 @@ internal static class OrderEvents
             .Where(i => i.OrderId == order.Id && i.TenantId == Invoice.UnassignedTenant)
             .OrderBy(i => i.ReceivedAt).ThenBy(i => i.Id)
             .ToListAsync(cancellationToken);
+        if (order.ClosedReason is { } closed)
+        {
+            foreach (var invoice in waiting)
+            {
+                logger.LogWarning(
+                    "Invoice {InvoiceId} ({Number}) waited for order {OrderId}, but {Reason} It takes no invoices; removed",
+                    invoice.Id, invoice.SupplierInvoiceNumber, order.Id, closed);
+                db.Invoices.Remove(invoice);
+            }
+
+            return [];
+        }
+
         var adopted = new List<Invoice>();
         foreach (var invoice in waiting)
         {
@@ -148,14 +172,17 @@ public static class GoodsReceivedHandler
 /// <summary>An order closed with goods outstanding: those quantities will never be paid, which can settle the order.</summary>
 public static class PurchaseOrderClosedShortHandler
 {
+    /// <summary>Without the copy of the order yet, <see cref="OrderViewMissingException"/> sends the message back for a later retry.</summary>
     public static async Task Handle(
-        PurchaseOrderClosedShort message, IInvoicingDbContext db, IMessageBus bus, TimeProvider time, CancellationToken cancellationToken)
+        PurchaseOrderClosedShort message, IInvoicingDbContext db, IMessageBus bus, ICacheInvalidator cache, TimeProvider time,
+        CancellationToken cancellationToken)
     {
         var order = await OrderEvents.LoadViewAsync(db, message.TenantId, message.OrderId, cancellationToken)
             ?? throw new OrderViewMissingException(message.OrderId);
         order.ApplyClosedShort([.. message.ClosedLines.Select(l => (l.LineNo, l.Quantity))]);
         var now = time.GetUtcNow();
         var settled = order.MarkSettled(now);
+        await OrderEvents.EvictInvoicesOfAsync(db, cache, order, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         if (settled)
         {
@@ -164,26 +191,46 @@ public static class PurchaseOrderClosedShortHandler
     }
 }
 
+/// <summary>The order was cancelled: it is dead here too (no more matches, invoices or payments).</summary>
 public static class PurchaseOrderCancelledHandler
 {
-    /// <summary>A cancel before the order existed (no order ID) or for an order never copied here changes nothing.</summary>
+    /// <summary>
+    /// A cancel before the order existed (no order ID: Purchasing never created it, so no <c>PurchaseOrderCreated</c> follows)
+    /// changes nothing. A cancel of an order whose copy has not arrived yet (it overtook <c>PurchaseOrderCreated</c>) throws
+    /// <see cref="OrderViewMissingException"/> and is retried until the copy exists, so it is never lost.
+    /// </summary>
     public static async Task Handle(
-        PurchaseOrderCancelled message, IInvoicingDbContext db, ILogger<PurchaseOrderCancelled> logger, CancellationToken cancellationToken)
+        PurchaseOrderCancelled message, IInvoicingDbContext db, ICacheInvalidator cache, CancellationToken cancellationToken)
     {
         if (message.OrderId is not { } orderId)
         {
             return;
         }
 
-        var order = await OrderEvents.LoadViewAsync(db, message.TenantId, orderId, cancellationToken);
-        if (order is null)
+        var order = await OrderEvents.LoadViewAsync(db, message.TenantId, orderId, cancellationToken)
+            ?? throw new OrderViewMissingException(orderId);
+        if (order.Cancel())
         {
-            logger.LogWarning("Order {OrderId} was cancelled but Invoicing has no copy of it; ignored", orderId);
-            return;
+            await OrderEvents.EvictInvoicesOfAsync(db, cache, order, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
+    }
+}
 
-        order.Cancel();
-        await db.SaveChangesAsync(cancellationToken);
+/// <summary>The supplier rejected the order: it is dead here too (no more matches, invoices or payments).</summary>
+public static class PurchaseOrderRejectedHandler
+{
+    /// <summary>Without the copy of the order yet, <see cref="OrderViewMissingException"/> sends the message back for a later retry.</summary>
+    public static async Task Handle(
+        PurchaseOrderRejected message, IInvoicingDbContext db, ICacheInvalidator cache, CancellationToken cancellationToken)
+    {
+        var order = await OrderEvents.LoadViewAsync(db, message.TenantId, message.OrderId, cancellationToken)
+            ?? throw new OrderViewMissingException(message.OrderId);
+        if (order.Reject())
+        {
+            await OrderEvents.EvictInvoicesOfAsync(db, cache, order, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
     }
 }
 
@@ -191,10 +238,6 @@ public static class PurchaseOrderCancelledHandler
 public static class PurchaseOrderIgnoredEventsHandler
 {
     public static void Handle(PurchaseOrderConfirmed message)
-    {
-    }
-
-    public static void Handle(PurchaseOrderRejected message)
     {
     }
 

@@ -288,6 +288,63 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
             .ShouldBe(0);
     }
 
+    /// <summary>
+    /// Final review M2: the supplier rejects the order, so Invoicing's view of it is dead. The invoice it already holds keeps its
+    /// outcome; a new invoice for the order, by webhook or by hand, is refused (422) and nothing is announced.
+    /// </summary>
+    [Fact]
+    public async Task Supplier_rejection_closes_the_order_view_and_later_invoices_are_refused()
+    {
+        var tenant = InvoicingApp.NewTenant();
+        var order = await app.CreateOrderAsync(tenant);
+        var first = await app.WebhookInvoiceAsync(order.OrderId, "INV-R1", 3);
+        await app.WaitForStatusAsync(first, "Mismatched");
+        var deadBefore = await app.DeadLettersAsync();
+
+        await app.PublishAsync(
+            new PurchaseOrderRejected(order.OrderId, order.RequestId, tenant, order.OrderNumber, "Out of stock", DateTimeOffset.UtcNow), tenant);
+        await InvoicingApp.EventuallyAsync(
+            async () => await app.ScalarAsync<string>("SELECT status FROM order_views WHERE id = @id", ("id", order.OrderId)) == "Rejected",
+            "the order view marked rejected");
+        var eventsBefore = app.Events.Of(order.RequestId).Count;
+
+        using var webhook = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-R2", 1));
+        using var manual = await CreateAsync(InvoicingApp.Token(tenant), ManualInvoice(order.OrderId, "INV-R3", 1));
+
+        webhook.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await webhook.Content.ReadAsStringAsync());
+        (await webhook.Content.ReadAsStringAsync()).ShouldContain("PO-1001 was rejected by the supplier.");
+        manual.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await manual.Content.ReadAsStringAsync());
+        (await app.ScalarAsync<long>("SELECT count(*) FROM invoices WHERE order_id = @o", ("o", order.OrderId))).ShouldBe(1);
+        (await app.ScalarAsync<string>("SELECT status FROM invoices WHERE id = @id", ("id", first))).ShouldBe("Mismatched");
+        await InvoicingApp.SettleAsync();
+        app.Events.Of(order.RequestId).Count.ShouldBe(eventsBefore, "nothing announced for a dead order");
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore);
+    }
+
+    /// <summary>
+    /// Final review M2: a cancellation that overtakes <c>PurchaseOrderCreated</c> is not dropped. It is retried until the order view
+    /// exists and then closes it, so the order is never left open here. Nothing is dead-lettered.
+    /// </summary>
+    [Fact]
+    public async Task A_cancel_that_overtakes_the_order_is_applied_once_the_order_arrives()
+    {
+        var tenant = InvoicingApp.NewTenant();
+        var order = InvoicingApp.NewOrder(tenant);
+        var deadBefore = await app.DeadLettersAsync();
+
+        await app.PublishAsync(new PurchaseOrderCancelled(order.OrderId, order.RequestId, tenant, "No longer needed", DateTimeOffset.UtcNow), tenant);
+        await InvoicingApp.SettleAsync();
+        await app.PublishAsync(order, tenant);
+
+        await InvoicingApp.EventuallyAsync(
+            async () => await app.ScalarAsync<string>("SELECT status FROM order_views WHERE id = @id", ("id", order.OrderId)) == "Cancelled",
+            "the order view marked cancelled");
+        using var webhook = await app.PostWebhookAsync(InvoicingApp.InvoiceEvent(order.OrderId, "INV-C1", 1));
+        webhook.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await webhook.Content.ReadAsStringAsync()).ShouldContain("PO-1001 was cancelled.");
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore);
+    }
+
     [Fact]
     public async Task Invoice_document_is_stored_as_jsonb()
     {

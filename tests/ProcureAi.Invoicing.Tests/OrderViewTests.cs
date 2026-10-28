@@ -54,6 +54,33 @@ public sealed class OrderViewTests
     }
 
     [Fact]
+    public void A_rejected_order_is_dead_and_never_settled()
+    {
+        var order = Settled(paid: 2, closed: 1);
+
+        order.Reject().ShouldBeTrue();
+
+        order.Status.ShouldBe(OrderViewStatus.Rejected);
+        order.IsOpen.ShouldBeFalse();
+        order.IsSettled.ShouldBeFalse();
+        order.ClosedReason.ShouldBe("PO-1001 was rejected by the supplier.");
+    }
+
+    [Fact]
+    public void The_first_end_of_an_order_stays_and_a_repeat_changes_nothing()
+    {
+        var order = Fixture.Order();
+        order.Cancel().ShouldBeTrue();
+        var revision = order.Revision;
+
+        order.Cancel().ShouldBeFalse();
+        order.Reject().ShouldBeFalse();
+
+        order.Status.ShouldBe(OrderViewStatus.Cancelled);
+        order.Revision.ShouldBe(revision);
+    }
+
+    [Fact]
     public void MarkSettled_is_true_only_once()
     {
         var order = Settled(paid: 2, closed: 1);

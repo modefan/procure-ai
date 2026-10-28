@@ -17,9 +17,15 @@ public static class MatchDecisions
     /// or held ones included. Invoices that are partly or fully paid, or held, are left as they are.
     /// With <paramref name="only"/> set, just that invoice is matched (a new invoice does not change the outcome of earlier ones).
     /// The order view is marked as matched when anything was evaluated, so the match and any payment of the order never overlap.
+    /// A dead order (cancelled or rejected, <see cref="OrderView.IsOpen"/>) matches nothing: its invoices keep their last outcome.
     /// </summary>
     public static IReadOnlyList<MatchOutcome> Rematch(OrderView order, IReadOnlyList<Invoice> invoices, Money tolerance, Invoice? only = null)
     {
+        if (!order.IsOpen)
+        {
+            return [];
+        }
+
         var ofOrder = invoices.Where(i => i.OrderId == order.Id).OrderBy(i => i.Sequence).ToList();
         var outcomes = new List<MatchOutcome>();
         foreach (var invoice in ofOrder)

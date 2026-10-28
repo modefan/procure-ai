@@ -97,8 +97,22 @@ public sealed class OrderView : Entity<Guid>
     /// <summary>Optimistic concurrency token (the Postgres <c>xmin</c> system column), set by the database on every write.</summary>
     public uint Version { get; private set; }
 
-    /// <summary>Not cancelled and every line is paid or closed short.</summary>
-    public bool IsSettled => Status != OrderViewStatus.Cancelled && _lines.All(l => l.Paid + l.ClosedShort >= l.Ordered);
+    /// <summary>
+    /// Goods and payments are still expected. A cancelled or rejected order is dead: its invoices are no longer matched, new
+    /// invoices are refused and nothing is paid.
+    /// </summary>
+    public bool IsOpen => Status == OrderViewStatus.Open;
+
+    /// <summary>Open and every line is paid or closed short.</summary>
+    public bool IsSettled => IsOpen && _lines.All(l => l.Paid + l.ClosedShort >= l.Ordered);
+
+    /// <summary>Why the order takes no more invoices or payments, e.g. <c>PO-1001 was cancelled.</c> (null while open).</summary>
+    public string? ClosedReason => Status switch
+    {
+        OrderViewStatus.Cancelled => $"{OrderNumber} was cancelled.",
+        OrderViewStatus.Rejected => $"{OrderNumber} was rejected by the supplier.",
+        _ => null,
+    };
 
     public static OrderView Create(
         Guid orderId, string tenantId, Guid requestId, string orderNumber, string supplierId, string costCenterCode,
@@ -171,10 +185,22 @@ public sealed class OrderView : Entity<Guid>
         Revision++;
     }
 
-    public void Cancel()
+    /// <summary>The order was cancelled. True when that changed the view (a repeat, or an order already rejected, changes nothing).</summary>
+    public bool Cancel() => Close(OrderViewStatus.Cancelled);
+
+    /// <summary>The supplier rejected the order. True when that changed the view.</summary>
+    public bool Reject() => Close(OrderViewStatus.Rejected);
+
+    private bool Close(OrderViewStatus status)
     {
-        Status = OrderViewStatus.Cancelled;
+        if (!IsOpen)
+        {
+            return false;
+        }
+
+        Status = status;
         Revision++;
+        return true;
     }
 
     /// <summary>Marks the order settled. True only the first time it is settled, so the event goes out once.</summary>

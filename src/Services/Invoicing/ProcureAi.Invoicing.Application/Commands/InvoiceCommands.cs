@@ -124,6 +124,12 @@ public static class RecordInvoiceHandler
             return InvoicingMapper.ToDto(waiting, null);
         }
 
+        if (order.ClosedReason is { } closed)
+        {
+            // A dead order (cancelled or rejected) takes no invoices: nothing can be received or paid against it.
+            throw new DomainException($"{closed} It takes no invoices.");
+        }
+
         var invoice = Invoice.Create(
             tenant, command.OrderId, order.RequestId, supplier, number, command.InvoiceDate,
             await sequence.NextAsync(tenant, "invoice", cancellationToken), command.Source, lines, stated, command.Document, now);
