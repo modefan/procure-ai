@@ -141,6 +141,9 @@ public sealed partial class LoginDriver : IDisposable
     }
 
     /// <summary>The whole sign-in. Returns where the gateway sent the browser afterwards.</summary>
+    /// <summary>The headers of the gateway's answer to the last login callback (the one that issues the session cookie).</summary>
+    public Dictionary<string, string>? CallbackHeaders { get; private set; }
+
     public async Task<Uri> LoginAsync(HttpClient gateway, string user, string path = "/bff/login")
     {
         var authorizeUrl = await StartAsync(gateway, path);
@@ -148,6 +151,7 @@ public sealed partial class LoginDriver : IDisposable
         var callback = redirect ?? await SubmitCredentialsAsync(
             formAction ?? throw new InvalidOperationException("No login form on Keycloak's page."), user, _keycloak.DemoPassword);
         using var done = await gateway.GetAsync(callback);
+        CallbackHeaders = done.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase);
         IsRedirect(done.StatusCode).ShouldBeTrue("Gateway callback failed: " + await done.Content.ReadAsStringAsync());
         return done.Headers.Location!;
     }

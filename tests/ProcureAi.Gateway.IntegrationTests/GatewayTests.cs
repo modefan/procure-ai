@@ -722,6 +722,19 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Login_completion_sends_clear_site_data_cache()
+    {
+        var driver = Driver();
+
+        await driver.LoginAsync(Browser(), "tom@acme.test");
+
+        // A new session cookie starts with an empty HTTP cache, so whoever signed in before in this browser leaves nothing
+        // behind (version ETags are the same in every tenant; the cache must not answer 304 for the next user).
+        driver.CallbackHeaders.ShouldNotBeNull();
+        driver.CallbackHeaders["Clear-Site-Data"].ShouldBe("\"cache\"");
+    }
+
+    [Fact]
     public async Task Logout_without_xsrf_header_is_400_and_keeps_the_session()
     {
         var browser = await SignedInAsync();

@@ -55,6 +55,10 @@ public sealed class ConditionalGetFilter : IAsyncResourceFilter
                 response.Headers.CacheControl = CacheControlValue;
             }
 
+            // A response is tied to the session cookie: some tags (a version such as "7") are the same in every tenant, so a
+            // browser must never revalidate an entry stored under another session. (Login and logout also clear the cache.)
+            response.Headers.Append(HeaderNames.Vary, HeaderNames.Cookie);
+
             if (Matches(http.Request, etag))
             {
                 response.StatusCode = StatusCodes.Status304NotModified;

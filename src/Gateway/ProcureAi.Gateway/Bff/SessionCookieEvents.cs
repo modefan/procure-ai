@@ -14,6 +14,16 @@ namespace ProcureAi.Gateway.Bff;
 public sealed class SessionCookieEvents(
     TokenRefresher refresher, IOptions<BffSessionOptions> session, TimeProvider time) : CookieAuthenticationEvents
 {
+    /// <summary>
+    /// A new session cookie is being issued (login callback, or the demo registration re-issuing it with a tenant): the browser
+    /// starts with an empty HTTP cache, so nothing cached for a previous user or tenant can be revalidated into this session.
+    /// </summary>
+    public override Task SigningIn(CookieSigningInContext context)
+    {
+        context.Response.Headers["Clear-Site-Data"] = "\"cache\"";
+        return base.SigningIn(context);
+    }
+
     public override Task RedirectToLogin(RedirectContext<CookieAuthenticationOptions> context)
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;

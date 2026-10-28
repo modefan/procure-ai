@@ -113,6 +113,35 @@ public sealed class ConditionalGetFilterTests(RedisFixture redis) : IAsyncLifeti
     }
 
     [Fact]
+    public async Task Get_varies_by_cookie()
+    {
+        using var plain = await SendAsync(Get($"{Base}/plain"));
+        using var versioned = await SendAsync(Get($"{Base}/versioned"));
+        using var notModified = await SendAsync(Get($"{Base}/versioned", ifNoneMatch: "\"7\""));
+
+        foreach (var response in new[] { plain, versioned, notModified })
+        {
+            response.Headers.Vary.ShouldContain("Cookie");
+        }
+    }
+
+    [Fact]
+    public async Task Same_version_tag_in_two_tenants_is_safe_only_because_of_Vary_Cookie_and_login_clearing()
+    {
+        // The server alone cannot tell the tenants apart here: a version tag ("7") is the same for both, so tenant B's
+        // If-None-Match "7" matches and gets 304. What protects tenant B from tenant A's cached body is the browser side:
+        // Vary: Cookie (an entry stored under another session cookie is never reused) and Clear-Site-Data on login/logout
+        // (gateway tests). This test pins the server half: tagged responses carry Vary: Cookie.
+        using var tenantA = await SendAsync(Get($"{Base}/versioned", "acme"));
+        using var tenantB = await SendAsync(Get($"{Base}/versioned", "globex", ifNoneMatch: tenantA.Headers.ETag!.ToString()));
+
+        tenantA.Headers.ETag!.ToString().ShouldBe("\"7\"");
+        tenantB.StatusCode.ShouldBe(HttpStatusCode.NotModified);
+        tenantA.Headers.Vary.ShouldContain("Cookie");
+        tenantB.Headers.Vary.ShouldContain("Cookie");
+    }
+
+    [Fact]
     public async Task Different_user_with_other_etag_gets_200()
     {
         using var acme = await SendAsync(Get($"{Base}/plain", "acme"));
