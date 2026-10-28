@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject } from '@angular/core';
+import { Component, computed, effect, inject, untracked } from '@angular/core';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@angular/aria/menu';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
@@ -38,7 +38,9 @@ interface NavLink {
         </a>
 
         <nav aria-label="Main" class="order-3 flex w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto">
-          <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" class="nav-link">Welcome</a>
+          @if (!auth.isLoggedIn()) {
+            <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" class="nav-link">Welcome</a>
+          }
           @if (auth.isLoggedIn()) {
             <a routerLink="/app/dashboard" routerLinkActive="active" class="nav-link">Dashboard</a>
             @for (link of links(); track link.path) {
@@ -63,7 +65,7 @@ interface NavLink {
             <app-live-indicator />
             <app-bell-menu />
             <div class="relative">
-              <button ngMenuTrigger #trigger="ngMenuTrigger" [menu]="userMenu" type="button" data-testid="user-menu" class="btn-ghost max-w-40 !px-2 !py-1 sm:max-w-64 sm:!px-4">
+              <button ngMenuTrigger #trigger="ngMenuTrigger" [menu]="userMenu" type="button" data-testid="user-menu" class="btn-ghost max-w-40 !px-2 !py-1 sm:max-w-52 sm:!px-4">
                 <span class="min-w-0 text-left leading-tight">
                   <span class="block truncate">{{ auth.user()?.name ?? 'Account' }}</span>
                   <span class="block truncate text-xs font-normal text-slate-500">{{ roleAndTenant() }}</span>
@@ -136,10 +138,13 @@ export class Shell {
     // Fill the bell and the approvals count once somebody is signed in (the connection itself is started by the app initializer).
     effect(() => {
       if (this.auth.isLoggedIn()) {
-        void this.notifications.load();
-        if (this.auth.hasPermission('requests.approve')) {
-          void this.approvals.load();
-        }
+        // The loaders read store signals synchronously; untracked, so a push or markRead does not re-run this effect.
+        untracked(() => {
+          void this.notifications.load();
+          if (this.auth.hasPermission('requests.approve')) {
+            void this.approvals.load();
+          }
+        });
       }
     });
   }

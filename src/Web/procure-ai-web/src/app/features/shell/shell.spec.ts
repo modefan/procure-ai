@@ -5,6 +5,7 @@ import { AuthStore } from '../../core/auth/auth.store';
 import { ApprovalsCountStore } from '../../core/live/approvals-count.store';
 import { LiveConnection, LiveState } from '../../core/live/live-connection';
 import { NotificationsStore } from '../../core/live/notifications.store';
+import { NotificationsService } from '../../api/notifications/services/notifications.service';
 import { PresenceStore } from '../../core/live/presence.store';
 import { Shell } from './shell';
 
@@ -64,17 +65,17 @@ describe('Shell header', () => {
 
   it('links_follow_permissions', async () => {
     signIn(['requests.read', 'requests.create']);
-    expect(navLinks(await render())).toEqual(['Welcome', 'Dashboard', 'Requests']);
+    expect(navLinks(await render())).toEqual(['Dashboard', 'Requests']);
   });
 
   it('finance_sees_orders_invoices_and_budgets', async () => {
     signIn(['requests.read', 'orders.read', 'invoices.read', 'budgets.read']);
-    expect(navLinks(await render())).toEqual(['Welcome', 'Dashboard', 'Requests', 'Orders', 'Invoices', 'Budgets']);
+    expect(navLinks(await render())).toEqual(['Dashboard', 'Requests', 'Orders', 'Invoices', 'Budgets']);
   });
 
   it('a_manager_sees_the_approvals_link', async () => {
     signIn(['requests.read', 'requests.approve', 'budgets.read'], ['manager']);
-    expect(navLinks(await render())).toEqual(['Welcome', 'Dashboard', 'Requests', expect.stringContaining('Approvals'), 'Budgets']);
+    expect(navLinks(await render())).toEqual(['Dashboard', 'Requests', expect.stringContaining('Approvals'), 'Budgets']);
   });
 
   it('approvals_link_shows_count', async () => {
@@ -159,5 +160,41 @@ describe('Shell header', () => {
     expect(trigger).toContain('Tom Requester');
     expect(trigger).toContain('Manager');
     expect(trigger).toContain('Acme');
+  });
+
+  it('marking_read_or_a_push_does_not_trigger_another_list_call', async () => {
+    const answer = { unread: 1, items: [{ id: 'n1', text: 't', link: '/requests/r', read: false, createdAt: '2026-10-28T10:00:00Z', requestId: null }] };
+    // Every call after the 5th never answers, so a re-running effect (the bug) ends in a failed count, not a loop.
+    const list = vi.fn().mockImplementation(() => (list.mock.calls.length > 5 ? new Promise(() => undefined) : Promise.resolve(structuredClone(answer))));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        { provide: NotificationsService, useValue: { listNotifications: list, markNotificationRead: vi.fn().mockResolvedValue(undefined), markAllNotificationsRead: vi.fn() } },
+        { provide: AuthStore, useValue: { user, isLoggedIn: () => user() !== null, hasPermission: () => false, logout, logoutAll } },
+        { provide: LiveConnection, useValue: { state, on: () => () => undefined, onReconnected: () => () => undefined, onEntityChanged: () => () => undefined, onViewersChanged: () => () => undefined } },
+        { provide: PresenceStore, useValue: { online } },
+        { provide: ApprovalsCountStore, useValue: { count, load: vi.fn() } },
+      ],
+    });
+    // A clock that jumps 31 s at every reading: the list is always stale, so any extra load() call reaches the API.
+    let clock = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => (clock += 31_000));
+    signIn(['requests.read']);
+    const fixture = TestBed.createComponent(Shell);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const before = list.mock.calls.length;
+
+    const store = TestBed.inject(NotificationsStore);
+    await store.markRead('n1');
+    store.add({ id: 'n2', text: 'x', link: '/requests/q', read: false, createdAt: '2026-10-28T10:01:00Z', requestId: null });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(before).toBe(1);
+    expect(list).toHaveBeenCalledTimes(1);
   });
 });

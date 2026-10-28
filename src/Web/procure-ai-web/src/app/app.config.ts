@@ -3,7 +3,7 @@ import { provideHttpClient, withInterceptors, withXsrfConfiguration } from '@ang
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
 import { AuthStore } from './core/auth/auth.store';
-import { LiveConnection } from './core/live/live-connection';
+import { LiveSession } from './core/live/live-session';
 import { provideAppConfig } from './core/config/app-config';
 import { credentialsInterceptor } from './core/http/credentials.interceptor';
 import { correlationInterceptor } from './core/http/correlation.interceptor';
@@ -23,15 +23,12 @@ export const appConfig: ApplicationConfig = {
       withInterceptors([credentialsInterceptor, correlationInterceptor, errorsInterceptor]),
     ),
     provideRouter(routes),
-    // Ask the gateway who is signed in before the first page, so the header is right from the first paint, then open
-    // the live connection for a signed-in user (not awaited: the page must not wait for the socket).
-    provideAppInitializer(async () => {
-      const auth = inject(AuthStore);
-      const live = inject(LiveConnection);
-      await auth.load();
-      if (auth.isLoggedIn()) {
-        live.start();
-      }
+    // Ask the gateway who is signed in before the first page, so the header is right from the first paint. The live
+    // connection follows `isLoggedIn()` (LiveSession), so it also starts when the user becomes known later (a failed
+    // first load that a guard retries).
+    provideAppInitializer(() => {
+      inject(LiveSession);
+      return inject(AuthStore).load();
     }),
   ],
 };

@@ -29,6 +29,8 @@ export const NotificationsStore = signalStore(
   withMethods((store) => {
     const api = inject(NotificationsService);
     const log = inject(Logger).withSource('NotificationsStore');
+    /** Ids pushed since the last list answer was applied. */
+    const pushedIds = new Set<string>();
 
     return {
       /** Shows the list (once fresh, a second call does nothing). A failure sets `error` and keeps what is shown. */
@@ -44,7 +46,11 @@ export const NotificationsStore = signalStore(
               if (epoch !== store.cacheEpoch()) {
                 return; // logged out meanwhile: the answer belongs to the old user
               }
-              patchState(store, { items: list.items });
+              // Keep items pushed while the GET was running that the answer does not have yet.
+              const known = new Set(list.items.map((i) => i.id));
+              const pushed = store.items().filter((i) => pushedIds.has(i.id) && !known.has(i.id));
+              patchState(store, { items: [...pushed, ...list.items] });
+              pushedIds.clear();
               store.setLoaded();
             } catch (error) {
               if (epoch === store.cacheEpoch()) {
@@ -64,6 +70,7 @@ export const NotificationsStore = signalStore(
         if (store.items().some((i) => i.id === item.id)) {
           return;
         }
+        pushedIds.add(item.id);
         patchState(store, (s) => ({ items: [item, ...s.items] }));
       },
 

@@ -65,6 +65,7 @@ describe('CacheRegistry', () => {
 
     registry.revalidateAll();
 
+    expect(bad.revalidateAll).toHaveBeenCalledTimes(1);
     expect(good.revalidateAll).toHaveBeenCalledTimes(1);
   });
 });

@@ -153,4 +153,18 @@ describe('NotificationsStore', () => {
     expect(store.error()).toBe('The notifications could not be loaded.');
     expect(store.items()).toEqual([]);
   });
+
+  it('a_push_that_arrives_while_a_reload_is_running_is_kept', async () => {
+    await store.load();
+    await connect();
+    let answer!: (v: unknown) => void;
+    api.listNotifications.mockReturnValue(new Promise((r) => (answer = r)));
+    store.invalidate('list');
+    hubs[0].emit('NotificationAdded', item(7)); // pushed while the GET is running; the answer does not have it
+    answer({ items: [item(3), item(2, true), item(1)], unread: 2 });
+
+    await vi.waitFor(() => expect(store.items().map((i) => i.id)).toContain('n7'));
+    await new Promise((r) => setTimeout(r, 20)); // let the answer be applied
+    expect(store.items().map((i) => i.id)).toEqual(['n7', 'n3', 'n2', 'n1']);
+  });
 });
