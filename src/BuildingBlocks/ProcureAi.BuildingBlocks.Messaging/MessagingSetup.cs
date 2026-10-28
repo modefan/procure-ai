@@ -47,7 +47,8 @@ public static class MessagingSetup
     /// <summary>
     /// What every service's Wolverine setup shares, whatever stores its messages: handler discovery (the service's and the
     /// shared ones: cache eviction after commit, <c>AccessChanged</c>), transactions around handlers, durable inbox and outbox,
-    /// RabbitMQ with caller propagation (<see cref="UseProcureAiTransport"/>), and the queue <c>&lt;serviceName&gt;-access-changed</c>.
+    /// RabbitMQ with caller propagation (<see cref="UseProcureAiTransport"/>), the queue <c>&lt;serviceName&gt;-access-changed</c>, and
+    /// scheduled retries of transient database failures (<see cref="TransientDatabaseRetryPolicy"/>, <c>Messaging:TransientDatabaseRetry</c>).
     /// <see cref="UseProcureAiMessaging{TAbstraction,TDbContext}"/> calls it for EF Core services; a service with another message
     /// store (Audit: Marten's <c>IntegrateWithWolverine</c>) calls it directly.
     /// </summary>
