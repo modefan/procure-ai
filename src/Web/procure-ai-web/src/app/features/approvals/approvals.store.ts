@@ -30,7 +30,7 @@ interface InboxState {
   total: number;
   /** The row being approved or rejected, by step ID: its buttons are busy. */
   acting: Record<string, InboxAction>;
-  /** A refusal (403, 409, 422 ...) or validation message for a row, by step ID. */
+  /** A refusal (403, 422 ...) or validation message for a row, by step ID. */
   rowErrors: Record<string, string>;
   details: Record<string, StepDetails>;
 }
@@ -219,7 +219,9 @@ export const ApprovalsStore = signalStore(
           }
           return true;
         } catch (error) {
-          if (error instanceof HttpErrorResponse && error.status === 412) {
+          if (error instanceof HttpErrorResponse && (error.status === 412 || error.status === 409)) {
+            // 412: the step changed since it was read. 409: it is not open any more (someone else got there first; the server
+            // checks that before the version). Either way the user sees the same conflict and the latest inbox.
             await conflict.show(`Someone else just changed ${step.requestNumber}. Showing the latest version.`);
             store.invalidate('list');
           } else {

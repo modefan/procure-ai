@@ -14,7 +14,7 @@ const MAX_REASON = 500;
  * Screen 8: the approvals inbox (needs `requests.approve`). The open steps I may act on, most urgent first. Approve
  * sends the step's version as `If-Match`; Reject opens a reason box first. The row is busy while the server works
  * and leaves the list when it agrees; a 412 opens the conflict dialog (from the store) and the list reloads.
- * A table from the md breakpoint, cards below it.
+ * A table from the lg breakpoint (the columns need it), cards below.
  */
 @Component({
   selector: 'app-approvals-page',
@@ -45,7 +45,7 @@ const MAX_REASON = 500;
         </div>
       } @else if (store.entities().length > 0) {
         <div class="mt-6" [attr.aria-busy]="store.isLoading()" [class.opacity-60]="store.isLoading()">
-          <div class="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
+          <div class="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:block">
             <table class="w-full table-fixed text-left text-sm">
               <caption class="sr-only">Requests waiting for your approval, page {{ store.page() }} of {{ store.pageCount() }}</caption>
               <colgroup>
@@ -89,7 +89,7 @@ const MAX_REASON = 500;
             </table>
           </div>
 
-          <ul class="space-y-3 md:hidden" aria-label="Requests waiting for your approval">
+          <ul class="space-y-3 lg:hidden" aria-label="Requests waiting for your approval">
             @for (step of store.entities(); track step.id) {
               <li class="card p-4">
                 <div class="flex items-center justify-between gap-3">
@@ -117,7 +117,7 @@ const MAX_REASON = 500;
     </section>
 
     <ng-template #actions let-step>
-      <div class="flex flex-wrap justify-end gap-2 md:flex-nowrap">
+      <div class="flex flex-wrap justify-end gap-2 lg:flex-nowrap">
         <span class="contents" data-action="approve">
           <app-busy-button
             [busy]="store.actingOn(step.id) === 'approve'"

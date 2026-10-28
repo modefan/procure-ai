@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { AUDIT_LAG_MS } from '../requests/request-detail.store';
-import { DashboardStore } from './dashboard.store';
+import { currentFiscalYear, DashboardStore } from './dashboard.store';
 import { DashboardHarness, setupDashboard } from './dashboard.testing';
 
 const ALL = ['requests.read', 'requests.approve', 'budgets.read', 'invoices.read'];
@@ -37,6 +37,19 @@ describe('DashboardStore', () => {
     expect(h.api.listInvoices).toHaveBeenCalledWith({ status: 'Mismatched', page: 1, pageSize: 1 });
     expect(store.mismatched()).toBe(1);
     expect(store.activity()).toHaveLength(2);
+  });
+
+  it('fiscal_year_runs_from_1_march_in_south_african_time', () => {
+    expect(currentFiscalYear(new Date('2026-10-28T10:00:00Z'))).toBe('FY2027');
+    expect(currentFiscalYear(new Date('2027-02-28T21:30:00Z'))).toBe('FY2027'); // 23:30 on 28 February in Johannesburg
+    expect(currentFiscalYear(new Date('2027-02-28T22:30:00Z'))).toBe('FY2028'); // 00:30 on 1 March in Johannesburg
+    expect(currentFiscalYear(new Date('2026-02-27T23:00:00Z'))).toBe('FY2026');
+  });
+
+  it('only the current fiscal year is asked for', async () => {
+    h = await setupDashboard(ALL);
+    await TestBed.inject(DashboardStore).load();
+    expect(h.api.listBudgets).toHaveBeenCalledWith({ fiscalYear: currentFiscalYear() });
   });
 
   it('budget tiles are the cost centers of me only, with percent used from spent', async () => {

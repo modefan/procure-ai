@@ -112,6 +112,20 @@ describe('ApprovalsStore', () => {
     expect(store.actingOn('s1')).toBeNull();
   });
 
+  it('conflict_409_when_the_step_is_no_longer_open_is_the_same_story_as_412', async () => {
+    // The server checks that the step is still open before it compares versions, so "someone approved it first" is a 409.
+    const store = await setup();
+    await store.load(1);
+    api['approveStep'].mockRejectedValue(new HttpErrorResponse({ status: 409, error: { detail: 'Approval step 1 of PR-1044 is not open (it is Approved).' } }));
+    api['getApprovalInbox'].mockResolvedValue(inboxPage([inboxStep({ id: 's2', requestId: 'r2', requestNumber: 'PR-1045', version: 77 })]));
+
+    await store.approve(store.entities()[0]);
+
+    expect(conflict.show).toHaveBeenCalledWith('Someone else just changed PR-1044. Showing the latest version.');
+    expect(store.errorOf('s1')).toBeNull();
+    await vi.waitFor(() => expect(store.entities().map((s) => s.id)).toEqual(['s2']));
+  });
+
   it('403 and 422 show the server message on the row and keep the page', async () => {
     const store = await setup();
     await store.load(1);

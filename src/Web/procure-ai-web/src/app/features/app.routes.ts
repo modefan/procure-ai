@@ -15,6 +15,13 @@ export const APP_ROUTES: Routes = [
     loadComponent: () => import('./dashboard/dashboard.page').then((m) => m.DashboardPage),
   },
   {
+    path: 'approvals',
+    title: 'Approvals',
+    canActivate: [permissionGuard],
+    data: { permission: 'requests.approve' },
+    loadComponent: () => import('./approvals/approvals.page').then((m) => m.ApprovalsPage),
+  },
+  {
     path: 'requests',
     title: 'Requests',
     canActivate: [permissionGuard],

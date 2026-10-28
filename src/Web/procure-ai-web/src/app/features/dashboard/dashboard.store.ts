@@ -39,6 +39,17 @@ interface DashboardState {
   errors: Record<string, string>;
 }
 
+/**
+ * The company fiscal year the instant falls in: 1 March to the end of February in South African time, named after the
+ * year it ends in (1 March 2026 to 28 February 2027 is FY2027), like Budgets does.
+ */
+export function currentFiscalYear(at: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-ZA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: 'numeric' }).formatToParts(at);
+  const year = Number(parts.find((p) => p.type === 'year')?.value);
+  const month = Number(parts.find((p) => p.type === 'month')?.value);
+  return `FY${month >= 3 ? year + 1 : year}`;
+}
+
 const percent = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 /**
@@ -119,7 +130,7 @@ export const DashboardStore = signalStore(
       budgets: () =>
         tile('budgets', async () => {
           await refs.loadMe();
-          return { budgets: await budgets.listBudgets() };
+          return { budgets: await budgets.listBudgets({ fiscalYear: currentFiscalYear() }) };
         }),
       activity: () => tile('activity', async () => ({ activity: await audit.getActivity({ limit: ACTIVITY_LIMIT }) })),
     };
