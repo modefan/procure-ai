@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.Suppliers.Application;
 using ProcureAi.Suppliers.Application.Dtos;
@@ -23,7 +24,7 @@ namespace ProcureAi.Suppliers.Api.Controllers;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/suppliers")]
 [RequireTenant]
-public sealed class SuppliersController(IMessageBus bus, IOptions<PagingOptions> paging) : ControllerBase
+public sealed class SuppliersController(IMessageBus bus) : ControllerBase
 {
     /// <summary>The tenant's suppliers by code; <c>search</c> narrows to those whose code or name contains it.</summary>
     [HttpGet(Name = "ListSuppliers")]
@@ -33,14 +34,10 @@ public sealed class SuppliersController(IMessageBus bus, IOptions<PagingOptions>
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<SupplierSummaryDto>>> List(
         [FromQuery, MaxLength(SuppliersLimits.MaxSearchLength)] string? search,
-        [FromQuery] int page = 1,
-        [FromQuery] int? pageSize = null,
+        [FromQuery] PagingQuery paging,
         CancellationToken cancellationToken = default)
     {
-        var size = ValidatePaging(page, pageSize);
-        return ModelState.IsValid
-            ? await bus.InvokeAsync<PagedResult<SupplierSummaryDto>>(new ListSuppliers(search, page, size), cancellationToken)
-            : ValidationProblem(ModelState);
+        return await bus.InvokeAsync<PagedResult<SupplierSummaryDto>>(new ListSuppliers(search, paging.Page, paging.Size()), cancellationToken);
     }
 
     /// <summary>One supplier with the items it currently offers.</summary>
@@ -63,14 +60,10 @@ public sealed class SuppliersController(IMessageBus bus, IOptions<PagingOptions>
     public async Task<ActionResult<PagedResult<CatalogItemDto>>> Items(
         [MaxLength(SuppliersLimits.MaxCodeLength)] string code,
         [FromQuery, MaxLength(SuppliersLimits.MaxSearchLength)] string? search,
-        [FromQuery] int page = 1,
-        [FromQuery] int? pageSize = null,
+        [FromQuery] PagingQuery paging,
         CancellationToken cancellationToken = default)
     {
-        var size = ValidatePaging(page, pageSize);
-        return ModelState.IsValid
-            ? await bus.InvokeAsync<PagedResult<CatalogItemDto>>(new SearchCatalog(code, search, page, size), cancellationToken)
-            : ValidationProblem(ModelState);
+        return await bus.InvokeAsync<PagedResult<CatalogItemDto>>(new SearchCatalog(code, search, paging.Page, paging.Size()), cancellationToken);
     }
 
     /// <summary>
@@ -107,22 +100,5 @@ public sealed class SuppliersController(IMessageBus bus, IOptions<PagingOptions>
         return ModelState.IsValid
             ? await bus.InvokeAsync<CatalogItemsDto>(new GetCatalogItems(code, parsed), cancellationToken)
             : ValidationProblem(ModelState);
-    }
-
-    // The page size limit comes from configuration (Paging), so it cannot be an attribute. Bad query input is a 400 validation problem.
-    private int ValidatePaging(int page, int? pageSize)
-    {
-        var size = pageSize ?? paging.Value.DefaultPageSize;
-        if (page < 1)
-        {
-            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
-        }
-
-        if (size < 1 || size > paging.Value.MaxPageSize)
-        {
-            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
-        return size;
     }
 }

@@ -7,6 +7,7 @@ using ProcureAi.Audit.Application.Queries;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using Wolverine;
 
@@ -19,7 +20,7 @@ namespace ProcureAi.Audit.Api.Controllers;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/audit")]
-public sealed class DataChangesController(IMessageBus bus, IOptions<PagingOptions> paging) : ControllerBase
+public sealed class DataChangesController(IMessageBus bus) : ControllerBase
 {
     /// <summary>
     /// The data changes of a purchase request of the caller tenant across services (request, lines, budget reservation), oldest
@@ -33,14 +34,10 @@ public sealed class DataChangesController(IMessageBus bus, IOptions<PagingOption
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PagedResult<DataChangeDto>>> GetRequestDataChanges(
-        Guid requestId, [FromQuery] int page = 1, [FromQuery] int? pageSize = null, CancellationToken cancellationToken = default)
+        Guid requestId, [FromQuery] PagingQuery paging, CancellationToken cancellationToken = default)
     {
-        if (CheckPage(page, pageSize) is not { } size)
-        {
-            return ValidationProblem(ModelState);
-        }
-
-        return await bus.InvokeAsync<PagedResult<DataChangeDto>>(new GetRequestDataChanges(requestId, page, size), cancellationToken);
+        return await bus.InvokeAsync<PagedResult<DataChangeDto>>(
+            new GetRequestDataChanges(requestId, paging.Page, paging.Size()), cancellationToken);
     }
 
     /// <summary>
@@ -55,33 +52,12 @@ public sealed class DataChangesController(IMessageBus bus, IOptions<PagingOption
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<PagedResult<DataChangeDto>>> SearchDataChanges(
+        [FromQuery] PagingQuery paging,
         [FromQuery] string? database = null, [FromQuery] string? table = null, [FromQuery] string? userId = null,
         [FromQuery] bool outsideOnly = false, [FromQuery] DateTimeOffset? from = null, [FromQuery] DateTimeOffset? to = null,
-        [FromQuery] int page = 1, [FromQuery] int? pageSize = null, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        if (CheckPage(page, pageSize) is not { } size)
-        {
-            return ValidationProblem(ModelState);
-        }
-
         return await bus.InvokeAsync<PagedResult<DataChangeDto>>(
-            new SearchDataChanges(database, table, userId, outsideOnly, from, to, page, size), cancellationToken);
-    }
-
-    // Bad query input is a 400 validation problem; the limit comes from configuration (Paging), so it cannot be an attribute.
-    private int? CheckPage(int page, int? pageSize)
-    {
-        var size = pageSize ?? paging.Value.DefaultPageSize;
-        if (page < 1)
-        {
-            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
-        }
-
-        if (size < 1 || size > paging.Value.MaxPageSize)
-        {
-            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
-        return ModelState.IsValid ? size : null;
+            new SearchDataChanges(database, table, userId, outsideOnly, from, to, paging.Page, paging.Size()), cancellationToken);
     }
 }

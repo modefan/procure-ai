@@ -9,6 +9,7 @@ using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
 using ProcureAi.Invoicing.Application;
@@ -30,7 +31,7 @@ namespace ProcureAi.Invoicing.Api.Controllers;
 [Route("api/v{version:apiVersion}/invoicing")]
 [RequireTenant]
 public sealed class InvoicesController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, IOptions<PagingOptions> paging, ILogger<InvoicesController> logger)
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ILogger<InvoicesController> logger)
     : ControllerBase
 {
     private const string What = "The invoice";
@@ -42,30 +43,12 @@ public sealed class InvoicesController(
     [ProducesResponseType<PagedResult<InvoiceDto>>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<InvoiceDto>>> List(
+        [FromQuery] PagingQuery paging,
         [FromQuery] InvoiceStatus? status = null,
         [FromQuery] Guid? orderId = null,
-        [FromQuery] int page = 1,
-        [FromQuery] int? pageSize = null,
         CancellationToken cancellationToken = default)
     {
-        // Bad query input is a 400 validation problem (like a bad body), not a 422 business-rule failure.
-        var size = pageSize ?? paging.Value.DefaultPageSize;
-        if (page < 1)
-        {
-            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
-        }
-
-        if (size < 1 || size > paging.Value.MaxPageSize)
-        {
-            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
-        return await bus.InvokeAsync<PagedResult<InvoiceDto>>(new ListInvoices(status?.ToString(), orderId, page, size), cancellationToken);
+        return await bus.InvokeAsync<PagedResult<InvoiceDto>>(new ListInvoices(status?.ToString(), orderId, paging.Page, paging.Size()), cancellationToken);
     }
 
     /// <summary>One invoice with its match lines (ordered, received, invoiced before, invoiced, prices, reasons) and its payments.</summary>

@@ -16,7 +16,6 @@ public static class InvoicingApi
     public static WebApplication Build(string[] args) =>
         ServiceHost.Build(args, ServiceName, builder =>
         {
-            builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
             builder.Services.AddValidatedOptions<InvoicingOptions>(builder.Configuration, InvoicingOptions.SectionName);
             builder.Services.AddInvoicingInfrastructure(builder.Configuration);
             builder.Services.AddErpGateway(builder.Configuration);

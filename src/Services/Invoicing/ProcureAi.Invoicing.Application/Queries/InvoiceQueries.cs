@@ -21,18 +21,8 @@ public static class ListInvoicesHandler
     /// the order view (finance and the admin key: all).
     /// </summary>
     public static async Task<PagedResult<InvoiceDto>> Handle(
-        ListInvoices query, IInvoicingDbContext db, ICallerScope scope, IOptions<PagingOptions> paging, CancellationToken cancellationToken)
+        ListInvoices query, IInvoicingDbContext db, ICallerScope scope, CancellationToken cancellationToken)
     {
-        if (query.Page < 1)
-        {
-            throw new DomainException("Page must be 1 or more.");
-        }
-
-        if (query.PageSize < 1 || query.PageSize > paging.Value.MaxPageSize)
-        {
-            throw new DomainException($"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
         var orders = db.Orders.AsNoTracking();
         var callerScope = await scope.GetAsync(cancellationToken);
         if (!callerScope.All)

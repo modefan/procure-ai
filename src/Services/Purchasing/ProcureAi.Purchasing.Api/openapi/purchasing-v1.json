@@ -14,13 +14,6 @@
         "operationId": "ListOrders",
         "parameters": [
           {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/OrderStatus"
-            }
-          },
-          {
             "name": "page",
             "in": "query",
             "schema": {
@@ -35,6 +28,13 @@
             "schema": {
               "type": "integer",
               "format": "int32"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/OrderStatus"
             }
           }
         ],

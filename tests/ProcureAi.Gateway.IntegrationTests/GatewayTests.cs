@@ -706,6 +706,21 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         (await driver.OpenLoginPageAsync(await LoginDriver.StartAsync(Browser(), "/bff/login"))).FormAction.ShouldNotBeNull();
     }
 
+    [Theory]
+    [InlineData("/bff/logout")]
+    [InlineData("/bff/logout-all")]
+    public async Task Logout_sends_clear_site_data_cache(string path)
+    {
+        var browser = await SignedInAsync();
+        var xsrf = await XsrfTokenAsync(browser);
+
+        using var response = await browser.SendAsync(Request(HttpMethod.Post, path, xsrf), Ct);
+
+        response.IsSuccessStatusCode.ShouldBeTrue();
+        // The browser drops its HTTP cache, so the next user of this browser cannot see this user's cached API responses.
+        response.Headers.GetValues("Clear-Site-Data").Single().ShouldBe("\"cache\"");
+    }
+
     [Fact]
     public async Task Logout_without_xsrf_header_is_400_and_keeps_the_session()
     {

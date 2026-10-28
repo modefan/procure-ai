@@ -15,7 +15,6 @@ public static class RequestsApi
     public static WebApplication Build(string[] args) =>
         ServiceHost.Build(args, ServiceName, builder =>
         {
-            builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
             builder.Services.AddValidatedOptions<RequestsOptions>(builder.Configuration, RequestsOptions.SectionName);
             builder.Services.AddRequestsInfrastructure(builder.Configuration);
             builder.Services.AddApprovalPreview(builder.Configuration);

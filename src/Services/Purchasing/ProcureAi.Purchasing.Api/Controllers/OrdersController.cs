@@ -7,6 +7,7 @@ using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
 using ProcureAi.Purchasing.Application;
@@ -27,7 +28,7 @@ namespace ProcureAi.Purchasing.Api.Controllers;
 [Route("api/v{version:apiVersion}/purchasing")]
 [RequireTenant]
 public sealed class OrdersController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, IOptions<PagingOptions> paging, ILogger<OrdersController> logger)
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ILogger<OrdersController> logger)
     : ControllerBase
 {
     /// <summary>The orders the caller may see, newest first, optionally of one status.</summary>
@@ -37,30 +38,11 @@ public sealed class OrdersController(
     [ProducesResponseType<PagedResult<PurchaseOrderDto>>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<PurchaseOrderDto>>> List(
+        [FromQuery] PagingQuery paging,
         [FromQuery] OrderStatus? status = null,
-        [FromQuery] int page = 1,
-        [FromQuery] int? pageSize = null,
         CancellationToken cancellationToken = default)
     {
-        // Bad query input is a 400 validation problem (like a bad body), not a 422 business-rule failure.
-        // The limit comes from configuration (Paging), so it cannot be an attribute.
-        var size = pageSize ?? paging.Value.DefaultPageSize;
-        if (page < 1)
-        {
-            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
-        }
-
-        if (size < 1 || size > paging.Value.MaxPageSize)
-        {
-            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
-        return await bus.InvokeAsync<PagedResult<PurchaseOrderDto>>(new ListOrders(status?.ToString(), page, size), cancellationToken);
+        return await bus.InvokeAsync<PagedResult<PurchaseOrderDto>>(new ListOrders(status?.ToString(), paging.Page, paging.Size()), cancellationToken);
     }
 
     [HttpGet("orders/{id:guid}", Name = "GetOrder")]

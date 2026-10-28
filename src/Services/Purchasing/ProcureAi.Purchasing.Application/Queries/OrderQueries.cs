@@ -20,18 +20,8 @@ public sealed record GetOrderForRequest(Guid RequestId);
 public static class ListOrdersHandler
 {
     public static async Task<PagedResult<PurchaseOrderDto>> Handle(
-        ListOrders query, IPurchasingDbContext db, ICallerScope scope, IOptions<PagingOptions> paging, CancellationToken cancellationToken)
+        ListOrders query, IPurchasingDbContext db, ICallerScope scope, CancellationToken cancellationToken)
     {
-        if (query.Page < 1)
-        {
-            throw new DomainException("Page must be 1 or more.");
-        }
-
-        if (query.PageSize < 1 || query.PageSize > paging.Value.MaxPageSize)
-        {
-            throw new DomainException($"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
         var orders = db.Orders.AsNoTracking().Where(o => o.Number != null);
         if (query.Status is { } text)
         {

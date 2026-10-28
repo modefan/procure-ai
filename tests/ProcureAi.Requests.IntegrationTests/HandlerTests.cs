@@ -242,10 +242,7 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         page1.Items.Select(i => i.Title).ShouldBe(["three", "two"]);
         page2.Items.Select(i => i.Title).ShouldBe(["one"]);
         submitted.Items.ShouldHaveSingleItem().Id.ShouldBe(first.Id);
-        await Should.ThrowAsync<DomainException>(() =>
-            _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(0, 10, null)));
-        await Should.ThrowAsync<DomainException>(() =>
-            _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 100_000, null)));
+        // Page and size limits are validated by PagingQuery at the controller (PagingQueryTests, ApiTests), not in the handler.
     }
 
     [Fact]

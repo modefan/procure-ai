@@ -15,11 +15,10 @@ public sealed record SearchCatalog(string Code, string? Search, int Page, int Pa
 public static class SearchCatalogHandler
 {
     public static async Task<PagedResult<CatalogItemDto>> Handle(
-        SearchCatalog query, ISupplierStore store, IOptions<PagingOptions> paging, CancellationToken cancellationToken)
+        SearchCatalog query, ISupplierStore store, CancellationToken cancellationToken)
     {
-        PagingRules.Validate(query.Page, query.PageSize, paging.Value);
         var supplier = await SupplierLookup.RequireAsync(store, query.Code, cancellationToken);
-        var search = PagingRules.Normalise(query.Search);
+        var search = SearchText.Normalise(query.Search);
         var matches = supplier.Items
             .Where(i => search is null
                 || i.Sku.Contains(search, StringComparison.OrdinalIgnoreCase)

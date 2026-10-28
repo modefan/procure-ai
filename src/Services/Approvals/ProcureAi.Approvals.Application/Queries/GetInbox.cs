@@ -14,19 +14,9 @@ public sealed record GetInbox(int Page, int PageSize);
 public static class GetInboxHandler
 {
     public static async Task<PagedResult<ApprovalStepDto>> Handle(
-        GetInbox query, IApprovalsDbContext db, ICallerContext caller, IOptions<PagingOptions> paging,
+        GetInbox query, IApprovalsDbContext db, ICallerContext caller,
         CancellationToken cancellationToken)
     {
-        if (query.Page < 1)
-        {
-            throw new DomainException("Page must be 1 or more.");
-        }
-
-        if (query.PageSize < 1 || query.PageSize > paging.Value.MaxPageSize)
-        {
-            throw new DomainException($"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
         var userId = caller.UserId;
         // Open = pending and opened (a due date); the tenant filter of the context limits it to the caller's tenant.
         var open = db.Steps.AsNoTracking()

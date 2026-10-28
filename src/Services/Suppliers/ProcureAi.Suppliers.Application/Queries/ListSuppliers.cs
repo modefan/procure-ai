@@ -13,29 +13,15 @@ public sealed record ListSuppliers(string? Search, int Page, int PageSize);
 public static class ListSuppliersHandler
 {
     public static async Task<PagedResult<SupplierSummaryDto>> Handle(
-        ListSuppliers query, ISupplierStore store, IOptions<PagingOptions> paging, CancellationToken cancellationToken)
+        ListSuppliers query, ISupplierStore store, CancellationToken cancellationToken)
     {
-        PagingRules.Validate(query.Page, query.PageSize, paging.Value);
         var (items, total) = await store.ListAsync(
-            PagingRules.Normalise(query.Search), (query.Page - 1) * query.PageSize, query.PageSize, cancellationToken);
+            SearchText.Normalise(query.Search), (query.Page - 1) * query.PageSize, query.PageSize, cancellationToken);
         return new PagedResult<SupplierSummaryDto>([.. items.Select(SupplierMapper.ToSummary)], query.Page, query.PageSize, total);
     }
 }
 
-internal static class PagingRules
+internal static class SearchText
 {
-    public static void Validate(int page, int pageSize, PagingOptions options)
-    {
-        if (page < 1)
-        {
-            throw new DomainException("Page must be 1 or more.");
-        }
-
-        if (pageSize < 1 || pageSize > options.MaxPageSize)
-        {
-            throw new DomainException($"Page size must be between 1 and {options.MaxPageSize}.");
-        }
-    }
-
     public static string? Normalise(string? search) => string.IsNullOrWhiteSpace(search) ? null : search.Trim();
 }

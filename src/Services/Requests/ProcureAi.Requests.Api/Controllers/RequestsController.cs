@@ -8,6 +8,7 @@ using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
 using ProcureAi.Requests.Application;
@@ -25,8 +26,7 @@ namespace ProcureAi.Requests.Api.Controllers;
 [Route("api/v{version:apiVersion}/requests")]
 [RequireTenant]
 public sealed class RequestsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, IOptions<PagingOptions> paging,
-    ILogger<RequestsController> logger) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ILogger<RequestsController> logger) : ControllerBase
 {
     [HttpPost(Name = "CreateRequest")]
     [Idempotent]
@@ -58,30 +58,11 @@ public sealed class RequestsController(
     [ProducesResponseType<PagedResult<RequestDto>>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<RequestDto>>> List(
-        [FromQuery] int page = 1,
-        [FromQuery] int? pageSize = null,
+        [FromQuery] PagingQuery paging,
         [FromQuery] RequestStatus? status = null,
         CancellationToken cancellationToken = default)
     {
-        // Bad query input is a 400 validation problem (like a bad body), not a 422 business-rule failure.
-        // The limit comes from configuration (Paging), so it cannot be an attribute.
-        var size = pageSize ?? paging.Value.DefaultPageSize;
-        if (page < 1)
-        {
-            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
-        }
-
-        if (size < 1 || size > paging.Value.MaxPageSize)
-        {
-            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
-        return await bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(page, size, status), cancellationToken);
+        return await bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(paging.Page, paging.Size(), status), cancellationToken);
     }
 
     [HttpPut("{id:guid}", Name = "UpdateRequest")]

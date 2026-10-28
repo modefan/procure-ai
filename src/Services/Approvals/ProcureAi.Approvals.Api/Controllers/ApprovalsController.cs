@@ -16,6 +16,7 @@ using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
 using Wolverine;
@@ -32,8 +33,7 @@ namespace ProcureAi.Approvals.Api.Controllers;
 [Route("api/v{version:apiVersion}/approvals")]
 [RequireTenant]
 public sealed class ApprovalsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, IOptions<PagingOptions> paging,
-    ILogger<ApprovalsController> logger) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, ILogger<ApprovalsController> logger) : ControllerBase
 {
     /// <summary>
     /// Approve and reject run in the request's saga, in process. A saga message that lost a race is retried inline
@@ -49,26 +49,9 @@ public sealed class ApprovalsController(
     [ProducesResponseType<PagedResult<ApprovalStepDto>>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<ApprovalStepDto>>> Inbox(
-        [FromQuery] int page = 1, [FromQuery] int? pageSize = null, CancellationToken cancellationToken = default)
+        [FromQuery] PagingQuery paging, CancellationToken cancellationToken = default)
     {
-        // Bad query input is a 400 validation problem; the limit comes from configuration (Paging), so it cannot be an attribute.
-        var size = pageSize ?? paging.Value.DefaultPageSize;
-        if (page < 1)
-        {
-            ModelState.AddModelError(nameof(page), "Page must be 1 or more.");
-        }
-
-        if (size < 1 || size > paging.Value.MaxPageSize)
-        {
-            ModelState.AddModelError(nameof(pageSize), $"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
-        if (!ModelState.IsValid)
-        {
-            return ValidationProblem(ModelState);
-        }
-
-        return await bus.InvokeAsync<PagedResult<ApprovalStepDto>>(new GetInbox(page, size), cancellationToken);
+        return await bus.InvokeAsync<PagedResult<ApprovalStepDto>>(new GetInbox(paging.Page, paging.Size()), cancellationToken);
     }
 
     /// <summary>

@@ -15,18 +15,8 @@ public static class ListRequestsHandler
 {
     /// <summary>Newest first (highest request number), optionally filtered by status.</summary>
     public static async Task<PagedResult<RequestDto>> Handle(
-        ListRequests query, IRequestsDbContext db, IOptions<PagingOptions> paging, CancellationToken cancellationToken)
+        ListRequests query, IRequestsDbContext db, CancellationToken cancellationToken)
     {
-        if (query.Page < 1)
-        {
-            throw new DomainException("Page must be 1 or more.");
-        }
-
-        if (query.PageSize < 1 || query.PageSize > paging.Value.MaxPageSize)
-        {
-            throw new DomainException($"Page size must be between 1 and {paging.Value.MaxPageSize}.");
-        }
-
         var requests = db.PurchaseRequests.AsNoTracking();
         if (query.Status is { } status)
         {

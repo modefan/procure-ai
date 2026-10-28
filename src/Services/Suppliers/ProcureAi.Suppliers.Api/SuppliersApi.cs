@@ -14,7 +14,6 @@ public static class SuppliersApi
     public static WebApplication Build(string[] args) =>
         ServiceHost.Build(args, ServiceName, builder =>
         {
-            builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
             builder.Services.AddSuppliersInfrastructure(builder.Configuration);
             builder.Host.UseWolverine(options => options.ConfigureSuppliers(builder.Configuration, ServiceName));
         });

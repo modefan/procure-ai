@@ -2,7 +2,9 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Correlation;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Logging;
@@ -26,10 +28,12 @@ public static class WebExtensions
         services.AddValidatedOptions<CachingOptions>(builder.Configuration, CachingOptions.SectionName);
         services.AddValidatedOptions<ErrorResponseOptions>(builder.Configuration, ErrorResponseOptions.SectionName);
         services.AddValidatedOptions<RateLimitingOptions>(builder.Configuration, RateLimitingOptions.SectionName);
+        // The limits behind PagingQuery.
+        services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
 
         // Enums travel as names ("Draft"), in responses, query strings and the OpenAPI document alike. Numbers are
         // numbers only (not "12" strings), so the OpenAPI schema says plain `number` and the generated clients stay simple.
-        services.AddControllers().AddJsonOptions(json =>
+        services.AddControllers().AddMvcOptions(mvc => mvc.Filters.Add<ConditionalGetFilter>()).AddJsonOptions(json =>
         {
             json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
             json.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict;

@@ -22,10 +22,9 @@ public static class DataChangeQueriesHandler
 {
     /// <summary>404 when the tenant has no change about the request (another tenant's request looks the same as none).</summary>
     public static async Task<PagedResult<DataChangeDto>> Handle(
-        GetRequestDataChanges query, ICallerContext caller, IDataChangeStore store, IOptions<PagingOptions> paging,
+        GetRequestDataChanges query, ICallerContext caller, IDataChangeStore store,
         CancellationToken cancellationToken)
     {
-        Paging.Check(query.Page, query.PageSize, paging.Value);
         var tenant = caller.TenantId ?? throw new NotFoundException($"No data changes for request {query.RequestId}.");
         var page = await store.ForSubjectAsync(tenant, query.RequestId, query.Page, query.PageSize, cancellationToken);
         if (page.Total == 0)
@@ -37,10 +36,9 @@ public static class DataChangeQueriesHandler
     }
 
     public static async Task<PagedResult<DataChangeDto>> Handle(
-        SearchDataChanges query, ICallerContext caller, IDataChangeStore store, IOptions<PagingOptions> paging,
+        SearchDataChanges query, ICallerContext caller, IDataChangeStore store,
         CancellationToken cancellationToken)
     {
-        Paging.Check(query.Page, query.PageSize, paging.Value);
         if (caller.TenantId is null && caller.Kind != CallerKind.AdminApiKey)
         {
             throw new ForbiddenException("The data-change log of every tenant is only for the platform (admin API key).");
@@ -52,23 +50,6 @@ public static class DataChangeQueriesHandler
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
-}
-
-/// <summary>The checks of a page request, for handlers invoked without the controller's validation.</summary>
-internal static class Paging
-{
-    public static void Check(int page, int pageSize, PagingOptions options)
-    {
-        if (page < 1)
-        {
-            throw new BuildingBlocks.Domain.DomainException("Page must be 1 or more.");
-        }
-
-        if (pageSize < 1 || pageSize > options.MaxPageSize)
-        {
-            throw new BuildingBlocks.Domain.DomainException($"Page size must be between 1 and {options.MaxPageSize}.");
-        }
-    }
 }
 
 /// <summary>A stored change as the screens show it: who and when, and each column's old and new value.</summary>

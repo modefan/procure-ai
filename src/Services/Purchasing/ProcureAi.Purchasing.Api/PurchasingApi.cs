@@ -16,7 +16,6 @@ public static class PurchasingApi
     public static WebApplication Build(string[] args) =>
         ServiceHost.Build(args, ServiceName, builder =>
         {
-            builder.Services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
             builder.Services.AddValidatedOptions<PurchasingOptions>(builder.Configuration, PurchasingOptions.SectionName);
             builder.Services.AddPurchasingInfrastructure(builder.Configuration);
             builder.Services.AddSupplierGateway(builder.Configuration);

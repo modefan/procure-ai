@@ -14,21 +14,6 @@
         "operationId": "ListInvoices",
         "parameters": [
           {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/InvoiceStatus"
-            }
-          },
-          {
-            "name": "orderId",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
             "name": "page",
             "in": "query",
             "schema": {
@@ -43,6 +28,21 @@
             "schema": {
               "type": "integer",
               "format": "int32"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/InvoiceStatus"
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],

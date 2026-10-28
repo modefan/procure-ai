@@ -74,6 +74,7 @@ public static class BffEndpoints
 
     private static async Task<IResult> LogoutAsync(HttpContext http, TokenRefresher refresher)
     {
+        ClearBrowserCache(http);
         await refresher.EndProviderSessionAsync(await http.GetTokenAsync(BffSchemes.Cookie, "refresh_token"), http.RequestAborted);
         await http.SignOutAsync(BffSchemes.Cookie);
         http.Response.Cookies.Delete(XsrfMiddleware.CookieName, XsrfCookieOptions());
@@ -83,6 +84,7 @@ public static class BffEndpoints
     /// <summary>Revokes every session of this user, in every browser, then ends this one like a normal sign-out.</summary>
     private static async Task<IResult> LogoutAllAsync(HttpContext http, RedisTicketStore store, TokenRefresher refresher)
     {
+        ClearBrowserCache(http);
         var refreshToken = await http.GetTokenAsync(BffSchemes.Cookie, "refresh_token");
         var subject = http.User.FindFirst("sub")?.Value;
         var revoked = subject is null ? 0 : await store.RevokeAllForUserAsync(subject, http.RequestAborted);
@@ -91,6 +93,12 @@ public static class BffEndpoints
         http.Response.Cookies.Delete(XsrfMiddleware.CookieName, XsrfCookieOptions());
         return Results.Json(new { revoked });
     }
+
+    /// <summary>
+    /// Tells the browser to drop its HTTP cache for this site: API responses are revalidated with ETags (conditional GETs), so
+    /// the next person to sign in on this browser must not be able to read the previous user's cached responses.
+    /// </summary>
+    private static void ClearBrowserCache(HttpContext http) => http.Response.Headers["Clear-Site-Data"] = "\"cache\"";
 
     /// <summary>Only a path on this site: no other host, no protocol-relative <c>//host</c>, no control characters.</summary>
     internal static string SafeReturnUrl(string? returnUrl)
