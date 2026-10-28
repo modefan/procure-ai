@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
@@ -32,6 +33,10 @@ public static partial class ClientLogEndpoints
     private const string Mask = "***";
     private const int MaxDepth = 8;
 
+    /// <summary>The endpoint's path, with or without a trailing slash (routing treats both alike, so the auth and XSRF rules must too).</summary>
+    public static bool IsClientLogPath(PathString path) =>
+        path.HasValue && path.Value!.TrimEnd('/').Equals(Path, StringComparison.OrdinalIgnoreCase);
+
     public static IEndpointRouteBuilder MapClientLogs(this IEndpointRouteBuilder app)
     {
         app.MapPost(Path, (Delegate)AcceptAsync).AllowAnonymous().WithOrder(5);
@@ -40,7 +45,8 @@ public static partial class ClientLogEndpoints
 
     private static async Task<IResult> AcceptAsync(
         HttpContext http, ClientLogRateLimiter limiter, IOptions<ClientLogOptions> options, ILoggerFactory loggers,
-        RedisTicketStore tickets, IOptionsMonitor<CookieAuthenticationOptions> cookies, TimeProvider time)
+        RedisTicketStore tickets, IOptionsMonitor<CookieAuthenticationOptions> cookies, IOptions<BffSessionOptions> sessionOptions,
+        TimeProvider time)
     {
         if (http.Request.ContentLength > MaxBodyBytes)
         {
@@ -71,7 +77,7 @@ public static partial class ClientLogEndpoints
 
         // The session is the verified cookie ticket, never a header or a cookie value the client could make up. It is only read:
         // authenticating through the cookie handler would slide the session's expiry and refresh its tokens on every log post.
-        var session = await ReadSessionAsync(http, tickets, cookies.Get(BffSchemes.Cookie), time);
+        var session = await ReadSessionAsync(http, tickets, cookies.Get(BffSchemes.Cookie), sessionOptions.Value, time);
         var userId = SafeId(session?.FindFirst("sub")?.Value);
         var tenantId = SafeId(session?.FindFirst("tenant")?.Value);
         var partition = userId is null ? $"ip:{http.Connection.RemoteIpAddress}" : $"user:{userId}";
@@ -180,7 +186,7 @@ public static partial class ClientLogEndpoints
 
     /// <summary>The session behind the cookie, read from Redis without touching it; null when there is none or it has expired.</summary>
     private static async Task<ClaimsPrincipal?> ReadSessionAsync(
-        HttpContext http, RedisTicketStore tickets, CookieAuthenticationOptions cookie, TimeProvider time)
+        HttpContext http, RedisTicketStore tickets, CookieAuthenticationOptions cookie, BffSessionOptions sessionOptions, TimeProvider time)
     {
         var value = cookie.CookieManager.GetRequestCookie(http, cookie.Cookie.Name!);
         if (string.IsNullOrEmpty(value))
@@ -196,7 +202,17 @@ public static partial class ClientLogEndpoints
         }
 
         var ticket = await tickets.RetrieveAsync(key, http.RequestAborted);
-        return ticket is null || ticket.Properties.ExpiresUtc is { } expires && expires <= time.GetUtcNow() ? null : ticket.Principal;
+        if (ticket is null || ticket.Properties.ExpiresUtc is { } expires && expires <= time.GetUtcNow())
+        {
+            return null;
+        }
+
+        // The same test as SessionCookieEvents.ValidatePrincipal: a session whose access token is due for a refresh is not verified here,
+        // because the refresh (which ends a revoked session) is not done by a log post. Such a caller logs as anonymous.
+        var expiresAt = TokenRefresher.ParseExpiresAt(ticket.Properties.GetTokenValue("expires_at"));
+        return expiresAt is null || expiresAt.Value - TimeSpan.FromSeconds(sessionOptions.RefreshSkewSeconds) > time.GetUtcNow()
+            ? ticket.Principal
+            : null;
     }
 
     private static LogLevel MapLevel(string? level) => level?.ToLowerInvariant() switch

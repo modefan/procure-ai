@@ -199,18 +199,11 @@ public sealed class ClientLogTests(KeycloakFixture keycloak, RedisFixture redis)
     }
 
     [Fact]
-    public async Task Logging_does_not_renew_or_refresh_the_session()
+    public async Task Logging_within_the_token_lifetime_does_not_renew_the_session()
     {
-        await StartAsync();
-        var driver = new LoginDriver(keycloak);
-        _disposables.Add(driver);
-        var browser = Browser();
-        await driver.LoginAsync(browser, "tom@acme.test");
-        var before = SessionTickets();
-        before.Length.ShouldBe(1);
+        var (browser, before) = await SignedInWithTicketAsync();
 
-        // Past the access token's lifetime: any authentication through the cookie handler would refresh the tokens and rewrite the ticket.
-        _gateway.Clock.Advance(TimeSpan.FromHours(1));
+        _gateway.Clock.Advance(TimeSpan.FromSeconds(30));
         using var response = await browser.PostAsync(Path, Json("""[{"level":"error","source":"s","message":"m"}]"""), Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
@@ -218,7 +211,39 @@ public sealed class ClientLogTests(KeycloakFixture keycloak, RedisFixture redis)
         SessionTickets().ShouldBe(before, "the stored session is untouched");
         var entry = _sink.Browser().ShouldHaveSingleItem();
         Prop(entry, "UserId").ShouldNotBeEmpty();
-        entry.Level.ShouldBe(LogEventLevel.Error, "a signed-in session may log errors");
+        entry.Level.ShouldBe(LogEventLevel.Error, "a verified session may log errors");
+    }
+
+    [Theory]
+    [InlineData("/api/client-logs")]
+    [InlineData("/api/client-logs/")]
+    public async Task Session_with_an_expired_access_token_logs_as_anonymous_and_is_left_alone(string path)
+    {
+        var (browser, before) = await SignedInWithTicketAsync();
+
+        // Past the access token's lifetime: only the cookie handler would refresh the tokens (and end a revoked session); a log post must not.
+        _gateway.Clock.Advance(TimeSpan.FromHours(1));
+        using var response = await browser.PostAsync(path, Json("""[{"level":"error","source":"s","message":"m"}]"""), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        response.Headers.Contains("Set-Cookie").ShouldBeFalse();
+        SessionTickets().ShouldBe(before, "the stored session is untouched");
+        var entry = _sink.Browser().ShouldHaveSingleItem();
+        entry.Properties.ContainsKey("UserId").ShouldBeFalse();
+        entry.Properties.ContainsKey("TenantId").ShouldBeFalse();
+        entry.Level.ShouldBe(LogEventLevel.Warning);
+    }
+
+    private async Task<(HttpClient Browser, string[] Tickets)> SignedInWithTicketAsync()
+    {
+        await StartAsync();
+        var driver = new LoginDriver(keycloak);
+        _disposables.Add(driver);
+        var browser = Browser();
+        await driver.LoginAsync(browser, "tom@acme.test");
+        var tickets = SessionTickets();
+        tickets.Length.ShouldBe(1);
+        return (browser, tickets);
     }
 
     private string[] SessionTickets()
