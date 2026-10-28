@@ -495,9 +495,35 @@ public sealed class ServiceResourcesTests
         // The API starts only once Debezium is healthy, so no app change precedes the capture (snapshot.mode=no_data).
         api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
         debezium.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
-        debezium.Annotations.OfType<ContainerMountAnnotation>()
-            .ShouldContain(m => m.Target == "/debezium/data" && m.Source == "debezium-requestsdb-data");
+        debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/data");
         debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/config/application.properties");
+    }
+
+    /// <summary>
+    /// Debezium's offsets (the last WAL position read) must live exactly as long as the Postgres data they point into.
+    /// The Postgres volume is scoped per AppHost (<c>{app}-{sha of the AppHost path}-postgres-data</c>), so every clone or
+    /// worktree gets its own database. A fixed offset volume name (<c>debezium-requestsdb-data</c>) was shared by all of
+    /// them: a fresh worktree's empty database met the offsets of another checkout, and Debezium refused to start
+    /// ("trying to read change stream starting at LSN ... no longer available on the server"), so no api ever started.
+    /// </summary>
+    [Fact]
+    public async Task Debezium_offset_volumes_are_scoped_to_the_apphost_like_the_postgres_volume()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var postgres = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "postgres");
+        var postgresVolume = postgres.Annotations.OfType<ContainerMountAnnotation>()
+            .Single(m => m.Type == ContainerMountType.Volume && m.Source!.EndsWith("-postgres-data", StringComparison.Ordinal)).Source!;
+        var appHostPrefix = postgresVolume[..^"postgres-data".Length];
+
+        var debeziums = model.Resources.OfType<ContainerResource>().Where(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal)).ToList();
+        debeziums.ShouldNotBeEmpty();
+        foreach (var debezium in debeziums)
+        {
+            var offsets = debezium.Annotations.OfType<ContainerMountAnnotation>().Single(m => m.Target == "/debezium/data");
+            offsets.Type.ShouldBe(ContainerMountType.Volume);
+            offsets.Source.ShouldBe($"{appHostPrefix}{debezium.Name}-data", $"{debezium.Name} keeps its offsets next to this AppHost's database");
+        }
     }
 
     /// <summary>

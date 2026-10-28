@@ -186,7 +186,11 @@ public static class ServiceResources
             .WithContainerLimits(shared.Limits.Debezium);
         if (shared.UseDataVolumes)
         {
-            debezium.WithVolume($"{DebeziumPrefix}{database}-data", "/debezium/data");
+            // The offsets (last WAL position read) must live exactly as long as the database they point into. Postgres's
+            // WithDataVolume is scoped per AppHost ({app}-{sha of the AppHost path}-postgres-data), so this volume is scoped
+            // the same way. A fixed name was shared by every clone and worktree: a fresh worktree's empty database met another
+            // checkout's offsets and Debezium refused to start ("LSN ... no longer available on the server").
+            debezium.WithVolume(VolumeNameGenerator.Generate(debezium, "data"), "/debezium/data");
         }
 
         return debezium;
