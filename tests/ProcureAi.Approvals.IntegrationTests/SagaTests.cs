@@ -423,6 +423,11 @@ public sealed class SagaTests(ApprovalsApp app)
         await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Approvals.RequestApproved), EventTimeout);
 
         await Main.PublishAsync(Cancelled(submitted), Exchanges.Requests, tenant);
+        // Approved requests are cancelled through Purchasing (plan 03): the saga asks, and Purchasing's answer ends it.
+        await Recorder.WaitForAsync(id, nameof(ProcureAi.Contracts.Purchasing.CancelPurchaseOrder), EventTimeout);
+        await Main.PublishAsync(
+            new ProcureAi.Contracts.Purchasing.PurchaseOrderCancelled(null, id, tenant, "Cancelled", DateTimeOffset.UtcNow),
+            Exchanges.Purchasing, tenant);
         await Recorder.WaitForAsync(id, nameof(ReleaseBudget), EventTimeout);
         await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
         // The cancellation delivered again finds no saga: nothing more is released.
@@ -674,6 +679,16 @@ public sealed class SagaTests(ApprovalsApp app)
             Main.PublishAsync(Cancelled(w.Submitted), Exchanges.Requests, tenant),
             ApproveOrConflictAsync(w.Submitted.RequestId, w.Step, tenant, TimeSpan.FromMilliseconds(i * 200), approvedIds),
         }));
+
+        foreach (var (submitted, step) in waiting.Where(w => approvedIds.Contains(w.Submitted.RequestId)))
+        {
+            // Approved first: the cancellation went to Purchasing, whose answer (played here) ends the saga.
+            var id = submitted.RequestId;
+            await Main.WaitForSagaAsync(id, saga => saga?.State == ApprovalState.Cancelling, EventTimeout);
+            await Main.PublishAsync(
+                new ProcureAi.Contracts.Purchasing.PurchaseOrderCancelled(null, id, tenant, "Cancelled", DateTimeOffset.UtcNow),
+                Exchanges.Purchasing, tenant);
+        }
 
         foreach (var (submitted, step) in waiting)
         {

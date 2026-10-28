@@ -9,6 +9,8 @@ using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Budgets;
+using ProcureAi.Contracts.Invoicing;
+using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Contracts.Requests;
 using Wolverine;
 using Wolverine.Persistence.Sagas;
@@ -20,8 +22,17 @@ public enum ApprovalState
     AwaitingBudget,
     AwaitingApproval,
 
-    /// <summary>Every step approved. The saga stays (plan 03 continues it through ordering and payment).</summary>
+    /// <summary>Every step approved and the purchase order requested from Purchasing (not created yet).</summary>
     Approved,
+
+    /// <summary>Purchasing created the order (<c>RequestOrdered</c>); the saga waits for payment and settlement.</summary>
+    Ordered,
+
+    /// <summary>A cancellation was sent to Purchasing, which alone decides whether it succeeds; its answer ends or restores the saga.</summary>
+    Cancelling,
+
+    /// <summary>Every order line is paid or closed short (<c>PurchaseOrderSettled</c>). Never stored: the saga ends here.</summary>
+    Completed,
     Rejected,
     Cancelled,
 }
@@ -50,6 +61,12 @@ public sealed class ApprovalSaga : Saga
 {
     public const string NoEligibleApprover = "No eligible approver";
 
+    /// <summary>Sent to Purchasing when the request was cancelled without a reason (Purchasing refuses a blank one).</summary>
+    public const string DefaultCancelReason = "Request cancelled";
+
+    /// <summary>The rejection reason when the supplier rejects the order.</summary>
+    public static string SupplierRejected(string reason) => $"Supplier rejected the order: {reason}";
+
     /// <summary>The rejection reason when Access does not know the request's cost center.</summary>
     public static string UnknownCostCenter(string code) => $"Unknown cost center {code}";
 
@@ -77,6 +94,22 @@ public sealed class ApprovalSaga : Saga
     public decimal TotalInclVat { get; set; }
 
     public ApprovalState State { get; set; }
+
+    /// <summary>The supplier the request orders from (from <see cref="RequestSubmitted"/>, sent on in <see cref="CreatePurchaseOrder"/>).</summary>
+    public string SupplierId { get; set; } = "";
+
+    /// <summary>The request's lines, frozen at submission (stored as jsonb).</summary>
+    public List<RequestLineItem> Lines { get; set; } = [];
+
+    public Guid? OrderId { get; set; }
+
+    public string? OrderNumber { get; set; }
+
+    /// <summary>Goods were received for the order (any receipt).</summary>
+    public bool GoodsReceived { get; set; }
+
+    /// <summary>The state to return to when Purchasing refuses a cancellation (Approved or Ordered).</summary>
+    public ApprovalState? StateBeforeCancel { get; set; }
 
     /// <summary>The step number that is open (0 before the chain exists).</summary>
     public int CurrentStepNo { get; set; }
@@ -127,6 +160,8 @@ public sealed class ApprovalSaga : Saga
         RequesterId = submitted.RequesterId;
         CostCenterCode = submitted.CostCenterCode;
         TotalInclVat = submitted.TotalInclVat;
+        SupplierId = submitted.SupplierId;
+        Lines = [.. submitted.Lines];
         State = ApprovalState.AwaitingBudget;
         await context.SendAsync(new ReserveBudget(
             submitted.RequestId, submitted.TenantId, submitted.CostCenterCode, submitted.TotalInclVat, submitted.SubmittedAt));
@@ -243,6 +278,7 @@ public sealed class ApprovalSaga : Saga
         State = ApprovalState.Approved;
         var approvers = steps.Where(s => s.Status == ApprovalStepStatus.Approved).OrderBy(s => s.StepNo).Select(s => s.ActedBy!).ToList();
         await context.PublishAsync(new RequestApproved(Id, TenantId, RequestNumber, TotalInclVat, approvers, now));
+        await context.SendAsync(new CreatePurchaseOrder(Id, TenantId, RequestNumber, RequesterId, CostCenterCode, SupplierId, Lines));
     }
 
     public static Task NotFound(
@@ -350,6 +386,12 @@ public sealed class ApprovalSaga : Saga
             return;
         }
 
+        if (State == ApprovalState.Cancelling)
+        {
+            // Purchasing is already deciding on the cancellation we sent.
+            return;
+        }
+
         await EvictAsync(cache);
         if (State == ApprovalState.AwaitingBudget)
         {
@@ -358,9 +400,168 @@ public sealed class ApprovalSaga : Saga
             return;
         }
 
+        if (State is ApprovalState.Approved or ApprovalState.Ordered)
+        {
+            // Purchasing alone decides whether the order can still be cancelled (goods received or not). It answers
+            // PurchaseOrderCancelled (also when it never saw the order: it keeps a tombstone) or PurchaseOrderCancellationRefused.
+            StateBeforeCancel = State;
+            State = ApprovalState.Cancelling;
+            await context.SendAsync(new CancelPurchaseOrder(
+                Id, TenantId, string.IsNullOrWhiteSpace(cancelled.Reason) ? DefaultCancelReason : cancelled.Reason));
+            return;
+        }
+
         CancelPending(await StepsAsync(db, cancellationToken));
         await context.SendAsync(Release());
         End(ApprovalState.Cancelled);
+    }
+
+    // ---- Purchasing's answers ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The order exists. While the saga is Cancelling nothing is announced (the order is about to be cancelled, or the
+    /// cancellation refused, which restores Ordered); the order is stored all the same.
+    /// </summary>
+    public async Task Handle(
+        [SagaIdentityFrom(nameof(PurchaseOrderCreated.RequestId))] PurchaseOrderCreated created, TimeProvider time,
+        IMessageContext context, ICacheInvalidator cache)
+    {
+        if (State is not (ApprovalState.Approved or ApprovalState.Cancelling))
+        {
+            // Ordered already (a repeat), or no order is wanted any more.
+            return;
+        }
+
+        OrderId = created.OrderId;
+        OrderNumber = created.OrderNumber;
+        if (State == ApprovalState.Cancelling)
+        {
+            return;
+        }
+
+        State = ApprovalState.Ordered;
+        await EvictAsync(cache);
+        await context.PublishAsync(new RequestOrdered(Id, TenantId, RequestNumber, created.OrderId, created.OrderNumber, time.GetUtcNow()));
+    }
+
+    public static void NotFound([SagaIdentityFrom(nameof(PurchaseOrderCreated.RequestId))] PurchaseOrderCreated created)
+    {
+    }
+
+    /// <summary>The supplier rejected the order: the request ends Rejected (Cancelled when it was being cancelled), and the budget is released.</summary>
+    public async Task Handle(
+        [SagaIdentityFrom(nameof(PurchaseOrderRejected.RequestId))] PurchaseOrderRejected rejected, TimeProvider time,
+        IMessageContext context, ICacheInvalidator cache)
+    {
+        if (State is not (ApprovalState.Approved or ApprovalState.Ordered or ApprovalState.Cancelling))
+        {
+            return;
+        }
+
+        await EvictAsync(cache);
+        await context.SendAsync(Release());
+        if (State == ApprovalState.Cancelling)
+        {
+            await context.PublishAsync(new RequestCancellationConfirmed(Id, TenantId, RequestNumber, time.GetUtcNow()));
+            End(ApprovalState.Cancelled);
+            return;
+        }
+
+        await context.PublishAsync(new RequestRejected(
+            Id, TenantId, RequestNumber, SupplierRejected(rejected.Reason), null, time.GetUtcNow()));
+        End(ApprovalState.Rejected);
+    }
+
+    public static void NotFound([SagaIdentityFrom(nameof(PurchaseOrderRejected.RequestId))] PurchaseOrderRejected rejected)
+    {
+    }
+
+    public void Handle([SagaIdentityFrom(nameof(ProcureAi.Contracts.Purchasing.GoodsReceived.RequestId))] GoodsReceived received)
+    {
+        GoodsReceived = true;
+    }
+
+    public static void NotFound([SagaIdentityFrom(nameof(ProcureAi.Contracts.Purchasing.GoodsReceived.RequestId))] GoodsReceived received)
+    {
+    }
+
+    /// <summary>Purchasing cancelled the order (or, having never seen it, stored a tombstone): the request is cancelled and the budget released.</summary>
+    public async Task Handle(
+        [SagaIdentityFrom(nameof(PurchaseOrderCancelled.RequestId))] PurchaseOrderCancelled cancelled, TimeProvider time,
+        IMessageContext context, ICacheInvalidator cache)
+    {
+        if (State != ApprovalState.Cancelling)
+        {
+            return;
+        }
+
+        await EvictAsync(cache);
+        await context.SendAsync(Release());
+        await context.PublishAsync(new RequestCancellationConfirmed(Id, TenantId, RequestNumber, time.GetUtcNow()));
+        End(ApprovalState.Cancelled);
+    }
+
+    public static void NotFound([SagaIdentityFrom(nameof(PurchaseOrderCancelled.RequestId))] PurchaseOrderCancelled cancelled)
+    {
+    }
+
+    /// <summary>Purchasing refused the cancellation (goods were received): back to where we were, and the requester is told why.</summary>
+    public async Task Handle(
+        [SagaIdentityFrom(nameof(PurchaseOrderCancellationRefused.RequestId))] PurchaseOrderCancellationRefused refused,
+        TimeProvider time, IMessageContext context, ICacheInvalidator cache)
+    {
+        if (State != ApprovalState.Cancelling)
+        {
+            return;
+        }
+
+        // A refusal means the order exists: if its creation was seen while cancelling, the saga is Ordered whatever it was before.
+        State = OrderId is not null ? ApprovalState.Ordered : StateBeforeCancel ?? ApprovalState.Ordered;
+        StateBeforeCancel = null;
+        await EvictAsync(cache);
+        await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, refused.Reason, time.GetUtcNow()));
+    }
+
+    public static void NotFound(
+        [SagaIdentityFrom(nameof(PurchaseOrderCancellationRefused.RequestId))] PurchaseOrderCancellationRefused refused)
+    {
+    }
+
+    // ---- Invoicing's events -----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Records the spend of a payment in Budgets (idempotent there by payment ID). Sent whatever the saga's state, and by
+    /// <c>NotFound</c> too: the saga may have completed first, and Budgets gives the same final numbers in either order.
+    /// </summary>
+    public Task Handle(
+        [SagaIdentityFrom(nameof(PaymentReleased.RequestId))] PaymentReleased released, IMessageContext context) =>
+        context.SendAsync(Spend(released)).AsTask();
+
+    public static Task NotFound(
+        [SagaIdentityFrom(nameof(PaymentReleased.RequestId))] PaymentReleased released, IMessageContext context) =>
+        context.SendAsync(Spend(released)).AsTask();
+
+    private static RecordSpend Spend(PaymentReleased released) =>
+        new(released.RequestId, released.TenantId, released.PaymentId, released.AmountInclVat);
+
+    /// <summary>Every order line is paid or closed short: release what is left of the reservation and complete the request.</summary>
+    public async Task Handle(
+        [SagaIdentityFrom(nameof(PurchaseOrderSettled.RequestId))] PurchaseOrderSettled settled, TimeProvider time,
+        IMessageContext context, ICacheInvalidator cache)
+    {
+        if (State is not (ApprovalState.Approved or ApprovalState.Ordered or ApprovalState.Cancelling))
+        {
+            return;
+        }
+
+        await EvictAsync(cache);
+        await context.SendAsync(Release());
+        await context.PublishAsync(new RequestCompleted(Id, TenantId, RequestNumber, settled.PaidInclVat, time.GetUtcNow()));
+        End(ApprovalState.Completed);
+    }
+
+    public static void NotFound([SagaIdentityFrom(nameof(PurchaseOrderSettled.RequestId))] PurchaseOrderSettled settled)
+    {
     }
 
     // ---- Steps ------------------------------------------------------------------------------------------------------------

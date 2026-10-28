@@ -42,6 +42,24 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("current_step_no");
 
+                    b.Property<bool>("GoodsReceived")
+                        .HasColumnType("boolean")
+                        .HasColumnName("goods_received");
+
+                    b.Property<string>("Lines")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("lines");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<string>("OrderNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("order_number");
+
                     b.Property<Guid?>("OverdueAlertStepId")
                         .HasColumnType("uuid")
                         .HasColumnName("overdue_alert_step_id");
@@ -77,6 +95,17 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("state");
+
+                    b.Property<string>("StateBeforeCancel")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("state_before_cancel");
+
+                    b.Property<string>("SupplierId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("supplier_id");
 
                     b.Property<string>("TenantId")
                         .IsRequired()

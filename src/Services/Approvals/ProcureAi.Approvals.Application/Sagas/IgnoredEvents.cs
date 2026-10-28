@@ -1,4 +1,6 @@
 using ProcureAi.Contracts.Budgets;
+using ProcureAi.Contracts.Invoicing;
+using ProcureAi.Contracts.Purchasing;
 
 namespace ProcureAi.Approvals.Application.Sagas;
 
@@ -13,8 +15,32 @@ public static class IgnoredEventsHandler
     {
     }
 
-    /// <summary>Spend recorded on a payment; the saga learns of completion from Invoicing. A later task may replace this.</summary>
+    /// <summary>Spend recorded on a payment; the saga learns of completion from Invoicing.</summary>
     public static void Handle(BudgetSpent spent)
+    {
+    }
+
+    public static void Handle(PurchaseOrderConfirmed confirmed)
+    {
+    }
+
+    public static void Handle(PurchaseOrderClosedShort closedShort)
+    {
+    }
+
+    public static void Handle(InvoiceReceived received)
+    {
+    }
+
+    public static void Handle(InvoiceMatched matched)
+    {
+    }
+
+    public static void Handle(InvoiceMismatched mismatched)
+    {
+    }
+
+    public static void Handle(PaymentExported exported)
     {
     }
 }

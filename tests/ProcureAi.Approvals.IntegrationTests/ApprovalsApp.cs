@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using RabbitMQ.Client;
 using ProcureAi.Approvals.Application.Sagas;
 using ProcureAi.Approvals.Domain;
 using ProcureAi.Approvals.Infrastructure;
@@ -46,7 +47,7 @@ public sealed class ApprovalsApp : IAsyncLifetime
         await _infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
         Main = ApprovalsInstance.Start(_infra.DbConnectionString, _infra.RabbitConnectionString, _infra.RedisConnectionString, Access);
-        Recorder = await RabbitRecorder.StartAsync(_infra.RabbitConnectionString, [Exchanges.Approvals], [Queues.BudgetCommands]);
+        Recorder = await RabbitRecorder.StartAsync(_infra.RabbitConnectionString, [Exchanges.Approvals], [Queues.BudgetCommands, Queues.PurchasingCommands]);
     }
 
     public async ValueTask DisposeAsync()
@@ -94,6 +95,31 @@ public sealed class ApprovalsApp : IAsyncLifetime
     {
         var database = await _infra.CreateMigratedDatabaseAsync($"fast_{Guid.NewGuid():N}");
         return ApprovalsInstance.Start(database, _infra.RabbitConnectionString, _infra.RedisConnectionString, Access, timeouts);
+    }
+
+    /// <summary>
+    /// Messages Wolverine gave up on: its dead-letter table plus the broker queue <c>wolverine-dead-letter-queue</c> (where messages
+    /// that fail on the first try without a matching error rule are moved, so a table-only count asserts nothing). Tests compare it
+    /// with its value before.
+    /// </summary>
+    public async Task<long> DeadLettersAsync()
+    {
+        await using var connection = new NpgsqlConnection(_infra.DbConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
+        var inTable = (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+
+        await using var rabbit = await new ConnectionFactory { Uri = new Uri(_infra.RabbitConnectionString) }
+            .CreateConnectionAsync(TestContext.Current.CancellationToken);
+        await using var channel = await rabbit.CreateChannelAsync(cancellationToken: TestContext.Current.CancellationToken);
+        try
+        {
+            return inTable + (await channel.QueueDeclarePassiveAsync("wolverine-dead-letter-queue", TestContext.Current.CancellationToken)).MessageCount;
+        }
+        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException)
+        {
+            return inTable; // the queue is declared when the first message is moved there
+        }
     }
 
     public static string NewTenant() => $"t{Guid.NewGuid():N}"[..12];

@@ -1,8 +1,12 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using ProcureAi.Approvals.Application.Sagas;
 using ProcureAi.Approvals.Domain;
 using ProcureAi.BuildingBlocks.Domain;
+using ProcureAi.Contracts.Requests;
 
 namespace ProcureAi.Approvals.Infrastructure.Configurations;
 
@@ -47,6 +51,17 @@ internal sealed class ApprovalStepConfiguration : IEntityTypeConfiguration<Appro
 
 internal sealed class ApprovalSagaConfiguration : IEntityTypeConfiguration<ApprovalSaga>
 {
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private static readonly ValueConverter<List<RequestLineItem>, string> LinesConverter = new(
+        lines => JsonSerializer.Serialize(lines, Json),
+        text => JsonSerializer.Deserialize<List<RequestLineItem>>(text, Json) ?? new List<RequestLineItem>());
+
+    private static readonly ValueComparer<List<RequestLineItem>> LinesComparer = new(
+        (left, right) => JsonSerializer.Serialize(left, Json) == JsonSerializer.Serialize(right, Json),
+        lines => JsonSerializer.Serialize(lines, Json).GetHashCode(StringComparison.Ordinal),
+        lines => JsonSerializer.Deserialize<List<RequestLineItem>>(JsonSerializer.Serialize(lines, Json), Json)!);
+
     public void Configure(EntityTypeBuilder<ApprovalSaga> builder)
     {
         builder.ToTable("approval_sagas");
@@ -59,6 +74,14 @@ internal sealed class ApprovalSagaConfiguration : IEntityTypeConfiguration<Appro
         builder.Property(s => s.CostCenterCode).HasColumnName("cost_center_code").HasMaxLength(50).IsRequired();
         builder.Property(s => s.TotalInclVat).HasColumnName("total_incl_vat").HasColumnType("numeric(18,2)");
         builder.Property(s => s.State).HasColumnName("state").HasConversion<string>().HasMaxLength(20);
+        builder.Property(s => s.SupplierId).HasColumnName("supplier_id").HasMaxLength(100).IsRequired();
+        // The lines are stored as one jsonb value (a string to EF, so the audit interceptor sees one column, as stored).
+        builder.Property(s => s.Lines).HasColumnName("lines").HasColumnType("jsonb").IsRequired()
+            .HasConversion(LinesConverter, LinesComparer);
+        builder.Property(s => s.OrderId).HasColumnName("order_id");
+        builder.Property(s => s.OrderNumber).HasColumnName("order_number").HasMaxLength(50);
+        builder.Property(s => s.GoodsReceived).HasColumnName("goods_received");
+        builder.Property(s => s.StateBeforeCancel).HasColumnName("state_before_cancel").HasConversion<string>().HasMaxLength(20);
         builder.Property(s => s.CurrentStepNo).HasColumnName("current_step_no");
         builder.Property(s => s.CancelRequested).HasColumnName("cancel_requested");
         builder.Property(s => s.OverdueAlertStepId).HasColumnName("overdue_alert_step_id");
