@@ -42,9 +42,26 @@ internal sealed class CostCenterBudgetConfiguration : IEntityTypeConfiguration<C
             reservations.Property(r => r.RequestId).HasColumnName("request_id").ValueGeneratedNever();
             reservations.Property(r => r.Amount).HasColumnName("amount").HasColumnType(MoneyColumn)
                 .HasConversion(money => money.Amount, amount => Money.Zar(amount));
+            reservations.Property(r => r.Spent).HasColumnName("spent").HasColumnType(MoneyColumn)
+                .HasConversion(money => money.Amount, amount => Money.Zar(amount)).HasDefaultValue(Money.Zero);
             reservations.Property(r => r.IsReleased).HasColumnName("is_released");
+            reservations.Ignore(r => r.Remaining);
         });
         builder.Navigation(b => b.Reservations).UsePropertyAccessMode(PropertyAccessMode.Field);
+
+        builder.OwnsMany(b => b.Spends, spends =>
+        {
+            spends.ToTable("budget_spends");
+            spends.WithOwner().HasForeignKey(nameof(BudgetSpend.BudgetId));
+            spends.HasKey(nameof(BudgetSpend.BudgetId), nameof(BudgetSpend.PaymentId));
+            spends.Property(s => s.BudgetId).HasColumnName("budget_id");
+            spends.Property(s => s.PaymentId).HasColumnName("payment_id").ValueGeneratedNever();
+            spends.Property(s => s.RequestId).HasColumnName("request_id");
+            spends.Property(s => s.Amount).HasColumnName("amount").HasColumnType(MoneyColumn)
+                .HasConversion(money => money.Amount, amount => Money.Zar(amount));
+            spends.Property(s => s.RecordedAt).HasColumnName("recorded_at");
+        });
+        builder.Navigation(b => b.Spends).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }
 

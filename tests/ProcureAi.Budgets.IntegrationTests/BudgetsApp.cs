@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using ProcureAi.Budgets.Application.Dtos;
 using ProcureAi.Contracts;
+using RabbitMQ.Client;
 using Wolverine;
 
 namespace ProcureAi.Budgets.IntegrationTests;
@@ -117,7 +118,7 @@ public sealed class BudgetsApp : IAsyncLifetime
         await using var command = new NpgsqlCommand(
             """
             SELECT b.reserved, b.amount - b.reserved - b.spent,
-                   COALESCE((SELECT sum(r.amount) FROM budget_reservations r WHERE r.budget_id = b.id AND NOT r.is_released), 0)
+                   COALESCE((SELECT sum(r.amount - r.spent) FROM budget_reservations r WHERE r.budget_id = b.id AND NOT r.is_released), 0)
             FROM budgets b WHERE b.tenant_id = @t AND b.cost_center_code = @c AND b.fiscal_year = @y
             """,
             connection);
@@ -129,12 +130,51 @@ public sealed class BudgetsApp : IAsyncLifetime
         return (reader.GetDecimal(0), reader.GetDecimal(1), reader.GetDecimal(2));
     }
 
+    /// <summary>The spent total of a budget and the number of payments recorded on it, straight from the database.</summary>
+    public async Task<(decimal Spent, long Payments)> SpentAsync(string tenant, string costCenter)
+    {
+        await using var connection = new NpgsqlConnection(_infra.DbConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT b.spent, (SELECT count(*) FROM budget_spends s WHERE s.budget_id = b.id)
+            FROM budgets b WHERE b.tenant_id = @t AND b.cost_center_code = @c AND b.fiscal_year = @y
+            """,
+            connection);
+        command.Parameters.AddWithValue("t", tenant);
+        command.Parameters.AddWithValue("c", costCenter);
+        command.Parameters.AddWithValue("y", BudgetsInfraFixture.CurrentYear.EndYear);
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        await reader.ReadAsync(TestContext.Current.CancellationToken);
+        return (reader.GetDecimal(0), reader.GetInt64(1));
+    }
+
+    /// <summary>
+    /// Messages that ran out of retries or were moved to the error queue: the rows of Wolverine's dead-letter table plus the
+    /// messages in the broker's <c>wolverine-dead-letter-queue</c> (where a message from a listener without a durable inbox goes).
+    /// Tests compare it with its value before.
+    /// </summary>
     public async Task<long> DeadLettersAsync()
     {
         await using var connection = new NpgsqlConnection(_infra.DbConnectionString);
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using var command = new NpgsqlCommand("SELECT count(*) FROM wolverine.wolverine_dead_letters", connection);
-        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))! + await BrokerDeadLettersAsync();
+    }
+
+    private async Task<long> BrokerDeadLettersAsync()
+    {
+        await using var connection = await new ConnectionFactory { Uri = new Uri(_infra.RabbitConnectionString) }
+            .CreateConnectionAsync(TestContext.Current.CancellationToken);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: TestContext.Current.CancellationToken);
+        try
+        {
+            return (await channel.QueueDeclarePassiveAsync("wolverine-dead-letter-queue", TestContext.Current.CancellationToken)).MessageCount;
+        }
+        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException)
+        {
+            return 0; // the queue is declared when the first message is moved there
+        }
     }
 }
 

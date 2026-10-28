@@ -105,7 +105,7 @@ public sealed class AuditApp : IAsyncLifetime
     /// <summary>The tables the AppHost captures in the two databases (<c>ServiceSpec.CapturedTables</c>).</summary>
     public static readonly string[] RequestsTables = ["purchase_requests", "request_lines", "audit_entries"];
 
-    public static readonly string[] BudgetsTables = ["budgets", "budget_reservations", "audit_entries"];
+    public static readonly string[] BudgetsTables = ["budgets", "budget_reservations", "budget_spends", "audit_entries"];
 
     private readonly AuditInfraFixture _infra = new();
     private readonly SemaphoreSlim _cdcLock = new(1, 1);

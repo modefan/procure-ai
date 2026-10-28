@@ -182,4 +182,115 @@ public sealed class CostCenterBudgetTests
 
         budget.Reserved.ShouldBe(Money.Zero);
     }
+
+    private static readonly DateTimeOffset Now = new(2026, 10, 28, 8, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void RecordSpend_moves_reserved_to_spent()
+    {
+        var budget = Budget(100_000m);
+        var request = Guid.NewGuid();
+        budget.Reserve(request, Money.Zar(86_940m));
+
+        var outcome = budget.RecordSpend(request, Guid.NewGuid(), Money.Zar(57_960m), Now);
+
+        outcome.ShouldBe(SpendOutcome.Recorded(withoutReservation: false));
+        budget.Reserved.ShouldBe(Money.Zar(28_980m));
+        budget.Spent.ShouldBe(Money.Zar(57_960m));
+        budget.Available.ShouldBe(Money.Zar(13_060m));
+        budget.Reservations.Single().Remaining.ShouldBe(Money.Zar(28_980m));
+        budget.Spends.Single().Amount.ShouldBe(Money.Zar(57_960m));
+    }
+
+    [Fact]
+    public void Same_payment_twice_records_once()
+    {
+        var budget = Budget(100_000m);
+        var request = Guid.NewGuid();
+        var payment = Guid.NewGuid();
+        budget.Reserve(request, Money.Zar(86_940m));
+        budget.RecordSpend(request, payment, Money.Zar(57_960m), Now);
+
+        var again = budget.RecordSpend(request, payment, Money.Zar(57_960m), Now);
+
+        again.AlreadyRecorded.ShouldBeTrue();
+        budget.Spent.ShouldBe(Money.Zar(57_960m));
+        budget.Reserved.ShouldBe(Money.Zar(28_980m));
+        budget.Spends.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Spend_above_remaining_reservation_adds_to_spent_and_empties_reserved()
+    {
+        // VAT rounding: the payments add up to 50 cents more than the reservation.
+        var budget = Budget(100_000m);
+        var request = Guid.NewGuid();
+        budget.Reserve(request, Money.Zar(86_940m));
+        budget.RecordSpend(request, Guid.NewGuid(), Money.Zar(57_960m), Now);
+
+        budget.RecordSpend(request, Guid.NewGuid(), Money.Zar(28_980.50m), Now);
+
+        budget.Reserved.ShouldBe(Money.Zero);
+        budget.Spent.ShouldBe(Money.Zar(86_940.50m));
+        budget.Reservations.Single().Remaining.ShouldBe(Money.Zero);
+        budget.Release(request).ShouldBe(Money.Zero, "nothing is left to free");
+    }
+
+    [Fact]
+    public void Release_after_partial_spend_frees_only_remaining()
+    {
+        var budget = Budget(100_000m);
+        var request = Guid.NewGuid();
+        budget.Reserve(request, Money.Zar(86_940m));
+        budget.RecordSpend(request, Guid.NewGuid(), Money.Zar(57_960m), Now);
+
+        budget.Release(request).ShouldBe(Money.Zar(28_980m));
+
+        budget.Reserved.ShouldBe(Money.Zero);
+        budget.Spent.ShouldBe(Money.Zar(57_960m));
+        budget.Release(request).ShouldBe(Money.Zero, "a second release frees nothing");
+    }
+
+    [Fact]
+    public void Spend_after_release_or_without_reservation_is_flagged_and_adds_to_spent()
+    {
+        var budget = Budget(100_000m);
+        var released = Guid.NewGuid();
+        budget.Reserve(released, Money.Zar(86_940m));
+        budget.Release(released);
+
+        budget.RecordSpend(released, Guid.NewGuid(), Money.Zar(57_960m), Now).WithoutReservation.ShouldBeTrue();
+        budget.RecordSpend(Guid.NewGuid(), Guid.NewGuid(), Money.Zar(10m), Now).WithoutReservation.ShouldBeTrue();
+
+        budget.Reserved.ShouldBe(Money.Zero);
+        budget.Spent.ShouldBe(Money.Zar(57_970m));
+    }
+
+    [Fact]
+    public void Spend_and_release_in_either_order_give_the_same_numbers()
+    {
+        var spendFirst = Budget(100_000m);
+        var releaseFirst = Budget(100_000m);
+        var request = Guid.NewGuid();
+        var payment = Guid.NewGuid();
+        spendFirst.Reserve(request, Money.Zar(86_940m));
+        releaseFirst.Reserve(request, Money.Zar(86_940m));
+
+        spendFirst.RecordSpend(request, payment, Money.Zar(57_960m), Now);
+        spendFirst.Release(request);
+        releaseFirst.Release(request);
+        releaseFirst.RecordSpend(request, payment, Money.Zar(57_960m), Now);
+
+        releaseFirst.Spent.ShouldBe(spendFirst.Spent);
+        releaseFirst.Reserved.ShouldBe(spendFirst.Reserved);
+        releaseFirst.Available.ShouldBe(spendFirst.Available);
+        spendFirst.Available.ShouldBe(Money.Zar(42_040m));
+    }
+
+    [Fact]
+    public void A_spend_that_is_not_positive_is_refused()
+    {
+        var budget = Budget();
+        Should.Throw<DomainException>(() => budget.RecordSpend(Guid.NewGuid(), Guid.NewGuid(), Money.Zero, Now));
+    }
 }

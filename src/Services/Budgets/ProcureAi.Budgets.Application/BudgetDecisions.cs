@@ -58,8 +58,9 @@ public static class BudgetDecisions
             return new ReserveDecision(Failed(command, outcome.Reason!, outcome.Available.Amount, now), MarkerChange.None);
         }
 
+        // The budget that holds the reservation answers (a repeated command may name another cost center or year).
         var reserved = new BudgetReserved(
-            command.RequestId, command.TenantId, command.CostCenterCode, year.ToString(), outcome.Amount.Amount, now);
+            command.RequestId, command.TenantId, budget.CostCenterCode, budget.FiscalYear.ToString(), outcome.Amount.Amount, now);
         return new ReserveDecision(reserved, marker is null ? MarkerChange.AddReserved : MarkerChange.None);
     }
 

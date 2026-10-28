@@ -7,7 +7,7 @@ namespace ProcureAi.Budgets.IntegrationTests;
 
 /// <summary>The shared service infrastructure with the Budgets database migrated and demo-seeded by the real <c>--migrate</c> step.</summary>
 public sealed class BudgetsInfraFixture()
-    : ServiceInfraFixture("budgetsdb", "budgets", "budget_reservations", "audit_entries")
+    : ServiceInfraFixture("budgetsdb", "budgets", "budget_reservations", "budget_spends", "audit_entries")
 {
     public const string ApiAssembly = "ProcureAi.Budgets.Api.dll";
 

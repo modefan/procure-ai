@@ -10,6 +10,7 @@ using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Budgets;
 using Wolverine;
+using Wolverine.ErrorHandling;
 using Wolverine.EntityFrameworkCore;
 using Wolverine.RabbitMQ;
 
@@ -52,6 +53,9 @@ public static class DependencyInjection
         options.PublishMessage<BudgetReserved>().ToRabbitExchange(Exchanges.Budgets);
         options.PublishMessage<BudgetReservationFailed>().ToRabbitExchange(Exchanges.Budgets);
         options.PublishMessage<BudgetReleased>().ToRabbitExchange(Exchanges.Budgets);
+        options.PublishMessage<BudgetSpent>().ToRabbitExchange(Exchanges.Budgets);
+        // A spend no budget can take cannot succeed on a retry: straight to the error queue, where it is visible.
+        options.OnException<SpendCannotBeBookedException>().MoveToErrorQueue();
 
         var section = $"{BudgetsOptions.SectionName}:{nameof(BudgetsOptions.ConcurrencyRetry)}";
         var retry = configuration.GetSection(BudgetsOptions.SectionName).Get<BudgetsOptions>()?.ConcurrencyRetry

@@ -9,6 +9,7 @@ namespace ProcureAi.Budgets.Domain;
 public sealed class CostCenterBudget
 {
     private readonly List<BudgetReservation> _reservations = [];
+    private readonly List<BudgetSpend> _spends = [];
 
     private CostCenterBudget()
     {
@@ -28,6 +29,9 @@ public sealed class CostCenterBudget
     public Money Spent { get; private set; }
 
     public IReadOnlyList<BudgetReservation> Reservations => _reservations.AsReadOnly();
+
+    /// <summary>One row per payment recorded here; the key that makes recording a payment twice harmless.</summary>
+    public IReadOnlyList<BudgetSpend> Spends => _spends.AsReadOnly();
 
     /// <summary>
     /// Held for requests that are not released yet. It is a stored total, updated by every reserve and release, so the budget
@@ -96,6 +100,38 @@ public sealed class CostCenterBudget
         var released = existing.Release();
         Reserved -= released;
         return released;
+    }
+
+    /// <summary>
+    /// Books a payment of the request (ruling 16). The same payment again changes nothing. Otherwise <c>min(amount, what the
+    /// reservation still holds)</c> moves from reserved to spent and the rest of the amount is added to spent as well (VAT
+    /// rounding cents can make spent exceed the reservation). A request with no reservation, or a released one, has nothing to
+    /// move: the whole amount is added to spent and the outcome says so. Either order of this and <see cref="Release"/> gives
+    /// the same spent, and the same available.
+    /// </summary>
+    public SpendOutcome RecordSpend(Guid requestId, Guid paymentId, Money amount, DateTimeOffset recordedAt)
+    {
+        EnsureNotNegative(amount);
+        if (amount.Amount <= 0)
+        {
+            throw new DomainException("A spend must be greater than zero.");
+        }
+
+        if (_spends.Any(s => s.PaymentId == paymentId))
+        {
+            return SpendOutcome.Already();
+        }
+
+        var reservation = _reservations.FirstOrDefault(r => r.RequestId == requestId);
+        var withoutReservation = reservation is null or { IsReleased: true };
+        if (!withoutReservation)
+        {
+            Reserved -= reservation!.Spend(amount);
+        }
+
+        Spent += amount;
+        _spends.Add(BudgetSpend.Record(Id, paymentId, requestId, amount, recordedAt));
+        return SpendOutcome.Recorded(withoutReservation);
     }
 
     /// <summary>Changes the budget. It may not go below what is already reserved or spent.</summary>

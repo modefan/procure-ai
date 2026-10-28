@@ -121,7 +121,7 @@ var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     .WithEnvironment("Keycloak__AdminClientId", "procure-access-admin")
     .WithEnvironment("Keycloak__AdminClientSecret", keycloakAccessAdminSecret);
 var budgetsApi = builder.AddProcureAiService<Projects.ProcureAi_Budgets_Api>(
-    new ServiceSpec("budgets", ResourceNames.BudgetsDb, CapturedTables: ["budgets", "budget_reservations", "audit_entries"], GatewayCluster: "budgets", ApiRoutePrefix: "/api/budgets"),
+    new ServiceSpec("budgets", ResourceNames.BudgetsDb, CapturedTables: ["budgets", "budget_reservations", "budget_spends", "audit_entries"], GatewayCluster: "budgets", ApiRoutePrefix: "/api/budgets"),
     shared)
     // Every service but Access asks Access for permissions (and approvers, names): service discovery needs the reference.
     .CallsServices(accessApi);

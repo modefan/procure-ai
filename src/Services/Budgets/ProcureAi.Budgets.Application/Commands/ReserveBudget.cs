@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.Budgets.Application.Abstractions;
 using ProcureAi.Budgets.Domain;
@@ -20,16 +21,29 @@ public static class ReserveBudgetHandler
     /// </summary>
     public static async Task Handle(
         ReserveBudget command, IBudgetsDbContext db, IMessageBus bus, ICacheInvalidator cache, IOptions<BudgetsOptions> options,
-        TimeProvider time, CancellationToken cancellationToken)
+        TimeProvider time, ILogger<ReserveBudget> logger, CancellationToken cancellationToken)
     {
         var year = FiscalYear.For(command.SubmittedAt, options.Value.Zone);
         var marker = await db.RequestMarkers.IgnoreQueryFilters().SingleOrDefaultAsync(
             m => m.TenantId == command.TenantId && m.RequestId == command.RequestId, cancellationToken);
-        var budget = marker is { IsReleased: true }
-            ? null
-            : await db.Budgets.IgnoreQueryFilters().Include(b => b.Reservations).SingleOrDefaultAsync(
+        // A repeated command (the marker says reserved) is answered from the budget that holds the reservation, never from
+        // the cost center the command names.
+        var budget = marker switch
+        {
+            { IsReleased: true } => null,
+            { IsReleased: false } => await db.Budgets.IgnoreQueryFilters().Include(b => b.Reservations).SingleOrDefaultAsync(
+                b => b.TenantId == command.TenantId && b.Reservations.Any(r => r.RequestId == command.RequestId), cancellationToken),
+            null => await db.Budgets.IgnoreQueryFilters().Include(b => b.Reservations).SingleOrDefaultAsync(
                 b => b.TenantId == command.TenantId && b.CostCenterCode == command.CostCenterCode && b.FiscalYear == year,
-                cancellationToken);
+                cancellationToken),
+        };
+        if (marker is { IsReleased: false } && budget is not null
+            && (budget.CostCenterCode != command.CostCenterCode || budget.FiscalYear != year))
+        {
+            logger.LogError(
+                "Request {RequestId} is reserved on {HeldCostCenter} {HeldYear} but the command names {CostCenter} {Year}; answering from the holding budget.",
+                command.RequestId, budget.CostCenterCode, budget.FiscalYear, command.CostCenterCode, year);
+        }
 
         var decision = BudgetDecisions.Reserve(command, year, budget, marker, time.GetUtcNow());
         if (decision.Marker == MarkerChange.AddReserved)

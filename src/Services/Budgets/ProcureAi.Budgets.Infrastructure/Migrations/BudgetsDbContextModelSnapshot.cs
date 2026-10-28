@@ -185,6 +185,12 @@ namespace ProcureAi.Budgets.Infrastructure.Migrations
                                 .HasColumnType("boolean")
                                 .HasColumnName("is_released");
 
+                            b1.Property<decimal>("Spent")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("numeric(18,2)")
+                                .HasDefaultValue(0m)
+                                .HasColumnName("spent");
+
                             b1.HasKey("BudgetId", "RequestId");
 
                             b1.ToTable("budget_reservations", (string)null);
@@ -193,7 +199,39 @@ namespace ProcureAi.Budgets.Infrastructure.Migrations
                                 .HasForeignKey("BudgetId");
                         });
 
+                    b.OwnsMany("ProcureAi.Budgets.Domain.BudgetSpend", "Spends", b1 =>
+                        {
+                            b1.Property<Guid>("BudgetId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("budget_id");
+
+                            b1.Property<Guid>("PaymentId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("payment_id");
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("numeric(18,2)")
+                                .HasColumnName("amount");
+
+                            b1.Property<DateTimeOffset>("RecordedAt")
+                                .HasColumnType("timestamp with time zone")
+                                .HasColumnName("recorded_at");
+
+                            b1.Property<Guid>("RequestId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("request_id");
+
+                            b1.HasKey("BudgetId", "PaymentId");
+
+                            b1.ToTable("budget_spends", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("BudgetId");
+                        });
+
                     b.Navigation("Reservations");
+
+                    b.Navigation("Spends");
                 });
 #pragma warning restore 612, 618
         }

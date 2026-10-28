@@ -98,7 +98,7 @@ public sealed class ServiceResourcesTests
         migrateEnv.ShouldContainKeyAndValue("DemoSeed__Enabled", "true");
         debeziumEnv.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_DBNAME", "budgetsdb");
         debeziumEnv.ShouldContainKeyAndValue(
-            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", "public.budgets,public.budget_reservations,public.audit_entries");
+            "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", "public.budgets,public.budget_reservations,public.budget_spends,public.audit_entries");
         api.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
         api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
