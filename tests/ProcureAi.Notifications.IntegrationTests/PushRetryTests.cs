@@ -3,11 +3,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application.Caching;
+using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Web.Access;
 using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.Contracts;
+using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Notifications;
 using ProcureAi.Contracts.Requests;
+using ProcureAi.Notifications.Application.Email;
+using ProcureAi.Notifications.Application.Inbox;
 using ProcureAi.Notifications.Application.Live;
+using ProcureAi.Notifications.Application.Presence;
 using ProcureAi.Notifications.Infrastructure;
 using Shouldly;
 using StackExchange.Redis;
@@ -61,7 +67,25 @@ public sealed class PushRetryTests(NotificationsApp app)
         await host.StopAsync(Ct);
     }
 
-    private async Task<IHost> StartListenerAsync(FailingPushes pushes)
+    [Fact]
+    public async Task An_email_that_could_not_be_sent_is_retried_and_the_message_is_handled()
+    {
+        var pushes = new FailingPushes(failures: 0, () => new InvalidOperationException("never"));
+        var notifier = new FailingNotifier(failures: 2);
+        var tenant = NewTenant();
+        var before = await DeadLetters.CountAsync(null, app.Rabbit.ConnectionString, Ct);
+
+        using var host = await StartListenerAsync(pushes, notifier);
+        await app.PublishAsync(new ApprovalRequested(
+            Guid.NewGuid(), tenant, "PR-1", Guid.NewGuid(), 1, "Manager", ["maria"], DateTimeOffset.UtcNow.AddDays(2), DateTimeOffset.UtcNow));
+
+        await WaitUntilAsync(() => notifier.Delivered(tenant));
+        notifier.Attempts(tenant).ShouldBe(3, "two failed emails, then the third attempt sent it");
+        (await DeadLetters.CountAsync(null, app.Rabbit.ConnectionString, Ct)).ShouldBe(before, "nothing was dead-lettered");
+        await host.StopAsync(Ct);
+    }
+
+    private async Task<IHost> StartListenerAsync(FailingPushes pushes, IPersonalNotifier? notifier = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -80,6 +104,9 @@ public sealed class PushRetryTests(NotificationsApp app)
             .ConfigureServices(services =>
             {
                 services.AddSingleton<ILivePushes>(pushes);
+                services.AddSingleton<IPersonalNotifier>(notifier ?? new FailingNotifier(failures: 0));
+                // The caller model and IMessageMetadata the handlers take, as ServiceHost registers them.
+                services.AddProcureAiCaller(service);
                 // What the shared AccessChanged handler of UseProcureAiAccessEviction needs (never called here).
                 services.AddSingleton<IFusionCache>(new FusionCache(new FusionCacheOptions(), new MemoryCache(new MemoryCacheOptions())));
                 services.AddSingleton(Options.Create(new AccessClientOptions()));
@@ -146,6 +173,53 @@ public sealed class PushRetryTests(NotificationsApp app)
                 }
 
                 _delivered.Add(tenantId);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task PushViewersAsync(string tenantId, PresenceTarget target, IReadOnlyList<Viewer> viewers, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task PushOnlineAsync(string tenantId, IReadOnlyList<Viewer> online, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task PushToUserAsync(string tenantId, string userId, BellItem item, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    /// <summary>Fails the first <c>failures</c> notifications of each tenant as an email that could not be sent, then succeeds.</summary>
+    private sealed class FailingNotifier(int failures) : IPersonalNotifier
+    {
+        private readonly Dictionary<string, int> _attempts = [];
+        private readonly HashSet<string> _delivered = [];
+        private readonly Lock _lock = new();
+
+        public int Attempts(string tenant)
+        {
+            lock (_lock)
+            {
+                return _attempts.GetValueOrDefault(tenant);
+            }
+        }
+
+        public bool Delivered(string tenant)
+        {
+            lock (_lock)
+            {
+                return _delivered.Contains(tenant);
+            }
+        }
+
+        public Task NotifyAsync(IIntegrationEvent integrationEvent, Guid? messageId, CancellationToken cancellationToken)
+        {
+            lock (_lock)
+            {
+                var attempt = _attempts[integrationEvent.TenantId] = _attempts.GetValueOrDefault(integrationEvent.TenantId) + 1;
+                if (attempt <= failures)
+                {
+                    throw new EmailDeliveryException("SMTP down", new IOException("connection refused"));
+                }
+
+                _delivered.Add(integrationEvent.TenantId);
             }
 
             return Task.CompletedTask;

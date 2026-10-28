@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="DistributedLock.Redis" />
+    <PackageReference Include="MailKit" />
+    <!-- Lifts MimeKit's System.Security.Cryptography.Pkcs 10.0.0 (known vulnerabilities) to the patched version. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
     <PackageReference Include="WolverineFx.RabbitMQ" />
     <PackageReference Include="WolverineFx.RuntimeCompilation" />

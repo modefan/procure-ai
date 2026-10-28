@@ -276,6 +276,27 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_user_lookup_gives_name_and_email_and_shares_the_cached_answer_with_the_display_name()
+    {
+        var host = await StartAsync();
+        var tenant = NewTenant();
+        _access.SetDisplayName(tenant, "maria", "Maria Manager", "maria@acme.test");
+        _access.SetDisplayName(tenant, "ben", "Ben Buyer");
+        var access = host.Services.GetRequiredService<IAccessDirectory>();
+
+        var maria = await access.GetUserAsync("maria", tenant, Ct);
+        var name = await access.GetDisplayNameAsync("maria", tenant, Ct);
+        var ben = await access.GetUserAsync("ben", tenant, Ct);
+        var nobody = await access.GetUserAsync("nobody", tenant, Ct);
+
+        maria.ShouldBe(new DirectoryUser("maria", "Maria Manager", "maria@acme.test"));
+        name.ShouldBe("Maria Manager");
+        ben.ShouldNotBeNull().Email.ShouldBe("", "Access had no address for him");
+        nobody.ShouldBeNull();
+        _access.Calls.Count(c => c.Path == "/api/v1/access/internal/users/maria").ShouldBe(1, "one lookup serves both");
+    }
+
+    [Fact]
     public async Task AccessChanged_makes_the_tenants_cached_answers_unreachable_even_while_access_is_down()
     {
         var a = await StartAsync();

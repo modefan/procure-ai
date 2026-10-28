@@ -1,10 +1,17 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Contracts;
+using ProcureAi.Notifications.Application.Email;
 using ProcureAi.Notifications.Application.Handlers;
+using ProcureAi.Notifications.Application.Inbox;
 using ProcureAi.Notifications.Application.Live;
+using ProcureAi.Notifications.Application.Presence;
+using ProcureAi.Notifications.Infrastructure.Email;
+using ProcureAi.Notifications.Infrastructure.Inbox;
+using ProcureAi.Notifications.Infrastructure.Presence;
 using StackExchange.Redis;
 using Wolverine;
 using Wolverine.ErrorHandling;
@@ -20,6 +27,29 @@ public static class DependencyInjection
 
     /// <summary>The queue of <paramref name="serviceName"/> that receives the events of <see cref="LiveExchanges"/>.</summary>
     public static string LiveQueue(string serviceName) => $"{serviceName}-live";
+
+    /// <summary>
+    /// Presence (Redis store, the service and the sweeper on every instance), the bell (Redis), email (MailKit SMTP, deduplicated in
+    /// Redis) and the notifier that ties bell and email to the events. Uses the <see cref="IConnectionMultiplexer"/> and the
+    /// DistributedLock provider the shared caching setup registers. The presence clock is a keyed <see cref="TimeProvider"/>
+    /// (<see cref="PresenceClock.Key"/>), the system clock unless a test registers another first.
+    /// </summary>
+    public static IServiceCollection AddNotificationsInfrastructure(this IServiceCollection services)
+    {
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddKeyedSingleton(PresenceClock.Key, TimeProvider.System);
+        services.AddSingleton<IPresenceStore, RedisPresenceStore>();
+        services.AddSingleton<PresenceService>();
+        services.AddSingleton<PresenceSweeper>();
+        services.AddHostedService(provider => provider.GetRequiredService<PresenceSweeper>());
+
+        services.AddSingleton<IBellStore, RedisBellStore>();
+        services.AddSingleton<BellInbox>();
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        services.AddSingleton<IEmailOnce, RedisEmailOnce>();
+        services.AddScoped<IPersonalNotifier, PersonalNotifier>();
+        return services;
+    }
 
     /// <summary>
     /// The SignalR Redis backplane: a push from any instance reaches the clients connected to every instance. The channels are prefixed
@@ -55,10 +85,25 @@ public static class DependencyInjection
             }
         });
 
-        // The hub context (behind ILivePushes) is resolved from the container rather than built by generated code.
+        // The hub context (behind ILivePushes) is resolved from the container rather than built by generated code; so is the notifier,
+        // which depends on it and on the Access client.
         options.CodeGeneration.AlwaysUseServiceLocationFor<ILivePushes>();
+        options.CodeGeneration.AlwaysUseServiceLocationFor<IPersonalNotifier>();
 
-        options.RetryPushFailures(NotificationsOptions.PushRetryDelays(configuration));
+        var delays = NotificationsOptions.PushRetryDelays(configuration);
+        options.RetryPushFailures(delays);
+        options.RetryEmailFailures(delays);
+    }
+
+    /// <summary>
+    /// An email that could not be sent (<see cref="EmailDeliveryException"/>: the SMTP server or the address lookup failed) is retried
+    /// inline after each of <paramref name="delays"/> (<c>Notifications:PushRetry</c>), then the message goes to the error queue. A retry
+    /// adds no second bell item (same ID) and sends only the emails that were not sent (dedup key released on failure).
+    /// </summary>
+    public static WolverineOptions RetryEmailFailures(this WolverineOptions options, TimeSpan[] delays)
+    {
+        options.OnException<EmailDeliveryException>().RetryWithCooldown(delays);
+        return options;
     }
 
     /// <summary>

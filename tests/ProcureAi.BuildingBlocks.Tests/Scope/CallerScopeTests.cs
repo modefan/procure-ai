@@ -35,6 +35,9 @@ public sealed class CallerScopeTests
 
         public ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private static Task<CallerScope> ScopeAsync(CallerKind kind, string userId, params string[] costCenters) =>

@@ -37,6 +37,9 @@
     <PackageVersion Include="ZiggyCreatures.FusionCache.Backplane.StackExchangeRedis" Version="2.9.0" />
     <PackageVersion Include="ZiggyCreatures.FusionCache.Serialization.SystemTextJson" Version="2.9.0" />
     <PackageVersion Include="DistributedLock.Redis" Version="1.1.1" />
+    <PackageVersion Include="MailKit" Version="4.18.1" />
+    <!-- MimeKit (under MailKit) asks for 10.0.0, which has known vulnerabilities (NU1903); the patched one is referenced directly. -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Settings.Configuration" Version="10.0.1" />
     <PackageVersion Include="Serilog.Sinks.OpenTelemetry" Version="4.2.0" />

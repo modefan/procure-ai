@@ -218,6 +218,7 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
 
         refused.Text("reason").ShouldBe("Goods were already received");
         refused.Text("number").ShouldBe(submitted.Number);
+        refused.Text("requesterId").ShouldBe(submitted.RequesterId);
         var saga = await Main.WaitForSagaAsync(id, s => s?.State == ApprovalState.Ordered, EventTimeout);
         saga!.OrderId.ShouldBe(orderId);
         Recorder.Of(id).Where(m => m.Kind is nameof(ReleaseBudget) or nameof(RequestCancellationConfirmed)).ShouldBeEmpty();
@@ -335,6 +336,8 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
         var kinds = Recorder.Of(id).Select(m => m.Kind).ToList();
         var refused = Recorder.Of(id).Single(m => m.Kind == nameof(RequestCancellationRefused));
         refused.Text("reason").ShouldBe(ApprovalSaga.OrderSettled);
+        refused.Text("requesterId").ShouldBe(submitted.RequesterId);
+        Recorder.Of(id).Single(m => m.Kind == nameof(RequestCompleted)).Text("requesterId").ShouldBe(submitted.RequesterId);
         kinds.IndexOf(nameof(RequestCancellationRefused)).ShouldBeLessThan(kinds.IndexOf(nameof(RequestCompleted)));
         kinds.Count(k => k == nameof(RequestOrdered)).ShouldBe(1, "only the one from ordering");
     }

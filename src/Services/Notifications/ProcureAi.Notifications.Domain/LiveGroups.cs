@@ -13,6 +13,13 @@ public static class LiveGroups
     public static string User(string tenantId, string userId) =>
         $"u:{Required(tenantId, nameof(tenantId))}:{Required(userId, nameof(userId))}";
 
+    /// <summary>
+    /// Every connection viewing one entity of the tenant: <c>v:{tenantId}:{entity}:{id}</c> (presence, <c>ViewersChanged</c>). The tenant
+    /// comes from the caller's token, never from the client; entity and ID are checked first (no <c>:</c>), so a name is unambiguous.
+    /// </summary>
+    public static string Viewers(string tenantId, string entity, string id) =>
+        $"v:{Required(tenantId, nameof(tenantId))}:{Required(entity, nameof(entity))}:{Required(id, nameof(id))}";
+
     private static string Required(string value, string name) =>
         string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("A group needs a value.", name) : value;
 }

@@ -14,12 +14,15 @@ using Wolverine.RabbitMQ;
 namespace ProcureAi.Notifications.IntegrationTests;
 
 /// <summary>
-/// The real Notifications API (its Program) on a test server, against the shared RabbitMQ and Redis, with the stub Access service. Two
-/// instances on one Redis stand in for two pods (the SignalR backplane). No database.
+/// The real Notifications API (its Program) on a test server, against the shared RabbitMQ, Redis and Mailpit, with the stub Access
+/// service. Two instances on one Redis stand in for two pods (the SignalR backplane). No database. <paramref name="configure"/> adds
+/// what one test needs (a fake presence clock, other presence timings).
 /// </summary>
-public sealed class NotificationsApiFactory(NotificationsApp app)
+public sealed class NotificationsApiFactory(NotificationsApp app, Action<IWebHostBuilder>? configure = null)
     : ServiceApiFactory<Program>(null, null, app.Rabbit.ConnectionString, app.Redis.ConnectionString)
 {
+    public const string AppBaseUrl = "https://app.test";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -31,6 +34,11 @@ public sealed class NotificationsApiFactory(NotificationsApp app)
         builder.UseSetting("Auth:InternalClientId", NotificationsApp.InternalClientId);
         // High enough that long polling by several clients never meets the limiter.
         builder.UseSetting("RateLimiting:PermitLimit", "10000");
+        builder.UseSetting("Notifications:Smtp:Host", app.Mailpit.SmtpHost);
+        builder.UseSetting("Notifications:Smtp:Port", app.Mailpit.SmtpPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting("Notifications:Smtp:From", "no-reply@procure-ai.test");
+        builder.UseSetting("Notifications:Smtp:AppBaseUrl", AppBaseUrl);
+        configure?.Invoke(builder);
     }
 }
 
@@ -42,6 +50,10 @@ public sealed class NotificationsApp : IAsyncLifetime
     public RabbitFixture Rabbit { get; } = new();
 
     public RedisFixture Redis { get; } = new();
+
+    public MailpitFixture Mailpit { get; } = new();
+
+    public RabbitProbe Probe => new(Rabbit.ConnectionString);
 
     public StubAccessServer Access { get; private set; } = null!;
 
@@ -57,6 +69,7 @@ public sealed class NotificationsApp : IAsyncLifetime
     {
         await Rabbit.InitializeAsync();
         await Redis.InitializeAsync();
+        await Mailpit.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
         A = new NotificationsApiFactory(this);
         B = new NotificationsApiFactory(this);
@@ -74,6 +87,8 @@ public sealed class NotificationsApp : IAsyncLifetime
                 options.UseProcureAiTransport(configuration);
                 options.PublishMessage<RequestSubmitted>().ToRabbitExchange(Exchanges.Requests);
                 options.PublishMessage<ApprovalRequested>().ToRabbitExchange(Exchanges.Approvals);
+                options.PublishMessage<RequestApproved>().ToRabbitExchange(Exchanges.Approvals);
+                options.PublishMessage<RequestRejected>().ToRabbitExchange(Exchanges.Approvals);
                 options.PublishMessage<BudgetReserved>().ToRabbitExchange(Exchanges.Budgets);
                 options.PublishMessage<PurchaseOrderCreated>().ToRabbitExchange(Exchanges.Purchasing);
                 options.PublishMessage<InvoiceMatched>().ToRabbitExchange(Exchanges.Invoicing);
@@ -109,6 +124,7 @@ public sealed class NotificationsApp : IAsyncLifetime
             await Access.DisposeAsync();
         }
 
+        await Mailpit.DisposeAsync();
         await Redis.DisposeAsync();
         await Rabbit.DisposeAsync();
     }

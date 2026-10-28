@@ -18,6 +18,9 @@ public sealed class LiveClient : IAsyncDisposable
     private readonly ConcurrentQueue<JsonElement> _received = new();
     private readonly SemaphoreSlim _arrived = new(0);
 
+    private readonly ConcurrentQueue<LivePush> _other = new();
+    private readonly SemaphoreSlim _otherArrived = new(0);
+
     private LiveClient(HubConnection connection)
     {
         Connection = connection;
@@ -26,6 +29,49 @@ public sealed class LiveClient : IAsyncDisposable
             _received.Enqueue(message.Clone());
             _arrived.Release();
         });
+        connection.On<string, string, JsonElement>(LiveHubContract.ViewersChangedMethod, (entity, id, viewers) =>
+            Record(new LivePush(LiveHubContract.ViewersChangedMethod, entity, id, viewers.Clone())));
+        connection.On<JsonElement>(LiveHubContract.OnlineChangedMethod, users =>
+            Record(new LivePush(LiveHubContract.OnlineChangedMethod, null, null, users.Clone())));
+        connection.On<JsonElement>(LiveHubContract.NotificationAddedMethod, item =>
+            Record(new LivePush(LiveHubContract.NotificationAddedMethod, null, null, item.Clone())));
+    }
+
+    /// <summary>The presence and bell pushes received (<c>ViewersChanged</c>, <c>OnlineChanged</c>, <c>NotificationAdded</c>), in order.</summary>
+    public IReadOnlyList<LivePush> Pushes => [.. _other];
+
+    private void Record(LivePush push)
+    {
+        _other.Enqueue(push);
+        _otherArrived.Release();
+    }
+
+    /// <summary>How many presence and bell pushes arrived so far: pass it as <c>after</c> to wait only for what comes next.</summary>
+    public int PushCount => _other.Count;
+
+    /// <summary>
+    /// Waits for a presence or bell push that matches, among those that arrived after the first <paramref name="after"/> (see
+    /// <see cref="PushCount"/>); fails with what did arrive.
+    /// </summary>
+    public async Task<LivePush> WaitForPushAsync(Func<LivePush, bool> match, TimeSpan timeout, int after = 0)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            if (_other.Skip(after).LastOrDefault(match) is { } found)
+            {
+                return found;
+            }
+
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero)
+            {
+                throw new TimeoutException(
+                    $"No matching push within {timeout}. Received: {string.Join(" | ", _other.Select(p => $"{p.Method}({p.Entity},{p.Id}) {p.Payload.GetRawText()}"))}");
+            }
+
+            await _otherArrived.WaitAsync(left);
+        }
     }
 
     public HubConnection Connection { get; }
@@ -118,5 +164,16 @@ public sealed class LiveClient : IAsyncDisposable
     {
         await Connection.DisposeAsync();
         _arrived.Dispose();
+        _otherArrived.Dispose();
     }
+}
+
+/// <summary>
+/// One presence or bell push as the client got it: the method, the entity and ID (<c>ViewersChanged</c> only) and the JSON payload (the
+/// viewers or online users as <c>[{ userId, name }]</c>, or the bell item).
+/// </summary>
+public sealed record LivePush(string Method, string? Entity, string? Id, JsonElement Payload)
+{
+    /// <summary>The user IDs of a viewers or online list.</summary>
+    public string[] UserIds => [.. Payload.EnumerateArray().Select(v => v.GetProperty("userId").GetString()!)];
 }

@@ -97,7 +97,7 @@ var keycloak = builder.AddContainer(ResourceNames.Keycloak, "quay.io/keycloak/ke
     .WithHttpHealthCheck("/health/ready", endpointName: "management")
     .WithContainerLimits(limits.Keycloak);
 
-builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
+var mailpit = builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1.32.0")
     .WithHttpEndpoint(targetPort: 8025, name: "http")
     .WithEndpoint(targetPort: 1025, name: "smtp", scheme: "tcp")
     .WithHttpHealthCheck("/livez")
@@ -183,11 +183,17 @@ var invoicingApi = builder.AddProcureAiService<Projects.ProcureAi_Invoicing_Api>
 
 // Notifications: live updates over SignalR (the gateway proxies /hubs/** to it over WebSockets), fed by a buffered queue on the
 // services' exchanges, scaled out through the Redis backplane. No database (plan 04 ruling 1): no migrate resource, no Debezium.
-// Mailpit (email) is wired in plan 04 Task 1b.
+// It emails approvers and requesters through Mailpit's SMTP endpoint (the web UI on its http endpoint shows what was sent); the links in
+// the emails point at the gateway (set below, once the gateway exists).
+var mailpitSmtp = mailpit.GetEndpoint("smtp");
 var notificationsApi = builder.AddProcureAiService<Projects.ProcureAi_Notifications_Api>(
     new ServiceSpec("notifications", Database: "", CapturedTables: [], GatewayCluster: "notifications", ApiRoutePrefix: "/api/notifications", Store: ServiceStore.None),
     shared)
-    .CallsServices(accessApi);
+    .CallsServices(accessApi)
+    .WithEnvironment("Notifications__Smtp__Host", mailpitSmtp.Property(EndpointProperty.Host))
+    .WithEnvironment("Notifications__Smtp__Port", mailpitSmtp.Property(EndpointProperty.Port))
+    .WithEnvironment("Notifications__Smtp__From", "no-reply@procure-ai.local")
+    .WaitFor(mailpit);
 
 // The supplier calls the services directly, not through the gateway (exposing the webhooks publicly is plan 07/08): order webhooks to
 // Purchasing, invoice webhooks to Invoicing, both signed with the shared secret. Endpoint references only, no wait: the simulator's own
@@ -214,7 +220,7 @@ web.WithArgs(context =>
 // proxies /api to the services and /hubs to Notifications.
 // External HTTPS endpoint: the session cookie is __Host- prefixed and so needs https (the ASP.NET Core dev
 // certificate). Keycloak's gateway client accepts https://localhost:* callbacks.
-builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
+var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithHttpsEndpoint(name: "https")
     .WithExternalHttpEndpoints()
     .WithReference(redis)
@@ -260,5 +266,9 @@ builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);
+
+// The app as users open it: the links in the notification emails. An endpoint reference only (the gateway waits for Notifications, not
+// the other way round).
+notificationsApi.WithEnvironment("Notifications__Smtp__AppBaseUrl", gateway.GetEndpoint("https"));
 
 builder.Build().Run();

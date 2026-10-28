@@ -22,7 +22,8 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    `ServiceHost.MigratingSetting` (`Service:Migrating`, true only in the `--migrate` run) to the infrastructure and use
    `CreateOrUpdate` then; `None` otherwise (`CreateOrUpdate` in Development).
    Handlers that record messages take `IMessageMetadata` (message ID, stable across redeliveries; correlation ID).
-   Display names of users: `IAccessDirectory.GetDisplayNameAsync` (cached like the rest; null for an unknown user).
+   Display names of users: `IAccessDirectory.GetDisplayNameAsync` (cached like the rest; null for an unknown user); name and email
+   address: `IAccessDirectory.GetUserAsync` (the same cached lookup of Access `internal/users/{userId}`; `Email` empty when unknown).
 3. **`Program.cs`**: `var app = <Name>Api.Build(args); await ServiceHost.RunAsync(app, args, migrate, seedDemoData);`
    `--migrate` runs the EF Core migration, Wolverine's message-store migration and (when `DemoSeed:Enabled=true`) the demo
    seed, then exits. Also `public partial class Program;` for the integration tests.
@@ -39,7 +40,7 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    `Every_service_references_and_waits_for_the_services_it_calls`.
    With `CapturedTables` set, it also adds the database's own Debezium Server (see "Change data capture" below).
 7. **Tests**: reference `tests/ProcureAi.Testing` for `ServiceInfraFixture` (derive from it: Postgres, RabbitMQ, Redis, the migrated database, the `cdc` exchange and Debezium on demand, plus `CdcListener` and `RabbitProbe`), `PostgresFixture`, `MongoFixture`, `RabbitFixture`, `RedisFixture`, `TestLimits`,
-   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `StubSuppliersServer` (Suppliers' internal item lookup; a default catalog for every tenant, settable per tenant), `RabbitRecorder` (records what a
+   `TestAuth`, `ServiceApiFactory<Program>` (derive from it to add hooks), `StubAccessServer`, `StubApprovalsServer` (Approvals' internal preview), `StubSuppliersServer` (Suppliers' internal item lookup; a default catalog for every tenant, settable per tenant), `MailpitFixture` (the mail catcher, read through its HTTP API), `RabbitRecorder` (records what a
    service publishes and sends) and `RabbitContainer` (a broker of its own to stop, for outage tests). Never copy a fixture.
 8. **Gateway**: add the YARP route and cluster, and the service's OpenAPI document to the Swagger dropdown.
 
@@ -124,6 +125,36 @@ For a service that holds no business data of its own (Notifications: live pushes
   `X-XSRF-TOKEN`; the WebSocket upgrade is a GET, so `HubOriginMiddleware` refuses (403) an upgrade whose `Origin` is neither the
   gateway's own nor in `Hubs:AllowedOrigins`). The hub policy also refuses a caller without a `sub` (no shared `anonymous` user
   group) and evaluates hub methods' `HubInvocationContext` from the connection's request.
+
+### Notifications: presence, bell and email
+
+- **Presence** (ruling 11). Hub methods `Heartbeat()`, `Watch(entity, id)` (returns the current `Viewer[]`) and `Unwatch(entity, id)`, each
+  `[Authorize(Policy = "live-hub")]`; the tenant and user come from the connection's request (`LiveHubPolicy.Caller`), never from arguments.
+  `entity` must be one of `LiveEntities`, `id` 1 to 64 of `[A-Za-z0-9._-]` (`PresenceTarget.TryCreate`, no `:`), at most
+  `MaxWatchesPerConnection` per connection; anything else is a `HubException`. Watching joins the group `v:{tenant}:{entity}:{id}`.
+  Server to client: `ViewersChanged(entity, id, Viewer[])` to that group and `OnlineChanged(Viewer[])` to `t:{tenant}`, with
+  `Viewer { userId, name }`: distinct users (a second tab counts once), sorted by name; the name is the token's `name` claim, else the user ID.
+- State in Redis (`RedisPresenceStore`), shared by all instances: sorted sets `presence:{tenant}:online` and
+  `presence:{tenant}:view:{entity}:{id}` (member connection ID, score last heartbeat), hash `presence:connections` (connection → tenant, user,
+  name), set `presence:conn:{id}:views`, set `presence:tenants`. Readers ignore entries older than the TTL. `PresenceSweeper` (hosted service on
+  every instance) runs every `SweepInterval` under the DistributedLock `notifications:presence-sweep` (waits up to `SweepLockWait`), drops
+  connections of **any** instance without a heartbeat for longer than the TTL and sends the changed lists through the backplane. Options
+  `Notifications:Presence { HeartbeatInterval 15 s, Ttl 45 s (≥ 2 × heartbeat, checked at startup), SweepInterval 15 s, SweepLockWait 5 s,
+  MaxWatchesPerConnection 20 }`. Its clock is the keyed `TimeProvider` `PresenceClock.Key` (tests drive it without freezing HTTP timeouts).
+- **Bell** (ruling 8). `RecipientRules`: `ApprovalRequested`, `ApprovalReminderDue`, `ApprovalEscalated` → the approvers due;
+  `RequestApproved`, `RequestRejected`, `RequestCompleted`, `RequestCancellationRefused` → the requester (`RequesterId`, an optional contract
+  property added in plan 04; older messages without it notify nobody). The approval event handlers call `IPersonalNotifier` after the live
+  push: one `BellItem { id, text, requestId, link, createdAt, read }` per recipient (ID = the message ID, so a redelivery adds nothing),
+  pushed as `NotificationAdded` to `u:{tenant}:{user}`. Redis `bell:{tenant}:{user}:index|items|read` (Lua add: last `MaxItems` 50 within
+  `Retention` 30 days, `Notifications:Bell`). API: `GET api/v1/notifications` → `{ items, unread }` (`[CachedGet]`, tag
+  `notifications:{tenant}`, evicted on every write and new item), `POST api/v1/notifications/{id}/read` (404 for an item the caller does not
+  have) and `POST api/v1/notifications/read-all`, both `[Idempotent]`, 204. The owner is the token's user (`X-On-Behalf-Of-User` with the key).
+- **Email** (ruling 9). MailKit over SMTP (`Notifications:Smtp { Host, Port, From, FromName, AppBaseUrl, DedupWindow 7 d }`; the AppHost points it at
+  Mailpit's `smtp` endpoint and the gateway's https endpoint), plain text plus simple HTML with the link `{AppBaseUrl}/requests/{id}`. Address
+  from Access `internal/users/{userId}` (`Email`); none → bell item only. Once per (message, recipient): `SET email:{messageId}:{userId} NX`
+  for `DedupWindow`, released when the send fails. A failed email throws `EmailDeliveryException`, retried inline by `RetryEmailFailures`
+  (the `PushRetry` delays) and then dead-lettered; the retry sends only the emails that were not sent. Tests: `MailpitFixture`
+  (`ProcureAi.Testing`, same image and caps) read through `GET /api/v1/messages`.
 
 ## Change data capture (Debezium)
 

@@ -51,8 +51,9 @@ public sealed class LiveHubPolicyTests
     private HubInvocationContext Invocation(ClaimsPrincipal user)
     {
         var caller = new TestHubCallerContext(Request(user));
-        var hub = new LiveHub(_services.GetRequiredService<IOptions<AuthOptions>>());
-        return new HubInvocationContext(caller, _services, hub, typeof(LiveHub).GetMethod(nameof(LiveHub.OnConnectedAsync))!, []);
+        // Only the policy runs here: the hub's presence service is never reached.
+        var hub = new LiveHub(_services.GetRequiredService<IOptions<AuthOptions>>(), presence: null!);
+        return new HubInvocationContext(caller, _services, hub, typeof(LiveHub).GetMethod(nameof(LiveHub.Heartbeat))!, []);
     }
 
     private async Task<bool> AllowedAsync(ClaimsPrincipal user, object resource) =>

@@ -64,15 +64,19 @@ public sealed class AccessClient(
         return found ?? throw new NotFoundException($"Cost center '{costCenterCode}' does not exist.");
     }
 
-    public async ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken)
+    public async ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
+        (await GetUserAsync(userId, tenantId, cancellationToken))?.DisplayName;
+
+    public async ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken)
     {
         var url = $"api/v1/access/internal/users/{Uri.EscapeDataString(userId)}";
         var generation = await generations.GetAsync(tenantId, cancellationToken);
-        var found = await cache.GetOrSetAsync<UserName?>(
-            Key("name", tenantId, generation, userId),
+        // "user", not the earlier "name": entries cached before the email was part of the answer are never read as having none.
+        var found = await cache.GetOrSetAsync<UserEntry?>(
+            Key("user", tenantId, generation, userId),
             async (context, token) =>
             {
-                var name = await GetAsync<UserName>(url, tenantId, token, allowNotFound: true);
+                var name = await GetAsync<UserEntry>(url, tenantId, token, allowNotFound: true);
                 if (name is null)
                 {
                     // "No such user" is an answer: kept only briefly, and never replaced by a stale name.
@@ -86,10 +90,11 @@ public sealed class AccessClient(
             options: EntryOptions(),
             tags: [AccessCacheTag.Tenant(tenantId)],
             token: cancellationToken);
-        return found?.DisplayName;
+        return found is null ? null : new DirectoryUser(found.UserId, found.DisplayName, found.Email ?? "");
     }
 
-    private sealed record UserName(string UserId, string DisplayName);
+    /// <summary>Access's answer; <c>Email</c> is null from an Access that predates it.</summary>
+    private sealed record UserEntry(string UserId, string DisplayName, string? Email);
 
     // Every part is escaped, so no value can contain the separator and make two different lookups share a key.
     private static string Key(string kind, string tenantId, string generation, params string[] parts) =>

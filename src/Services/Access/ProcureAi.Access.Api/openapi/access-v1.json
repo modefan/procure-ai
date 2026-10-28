@@ -912,7 +912,8 @@
       "UserNameDto": {
         "required": [
           "userId",
-          "displayName"
+          "displayName",
+          "email"
         ],
         "type": "object",
         "properties": {
@@ -920,6 +921,9 @@
             "type": "string"
           },
           "displayName": {
+            "type": "string"
+          },
+          "email": {
             "type": "string"
           }
         }

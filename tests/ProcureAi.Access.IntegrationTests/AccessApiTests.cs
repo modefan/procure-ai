@@ -147,7 +147,7 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Internal_user_lookup_gives_the_display_name_and_404_outside_the_tenant()
+    public async Task Internal_user_lookup_gives_the_display_name_and_email_and_404_outside_the_tenant()
     {
         var maria = await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", Acme), Ct);
         var mariaAsGlobex = await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", Globex), Ct);
@@ -157,6 +157,8 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         var name = await ReadAsync<UserNameDto>(maria);
         name.UserId.ShouldBe(DemoUsers.Maria);
         name.DisplayName.ShouldBe("Maria Manager");
+        // The address the Notifications service emails her at (plan 04 ruling 9).
+        name.Email.ShouldBe("maria@acme.test");
         mariaAsGlobex.StatusCode.ShouldBe(HttpStatusCode.NotFound, "a user of another tenant looks like no user");
         unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         asUser.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "internal lookups are for services only");

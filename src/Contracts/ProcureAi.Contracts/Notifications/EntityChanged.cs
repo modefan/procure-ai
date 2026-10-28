@@ -35,4 +35,25 @@ public static class LiveHubContract
 
     /// <summary>The client method that receives an <see cref="EntityChanged"/>.</summary>
     public const string EntityChangedMethod = "EntityChanged";
+
+    /// <summary>
+    /// Client method <c>(entity, id, viewers)</c>: the distinct users (<c>{ userId, name }</c>) now viewing that entity, sent to everyone
+    /// watching it whenever the list may have changed.
+    /// </summary>
+    public const string ViewersChangedMethod = "ViewersChanged";
+
+    /// <summary>Client method <c>(users)</c>: the distinct users (<c>{ userId, name }</c>) of the tenant now online.</summary>
+    public const string OnlineChangedMethod = "OnlineChanged";
+
+    /// <summary>Client method <c>(item)</c>: a new bell item of the connection's user (<c>{ id, text, requestId, link, createdAt, read }</c>).</summary>
+    public const string NotificationAddedMethod = "NotificationAdded";
+
+    /// <summary>Server method <c>Heartbeat()</c>: keeps the connection online (and its watched entities) for another TTL.</summary>
+    public const string HeartbeatMethod = "Heartbeat";
+
+    /// <summary>Server method <c>Watch(entity, id)</c>: the caller views that entity; returns the current viewers.</summary>
+    public const string WatchMethod = "Watch";
+
+    /// <summary>Server method <c>Unwatch(entity, id)</c>: the caller no longer views that entity.</summary>
+    public const string UnwatchMethod = "Unwatch";
 }

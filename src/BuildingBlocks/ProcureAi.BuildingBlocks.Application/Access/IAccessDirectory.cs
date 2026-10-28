@@ -15,7 +15,16 @@ public interface IAccessDirectory
 
     /// <summary>The name <paramref name="userId"/> is shown under in <paramref name="tenantId"/>, or null when the tenant has no such user.</summary>
     ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// <paramref name="userId"/> as <paramref name="tenantId"/> knows them (display name and email address, for notifications), or null
+    /// when the tenant has no such user. The same cached lookup as <see cref="GetDisplayNameAsync"/>.
+    /// </summary>
+    ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken);
 }
+
+/// <summary>A user of a tenant: the name they are shown under and their email address (empty when Access has none).</summary>
+public sealed record DirectoryUser(string UserId, string DisplayName, string Email);
 
 /// <summary>Permissions, the cost centers the user acts for, and the approval limit in Rand.</summary>
 public sealed record EffectiveAccess(IReadOnlyList<string> Permissions, IReadOnlyList<string> CostCenterCodes, decimal ApprovalLimit);

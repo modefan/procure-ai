@@ -191,7 +191,7 @@ public sealed class ApprovalSaga : Saga
             return;
         }
 
-        await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, failed.Reason, null, time.GetUtcNow()));
+        await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, failed.Reason, null, time.GetUtcNow(), RequesterId));
         End(ApprovalState.Rejected);
     }
 
@@ -238,7 +238,7 @@ public sealed class ApprovalSaga : Saga
             // Answers, not failures (a failed call to Access throws something else and is retried: Approvals:DependencyRetry).
             var reason = exception is NotFoundException ? UnknownCostCenter(CostCenterCode) : NoEligibleApprover;
             await context.SendAsync(Release());
-            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, reason, null, time.GetUtcNow()));
+            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, reason, null, time.GetUtcNow(), RequesterId));
             End(ApprovalState.Rejected);
             return;
         }
@@ -284,14 +284,14 @@ public sealed class ApprovalSaga : Saga
             // that, so the request is rejected and the budget released here, instead of a CreatePurchaseOrder that dead-letters
             // and leaves the reservation held.
             await context.SendAsync(Release());
-            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, NoCatalogLines, null, now));
+            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, NoCatalogLines, null, now, RequesterId));
             End(ApprovalState.Rejected);
             return;
         }
 
         State = ApprovalState.Approved;
         var approvers = steps.Where(s => s.Status == ApprovalStepStatus.Approved).OrderBy(s => s.StepNo).Select(s => s.ActedBy!).ToList();
-        await context.PublishAsync(new RequestApproved(Id, TenantId, RequestNumber, TotalInclVat, approvers, now));
+        await context.PublishAsync(new RequestApproved(Id, TenantId, RequestNumber, TotalInclVat, approvers, now, RequesterId));
         await context.SendAsync(new CreatePurchaseOrder(Id, TenantId, RequestNumber, RequesterId, CostCenterCode, SupplierId, Lines));
     }
 
@@ -316,7 +316,7 @@ public sealed class ApprovalSaga : Saga
         step.Reject(caller.UserId, now);
         CancelPending(steps);
         await context.SendAsync(Release());
-        await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, command.Reason, caller.UserId, now));
+        await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, command.Reason, caller.UserId, now, RequesterId));
         End(ApprovalState.Rejected);
     }
 
@@ -482,7 +482,7 @@ public sealed class ApprovalSaga : Saga
         }
 
         await context.PublishAsync(new RequestRejected(
-            Id, TenantId, RequestNumber, SupplierRejected(rejected.Reason), null, time.GetUtcNow()));
+            Id, TenantId, RequestNumber, SupplierRejected(rejected.Reason), null, time.GetUtcNow(), RequesterId));
         End(ApprovalState.Rejected);
     }
 
@@ -527,7 +527,7 @@ public sealed class ApprovalSaga : Saga
         StateBeforeCancel = null;
         await EvictAsync(cache);
         var now = time.GetUtcNow();
-        await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, refused.Reason, now));
+        await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, refused.Reason, now, RequesterId));
         if (announce && OrderId is { } orderId)
         {
             await context.PublishAsync(new RequestOrdered(Id, TenantId, RequestNumber, orderId, OrderNumber ?? "", now));
@@ -579,7 +579,7 @@ public sealed class ApprovalSaga : Saga
         if (State == ApprovalState.Cancelling)
         {
             // Purchasing's refusal (it will come, goods were received) would find no saga: tell Requests now, before it completes.
-            await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, OrderSettled, now));
+            await context.PublishAsync(new RequestCancellationRefused(Id, TenantId, RequestNumber, OrderSettled, now, RequesterId));
         }
 
         if (OrderUnannounced)
@@ -589,7 +589,7 @@ public sealed class ApprovalSaga : Saga
                 Id, TenantId, RequestNumber, OrderId ?? settled.OrderId, OrderNumber ?? "", now));
         }
 
-        await context.PublishAsync(new RequestCompleted(Id, TenantId, RequestNumber, settled.PaidInclVat, now));
+        await context.PublishAsync(new RequestCompleted(Id, TenantId, RequestNumber, settled.PaidInclVat, now, RequesterId));
         End(ApprovalState.Completed);
     }
 
@@ -642,7 +642,7 @@ public sealed class ApprovalSaga : Saga
         var next = NewStep(replacement with { CoversLevels = covers });
         db.Steps.Add(next);
         await context.PublishAsync(new ApprovalEscalated(
-            Id, TenantId, next.Id, step.Level.ToString(), next.Level.ToString(), next.ApproverIds, now));
+            Id, TenantId, next.Id, step.Level.ToString(), next.Level.ToString(), next.ApproverIds, now, RequestNumber));
         await OpenAsync(next, options, now, context);
     }
 
@@ -650,7 +650,7 @@ public sealed class ApprovalSaga : Saga
     private async Task RemindAsync(ApprovalStep step, DateTimeOffset now, IMessageContext context)
     {
         var reminderNo = ++RemindersSent;
-        await context.PublishAsync(new ApprovalReminderDue(Id, TenantId, step.Id, step.ApproverIds, reminderNo, now));
+        await context.PublishAsync(new ApprovalReminderDue(Id, TenantId, step.Id, step.ApproverIds, reminderNo, now, RequestNumber));
     }
 
     /// <summary>Makes <paramref name="step"/> the open one: announces it and schedules its reminder and escalation.</summary>

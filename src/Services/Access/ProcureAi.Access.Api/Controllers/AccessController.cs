@@ -129,7 +129,7 @@ public sealed class AccessController(
         [MaxLength(AccessLimits.MaxCodeLength)] string code, CancellationToken cancellationToken) =>
         await bus.InvokeAsync<CostCenterApproversDto>(new GetCostCenterApprovers(code), cancellationToken);
 
-    /// <summary>Internal: the display name of a user of the tenant (audit history, inboxes). 404 when the tenant has no such user.</summary>
+    /// <summary>Internal: the display name and email address of a user of the tenant (audit history, inboxes, email notifications). 404 when the tenant has no such user.</summary>
     [HttpGet("internal/users/{userId}", Name = "GetUserName")]
     [Authorize(Policy = InternalPolicy.Name)]
     [ProducesResponseType<UserNameDto>(StatusCodes.Status200OK, "application/json")]

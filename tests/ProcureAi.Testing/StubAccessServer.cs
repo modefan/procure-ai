@@ -107,7 +107,7 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>The approvers lookups of one tenant answer 503 for the next <paramref name="duration"/> (a short Access outage).</summary>
     public void FailApprovers(string tenantId, TimeSpan duration) => _approversFailUntil[tenantId] = DateTimeOffset.UtcNow + duration;
 
-    private readonly ConcurrentDictionary<(string Tenant, string UserId), string> _displayNames = new();
+    private readonly ConcurrentDictionary<(string Tenant, string UserId), (string Name, string? Email)> _displayNames = new();
     private int _nameCalls;
 
     public int NameCalls => Volatile.Read(ref _nameCalls);
@@ -117,8 +117,9 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>Makes every display-name answer for the tenant this slow (a slow Access).</summary>
     public void SetNameDelay(string tenantId, TimeSpan delay) => _nameDelays[tenantId] = delay;
 
-    /// <summary>The display name the stub gives one user of one tenant (users without one are 404).</summary>
-    public void SetDisplayName(string tenantId, string userId, string displayName) => _displayNames[(tenantId, userId)] = displayName;
+    /// <summary>The display name (and email address, when given) the stub gives one user of one tenant (users without one are 404).</summary>
+    public void SetDisplayName(string tenantId, string userId, string displayName, string? email = null) =>
+        _displayNames[(tenantId, userId)] = (displayName, email);
 
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
@@ -191,8 +192,11 @@ public sealed class StubAccessServer : IAsyncDisposable
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
 
-            return stub._displayNames.TryGetValue((http.Request.Headers["X-Tenant-Id"].ToString(), userId), out var name)
-                ? Results.Json(new { userId, displayName = name })
+            // Without an address the stub leaves "email" out, as an Access from before plan 04 did.
+            return stub._displayNames.TryGetValue((http.Request.Headers["X-Tenant-Id"].ToString(), userId), out var user)
+                ? user.Email is null
+                    ? Results.Json(new { userId, displayName = user.Name })
+                    : Results.Json(new { userId, displayName = user.Name, email = user.Email })
                 : Results.NotFound();
         });
         app.MapGet("/api/v1/access/internal/cost-centers/{code}/approvers", (HttpContext http, string code) =>

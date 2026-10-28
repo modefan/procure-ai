@@ -144,4 +144,7 @@ public sealed class FakeAccessDirectory : IAccessDirectory
 
     public ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
+
+    public ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }

@@ -57,6 +57,9 @@ public sealed class BudgetScopeTests
 
         public ValueTask<string?> GetDisplayNameAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private static Task<IReadOnlySet<string>?> VisibleAsync(CallerKind kind, string userId, params string[] roles)

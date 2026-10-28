@@ -66,6 +66,8 @@ public sealed class SagaTests(ApprovalsApp app)
         var approved = seen.Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestApproved));
         approved.Body.GetProperty("approverIds").EnumerateArray().Select(e => e.GetString()).ShouldBe([DemoUsers.Maria, DemoUsers.Dept]);
         approved.Body.GetProperty("totalInclVat").GetDecimal().ShouldBe(30_000m);
+        // Who raised the request, for the requester's bell and email (plan 04 ruling 8).
+        approved.Text("requesterId").ShouldBe(DemoUsers.Tom);
         seen.Count(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalStepApproved)).ShouldBe(2);
         seen.ShouldNotContain(m => m.Kind == nameof(ReleaseBudget));
         // An approved saga stays (plan 03 continues it).
@@ -91,6 +93,7 @@ public sealed class SagaTests(ApprovalsApp app)
         rejected.Text("reason").ShouldBe(reason);
         rejected.Text("rejectedBy").ShouldBeNull();
         rejected.Text("number").ShouldBe(submitted.Number);
+        rejected.Text("requesterId").ShouldBe(DemoUsers.Tom);
         await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
         (await Main.StepsAsync(id)).ShouldBeEmpty();
         seen.ShouldNotContain(m => m.Kind == nameof(ReleaseBudget), "nothing was reserved");
@@ -111,6 +114,7 @@ public sealed class SagaTests(ApprovalsApp app)
         var rejected = seen.Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.RequestRejected));
         rejected.Text("reason").ShouldBe("Too expensive");
         rejected.Text("rejectedBy").ShouldBe(DemoUsers.Maria);
+        rejected.Text("requesterId").ShouldBe(DemoUsers.Tom);
         seen.Single(m => m.Kind == nameof(ReleaseBudget)).Text("tenantId").ShouldBe(tenant);
         (await Main.StepsAsync(id)).Select(s => s.Status).ShouldBe([ApprovalStepStatus.Rejected, ApprovalStepStatus.Cancelled]);
         (await Main.SagaAsync(id)).ShouldBeNull("a rejected saga is complete");
@@ -138,11 +142,13 @@ public sealed class SagaTests(ApprovalsApp app)
         reminder.Text("stepId").ShouldBe(first.Id.ToString());
         reminder.Body.GetProperty("reminderNo").GetInt32().ShouldBe(1);
         reminder.Body.GetProperty("approverIds").EnumerateArray().Select(e => e.GetString()).ShouldBe([DemoUsers.Maria]);
+        reminder.Text("number").ShouldBe(submitted.Number);
         var escalated = seen.Single(m => m.Kind == nameof(ProcureAi.Contracts.Approvals.ApprovalEscalated));
         seen.ToList().IndexOf(reminder).ShouldBeLessThan(seen.ToList().IndexOf(escalated), "the reminder comes before the escalation");
         escalated.Text("fromLevel").ShouldBe("Manager");
         escalated.Text("toLevel").ShouldBe("DepartmentHead");
         escalated.Body.GetProperty("approverIds").EnumerateArray().Select(e => e.GetString()).ShouldBe([DemoUsers.Dept]);
+        escalated.Text("number").ShouldBe(submitted.Number);
 
         // The replacement takes step 1 over and absorbs the department-head step that followed it.
         var steps = await fast.StepsAsync(id);

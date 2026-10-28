@@ -6,7 +6,9 @@ using ProcureAi.Contracts.Notifications;
 using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Contracts.Requests;
 using ProcureAi.Notifications.Application.Handlers;
+using ProcureAi.Notifications.Application.Inbox;
 using ProcureAi.Notifications.Application.Live;
+using ProcureAi.Notifications.Application.Presence;
 using Shouldly;
 
 namespace ProcureAi.Notifications.Tests;
@@ -156,5 +158,12 @@ public sealed class EventMapTests
             Sent.Add((tenantId, [.. changes]));
             return Task.CompletedTask;
         }
+
+        public Task PushViewersAsync(string tenantId, PresenceTarget target, IReadOnlyList<Viewer> viewers, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task PushOnlineAsync(string tenantId, IReadOnlyList<Viewer> online, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task PushToUserAsync(string tenantId, string userId, BellItem item, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

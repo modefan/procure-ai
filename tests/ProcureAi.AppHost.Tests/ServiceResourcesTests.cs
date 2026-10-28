@@ -333,6 +333,13 @@ public sealed class ServiceResourcesTests
             apiEnv.ShouldContainKey(cap);
         }
 
+        // Email through Mailpit's SMTP endpoint, with links to the gateway (plan 04 Task 1b).
+        apiEnv.ShouldContainKey("Notifications__Smtp__Host");
+        apiEnv.ShouldContainKey("Notifications__Smtp__Port");
+        apiEnv.ShouldContainKey("Notifications__Smtp__From");
+        apiEnv.ShouldContainKey("Notifications__Smtp__AppBaseUrl");
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource.Name == "mailpit");
+
         // The gateway proxies its API and the hub (/hubs/**) to it.
         gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__notifications__Destinations__d1__Address");
         gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);

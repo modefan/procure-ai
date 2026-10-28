@@ -55,11 +55,7 @@ public sealed class SystemHealthTests(SystemFixture system)
             config.ShouldContain($"/openapi/{service}/v1.json");
             using var document = await gateway.GetAsync($"/openapi/{service}/v1.json", TestContext.Current.CancellationToken);
             document.StatusCode.ShouldBe(HttpStatusCode.OK, $"{service} document");
-            if (service != "notifications")
-            {
-                // Notifications has only its hub so far; its HTTP API (the bell) comes with plan 04 Task 1b, which removes this exception.
-                (await document.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain($"/api/v1/{service}", Case.Sensitive, $"{service} document lists its API");
-            }
+            (await document.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain($"/api/v1/{service}", Case.Sensitive, $"{service} document lists its API");
         }
 
         System.Text.RegularExpressions.Regex.Matches(config, @"/openapi/\w+/v1\.json").Select(m => m.Value).Distinct().Count().ShouldBe(SystemFixture.Services.Length);
