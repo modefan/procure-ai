@@ -34,7 +34,15 @@ public static class RequestStatusFilters
     {
         RequestStatusFilter.Open => [RequestStatus.Draft, RequestStatus.Submitted, RequestStatus.Approved, RequestStatus.Ordered, RequestStatus.Cancelling],
         RequestStatusFilter.Closed => [RequestStatus.Completed, RequestStatus.Rejected, RequestStatus.Cancelled],
-        _ => [Enum.Parse<RequestStatus>(filter.ToString())],
+        RequestStatusFilter.Draft => [RequestStatus.Draft],
+        RequestStatusFilter.Submitted => [RequestStatus.Submitted],
+        RequestStatusFilter.Approved => [RequestStatus.Approved],
+        RequestStatusFilter.Ordered => [RequestStatus.Ordered],
+        RequestStatusFilter.Completed => [RequestStatus.Completed],
+        RequestStatusFilter.Rejected => [RequestStatus.Rejected],
+        RequestStatusFilter.Cancelling => [RequestStatus.Cancelling],
+        RequestStatusFilter.Cancelled => [RequestStatus.Cancelled],
+        _ => throw new ArgumentOutOfRangeException(nameof(filter), filter, null),
     };
 }
 

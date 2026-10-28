@@ -32,6 +32,7 @@ public sealed class AccessController(
     private const string UsersTagTemplate = "access:{tenant}:users";
 
     /// <summary>The caller: name, roles, cost centers and approval limit (reference data for forms and the dashboard). Any signed-in user of a tenant.</summary>
+    /// <remarks><c>roles</c> are the roles of the caller's own token; with the admin API key and <c>X-On-Behalf-Of-User</c> they are the key's roles, not the user's.</remarks>
     [HttpGet("me", Name = "GetMe")]
     [CachedGet(Tags = [UsersTagTemplate])]
     [ProducesResponseType<MeDto>(StatusCodes.Status200OK, "application/json")]

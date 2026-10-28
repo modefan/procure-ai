@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using ProcureAi.Audit.Application.Dtos;
 using ProcureAi.Contracts;
+using ProcureAi.Testing;
 using ProcureAi.Contracts.Budgets;
 using ProcureAi.Contracts.Requests;
 using Shouldly;
@@ -48,6 +49,42 @@ public sealed class ActivityTests(AuditApp app)
         feed[1].Summary.ShouldContain("Tom Tester");
         feed[1].ActorName.ShouldBe("Tom Tester");
         feed.Any(f => f.Summary.Contains("globex", StringComparison.OrdinalIgnoreCase)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Activity_needs_a_login()
+    {
+        using var response = await app.Client.GetAsync(Activity, Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Activity_without_requests_read_is_403()
+    {
+        var tenant = AuditApp.NewTenant();
+
+        using var response = await app.Client.SendAsync(AuditApp.Get(Activity, TestAuth.CreateToken("nobody-user", tenant, "nobody")), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Activity_of_a_user_token_shows_only_the_users_tenant()
+    {
+        var acme = AuditApp.NewTenant();
+        var globex = AuditApp.NewTenant();
+        var now = DateTimeOffset.UtcNow;
+        await app.PublishAsync(new BudgetReserved(Guid.NewGuid(), acme, "ACME-CC", "FY2027", 1m, now), Exchanges.Budgets, acme, Tom);
+        await app.PublishAsync(new BudgetReserved(Guid.NewGuid(), globex, "GLOBEX-CC", "FY2027", 1m, now), Exchanges.Budgets, globex, Tom);
+        await app.WaitForStoredAsync(acme, s => s.Count == 1);
+        await app.WaitForStoredAsync(globex, s => s.Count == 1);
+
+        using var response = await app.Client.SendAsync(AuditApp.Get(Activity, TestAuth.CreateToken("rita", acme, "requester")), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        var feed = (await response.Content.ReadFromJsonAsync<List<ActivityDto>>(Ct))!;
+        feed.ShouldHaveSingleItem().Summary.ShouldContain("ACME-CC");
     }
 
     [Fact]
