@@ -165,4 +165,18 @@ describe('RequestsStore', () => {
 
     expect(store().entities()).toEqual([]);
   });
+
+  it('two_loads_of_the_same_page_before_the_first_answers_make_one_call', async () => {
+    let resolve!: (value: PagedResultOfRequestDto) => void;
+    listRequests.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+
+    const first = store().load(1);
+    const second = store().load(1);
+    resolve(page([dto(1)], 1, 1));
+    await Promise.all([first, second]);
+
+    expect(listRequests).toHaveBeenCalledTimes(1);
+    expect(store().entities().map((r) => r.number)).toEqual(['PR-1001']);
+    expect(store().isLoaded()).toBe(true);
+  });
 });

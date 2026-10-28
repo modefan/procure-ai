@@ -1,10 +1,13 @@
+import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Logger } from '../logging/logger';
 import { patchState, signalStore, withState } from '@ngrx/signals';
 import { withCache } from './with-cache';
 import { CacheRegistry } from './cache-registry';
 
 const Store = signalStore({ providedIn: 'root', protectedState: false }, withState({ value: 'initial' }), withCache({ staleMs: 1000 }));
 const Forever = signalStore({ providedIn: 'root', protectedState: false }, withState({ value: 'initial' }), withCache({ staleMs: Infinity }));
+const Early = signalStore({ providedIn: 'root', protectedState: false }, withCache(), withState({ value: 'initial' }));
 const Default = signalStore({ providedIn: 'root', protectedState: false }, withState({ value: 'initial' }), withCache());
 
 describe('withCache', () => {
@@ -89,18 +92,31 @@ describe('withCache', () => {
     expect(a).toHaveBeenCalledTimes(2);
   });
 
-  it('a_string_matches_a_key_prefix', async () => {
+  it('a_string_matches_the_key_and_its_colon_children', async () => {
     const a = counting();
     const b = counting();
     await store().cacheLoad('list:1', a);
     await store().cacheLoad('list:2', b);
 
-    store().invalidate('list:');
+    store().invalidate('list');
 
     await vi.waitFor(() => {
       expect(a).toHaveBeenCalledTimes(2);
       expect(b).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('a_string_does_not_match_a_longer_key_that_merely_starts_with_it', async () => {
+    const one = counting();
+    const ten = counting();
+    await store().cacheLoad('list:1', one);
+    await store().cacheLoad('list:10', ten);
+
+    store().invalidate('list:1');
+
+    await vi.waitFor(() => expect(one).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(ten).toHaveBeenCalledTimes(1);
   });
 
   it('invalidate_during_a_load_runs_the_loader_again_afterwards', async () => {
@@ -226,5 +242,61 @@ describe('withCache', () => {
     TestBed.inject(CacheRegistry).clearAll();
 
     expect(store().value()).toBe('initial');
+  });
+
+  it('revalidate_all_skips_session_long_stores_unless_forced', async () => {
+    const forever = TestBed.inject(Forever);
+    const loader = vi.fn(async () => undefined);
+    await forever.cacheLoad('a', loader);
+
+    forever.revalidateAll();
+    await Promise.resolve();
+    expect(loader).toHaveBeenCalledTimes(1);
+
+    forever.revalidateAll({ force: true });
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledTimes(2));
+  });
+
+  it('an_explicit_invalidate_still_reruns_a_session_long_store', async () => {
+    const forever = TestBed.inject(Forever);
+    const loader = vi.fn(async () => undefined);
+    await forever.cacheLoad('a', loader);
+
+    forever.invalidate('a');
+
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledTimes(2));
+  });
+
+  it('reset_works_when_withCache_comes_before_the_state_features', async () => {
+    const early = TestBed.inject(Early);
+    patchState(early, { value: 'changed' });
+
+    early.reset();
+
+    expect(early.value()).toBe('initial');
+  });
+
+  it('a_failing_background_rerun_is_logged_not_swallowed', async () => {
+    const warn = vi.fn();
+    TestBed.configureTestingModule({ providers: [{ provide: Logger, useValue: { withSource: () => ({ warn, debug: vi.fn(), error: vi.fn(), info: vi.fn(), trace: vi.fn() }) } }] });
+    const failing = vi.fn(async () => undefined);
+    await store().cacheLoad('a', failing);
+    failing.mockRejectedValueOnce(new Error('network'));
+
+    store().invalidate('a');
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    expect(warn.mock.calls[0][0]).toContain('a');
+  });
+
+  it('a_destroyed_store_is_dropped_from_the_registry', async () => {
+    const injector = createEnvironmentInjector([Store], TestBed.inject(EnvironmentInjector));
+    const scoped = injector.get(Store);
+    await scoped.cacheLoad('a', async () => patchState(scoped, { value: 'changed' }));
+
+    injector.destroy();
+    TestBed.inject(CacheRegistry).clearAll();
+
+    expect(scoped.value()).toBe('changed'); // not reset: it is no longer registered
   });
 });

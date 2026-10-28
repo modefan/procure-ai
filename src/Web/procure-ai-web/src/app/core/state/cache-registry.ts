@@ -14,8 +14,12 @@ export interface Clearable {
 export class CacheRegistry {
   private readonly stores = new Set<Clearable>();
 
-  register(store: Clearable): void {
+  /** Adds a store. Returns a function that removes it again (a store that is destroyed calls it, so it cannot leak). */
+  register(store: Clearable): () => void {
     this.stores.add(store);
+    return () => {
+      this.stores.delete(store);
+    };
   }
 
   /** Clears the cache of every registered store and resets its state. One failing store does not stop the rest. */

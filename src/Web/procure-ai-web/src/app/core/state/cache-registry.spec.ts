@@ -41,4 +41,15 @@ describe('CacheRegistry', () => {
     expect(() => registry.clearAll()).not.toThrow();
     expect(good.clearCache).toHaveBeenCalled();
   });
+
+  it('register_returns_a_function_that_removes_the_store', () => {
+    const registry = TestBed.inject(CacheRegistry);
+    const a = { clearCache: vi.fn() };
+    const deregister = registry.register(a);
+
+    deregister();
+    registry.clearAll();
+
+    expect(a.clearCache).not.toHaveBeenCalled();
+  });
 });

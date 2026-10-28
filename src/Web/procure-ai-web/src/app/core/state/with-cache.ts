@@ -1,5 +1,6 @@
 import { inject } from '@angular/core';
-import { getState, patchState, signalStoreFeature, type, withHooks, withMethods } from '@ngrx/signals';
+import { getState, patchState, signalStoreFeature, type, withHooks, withMethods, withProps } from '@ngrx/signals';
+import { Logger } from '../logging/logger';
 import { CacheRegistry } from './cache-registry';
 
 export interface CacheOptions {
@@ -26,8 +27,11 @@ interface Entry {
  * what it has while the loader runs, so the loader should not set a loading state unless the screen is empty); the
  * same key already loading shares the running promise. A failed loader is not remembered as loaded.
  * `invalidate(match)` re-runs the loaders of matching keys now, in the background; a string matches a key that equals
- * it or starts with it. `revalidateAll()` does that for every key. `clearCache()` forgets everything; `reset()` also
- * puts the store's state back to what it was at creation. At most 50 keys are kept (least recently used dropped).
+ * it or a child of it (`list` matches `list:1`; `list:1` does not match `list:10`). A failing background re-run is
+ * logged (warn), not thrown. `revalidateAll()` does that for every key, except in a session-long store
+ * (`staleMs: Infinity`, reference data) unless called with `{ force: true }`. `clearCache()` forgets everything;
+ * `reset()` also puts the store's state back to what it was when the store was created (taken in `onInit`, so the
+ * order of features does not matter). At most 50 keys are kept (least recently used dropped).
  * `cacheEpoch()` changes whenever the cache is cleared, so a loader can drop an answer that arrives after a logout.
  * The store registers with `CacheRegistry`, which logout clears.
  */
@@ -36,10 +40,12 @@ export function withCache(options: CacheOptions = {}) {
 
   return signalStoreFeature(
     { state: type<object>() },
+    // Internal: where `onInit` leaves the state snapshot for `reset()` and the registry handle for `onDestroy`.
+    withProps(() => ({ _cacheInternals: { initialState: null as object | null, deregister: null as (() => void) | null } })),
     withMethods((store) => {
+      const log = inject(Logger).withSource('withCache');
       const entries = new Map<string, Entry>();
       let epoch = 0;
-      const initialState = structuredClone(getState(store));
 
       const isFresh = (entry: Entry) => entry.loadedAt !== null && Date.now() - entry.loadedAt < staleMs;
 
@@ -72,7 +78,7 @@ export function withCache(options: CacheOptions = {}) {
             }
             if (myEpoch === epoch && entry.rerun) {
               entry.rerun = false;
-              void run(key, entry).catch(() => undefined);
+              void run(key, entry).catch((error: unknown) => log.warn(`Background refresh of "${key}" failed`, error));
             }
           }
         })();
@@ -81,7 +87,7 @@ export function withCache(options: CacheOptions = {}) {
       };
 
       const matches = (match: string | ((key: string) => boolean)) =>
-        typeof match === 'string' ? (key: string) => key === match || key.startsWith(match) : match;
+        typeof match === 'string' ? (key: string) => key === match || key.startsWith(`${match}:`) : match;
 
       const methods = {
         cacheLoad(key: string, loader: () => Promise<void>): Promise<void> {
@@ -109,12 +115,16 @@ export function withCache(options: CacheOptions = {}) {
             if (entry.inFlight) {
               entry.rerun = true;
             } else {
-              void run(key, entry).catch(() => undefined);
+              void run(key, entry).catch((error: unknown) => log.warn(`Background refresh of "${key}" failed`, error));
             }
           }
         },
 
-        revalidateAll(): void {
+        /** Re-runs every loader in the background. A session-long store (`staleMs: Infinity`) is skipped unless `force`. */
+        revalidateAll(options: { force?: boolean } = {}): void {
+          if (staleMs === Infinity && !options.force) {
+            return;
+          }
           methods.invalidate(() => true);
         },
 
@@ -131,14 +141,18 @@ export function withCache(options: CacheOptions = {}) {
         /** Clears the cache and puts the state back to what it was when the store was created. */
         reset(): void {
           methods.clearCache();
-          patchState(store as never, structuredClone(initialState) as never);
+          patchState(store as never, structuredClone(store._cacheInternals.initialState ?? {}) as never);
         },
       };
       return methods;
     }),
     withHooks({
       onInit(store) {
-        inject(CacheRegistry).register(store);
+        store._cacheInternals.initialState = structuredClone(getState(store));
+        store._cacheInternals.deregister = inject(CacheRegistry).register(store);
+      },
+      onDestroy(store) {
+        store._cacheInternals.deregister?.();
       },
     }),
   );

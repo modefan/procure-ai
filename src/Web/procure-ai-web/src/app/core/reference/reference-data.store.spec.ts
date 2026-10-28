@@ -65,13 +65,14 @@ describe('ReferenceDataStore', () => {
   it('a failed load shows an error and a later call tries again', async () => {
     getMe.mockRejectedValueOnce(new Error('down'));
     await store().loadMe();
-    expect(store().error()).not.toBeNull();
+    expect(store().errorOf('me')).not.toBeNull();
     expect(store().me()).toBeNull();
 
     await store().loadMe();
 
     expect(store().me()?.name).toBe('Tom');
-    expect(store().error()).toBeNull();
+    expect(store().errorOf('me')).toBeNull();
+    expect(store().statusOf('me')).toBe('loaded');
   });
 
   it('is emptied by the registry on logout', async () => {
@@ -81,5 +82,42 @@ describe('ReferenceDataStore', () => {
 
     expect(store().me()).toBeNull();
     expect(store().suppliers()).toEqual([]);
+  });
+
+  it('a_late_answer_after_logout_leaves_no_status_behind', async () => {
+    let resolve!: (value: typeof me) => void;
+    getMe.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    const loading = store().loadMe();
+
+    TestBed.inject(CacheRegistry).clearAll();
+    resolve(me);
+    await loading;
+
+    expect(store().me()).toBeNull();
+    expect(store().statusOf('me')).toBe('idle');
+  });
+
+  it('a_late_failure_after_logout_leaves_no_error_behind', async () => {
+    let reject!: (e: unknown) => void;
+    getMe.mockReturnValueOnce(new Promise((_, r) => (reject = r)));
+    const loading = store().loadMe();
+
+    TestBed.inject(CacheRegistry).clearAll();
+    reject(new Error('down'));
+    await loading;
+
+    expect(store().errorOf('me')).toBeNull();
+  });
+
+  it('each_load_keeps_its_own_status_so_a_success_does_not_hide_a_failure', async () => {
+    getMe.mockRejectedValueOnce(new Error('down'));
+
+    await store().loadMe();
+    await store().loadSuppliers();
+
+    expect(store().errorOf('me')).not.toBeNull();
+    expect(store().errorOf('suppliers')).toBeNull();
+    expect(store().statusOf('suppliers')).toBe('loaded');
+    expect(store().statusOf('catalog:S1')).toBe('idle');
   });
 });

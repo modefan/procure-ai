@@ -35,6 +35,8 @@ export const RequestsStore = signalStore(
     let latest = 0;
     /** The page the entities hold, and the cache epoch they were loaded in (a cleared cache means they are gone). */
     let shown: { key: string; epoch: number } | null = null;
+    /** The page most recently asked for: asking for the same one again shares the running load instead of restarting it. */
+    let currentKey: string | null = null;
 
     return {
       /**
@@ -45,8 +47,9 @@ export const RequestsStore = signalStore(
         const pageSize = store.pageSize();
         const key = `list:${page}:${pageSize}`;
         const onScreen = () => shown !== null && shown.key === key && shown.epoch === store.cacheEpoch();
-        if (!onScreen()) {
+        if (currentKey !== key) {
           store.clearCache(); // one page is held, so what was cached for other pages is of no use
+          currentKey = key;
         }
         try {
           await store.cacheLoad(key, async () => {
