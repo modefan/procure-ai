@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { permissionGuard } from '../core/auth/permission.guard';
 import { unsavedChangesGuard } from '../core/auth/unsaved-changes.guard';
+import { orderResolver } from './orders/order.resolver';
 import { requestResolver } from './requests/request.resolver';
 
 /**
@@ -52,5 +53,20 @@ export const APP_ROUTES: Routes = [
     data: { permission: 'requests.read' },
     resolve: { request: requestResolver },
     loadComponent: () => import('./requests/request-detail.page').then((m) => m.RequestDetailPage),
+  },
+  {
+    path: 'orders',
+    title: 'Orders',
+    canActivate: [permissionGuard],
+    data: { permission: 'orders.read' },
+    loadComponent: () => import('./orders/orders.page').then((m) => m.OrdersPage),
+  },
+  {
+    path: 'orders/:id',
+    title: 'Order',
+    canActivate: [permissionGuard],
+    data: { permission: 'orders.read' },
+    resolve: { order: orderResolver },
+    loadComponent: () => import('./orders/order-detail.page').then((m) => m.OrderDetailPage),
   },
 ];
