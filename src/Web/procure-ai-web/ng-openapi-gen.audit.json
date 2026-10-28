@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/ng-openapi-gen/ng-openapi-gen-schema.json",
+  "input": "../../Services/Audit/ProcureAi.Audit.Api/openapi/audit-v1.json",
+  "output": "src/app/api/audit",
+  "rootUrl": "",
+  "module": false,
+  "services": true,
+  "enumStyle": "alias",
+  "ignoreUnusedModels": true,
+  "removeStaleFiles": true,
+  "skipJsonSuffix": true
+}

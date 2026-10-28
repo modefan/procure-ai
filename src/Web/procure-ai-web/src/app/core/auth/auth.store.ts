@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { firstValueFrom } from 'rxjs';
 import { BrowserLocation } from '../browser/browser-location';
+import { CacheRegistry } from '../state/cache-registry';
 
 /** What the gateway's GET /bff/user returns. */
 export interface BffUser {
@@ -39,6 +40,7 @@ export const AuthStore = signalStore(
     const http = inject(HttpClient);
     const location = inject(BrowserLocation);
     const router = inject(Router);
+    const caches = inject(CacheRegistry);
     let inFlight: Promise<void> | null = null;
 
     const bffUrl = (action: 'login' | 'register', returnUrl: string) =>
@@ -87,13 +89,15 @@ export const AuthStore = signalStore(
         } finally {
           // Even if the call failed (the session was already gone), this browser is signed out as far as the app goes.
           patchState(store, { user: null });
+          caches.clearAll();
           await router.navigateByUrl('/');
         }
       },
 
-      /** The session is over (the user declined to log in again): forget the user so the header says so. */
+      /** The session is over (the user declined to log in again): forget the user so the header says so, and forget everything the stores hold. */
       endSession(): void {
         patchState(store, { user: null });
+        caches.clearAll();
       },
 
       hasPermission(permission: string): boolean {

@@ -4,6 +4,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideRouter, Router } from '@angular/router';
 import { AuthStore } from './auth.store';
 import { BrowserLocation } from '../browser/browser-location';
+import { CacheRegistry } from '../state/cache-registry';
 
 describe('AuthStore', () => {
   let http: HttpTestingController;
@@ -112,5 +113,25 @@ describe('AuthStore', () => {
 
     expect(store.isLoggedIn()).toBe(false);
     expect(navigate).toHaveBeenCalledWith('/');
+  });
+  it('logout() clears every registered cache, also when the gateway call fails', async () => {
+    const clearCache = vi.fn();
+    TestBed.inject(CacheRegistry).register({ clearCache });
+    vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+
+    const loggingOut = store.logout();
+    (await vi.waitFor(() => http.expectOne('/bff/logout'))).flush(null, { status: 500, statusText: 'Server Error' });
+    await loggingOut.catch(() => undefined);
+
+    expect(clearCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('endSession() clears every registered cache', () => {
+    const clearCache = vi.fn();
+    TestBed.inject(CacheRegistry).register({ clearCache });
+
+    store.endSession();
+
+    expect(clearCache).toHaveBeenCalledTimes(1);
   });
 });

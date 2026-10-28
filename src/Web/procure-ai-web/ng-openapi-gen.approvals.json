@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/ng-openapi-gen/ng-openapi-gen-schema.json",
+  "input": "../../Services/Approvals/ProcureAi.Approvals.Api/openapi/approvals-v1.json",
+  "output": "src/app/api/approvals",
+  "rootUrl": "",
+  "module": false,
+  "services": true,
+  "enumStyle": "alias",
+  "ignoreUnusedModels": true,
+  "removeStaleFiles": true,
+  "skipJsonSuffix": true
+}

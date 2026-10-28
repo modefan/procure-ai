@@ -1,0 +1,230 @@
+import { TestBed } from '@angular/core/testing';
+import { patchState, signalStore, withState } from '@ngrx/signals';
+import { withCache } from './with-cache';
+import { CacheRegistry } from './cache-registry';
+
+const Store = signalStore({ providedIn: 'root', protectedState: false }, withState({ value: 'initial' }), withCache({ staleMs: 1000 }));
+const Forever = signalStore({ providedIn: 'root', protectedState: false }, withState({ value: 'initial' }), withCache({ staleMs: Infinity }));
+const Default = signalStore({ providedIn: 'root', protectedState: false }, withState({ value: 'initial' }), withCache());
+
+describe('withCache', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T10:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const store = () => TestBed.inject(Store);
+  const counting = (value = 'loaded') => vi.fn(async () => patchState(store(), { value }));
+
+  it('fresh_key_does_not_reload', async () => {
+    const loader = counting();
+    await store().cacheLoad('a', loader);
+    vi.advanceTimersByTime(999);
+
+    await store().cacheLoad('a', loader);
+
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('stale_key_reloads_in_background_keeping_state', async () => {
+    await store().cacheLoad('a', counting('first'));
+    vi.advanceTimersByTime(1001);
+    let finish!: () => void;
+    const slow = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          finish = () => {
+            patchState(store(), { value: 'second' });
+            r();
+          };
+        }),
+    );
+
+    const reload = store().cacheLoad('a', slow);
+
+    expect(slow).toHaveBeenCalledTimes(1);
+    expect(store().value()).toBe('first');
+    finish();
+    await reload;
+    expect(store().value()).toBe('second');
+  });
+
+  it('same_key_in_flight_shares_one_request', async () => {
+    let finish!: () => void;
+    const loader = vi.fn(() => new Promise<void>((r) => (finish = r)));
+
+    const first = store().cacheLoad('a', loader);
+    const second = store().cacheLoad('a', loader);
+    finish();
+    await Promise.all([first, second]);
+
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('a_failed_load_is_not_remembered_as_fresh', async () => {
+    const failing = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    await expect(store().cacheLoad('a', failing)).rejects.toThrow('boom');
+    const ok = counting();
+
+    await store().cacheLoad('a', ok);
+
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidate_reruns_matching_loaders', async () => {
+    const a = counting();
+    const b = counting();
+    await store().cacheLoad('list:1', a);
+    await store().cacheLoad('detail:9', b);
+
+    store().invalidate('list:1');
+    await vi.waitFor(() => expect(a).toHaveBeenCalledTimes(2));
+    expect(b).toHaveBeenCalledTimes(1);
+
+    store().invalidate((key) => key.startsWith('detail'));
+    await vi.waitFor(() => expect(b).toHaveBeenCalledTimes(2));
+    expect(a).toHaveBeenCalledTimes(2);
+  });
+
+  it('a_string_matches_a_key_prefix', async () => {
+    const a = counting();
+    const b = counting();
+    await store().cacheLoad('list:1', a);
+    await store().cacheLoad('list:2', b);
+
+    store().invalidate('list:');
+
+    await vi.waitFor(() => {
+      expect(a).toHaveBeenCalledTimes(2);
+      expect(b).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('invalidate_during_a_load_runs_the_loader_again_afterwards', async () => {
+    let finish!: () => void;
+    const loader = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    const first = store().cacheLoad('a', loader);
+
+    store().invalidate('a');
+    expect(loader).toHaveBeenCalledTimes(1);
+    finish();
+    await first;
+
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledTimes(2));
+    finish();
+  });
+
+  it('revalidate_all_reruns_every_loader', async () => {
+    const a = counting();
+    const b = counting();
+    await store().cacheLoad('a', a);
+    await store().cacheLoad('b', b);
+
+    store().revalidateAll();
+
+    await vi.waitFor(() => {
+      expect(a).toHaveBeenCalledTimes(2);
+      expect(b).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('lru_drops_oldest_after_50', async () => {
+    const loaders = Array.from({ length: 51 }, () => counting());
+    for (const [i, loader] of loaders.entries()) {
+      await store().cacheLoad(`k${i}`, loader);
+    }
+
+    // k0 was dropped (loads again); k2 is still fresh.
+    await store().cacheLoad('k0', loaders[0]);
+    await store().cacheLoad('k2', loaders[2]);
+
+    expect(loaders[0]).toHaveBeenCalledTimes(2);
+    expect(loaders[2]).toHaveBeenCalledTimes(1);
+  });
+
+  it('lru_keeps_a_key_that_was_used_recently', async () => {
+    const loaders = Array.from({ length: 50 }, () => counting());
+    for (const [i, loader] of loaders.entries()) {
+      await store().cacheLoad(`k${i}`, loader);
+    }
+    await store().cacheLoad('k0', loaders[0]); // touch k0
+    await store().cacheLoad('new', counting()); // the 51st key pushes out k1, not k0
+
+    await store().cacheLoad('k0', loaders[0]);
+    await store().cacheLoad('k1', loaders[1]);
+
+    expect(loaders[0]).toHaveBeenCalledTimes(1);
+    expect(loaders[1]).toHaveBeenCalledTimes(2);
+  });
+
+  it('clear_cache_forgets_everything', async () => {
+    const loader = counting();
+    await store().cacheLoad('a', loader);
+
+    store().clearCache();
+    await store().cacheLoad('a', loader);
+
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it('clear_cache_stops_a_running_load_from_being_remembered_and_bumps_the_epoch', async () => {
+    let finish!: () => void;
+    const loader = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    const epoch = store().cacheEpoch();
+    const running = store().cacheLoad('a', loader);
+
+    store().clearCache();
+    finish();
+    await running;
+    const again = counting();
+    await store().cacheLoad('a', again);
+
+    expect(store().cacheEpoch()).toBeGreaterThan(epoch);
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+
+  it('reset_returns_the_state_to_what_it_was_at_creation_and_clears_the_cache', async () => {
+    const loader = counting('changed');
+    await store().cacheLoad('a', loader);
+    expect(store().value()).toBe('changed');
+
+    store().reset();
+
+    expect(store().value()).toBe('initial');
+    await store().cacheLoad('a', loader);
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it('infinity_means_never_stale', async () => {
+    const loader = vi.fn(async () => undefined);
+    await TestBed.inject(Forever).cacheLoad('a', loader);
+    vi.advanceTimersByTime(365 * 24 * 3600 * 1000);
+
+    await TestBed.inject(Forever).cacheLoad('a', loader);
+
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults_to_30_seconds', async () => {
+    const s = TestBed.inject(Default);
+    const loader = vi.fn(async () => undefined);
+    await s.cacheLoad('a', loader);
+    vi.advanceTimersByTime(29_999);
+    await s.cacheLoad('a', loader);
+    expect(loader).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(2);
+    await s.cacheLoad('a', loader);
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it('registers_with_the_registry_so_clear_all_resets_it', async () => {
+    await store().cacheLoad('a', counting('changed'));
+
+    TestBed.inject(CacheRegistry).clearAll();
+
+    expect(store().value()).toBe('initial');
+  });
+});

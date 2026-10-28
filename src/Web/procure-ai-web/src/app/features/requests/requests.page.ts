@@ -1,5 +1,6 @@
 import { Component, inject, OnInit } from '@angular/core';
 import { RequestsStore } from './requests.store';
+import { Pager } from '../../core/ui/pager';
 import { StatusBadge } from './status-badge';
 
 /**
@@ -8,7 +9,7 @@ import { StatusBadge } from './status-badge';
  */
 @Component({
   selector: 'app-requests-page',
-  imports: [StatusBadge],
+  imports: [StatusBadge, Pager],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
       <h1 class="text-2xl font-bold tracking-tight text-slate-900">Purchase requests</h1>
@@ -21,7 +22,7 @@ import { StatusBadge } from './status-badge';
         </div>
       }
 
-      @if (store.loading() && store.entities().length === 0) {
+      @if (store.isLoading() && store.entities().length === 0) {
         <div class="card mt-6 space-y-4" role="status" aria-live="polite">
           <span class="sr-only">Loading requests</span>
           @for (row of skeletonRows; track row) {
@@ -34,7 +35,7 @@ import { StatusBadge } from './status-badge';
           <p class="mt-1 text-slate-600">Requests raised by your company will appear here.</p>
         </div>
       } @else if (store.entities().length > 0) {
-        <div class="mt-6" [attr.aria-busy]="store.loading()" [class.opacity-60]="store.loading()">
+        <div class="mt-6" [attr.aria-busy]="store.isLoading()" [class.opacity-60]="store.isLoading()">
           <div class="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
             <table class="w-full table-fixed text-left text-sm">
               <caption class="sr-only">Purchase requests, page {{ store.page() }} of {{ store.pageCount() }}</caption>
@@ -85,19 +86,7 @@ import { StatusBadge } from './status-badge';
           </ul>
         </div>
 
-        <nav class="mt-4 flex flex-wrap items-center justify-between gap-3" aria-label="Pagination">
-          <p class="text-sm text-slate-600" aria-live="polite">
-            Page {{ store.page() }} of {{ store.pageCount() }} ({{ store.total() }} {{ store.total() === 1 ? 'request' : 'requests' }})
-          </p>
-          <div class="flex gap-2">
-            <button type="button" class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" [disabled]="store.page() <= 1 || store.loading()" (click)="store.load(store.page() - 1)">
-              <span aria-hidden="true">&lsaquo;</span> Previous page
-            </button>
-            <button type="button" class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" [disabled]="store.page() >= store.pageCount() || store.loading()" (click)="store.load(store.page() + 1)">
-              Next page <span aria-hidden="true">&rsaquo;</span>
-            </button>
-          </div>
-        </nav>
+        <app-pager [page]="store.page()" [pageCount]="store.pageCount()" [total]="store.total()" [loading]="store.isLoading()" noun="request" nounPlural="requests" (pageChange)="store.load($event)" />
       }
     </section>
   `,
