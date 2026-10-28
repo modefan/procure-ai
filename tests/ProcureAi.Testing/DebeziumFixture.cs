@@ -19,7 +19,6 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
     private const string Image = "quay.io/debezium/server:3.7.0.Final";
     private const int HttpPort = 8080;
     private static readonly TimeSpan StreamingTimeout = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan HealthyTimeout = TimeSpan.FromSeconds(120);
 
     private IContainer? _container;
 
@@ -28,6 +27,16 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
     /// offsets live and die with the container.
     /// </summary>
     public string? OffsetsVolume { get; init; }
+
+    /// <summary>
+    /// Sets <c>DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR</c> as the AppHost does from
+    /// <c>Debezium:SelfHealLostOffsets</c>: a lost offset is dropped instead of failing the start. False is the
+    /// application.properties default (a lost offset fails loudly).
+    /// </summary>
+    public bool SelfHealLostOffsets { get; init; }
+
+    /// <summary>How long <see cref="StartAsync"/> waits for Debezium to report healthy before it fails.</summary>
+    public TimeSpan HealthyTimeout { get; init; } = TimeSpan.FromSeconds(120);
 
     /// <summary>
     /// Starts Debezium for <paramref name="database"/> and returns when its replication slot is active, so no later change is missed.
@@ -54,6 +63,7 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
             .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_DBNAME", database)
             .WithEnvironment("DEBEZIUM_SOURCE_TOPIC_PREFIX", database)
             .WithEnvironment("DEBEZIUM_SOURCE_SLOT_NAME", slot)
+            .WithEnvironment("DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR", SelfHealLostOffsets ? "true" : "false")
             .WithEnvironment("DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", string.Join(',', tables.Select(t => "public." + t)))
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", RabbitMqBuilder.DefaultUsername)
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", RabbitMqBuilder.DefaultPassword)

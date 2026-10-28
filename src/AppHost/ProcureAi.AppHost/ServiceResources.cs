@@ -27,6 +27,8 @@ public sealed record ServiceSpec(
 /// <param name="AccessAdminClientSecret">Secret of the Keycloak client <c>procure-access-admin</c> (Keycloak admin API). Not passed to any service here: only the Access service gets it.</param>
 /// <param name="DebeziumPassword">Password of the Postgres <c>debezium</c> role (secret parameter), for every Debezium Server.</param>
 /// <param name="UseDataVolumes">Whether containers keep their data in named volumes (offsets of Debezium).</param>
+/// <param name="DebeziumSelfHealLostOffsets">Config <c>Debezium:SelfHealLostOffsets</c>: when a Debezium Server's stored offset is no longer available
+/// (slot gone, database reset), drop it and stream from a new slot instead of failing. Leaves a CDC gap; local runs only.</param>
 /// <param name="OtlpEndpoint">The Aspire dashboard's OTLP endpoint (the Serilog OpenTelemetry sink has no environment fallback).</param>
 public sealed record SharedResources(
     IResourceBuilder<PostgresServerResource> Postgres,
@@ -41,7 +43,8 @@ public sealed record SharedResources(
     string? OtlpEndpoint,
     ResourcesOptions Limits,
     ParameterResource DebeziumPassword,
-    bool UseDataVolumes);
+    bool UseDataVolumes,
+    bool DebeziumSelfHealLostOffsets = false);
 
 public static class ServiceResources
 {
@@ -55,6 +58,9 @@ public static class ServiceResources
     private const string DebeziumImage = "quay.io/debezium/server";
     private const string DebeziumTag = "3.7.0.Final";
     private const int DebeziumHttpPort = 8080;
+
+    /// <summary>Overrides <c>debezium.source.snapshot.mode.configuration.based.snapshot.on.data.error</c> of application.properties.</summary>
+    public const string SelfHealEnvironmentVariable = "DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR";
 
     /// <summary>
     /// Adds a service the one way every service is added: its database, a short-lived <c>&lt;name&gt;-migrate</c> resource (neither for a
@@ -130,7 +136,7 @@ public static class ServiceResources
 
         if (migrate is not null && spec.CapturedTables.Length > 0)
         {
-            // Debezium starts with snapshot.mode=no_data, so it only sees changes made after its slot exists. The API
+            // Debezium takes no data snapshot (snapshot.mode=configuration_based, snapshot.data=false), so it only sees changes made after its slot exists. The API
             // therefore waits for Debezium to be healthy: no change made through the app can precede the capture.
             // (The demo seed written by --migrate runs before Debezium starts and is deliberately not captured.)
             api.WaitFor(builder.AddDebeziumFor(spec.Database, spec.CapturedTables, migrate, shared));
@@ -177,6 +183,9 @@ public static class ServiceResources
             .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_DBNAME", database)
             .WithEnvironment("DEBEZIUM_SOURCE_TOPIC_PREFIX", database)
             .WithEnvironment("DEBEZIUM_SOURCE_SLOT_NAME", "debezium_" + database)
+            // Off in application.properties (a lost offset fails loudly); on for local runs (AppHost appsettings), where a
+            // reset database is normal. A reset leaves a CDC gap: changes between the lost position and the restart are not audited.
+            .WithEnvironment(SelfHealEnvironmentVariable, shared.DebeziumSelfHealLostOffsets ? "true" : "false")
             .WithEnvironment("DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", string.Join(',', tables.Select(t => "public." + t)))
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", shared.RabbitMq.Resource.UserNameReference)
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", shared.RabbitMq.Resource.PasswordParameter)

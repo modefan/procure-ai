@@ -492,11 +492,54 @@ public sealed class ServiceResourcesTests
         // The publication is created by the migration, so Debezium waits for it to finish.
         debezium.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
-        // The API starts only once Debezium is healthy, so no app change precedes the capture (snapshot.mode=no_data).
+        // The API starts only once Debezium is healthy, so no app change precedes the capture (no data snapshot is taken).
         api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
         debezium.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
         debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/data");
         debezium.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldContain("/debezium/config/application.properties");
+    }
+
+    /// <summary>
+    /// Self-healing of a lost Debezium offset is off in application.properties (fail loudly, deployments must opt in) and
+    /// switched on by the AppHost for local runs from <c>Debezium:SelfHealLostOffsets</c> (true in its appsettings.json).
+    /// </summary>
+    [Theory]
+    [InlineData(null, "true")]
+    [InlineData("false", "false")]
+    [InlineData("true", "true")]
+    public async Task Every_debezium_gets_the_self_heal_switch_from_configuration(string? configured, string expected)
+    {
+        await using var scope = await ModelScope.BuildAsync(configured is null ? [] : [$"Debezium:SelfHealLostOffsets={configured}"]);
+        var debeziums = scope.Model.Resources.OfType<ContainerResource>().Where(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal)).ToList();
+
+        debeziums.Count.ShouldBe(6);
+        foreach (var debezium in debeziums)
+        {
+            (await EnvironmentOfAsync(debezium)).ShouldContainKeyAndValue(ServiceResources.SelfHealEnvironmentVariable, expected, debezium.Name);
+        }
+    }
+
+    [Fact]
+    public void Self_heal_is_off_in_application_properties_so_deployments_must_opt_in()
+    {
+        var properties = File.ReadAllLines(Path.Combine(RepoRoot(), "infra", "debezium", "application.properties"));
+
+        properties.ShouldContain("debezium.source.snapshot.mode.configuration.based.snapshot.on.data.error=false");
+        properties.ShouldContain("debezium.source.snapshot.mode.configuration.based.snapshot.data=false");
+        ServiceResources.SelfHealEnvironmentVariable.ShouldBe(
+            "debezium.source.snapshot.mode.configuration.based.snapshot.on.data.error".ToUpperInvariant().Replace('.', '_'),
+            "the environment variable must override exactly that property");
+    }
+
+    private static string RepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "infra", "debezium", "application.properties")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? throw new DirectoryNotFoundException("repository root (infra/debezium) not found");
     }
 
     /// <summary>
@@ -650,9 +693,9 @@ public sealed class ServiceResourcesTests
 
         public DistributedApplicationModel Model => _app.Services.GetRequiredService<DistributedApplicationModel>();
 
-        public static async Task<ModelScope> BuildAsync()
+        public static async Task<ModelScope> BuildAsync(string[]? args = null)
         {
-            var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>([]);
+            var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(args ?? []);
             return new ModelScope(builder, await builder.BuildAsync());
         }
 

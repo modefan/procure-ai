@@ -7,6 +7,9 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 var limits = ResourcesOptions.Load(builder.Configuration);
 var useDataVolumes = builder.Configuration.GetValue("Persistence:UseDataVolumes", true);
+// Off unless configured (appsettings.json turns it on for local runs): a Debezium whose stored offset is gone drops it and
+// streams from a new slot, leaving a CDC gap. Deployments must opt in explicitly. See ServiceResources.AddDebeziumFor.
+var debeziumSelfHeal = builder.Configuration.GetValue("Debezium:SelfHealLostOffsets", false);
 
 // Parameters. Secrets come from AppHost user secrets (never the repo); see DEMO PASSWORDS.txt.
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
@@ -27,9 +30,11 @@ var simulatorApiKey = builder.AddParameter("simulator-api-key", secret: true);
 var supplierWebhookSecret = builder.AddParameter("supplier-webhook-secret", secret: true);
 
 // Postgres: custom image (pgvector + pgaudit), logical WAL for Debezium CDC.
-const string PostgresVolumeTarget = "/var/lib/postgresql/data"; // the image's VOLUME: a named volume mounted exactly there replaces the anonymous one
+// The image's VOLUME: a named volume mounted exactly there replaces the anonymous one. Moving to pg18 (VOLUME /var/lib/postgresql,
+// PGDATA /var/lib/postgresql/18/docker) means changing this mount target and PGDATA together (or back to WithDataVolume()).
+const string PostgresVolumeTarget = "/var/lib/postgresql/data";
 const string PostgresDataDirectory = PostgresVolumeTarget + "/pgdata";
-var postgres =builder.AddPostgres(ResourceNames.Postgres)
+var postgres = builder.AddPostgres(ResourceNames.Postgres)
     .WithDockerfile("../../../infra/postgres")
     .WithEnvironment("DEBEZIUM_PASSWORD", debeziumPassword)
     .WithArgs(
@@ -47,6 +52,7 @@ if (useDataVolumes)
     // Not WithDataVolume(): Aspire 13.6 mounts that at /var/lib/postgresql (the Postgres 18 layout), but this pg17 image
     // declares /var/lib/postgresql/data as a VOLUME, so the data went to an anonymous volume and every new Postgres container
     // started empty (while Debezium's offsets survived and it refused to start). Same volume name as WithDataVolume().
+    // The mount target and PGDATA must change together (e.g. when moving to pg18; see PostgresVolumeTarget).
     postgres.WithVolume(VolumeNameGenerator.Generate(postgres, "data"), PostgresVolumeTarget);
 }
 // MongoDB: single-node replica set (needed for change streams / CDC). Aspire's WithReplicaSet generates the
@@ -117,7 +123,7 @@ var mailpit = builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
-    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes);
+    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes, debeziumSelfHeal);
 
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),
