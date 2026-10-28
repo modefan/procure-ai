@@ -26,7 +26,7 @@ namespace ProcureAi.Requests.Api.Controllers;
 [Route("api/v{version:apiVersion}/requests")]
 [RequireTenant]
 public sealed class RequestsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ILogger<RequestsController> logger) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, ILogger<RequestsController> logger) : ControllerBase
 {
     [HttpPost(Name = "CreateRequest")]
     [Idempotent]
@@ -52,6 +52,10 @@ public sealed class RequestsController(
         return request;
     }
 
+    /// <summary>
+    /// The tenant's requests, newest first. <c>status</c> is one status or a group (<c>open</c>: not finished,
+    /// <c>closed</c>: completed, rejected or cancelled); <c>mine=true</c> limits the list to requests the caller made.
+    /// </summary>
     [HttpGet(Name = "ListRequests")]
     [CachedGet(Tags = [RequestCacheTag.ListTemplate])]
     [RequirePermission(Permissions.RequestsRead)]
@@ -59,10 +63,13 @@ public sealed class RequestsController(
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<RequestDto>>> List(
         [FromQuery] PagingQuery paging,
-        [FromQuery] RequestStatus? status = null,
+        [FromQuery] RequestStatusFilter? status = null,
+        [FromQuery] bool mine = false,
         CancellationToken cancellationToken = default)
     {
-        return await bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(paging.Page, paging.Size(), status), cancellationToken);
+        // "mine" is the requests the caller made (for a service or the admin key acting for a user, that user).
+        var requester = mine ? caller.UserId : null;
+        return await bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(paging.Page, paging.Size(), status, requester), cancellationToken);
     }
 
     [HttpPut("{id:guid}", Name = "UpdateRequest")]

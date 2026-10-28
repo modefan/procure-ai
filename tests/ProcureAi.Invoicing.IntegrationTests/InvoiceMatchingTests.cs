@@ -110,6 +110,7 @@ public sealed class InvoiceMatchingTests(InvoicingApp app)
         (await app.ReceivedAsync(order.OrderId)).ShouldBe(3, "the delivery was retried until the order view existed");
         var (invoice, _) = await app.GetInvoiceAsync(invoiceId, InvoicingApp.Token(tenant));
         invoice.RequestId.ShouldBe(order.RequestId);
+        invoice.OrderNumber.ShouldBe(order.OrderNumber);
         (await app.DeadLettersAsync()).ShouldBe(deadBefore);
     }
 

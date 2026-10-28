@@ -1,4 +1,5 @@
 using Asp.Versioning;
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using ProcureAi.Audit.Application.Dtos;
@@ -28,4 +29,14 @@ public sealed class AuditController(IMessageBus bus) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<BusinessEventDto>>> GetRequestHistory(Guid requestId, CancellationToken cancellationToken) =>
         Ok(await bus.InvokeAsync<IReadOnlyList<BusinessEventDto>>(new GetRequestHistory(requestId), cancellationToken));
+
+    /// <summary>The latest business events of the tenant (1 to 50, default 20), newest first, for the dashboard.</summary>
+    [HttpGet("activity", Name = "GetActivity")]
+    [CachedGet]
+    [RequirePermission(Permissions.RequestsRead)]
+    [ProducesResponseType<IReadOnlyList<ActivityDto>>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IReadOnlyList<ActivityDto>>> GetActivity(
+        [FromQuery, Range(1, 50)] int limit = 20, CancellationToken cancellationToken = default) =>
+        Ok(await bus.InvokeAsync<IReadOnlyList<ActivityDto>>(new GetActivity(limit), cancellationToken));
 }

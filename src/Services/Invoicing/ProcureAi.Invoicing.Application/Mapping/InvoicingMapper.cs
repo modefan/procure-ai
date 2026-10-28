@@ -9,7 +9,7 @@ public static class InvoicingMapper
 {
     /// <summary>The invoice with its match lines; <paramref name="order"/> (its order view) adds the ordered quantities and prices.</summary>
     public static InvoiceDto ToDto(Invoice invoice, OrderView? order) => new(
-        invoice.Id, invoice.OrderId, invoice.RequestId, invoice.SupplierId, invoice.SupplierInvoiceNumber, invoice.InvoiceDate,
+        invoice.Id, invoice.OrderId, order?.OrderNumber, invoice.RequestId, invoice.SupplierId, invoice.SupplierInvoiceNumber, invoice.InvoiceDate,
         invoice.Sequence, invoice.Source, invoice.Status, invoice.OnHold, invoice.HoldReason,
         invoice.Match?.Reasons ?? [],
         [.. invoice.Lines.OrderBy(l => l.LineNo).Select(l => ToLineDto(

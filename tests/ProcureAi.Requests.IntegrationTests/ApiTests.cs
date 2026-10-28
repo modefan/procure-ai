@@ -530,6 +530,97 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         defaults!.PageSize.ShouldBe(25);
     }
 
+    private async Task<PagedResult<RequestDto>> ListAsync(string query, string tenant, string? bearer = null)
+    {
+        using var response = await _client.SendAsync(Req(HttpMethod.Get, $"{Requests}?{query}", tenant: tenant, bearer: bearer), Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        return (await response.Content.ReadFromJsonAsync<PagedResult<RequestDto>>(Json, Ct))!;
+    }
+
+    [Fact]
+    public async Task Mine_lists_only_callers_requests()
+    {
+        var tenant = NewTenant("mine");
+        infra.Access.SetCostCenters(tenant, "alice", "CC-100");
+        infra.Access.SetCostCenters(tenant, "bob", "CC-100");
+        var alice = TestAuth.CreateToken("alice", tenant, "requester");
+        var bob = TestAuth.CreateToken("bob", tenant, "requester");
+        await CreateAsync(tenant, alice, "alice one");
+        await CreateAsync(tenant, alice, "alice two");
+        await CreateAsync(tenant, bob, "bob one");
+
+        var aliceMine = await ListAsync("mine=true", tenant, alice);
+        var bobMine = await ListAsync("mine=true", tenant, bob);
+        var aliceAll = await ListAsync("mine=false", tenant, alice);
+
+        aliceMine.Items.Select(i => i.Title).ShouldBe(["alice two", "alice one"]);
+        aliceMine.Total.ShouldBe(2);
+        bobMine.Items.Select(i => i.Title).ShouldBe(["bob one"]);
+        aliceAll.Total.ShouldBe(3, "without mine the list is the tenant's");
+    }
+
+    [Fact]
+    public async Task Open_group_excludes_completed_rejected_cancelled()
+    {
+        var tenant = NewTenant("groups");
+        var draft = await CreateAsync(tenant, title: "draft");
+        var submitted = await CreateAsync(tenant, title: "submitted");
+        var cancelled = await CreateAsync(tenant, title: "cancelled");
+        (await _client.SendAsync(Req(HttpMethod.Post, $"{Requests}/{submitted.Id}/submit", null, tenant, ifMatch: ETagOf(submitted), idempotencyKey: Guid.NewGuid().ToString()), Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        (await _client.SendAsync(Req(HttpMethod.Post, $"{Requests}/{cancelled.Id}/cancel", null, tenant, ifMatch: ETagOf(cancelled), idempotencyKey: Guid.NewGuid().ToString()), Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var open = await ListAsync("status=open", tenant);
+        var closed = await ListAsync("status=closed", tenant);
+        var one = await ListAsync("status=cancelled", tenant);
+
+        open.Items.Select(i => i.Title).ShouldBe(["submitted", "draft"]);
+        closed.Items.Select(i => i.Title).ShouldBe(["cancelled"]);
+        one.Items.Select(i => i.Title).ShouldBe(["cancelled"]);
+        open.Items.ShouldNotContain(i => i.Status == RequestStatus.Cancelled || i.Status == RequestStatus.Completed || i.Status == RequestStatus.Rejected);
+        draft.Status.ShouldBe(RequestStatus.Draft);
+    }
+
+    [Fact]
+    public async Task Unknown_status_is_a_400_validation_problem()
+    {
+        using var response = await _client.SendAsync(Req(HttpMethod.Get, $"{Requests}?status=bogus", tenant: NewTenant("badstatus")), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Submit_and_cancel_without_if_match_return_428()
+    {
+        var tenant = NewTenant("nomatch2");
+        var created = await CreateAsync(tenant);
+
+        var submit = await _client.SendAsync(Req(HttpMethod.Post, $"{Requests}/{created.Id}/submit", null, tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        var cancel = await _client.SendAsync(Req(HttpMethod.Post, $"{Requests}/{created.Id}/cancel", null, tenant, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+
+        submit.StatusCode.ShouldBe((HttpStatusCode)428);
+        cancel.StatusCode.ShouldBe((HttpStatusCode)428);
+    }
+
+    [Fact]
+    public async Task Submit_and_cancel_with_stale_if_match_return_412_and_get_carries_the_version_etag()
+    {
+        var tenant = NewTenant("stale2");
+        var created = await CreateAsync(tenant);
+        (await _client.SendAsync(Req(HttpMethod.Put, $"{Requests}/{created.Id}", NewBody("Edited"), tenant, ifMatch: ETagOf(created)), Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var submit = await _client.SendAsync(Req(HttpMethod.Post, $"{Requests}/{created.Id}/submit", null, tenant, ifMatch: ETagOf(created), idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        var cancel = await _client.SendAsync(Req(HttpMethod.Post, $"{Requests}/{created.Id}/cancel", null, tenant, ifMatch: ETagOf(created), idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        var read = await _client.SendAsync(Req(HttpMethod.Get, $"{Requests}/{created.Id}", tenant: tenant), Ct);
+
+        submit.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+        cancel.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+        var current = (await read.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+        read.Headers.ETag!.Tag.ShouldBe(ETagOf(current));
+    }
+
     [Theory]
     [InlineData("pageSize=100000", "pageSize")]
     [InlineData("pageSize=0", "pageSize")]

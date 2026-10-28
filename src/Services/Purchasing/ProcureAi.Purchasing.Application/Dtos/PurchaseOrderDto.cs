@@ -13,6 +13,8 @@ public sealed record PurchaseOrderDto(
     string SupplierId,
     OrderStatus Status,
     string SupplierStatus,
+    int SupplierAttempts,
+    string? SupplierLastError,
     string? SupplierReference,
     DateOnly? ExpectedDelivery,
     IReadOnlyList<OrderLineDto> Lines,

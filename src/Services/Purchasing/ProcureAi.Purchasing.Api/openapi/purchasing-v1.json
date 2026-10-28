@@ -800,6 +800,8 @@
           "supplierId",
           "status",
           "supplierStatus",
+          "supplierAttempts",
+          "supplierLastError",
           "supplierReference",
           "expectedDelivery",
           "lines",
@@ -845,6 +847,16 @@
           },
           "supplierStatus": {
             "type": "string"
+          },
+          "supplierAttempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "supplierLastError": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "supplierReference": {
             "type": [

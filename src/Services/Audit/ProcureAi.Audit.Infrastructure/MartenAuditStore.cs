@@ -42,4 +42,29 @@ public sealed class MartenAuditStore(IDocumentStore store) : IAuditStore
             .OrderBy(e => e.OccurredAt).ThenBy(e => e.Id)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<BusinessEvent>> LatestAsync(string tenantId, int limit, CancellationToken cancellationToken)
+    {
+        await using var session = store.QuerySession();
+        return await session.Query<BusinessEvent>()
+            .Where(e => e.TenantId == tenantId)
+            .OrderByDescending(e => e.OccurredAt).ThenByDescending(e => e.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BusinessEvent>> SubmissionsAsync(
+        string tenantId, IReadOnlyCollection<Guid> subjectIds, CancellationToken cancellationToken)
+    {
+        if (subjectIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = subjectIds.Select(id => (Guid?)id).ToArray();
+        await using var session = store.QuerySession();
+        return await session.Query<BusinessEvent>()
+            .Where(e => e.TenantId == tenantId && e.Type == "RequestSubmitted" && ids.Contains(e.SubjectId))
+            .ToListAsync(cancellationToken);
+    }
 }

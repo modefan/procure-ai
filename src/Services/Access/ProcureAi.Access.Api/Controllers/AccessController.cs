@@ -31,6 +31,13 @@ public sealed class AccessController(
     private const string MatrixTagTemplate = "access:{tenant}:matrix";
     private const string UsersTagTemplate = "access:{tenant}:users";
 
+    /// <summary>The caller: name, roles, cost centers and approval limit (reference data for forms and the dashboard). Any signed-in user of a tenant.</summary>
+    [HttpGet("me", Name = "GetMe")]
+    [CachedGet(Tags = [UsersTagTemplate])]
+    [ProducesResponseType<MeDto>(StatusCodes.Status200OK, "application/json")]
+    public async Task<ActionResult<MeDto>> GetMe(CancellationToken cancellationToken) =>
+        await bus.InvokeAsync<MeDto>(new GetMe(user.OnBehalfOfUser ?? user.UserId, [.. user.Roles]), cancellationToken);
+
     [HttpGet("matrix", Name = "GetMatrix")]
     [CachedGet(Tags = [MatrixTagTemplate])]
     [RequirePermission(Permissions.AdminAuthorization)]

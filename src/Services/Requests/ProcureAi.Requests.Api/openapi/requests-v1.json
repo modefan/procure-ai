@@ -83,7 +83,15 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "$ref": "#/components/schemas/RequestStatus"
+              "$ref": "#/components/schemas/RequestStatusFilter"
+            }
+          },
+          {
+            "name": "mine",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -979,6 +987,21 @@
           "Rejected",
           "Cancelling",
           "Cancelled"
+        ]
+      },
+      "RequestStatusFilter": {
+        "enum": [
+          "Draft",
+          "Submitted",
+          "Approved",
+          "Ordered",
+          "Completed",
+          "Rejected",
+          "Cancelling",
+          "Cancelled",
+          "Open",
+          "Closed",
+          null
         ]
       },
       "UpdateRequestBody": {

@@ -9,18 +9,54 @@ using ProcureAi.Requests.Domain;
 
 namespace ProcureAi.Requests.Application.Queries;
 
-public sealed record ListRequests(int Page, int PageSize, RequestStatus? Status);
+/// <summary>
+/// What the list's <c>status</c> parameter accepts: one status (same names as <see cref="RequestStatus"/>) or a group.
+/// <c>Open</c> is every status that can still change (Draft, Submitted, Approved, Ordered, Cancelling); <c>Closed</c> is
+/// Completed, Rejected and Cancelled.
+/// </summary>
+public enum RequestStatusFilter
+{
+    Draft,
+    Submitted,
+    Approved,
+    Ordered,
+    Completed,
+    Rejected,
+    Cancelling,
+    Cancelled,
+    Open,
+    Closed,
+}
+
+public static class RequestStatusFilters
+{
+    public static IReadOnlyList<RequestStatus> Statuses(this RequestStatusFilter filter) => filter switch
+    {
+        RequestStatusFilter.Open => [RequestStatus.Draft, RequestStatus.Submitted, RequestStatus.Approved, RequestStatus.Ordered, RequestStatus.Cancelling],
+        RequestStatusFilter.Closed => [RequestStatus.Completed, RequestStatus.Rejected, RequestStatus.Cancelled],
+        _ => [Enum.Parse<RequestStatus>(filter.ToString())],
+    };
+}
+
+/// <summary><paramref name="RequesterId"/> limits the list to the requests that user made (the caller's own, for <c>mine=true</c>).</summary>
+public sealed record ListRequests(int Page, int PageSize, RequestStatusFilter? Status, string? RequesterId = null);
 
 public static class ListRequestsHandler
 {
-    /// <summary>Newest first (highest request number), optionally filtered by status.</summary>
+    /// <summary>Newest first (highest request number), optionally filtered by status (or group) and requester.</summary>
     public static async Task<PagedResult<RequestDto>> Handle(
         ListRequests query, IRequestsDbContext db, CancellationToken cancellationToken)
     {
         var requests = db.PurchaseRequests.AsNoTracking();
-        if (query.Status is { } status)
+        if (query.Status is { } filter)
         {
-            requests = requests.Where(r => r.Status == status);
+            var statuses = filter.Statuses();
+            requests = requests.Where(r => statuses.Contains(r.Status));
+        }
+
+        if (query.RequesterId is { } requester)
+        {
+            requests = requests.Where(r => r.RequesterId == requester);
         }
 
         var total = await requests.CountAsync(cancellationToken);

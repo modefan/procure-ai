@@ -8,12 +8,13 @@ import { StrictHttpResponse } from '../../strict-http-response';
 import { RequestBuilder } from '../../request-builder';
 
 import { PagedResultOfRequestDto } from '../../models/paged-result-of-request-dto';
-import { RequestStatus } from '../../models/request-status';
+import { RequestStatusFilter } from '../../models/request-status-filter';
 
 export interface ListRequests$Params {
   page?: number;
   pageSize?: number;
-  status?: RequestStatus;
+  status?: RequestStatusFilter;
+  mine?: boolean;
 }
 
 export function listRequests(http: HttpClient, rootUrl: string, params?: ListRequests$Params, context?: HttpContext): Observable<StrictHttpResponse<PagedResultOfRequestDto>> {
@@ -22,6 +23,7 @@ export function listRequests(http: HttpClient, rootUrl: string, params?: ListReq
     rb.query('page', params.page, {});
     rb.query('pageSize', params.pageSize, {});
     rb.query('status', params.status, {});
+    rb.query('mine', params.mine, {});
   }
 
   return http.request(

@@ -174,6 +174,8 @@ public sealed class OrderFlowTests(PurchasingApp app)
             stored.LastSupplierError.ShouldNotBeNullOrWhiteSpace();
             var (order, _) = await app.GetOrderAsync(orderId, PurchasingApp.Token(tenant));
             order.SupplierStatus.ShouldStartWith("Supplier unavailable · retrying");
+            order.SupplierAttempts.ShouldBeGreaterThanOrEqualTo(3);
+            order.SupplierLastError.ShouldBe(stored.LastSupplierError);
             Volatile.Read(ref circuitOpened).ShouldBeGreaterThan(0, "the supplier circuit opened");
             app.Supplier.SubmissionsOf(orderId).ShouldAllBe(c => c.Status == 503);
             await PurchasingApp.EventuallyAsync(

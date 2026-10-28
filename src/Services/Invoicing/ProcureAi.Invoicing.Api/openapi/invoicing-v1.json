@@ -983,6 +983,7 @@
         "required": [
           "id",
           "orderId",
+          "orderNumber",
           "requestId",
           "supplierId",
           "supplierInvoiceNumber",
@@ -1013,6 +1014,12 @@
           "orderId": {
             "type": "string",
             "format": "uuid"
+          },
+          "orderNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "requestId": {
             "type": "string",

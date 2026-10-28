@@ -31,3 +31,13 @@ public sealed record RegistrationDto(string TenantId, bool Joined);
 
 /// <summary>The name a user is shown under (audit history, inboxes).</summary>
 public sealed record UserNameDto(string UserId, string DisplayName);
+
+/// <summary>A cost center the caller acts for.</summary>
+public sealed record CostCenterDto(string Code, string Name, string DepartmentCode);
+
+/// <summary>
+/// The caller as the screens need them: display name (the user ID when the tenant has no such user), the roles of the token, the
+/// cost centers they act for (finance: all of the tenant) and the approval limit in Rand (null when they have none).
+/// </summary>
+public sealed record MeDto(
+    string UserId, string Name, IReadOnlyList<string> Roles, IReadOnlyList<CostCenterDto> CostCenters, decimal? ApprovalLimit);

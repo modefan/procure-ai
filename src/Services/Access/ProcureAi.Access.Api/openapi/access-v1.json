@@ -6,6 +6,26 @@
     "version": "1.0"
   },
   "paths": {
+    "/api/v1/access/me": {
+      "get": {
+        "tags": [
+          "Access"
+        ],
+        "operationId": "GetMe",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/access/matrix": {
       "get": {
         "tags": [
@@ -624,6 +644,25 @@
           }
         }
       },
+      "CostCenterDto": {
+        "required": [
+          "code",
+          "name",
+          "departmentCode"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "departmentCode": {
+            "type": "string"
+          }
+        }
+      },
       "EffectiveAccessDto": {
         "required": [
           "permissions",
@@ -677,6 +716,43 @@
             "items": {
               "$ref": "#/components/schemas/RoleDto"
             }
+          }
+        }
+      },
+      "MeDto": {
+        "required": [
+          "userId",
+          "name",
+          "roles",
+          "costCenters",
+          "approvalLimit"
+        ],
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "costCenters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CostCenterDto"
+            }
+          },
+          "approvalLimit": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
           }
         }
       },

@@ -10,7 +10,7 @@ public static class PurchasingMapper
 {
     public static PurchaseOrderDto ToDto(PurchaseOrder order) => new(
         order.Id, order.RequestId, NumberText(order), order.RequestNumber, order.RequesterId, order.CostCenterCode, order.SupplierId,
-        order.Status, SupplierStatusText.For(order), order.SupplierReference, order.ExpectedDelivery,
+        order.Status, SupplierStatusText.For(order), order.SupplierAttempts, order.LastSupplierError, order.SupplierReference, order.ExpectedDelivery,
         [.. order.Lines.OrderBy(l => l.LineNo).Select(ToLineDto)],
         [.. order.Receipts.OrderBy(r => r.ReceivedAt).Select(ToReceiptDto)],
         order.TotalExclVat.Amount, order.Vat.Amount, order.TotalInclVat.Amount,

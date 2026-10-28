@@ -55,6 +55,9 @@ public sealed class MappingTests
 
         order.RecordSupplierFailure("timeout", Now.AddSeconds(5));
         SupplierStatusText.For(order).ShouldBe("Supplier unavailable · retrying (attempt 2)");
+        var failed = PurchasingMapper.ToDto(order);
+        failed.SupplierAttempts.ShouldBe(1);
+        failed.SupplierLastError.ShouldBe("timeout");
 
         order.Confirm("SUP-1", new DateOnly(2026, 11, 3), Now);
         SupplierStatusText.For(order).ShouldBe("Confirmed, delivery 2026-11-03");

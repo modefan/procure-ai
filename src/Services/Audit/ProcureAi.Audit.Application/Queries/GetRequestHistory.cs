@@ -32,7 +32,7 @@ public static class GetRequestHistoryHandler
         return [.. history.Events.Select(e => new BusinessEventDto(e.Stored.Type, e.Stored.UserId, e.Stored.OccurredAt, history.Summarize(e, names)))];
     }
 
-    private static async Task<IReadOnlyDictionary<string, string>> DisplayNamesAsync(
+    internal static async Task<IReadOnlyDictionary<string, string>> DisplayNamesAsync(
         IReadOnlyCollection<string> userIds, string tenant, IAccessDirectory access, TimeSpan timeout, ILogger logger,
         CancellationToken cancellationToken)
     {

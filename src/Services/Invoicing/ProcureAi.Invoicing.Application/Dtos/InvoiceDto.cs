@@ -6,6 +6,7 @@ namespace ProcureAi.Invoicing.Application.Dtos;
 public sealed record InvoiceDto(
     Guid Id,
     Guid OrderId,
+    string? OrderNumber,
     Guid RequestId,
     string SupplierId,
     string SupplierInvoiceNumber,
