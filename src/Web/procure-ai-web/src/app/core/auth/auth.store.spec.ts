@@ -5,6 +5,7 @@ import { provideRouter, Router } from '@angular/router';
 import { AuthStore } from './auth.store';
 import { BrowserLocation } from '../browser/browser-location';
 import { CacheRegistry } from '../state/cache-registry';
+import { LiveConnection } from '../live/live-connection';
 
 describe('AuthStore', () => {
   let http: HttpTestingController;
@@ -133,5 +134,42 @@ describe('AuthStore', () => {
     store.endSession();
 
     expect(clearCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('logout_stops_connection_and_clears_presence', async () => {
+    const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+    const clearCache = vi.fn();
+    TestBed.inject(CacheRegistry).register({ clearCache });
+    vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+
+    const loggingOut = store.logout();
+    (await vi.waitFor(() => http.expectOne('/bff/logout'))).flush(null, { status: 204, statusText: 'No Content' });
+    await loggingOut;
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(clearCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('logoutAll posts to /bff/logout-all, stops the connection and clears the caches', async () => {
+    const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+    const clearCache = vi.fn();
+    TestBed.inject(CacheRegistry).register({ clearCache });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+
+    const loggingOut = store.logoutAll();
+    const request = await vi.waitFor(() => http.expectOne('/bff/logout-all'));
+    expect(request.request.method).toBe('POST');
+    request.flush(null, { status: 204, statusText: 'No Content' });
+    await loggingOut;
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(clearCache).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/');
+  });
+
+  it('endSession() stops the connection', () => {
+    const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+    store.endSession();
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });

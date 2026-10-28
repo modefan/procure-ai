@@ -4,6 +4,8 @@ import { Service } from '@angular/core';
 export interface Clearable {
   clearCache(): void;
   reset?(): void;
+  /** Refresh what the store holds in the background (after a reconnect). */
+  revalidateAll?(): void;
 }
 
 /**
@@ -30,6 +32,17 @@ export class CacheRegistry {
         store.reset?.();
       } catch (error) {
         console.error('Clearing a store failed', error);
+      }
+    }
+  }
+
+  /** Asks every registered store to refresh what it holds (after a connect or reconnect). One failing store does not stop the rest. */
+  revalidateAll(): void {
+    for (const store of this.stores) {
+      try {
+        store.revalidateAll?.();
+      } catch (error) {
+        console.error('Revalidating a store failed', error);
       }
     }
   }

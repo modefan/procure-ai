@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { firstValueFrom } from 'rxjs';
 import { BrowserLocation } from '../browser/browser-location';
+import { LiveConnection } from '../live/live-connection';
 import { CacheRegistry } from '../state/cache-registry';
 
 /** What the gateway's GET /bff/user returns. */
@@ -41,10 +42,28 @@ export const AuthStore = signalStore(
     const location = inject(BrowserLocation);
     const router = inject(Router);
     const caches = inject(CacheRegistry);
+    const live = inject(LiveConnection);
     let inFlight: Promise<void> | null = null;
 
     const bffUrl = (action: 'login' | 'register', returnUrl: string) =>
       `/bff/${action}?returnUrl=${encodeURIComponent(returnUrl)}`;
+
+    /** Closes the live connection first, so nothing arrives for the old user, then empties every store. */
+    const forget = () => {
+      void live.stop();
+      patchState(store, { user: null });
+      caches.clearAll();
+    };
+
+    const signOut = async (url: string): Promise<void> => {
+      try {
+        await firstValueFrom(http.post(url, null));
+      } finally {
+        // Even if the call failed (the session was already gone), this browser is signed out as far as the app goes.
+        forget();
+        await router.navigateByUrl('/');
+      }
+    };
 
     return {
       /**
@@ -83,21 +102,18 @@ export const AuthStore = signalStore(
       },
 
       /** Ends the session at the gateway (and Keycloak), forgets the user and goes to the welcome page. */
-      async logout(): Promise<void> {
-        try {
-          await firstValueFrom(http.post('/bff/logout', null));
-        } finally {
-          // Even if the call failed (the session was already gone), this browser is signed out as far as the app goes.
-          patchState(store, { user: null });
-          caches.clearAll();
-          await router.navigateByUrl('/');
-        }
+      logout(): Promise<void> {
+        return signOut('/bff/logout');
       },
 
-      /** The session is over (the user declined to log in again): forget the user so the header says so, and forget everything the stores hold. */
+      /** Ends every session of this user (all browsers), then like `logout()`. */
+      logoutAll(): Promise<void> {
+        return signOut('/bff/logout-all');
+      },
+
+      /** The session is over (the user declined to log in again): stop the live connection, forget the user and everything the stores hold. */
       endSession(): void {
-        patchState(store, { user: null });
-        caches.clearAll();
+        forget();
       },
 
       hasPermission(permission: string): boolean {

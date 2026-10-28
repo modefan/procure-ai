@@ -52,4 +52,19 @@ describe('CacheRegistry', () => {
 
     expect(a.clearCache).not.toHaveBeenCalled();
   });
+
+  it('revalidateAll_asks_every_store_that_can_and_survives_a_failing_one', () => {
+    const registry = TestBed.inject(CacheRegistry);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const bad = { clearCache: vi.fn(), revalidateAll: vi.fn(() => { throw new Error('x'); }) };
+    const good = { clearCache: vi.fn(), revalidateAll: vi.fn() };
+    const plain = { clearCache: vi.fn() };
+    registry.register(bad);
+    registry.register(good);
+    registry.register(plain);
+
+    registry.revalidateAll();
+
+    expect(good.revalidateAll).toHaveBeenCalledTimes(1);
+  });
 });
