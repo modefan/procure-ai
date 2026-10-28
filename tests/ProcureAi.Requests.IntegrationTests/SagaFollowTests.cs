@@ -699,4 +699,58 @@ public sealed class SagaFollowTests(InfraFixture infra) : IAsyncLifetime
             _factory, new RequestCancellationConfirmed(approved.Id, tenant, approved.Number, DateTimeOffset.UtcNow), tenant, "tom");
         await WaitForAsync(_client, tenant, approved.Id, r => r.Status == RequestStatus.Cancelled);
     }
+
+    [Fact]
+    public async Task Ordered_before_Approved_still_orders_and_the_late_approval_changes_nothing()
+    {
+        var tenant = NewTenant("ordfirst");
+        var submitted = await SubmitAsync(tenant, await CreateAsync(tenant));
+        var dead = await DeadLettersAsync();
+
+        await PublishFromApprovalsAsync(_factory, Ordered(submitted, tenant, Guid.NewGuid()), tenant, "tom");
+        var ordered = await WaitForAsync(_client, tenant, submitted.Id, r => r.Status == RequestStatus.Ordered);
+        var handled = HandledCount(submitted.Id);
+        await PublishFromApprovalsAsync(_factory, Approved(submitted, tenant), tenant, DemoUsers.Maria);
+        await WaitForHandledMoreAsync(submitted.Id, handled + 1);
+
+        var after = await GetAsync(_client, tenant, submitted.Id);
+        after.Status.ShouldBe(RequestStatus.Ordered);
+        after.Version.ShouldBe(ordered.Version);
+        (await DeadLettersAsync()).ShouldBe(dead);
+    }
+
+    [Fact]
+    public async Task Completed_before_Approved_still_completes_and_the_late_approval_changes_nothing()
+    {
+        var tenant = NewTenant("compfirst");
+        var submitted = await SubmitAsync(tenant, await CreateAsync(tenant));
+        var dead = await DeadLettersAsync();
+
+        await PublishFromApprovalsAsync(_factory, Completed(submitted, tenant, 500m), tenant, "tom");
+        var completed = await WaitForAsync(_client, tenant, submitted.Id, r => r.Status == RequestStatus.Completed);
+        var handled = HandledCount(submitted.Id);
+        await PublishFromApprovalsAsync(_factory, Approved(submitted, tenant), tenant, DemoUsers.Maria);
+        await WaitForHandledMoreAsync(submitted.Id, handled + 1);
+
+        var after = await GetAsync(_client, tenant, submitted.Id);
+        after.Status.ShouldBe(RequestStatus.Completed);
+        after.SpentInclVat.ShouldBe(500m);
+        after.Version.ShouldBe(completed.Version);
+        (await DeadLettersAsync()).ShouldBe(dead);
+    }
+
+    [Fact]
+    public async Task Supplier_rejection_while_cancelling_rejects_the_request()
+    {
+        var tenant = NewTenant("rejcancel");
+        var ordered = await OrderedAsync(tenant, Guid.NewGuid());
+        await CancellingAsync(tenant, ordered);
+
+        await PublishFromApprovalsAsync(_factory, Rejected(ordered, tenant, "The supplier cannot deliver", by: null), tenant, "tom");
+
+        var rejected = await WaitForAsync(_client, tenant, ordered.Id, r => r.Status == RequestStatus.Rejected);
+        rejected.RejectionReason.ShouldBe("The supplier cannot deliver");
+        rejected.CancellationReason.ShouldBeNull();
+        rejected.CancelledAt.ShouldBeNull();
+    }
 }

@@ -62,6 +62,27 @@ public sealed class PurchaseRequest : Entity<Guid>
 
     public IReadOnlyList<RequestLine> Lines => _lines.AsReadOnly();
 
+    // What each saga outcome applies to. The handler asks these instead of keeping its own lists, so the two cannot drift.
+
+    /// <summary>Only a submitted request can be approved; a late approval of an ordered or completed request changes nothing.</summary>
+    public bool CanApprove => Status == RequestStatus.Submitted;
+
+    /// <summary>Submitted too: the order can be announced before the approval is handled (the messages are not ordered).</summary>
+    public bool CanMarkOrdered =>
+        Status is RequestStatus.Submitted or RequestStatus.Approved or RequestStatus.Ordered or RequestStatus.Completed or RequestStatus.Cancelling;
+
+    /// <summary>Submitted and approved: the completion can overtake the approval and the order. Cancelling: the settlement overtook the cancel.</summary>
+    public bool CanComplete =>
+        Status is RequestStatus.Submitted or RequestStatus.Approved or RequestStatus.Ordered or RequestStatus.Cancelling;
+
+    /// <summary>Submitted, or approved/ordered when the supplier rejects the order, or cancelling when that races with a cancel.</summary>
+    public bool CanReject =>
+        Status is RequestStatus.Submitted or RequestStatus.Approved or RequestStatus.Ordered or RequestStatus.Cancelling;
+
+    public bool CanConfirmCancellation => Status is RequestStatus.Cancelling or RequestStatus.Cancelled;
+
+    public bool CanRefuseCancellation => Status is RequestStatus.Cancelling or RequestStatus.Cancelled;
+
     public Money TotalExclVat => _lines.Aggregate(Money.Zero, (sum, line) => sum + line.TotalExclVat);
 
     /// <summary>VAT on the whole request (not per line), rounded to cents, midpoints away from zero (see <see cref="Money.Vat"/>).</summary>
@@ -164,16 +185,17 @@ public sealed class PurchaseRequest : Entity<Guid>
 
     /// <summary>
     /// Rejected by an approver or by the system (the saga's RequestRejected). A submitted request can be rejected; so can an approved
-    /// or ordered one, when the supplier rejects the order.
+    /// or ordered one, when the supplier rejects the order; a cancelling one too (the pending cancel is dropped, the saga ended).
     /// </summary>
     public void Reject(string reason, DateTimeOffset now)
     {
-        if (Status is not (RequestStatus.Submitted or RequestStatus.Approved or RequestStatus.Ordered))
+        if (!CanReject)
         {
-            throw new DomainException($"Only a submitted, approved or ordered request can be rejected; this one is {Status.ToString().ToLowerInvariant()}.");
+            throw new DomainException($"A {Status.ToString().ToLowerInvariant()} request cannot be rejected.");
         }
 
         RequireText(reason, "A rejection reason");
+        ClearPendingCancel();
         Status = RequestStatus.Rejected;
         RejectionReason = reason.Trim();
         RejectedAt = now;
@@ -208,13 +230,13 @@ public sealed class PurchaseRequest : Entity<Guid>
     }
 
     /// <summary>
-    /// The purchase order exists (the saga's RequestOrdered). An approved request becomes ordered. In any other status that has an
+    /// The purchase order exists (the saga's RequestOrdered). An approved (or, when the approval is still on its way, submitted) request becomes ordered. In any other status that has an
     /// order (ordered, completed, cancelling) only the order's details are filled in, which is how a late or repeated message is
     /// harmless. An empty number (the saga had none) is stored as null and never replaces a known one.
     /// </summary>
     public void MarkOrdered(Guid orderId, string? orderNumber, DateTimeOffset now)
     {
-        if (Status is not (RequestStatus.Approved or RequestStatus.Ordered or RequestStatus.Completed or RequestStatus.Cancelling))
+        if (!CanMarkOrdered)
         {
             throw new DomainException($"A {Status.ToString().ToLowerInvariant()} request cannot be ordered.");
         }
@@ -225,7 +247,7 @@ public sealed class PurchaseRequest : Entity<Guid>
             OrderNumber = orderNumber.Trim();
         }
 
-        if (Status == RequestStatus.Approved)
+        if (Status is RequestStatus.Submitted or RequestStatus.Approved)
         {
             Status = RequestStatus.Ordered;
         }
@@ -233,13 +255,13 @@ public sealed class PurchaseRequest : Entity<Guid>
 
     /// <summary>
     /// Fully paid (the saga's RequestCompleted). Normally from ordered; also from cancelling (the settlement overtook the cancel, so
-    /// the pending cancel is cleared) and from approved (RequestCompleted overtook RequestOrdered, which fills in the order later).
+    /// the pending cancel is cleared) and from approved or submitted (RequestCompleted overtook RequestOrdered or RequestApproved; RequestOrdered fills in the order later).
     /// </summary>
     public void Complete(Money spent, DateTimeOffset now)
     {
-        if (Status is not (RequestStatus.Ordered or RequestStatus.Approved or RequestStatus.Cancelling))
+        if (!CanComplete)
         {
-            throw new DomainException($"Only an ordered request can be completed; this one is {Status.ToString().ToLowerInvariant()}.");
+            throw new DomainException($"A {Status.ToString().ToLowerInvariant()} request cannot be completed.");
         }
 
         Status = RequestStatus.Completed;
@@ -256,14 +278,14 @@ public sealed class PurchaseRequest : Entity<Guid>
             return;
         }
 
-        if (Status != RequestStatus.Cancelling)
+        if (!CanConfirmCancellation)
         {
             throw new DomainException($"Only a request being cancelled can be confirmed cancelled; this one is {Status.ToString().ToLowerInvariant()}.");
         }
 
         Status = RequestStatus.Cancelled;
         StatusBeforeCancel = null;
-        CancelledAt = now;
+        CancelledAt ??= now;
     }
 
     /// <summary>
@@ -273,15 +295,14 @@ public sealed class PurchaseRequest : Entity<Guid>
     /// </summary>
     public void RefuseCancellation(string reason, DateTimeOffset now)
     {
-        if (Status is not (RequestStatus.Cancelling or RequestStatus.Cancelled))
+        if (!CanRefuseCancellation)
         {
             throw new DomainException($"Only a request being cancelled can have its cancel refused; this one is {Status.ToString().ToLowerInvariant()}.");
         }
 
-        RequireText(reason, "A refusal reason");
         var before = StatusBeforeCancel ?? RequestStatus.Ordered;
         Status = before == RequestStatus.Approved && OrderId is not null ? RequestStatus.Ordered : before;
-        CancellationRefusedReason = reason.Trim();
+        CancellationRefusedReason = string.IsNullOrWhiteSpace(reason) ? "The cancellation was refused." : reason.Trim();
         ClearPendingCancel();
     }
 

@@ -18,64 +18,50 @@ namespace ProcureAi.Requests.Application.Events;
 /// </summary>
 public static class RequestOutcomeHandler
 {
-    private static readonly RequestStatus[] Submitted = [RequestStatus.Submitted];
-
-    // A supplier rejection (the saga's PurchaseOrderRejected) reaches a request that was already approved or ordered.
-    private static readonly RequestStatus[] Rejectable = [RequestStatus.Submitted, RequestStatus.Approved, RequestStatus.Ordered];
-
-    // Completed too: RequestOrdered may arrive after RequestCompleted, and then only fills in the order.
-    private static readonly RequestStatus[] Orderable =
-        [RequestStatus.Approved, RequestStatus.Ordered, RequestStatus.Completed, RequestStatus.Cancelling];
-
-    // Approved: RequestCompleted overtook RequestOrdered. Cancelling: the settlement overtook the cancel.
-    private static readonly RequestStatus[] Completable = [RequestStatus.Ordered, RequestStatus.Approved, RequestStatus.Cancelling];
-
-    private static readonly RequestStatus[] Cancelling = [RequestStatus.Cancelling, RequestStatus.Cancelled];
-
     public static Task Handle(
         RequestApproved approved, IRequestsDbContext db, ICacheInvalidator cache, ILogger<RequestApproved> logger,
         CancellationToken cancellationToken) =>
         ApplyAsync(
-            approved.RequestId, approved.TenantId, "approved", Submitted, r => r.Approve(approved.OccurredAt), db, cache, logger,
+            approved.RequestId, approved.TenantId, "approved", r => r.CanApprove, r => r.Approve(approved.OccurredAt), db, cache, logger,
             cancellationToken);
 
     public static Task Handle(
         RequestRejected rejected, IRequestsDbContext db, ICacheInvalidator cache, ILogger<RequestRejected> logger,
         CancellationToken cancellationToken) =>
         ApplyAsync(
-            rejected.RequestId, rejected.TenantId, "rejected", Rejectable, r => r.Reject(rejected.Reason, rejected.OccurredAt), db,
+            rejected.RequestId, rejected.TenantId, "rejected", r => r.CanReject, r => r.Reject(rejected.Reason, rejected.OccurredAt), db,
             cache, logger, cancellationToken);
 
     public static Task Handle(
         RequestOrdered ordered, IRequestsDbContext db, ICacheInvalidator cache, ILogger<RequestOrdered> logger,
         CancellationToken cancellationToken) =>
         ApplyAsync(
-            ordered.RequestId, ordered.TenantId, "ordered", Orderable,
+            ordered.RequestId, ordered.TenantId, "ordered", r => r.CanMarkOrdered,
             r => r.MarkOrdered(ordered.OrderId, ordered.OrderNumber, ordered.OccurredAt), db, cache, logger, cancellationToken);
 
     public static Task Handle(
         RequestCompleted completed, IRequestsDbContext db, ICacheInvalidator cache, ILogger<RequestCompleted> logger,
         CancellationToken cancellationToken) =>
         ApplyAsync(
-            completed.RequestId, completed.TenantId, "completed", Completable,
+            completed.RequestId, completed.TenantId, "completed", r => r.CanComplete,
             r => r.Complete(Money.Zar(completed.SpentInclVat), completed.OccurredAt), db, cache, logger, cancellationToken);
 
     public static Task Handle(
         RequestCancellationConfirmed confirmed, IRequestsDbContext db, ICacheInvalidator cache,
         ILogger<RequestCancellationConfirmed> logger, CancellationToken cancellationToken) =>
         ApplyAsync(
-            confirmed.RequestId, confirmed.TenantId, "cancellation confirmed", Cancelling,
+            confirmed.RequestId, confirmed.TenantId, "cancellation confirmed", r => r.CanConfirmCancellation,
             r => r.ConfirmCancellation(confirmed.OccurredAt), db, cache, logger, cancellationToken);
 
     public static Task Handle(
         RequestCancellationRefused refused, IRequestsDbContext db, ICacheInvalidator cache,
         ILogger<RequestCancellationRefused> logger, CancellationToken cancellationToken) =>
         ApplyAsync(
-            refused.RequestId, refused.TenantId, "cancellation refused", Cancelling,
+            refused.RequestId, refused.TenantId, "cancellation refused", r => r.CanRefuseCancellation,
             r => r.RefuseCancellation(refused.Reason, refused.OccurredAt), db, cache, logger, cancellationToken);
 
     private static async Task ApplyAsync(
-        Guid requestId, string tenantId, string outcome, RequestStatus[] applicableTo, Action<PurchaseRequest> apply,
+        Guid requestId, string tenantId, string outcome, Func<PurchaseRequest, bool> applicable, Action<PurchaseRequest> apply,
         IRequestsDbContext db, ICacheInvalidator cache, ILogger logger, CancellationToken cancellationToken)
     {
         // The tenant of the event, not of the caller: the query filter is bypassed and the tenant named explicitly.
@@ -87,7 +73,7 @@ public static class RequestOutcomeHandler
             return;
         }
 
-        if (!applicableTo.Contains(request.Status))
+        if (!applicable(request))
         {
             // A redelivery, or the saga's outcome after the requester cancelled or the request moved on: nothing to do.
             logger.LogInformation("Outcome {Outcome} ignored for request {RequestId}: it is {Status}", outcome, requestId, request.Status);

@@ -173,7 +173,8 @@ public class SagaOutcomeTests
         request.ConfirmCancellation(Now.AddMinutes(2));
 
         request.Status.ShouldBe(RequestStatus.Cancelled);
-        request.CancelledAt.ShouldBe(Now.AddMinutes(1));
+        // The requester cancel time is kept, not replaced by the confirmation time.
+        request.CancelledAt.ShouldBe(Now);
     }
 
     [Fact]
@@ -237,7 +238,7 @@ public class SagaOutcomeTests
     }
 
     [Fact]
-    public void Complete_only_from_ordered_approved_or_cancelling()
+    public void Complete_not_from_draft_rejected_cancelled_or_completed()
     {
         var draft = Draft();
         var submitted = Submitted();
@@ -248,7 +249,7 @@ public class SagaOutcomeTests
         var completed = Ordered();
         completed.Complete(Money.Zar(1m), Now);
 
-        foreach (var request in new[] { draft, submitted, rejected, cancelled, completed })
+        foreach (var request in new[] { draft, rejected, cancelled, completed })
         {
             Should.Throw<DomainException>(() => request.Complete(Money.Zar(1m), Now));
         }
@@ -318,5 +319,48 @@ public class SagaOutcomeTests
         request.Complete(Money.Zar(1m), Now);
 
         Should.Throw<DomainException>(() => request.Cancel("tom", null, Now)).Message.ShouldContain("completed");
+    }
+
+    [Fact]
+    public void Ordered_and_completed_can_overtake_the_approval()
+    {
+        var ordered = Submitted();
+        var completed = Submitted();
+
+        ordered.MarkOrdered(OrderId, "PO-0001", Now);
+        completed.Complete(Money.Zar(10m), Now);
+
+        ordered.Status.ShouldBe(RequestStatus.Ordered);
+        completed.Status.ShouldBe(RequestStatus.Completed);
+        // The approval arriving late changes nothing.
+        Should.Throw<DomainException>(() => ordered.Approve(Now));
+        Should.Throw<DomainException>(() => completed.Approve(Now));
+        ordered.Status.ShouldBe(RequestStatus.Ordered);
+        completed.Status.ShouldBe(RequestStatus.Completed);
+        ordered.CanApprove.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Supplier_rejection_while_cancelling_rejects_and_clears_the_cancel()
+    {
+        var request = Ordered();
+        request.Cancel("tom", "x", Now);
+
+        request.Reject("The supplier cannot deliver", Now);
+
+        request.Status.ShouldBe(RequestStatus.Rejected);
+        request.StatusBeforeCancel.ShouldBeNull();
+        request.CancellationReason.ShouldBeNull();
+        request.CancelledAt.ShouldBeNull();
+        request.CancelledBy.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Complete_of_a_request_in_the_wrong_status_says_what_is_accepted()
+    {
+        var request = Draft();
+
+        Should.Throw<DomainException>(() => request.Complete(Money.Zar(1m), Now)).Message.ShouldContain("draft");
+        request.CanComplete.ShouldBeFalse();
     }
 }
