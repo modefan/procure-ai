@@ -3,14 +3,17 @@
 [![CI](https://github.com/modefan/procure-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/modefan/procure-ai/actions/workflows/ci.yml)
 
 A multi-tenant procurement system in South African Rand (ZAR): employees raise purchase requests, a rules-driven
-approval chain runs with budget reservation, approved requests become purchase orders, and invoices are three-way
-matched and exported for payment. An AI policy assistant (RAG) and invoice scanning come later. Built as a portfolio
+approval chain runs with budget reservation, approved requests become purchase orders sent to a supplier, deliveries are
+received, and invoices are three-way matched and exported for payment. An AI policy assistant (RAG) and invoice
+scanning come later. Built as a portfolio
 demo of enterprise .NET and Angular practice: microservices, Clean Architecture, messaging, GitOps-style delivery.
 
-**Status: plan 02 of 8 done (final review in progress).** What runs today: five services (Requests, Access, Budgets, Approvals, Audit), the BFF
-gateway with Keycloak login, the Angular app, and per-database change data capture. A purchase request can be
-submitted, its budget reserved, approved through a rules-driven chain (or rejected or cancelled, which returns the
-budget) and audited end to end. Purchasing, invoicing and the AI assistant arrive in the following plans.
+**Status: plan 03 of 8 done.** What runs today: eight services (Requests, Access, Budgets, Approvals, Audit, Suppliers,
+Purchasing, Invoicing), two simulators (supplier and ERP), the BFF gateway with Keycloak login, the Angular app, and
+per-database change data capture. A request is submitted, its budget reserved, approved through a rules-driven chain,
+turned into a purchase order, delivered, invoiced, three-way matched and paid (for example a R 86 940,00 order), with
+cancellation and rejection returning the budget, all audited end to end. The AI assistant and invoice scanning arrive
+in later plans.
 
 ## Architecture at a glance
 
@@ -19,8 +22,11 @@ flowchart LR
     Browser["Angular 22 app"] -->|"HttpOnly session cookie"| GW["Gateway (YARP, BFF)"]
     GW <-->|"OIDC code flow + PKCE"| KC["Keycloak"]
     GW -->|"sessions"| Redis[("Redis")]
-    GW -->|"JWT"| Svc["Requests / Access / Budgets / Approvals / Audit APIs"]
+    GW -->|"JWT"| Svc["Requests / Access / Budgets / Approvals / Audit / Purchasing / Invoicing APIs"]
+    GW -->|"JWT"| Sup["Suppliers API"]
+    Sup --> Mongo[("MongoDB")]
     Svc -->|"own database each"| PG[("Postgres")]
+    Svc <-->|"orders, signed webhooks"| Sim["Supplier + ERP simulators"]
     Svc <-->|"Wolverine outbox + inbox"| MQ{{"RabbitMQ"}}
     PG -->|"WAL (one Debezium per database)"| DBZ["Debezium Servers"]
     DBZ -->|"CDC events"| MQ
@@ -38,6 +44,10 @@ Everything is orchestrated by .NET Aspire locally; logs, traces and metrics (Ope
 | Budgets | Cost-center budgets per fiscal year, reservations, release on reject or cancel | Postgres |
 | Approvals | Approval chain, the approval saga, reminders and escalation, approver inbox | Postgres (saga state) |
 | Audit | Business-event history, data-change audit matched to Debezium CDC | Marten (Postgres) |
+| Suppliers | Supplier catalog and prices per tenant; read through its API by others, publishes no events | MongoDB |
+| Purchasing | One purchase order per approved request, supplier delivery, goods receipt per line, cancellation | Postgres |
+| Invoicing | Invoices (by webhook or entered), three-way match, payment export to the ERP | Postgres (invoice documents in `jsonb`) |
+| Simulators | Supplier and ERP stand-ins, deliberately slow and flaky | none |
 | Gateway | YARP reverse proxy, BFF login, Swagger UI with one definition per service | Redis (sessions) |
 
 ## The approval flow
@@ -72,6 +82,34 @@ sequenceDiagram
 
 Each service that publishes events writes its state and those events in one transaction (Wolverine outbox), and Audit
 records every event.
+
+## From order to payment
+
+```mermaid
+sequenceDiagram
+    participant A as Approvals
+    participant P as Purchasing
+    participant S as Supplier simulator
+    participant I as Invoicing
+    participant E as ERP simulator
+    participant B as Budgets
+    A-)P: RequestApproved (carries the order lines)
+    P->>P: create order, prices from the Suppliers catalog
+    P->>S: send order (retries, circuit breaker)
+    S--)P: signed webhook: confirmed
+    S--)P: signed webhook: delivered (partial or full)
+    P->>P: goods receipt per line
+    S--)I: signed webhook: invoice (or entered by hand)
+    I->>I: three-way match (order, receipts, invoice; R 0,50 tolerance)
+    Note over I: a mismatch is held for finance
+    I->>E: export payment (finance pays; outbox)
+    I-)B: spend recorded per payment
+    P-)B: leftover released when every line is paid or closed short
+    opt cancelled before the first goods are received
+        P->>S: cancel order
+        P-)B: ReleaseBudget
+    end
+```
 
 ## Run it locally
 
@@ -118,8 +156,9 @@ Sign in through Keycloak; the demo password is the `keycloak-demo-password` para
 `dotnet test --project tests/<project>` per project (xUnit v3 on Microsoft.Testing.Platform). Unit, architecture
 (layer rules), Testcontainers integration tests (Postgres, Redis, Keycloak, RabbitMQ), an Aspire AppHost test, and
 Playwright end-to-end tests, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
-whole AppHost and drives a request through approval and audit. GitHub Actions builds with warnings as errors and fails
-the build if the generated Angular API client drifts from any of the five services' OpenAPI documents. The test suites
+whole AppHost and drives a request through approval, purchasing, invoicing and audit. GitHub Actions builds with warnings as errors and fails
+the build if the generated Angular API client drifts from any of the eight services' OpenAPI documents (found by
+convention, so a new service is covered automatically). The test suites
 are run locally before every push; their CI steps are switched off until the app is complete and will be re-enabled
 before this repo goes public. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
 
@@ -154,7 +193,30 @@ before this repo goes public. CI generates random, per-run secrets; nothing sens
 - **Fiscal year in SAST.** A budget's fiscal year runs 1 March to the end of February in `Africa/Johannesburg` time, so a
   request submitted late on 28 February is judged by the South African calendar, not UTC.
 - **Generated API client.** Angular calls are generated from the OpenAPI document (ng-openapi-gen; the Requests client so
-  far) and CI guards against drift for all five services' documents.
+  far) and CI guards against drift for all eight services' documents.
+- **Event-carried order lines.** The approval event carries the request's lines, so Purchasing builds the order without
+  calling Requests back and keeps working when Requests is down.
+- **The catalog is the price source.** Prices come from the Suppliers catalog, not from the requester, so a request
+  cannot name its own price.
+- **Purchasing decides cancellation.** Only Purchasing knows whether goods have arrived, so it alone accepts or refuses
+  a cancel (allowed until the first receipt); the request shows Cancelling until its answer, then Cancelled (budget
+  released) or back to Ordered.
+- **Tombstones.** A cancel that overtakes the order's creation stores a cancelled placeholder order, so the create that
+  follows does nothing; no race can resurrect a cancelled request.
+- **Never-give-up supplier delivery with a circuit breaker.** A failed send (timeout, 5xx, open breaker) is recorded on
+  the order and rescheduled with backoff until the supplier answers or the order is cancelled; the breaker stops
+  hammering a down supplier. The order shows "Supplier unavailable, retrying" instead of failing.
+- **Signed webhooks with a replay inbox.** Webhooks carry an HMAC-SHA256 signature over a timestamp and the body (5 minute
+  tolerance, constant-time compare), and each event ID is stored in the same transaction as its effect, so forged,
+  stale and replayed calls change nothing.
+- **Cumulative three-way match.** Each invoice is matched against what was ordered and received minus what earlier
+  invoices already claimed, so several invoices per order and partial deliveries work.
+- **Payments at order price, with separation of duties.** Finance pays quantities at the order's price, never above it, and the
+  requester of a request cannot release its payment (like approvals).
+- **Spend per payment.** Budgets record spend for each payment (idempotent by payment ID), so
+  partial payments and the leftover release give the same totals in either order.
+- **MongoDB catalog with tenant collections.** Catalog data is documents and publishes no events, which suits MongoDB;
+  one tenant-scoped collection wrapper makes the tenant filter impossible to forget.
 - **Libraries that went commercial are avoided:** Wolverine instead of MassTransit v9, Mapperly instead of
   AutoMapper, plain handlers instead of MediatR, Shouldly instead of FluentAssertions, and YARP with ASP.NET Core's
   OIDC handlers instead of Duende BFF.
