@@ -66,7 +66,8 @@ public sealed class GatewayHost : IAsyncDisposable
     public string KeyPrefix { get; }
 
     public static async Task<GatewayHost> StartAsync(
-        KeycloakFixture keycloak, RedisFixture redis, Dictionary<string, string?>? extra = null, bool kestrel = false)
+        KeycloakFixture keycloak, RedisFixture redis, Dictionary<string, string?>? extra = null, bool kestrel = false,
+        Action<IServiceCollection>? configureServices = null)
     {
         var stub = await StubDownstream.StartAsync();
         var access = await StubAccessServer.StartAsync();
@@ -114,6 +115,7 @@ public sealed class GatewayHost : IAsyncDisposable
             builder.Configuration.AddInMemoryCollection(settings);
             builder.Services.AddSingleton<TimeProvider>(clock);
             builder.Services.AddSingleton<IStartupFilter, ClientAddressFilter>();
+            configureServices?.Invoke(builder.Services);
         });
         try
         {

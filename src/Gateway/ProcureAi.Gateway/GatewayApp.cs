@@ -41,6 +41,8 @@ public static class GatewayApp
         services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
         services.AddValidatedOptions<RegistrationOptions>(configuration, RegistrationOptions.SectionName);
         services.AddValidatedOptions<HubOptions>(configuration, HubOptions.SectionName);
+        services.AddValidatedOptions<ClientLogOptions>(configuration, ClientLogOptions.SectionName);
+        services.AddSingleton<ClientLogRateLimiter>();
         services.AddValidatedOptions<RateLimitingOptions>(configuration, RateLimitingOptions.SectionName);
         services.AddProcureAiForwardedHeaders(configuration);
         services.AddProcureAiCorrelationPropagation();
