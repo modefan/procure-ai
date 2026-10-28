@@ -77,16 +77,51 @@ public sealed class OrderingSagaTests(ApprovalsApp app)
     }
 
     [Fact]
-    public async Task Goods_received_is_remembered()
+    public async Task Goods_received_is_consumed_without_rewriting_the_saga()
     {
+        // Final review M3: nothing reads a receipt in the saga, so it must not load and rewrite the saga row (version conflicts).
         var (tenant, submitted) = await OrderedAsync();
         var id = submitted.RequestId;
+        var before = (await Main.SagaAsync(id))!;
+        var deadBefore = await app.DeadLettersAsync();
 
         await PublishAsync(
             new GoodsReceived(Guid.NewGuid(), id, tenant, Guid.NewGuid(), [new ReceivedLine(1, 1)], DemoUsers.Tom, DateTimeOffset.UtcNow),
             Exchanges.Purchasing, tenant);
+        await Task.Delay(Settle);
 
-        (await Main.WaitForSagaAsync(id, saga => saga is { GoodsReceived: true }, EventTimeout))!.State.ShouldBe(ApprovalState.Ordered);
+        var after = (await Main.SagaAsync(id))!;
+        after.State.ShouldBe(ApprovalState.Ordered);
+        after.Version.ShouldBe(before.Version, "the receipt did not touch the saga row");
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore);
+    }
+
+    [Fact]
+    public async Task Approving_a_request_without_catalog_lines_rejects_it_and_releases_the_budget()
+    {
+        // Final review M1: a saga from before plan 03 has no lines and no supplier; Purchasing cannot order that.
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var submitted = Submitted(tenant, DemoUsers.Tom, 5_000m) with { SupplierId = "", Lines = [] };
+        var id = submitted.RequestId;
+        var deadBefore = await app.DeadLettersAsync();
+        await Main.PublishAsync(submitted, Exchanges.Requests, tenant);
+        await Recorder.WaitForAsync(id, nameof(ReserveBudget), EventTimeout);
+        await Main.PublishAsync(Reserved(submitted), Exchanges.Budgets, tenant);
+        await Recorder.WaitForAsync(id, nameof(ApprovalRequested), EventTimeout);
+        var step = (await Main.StepsAsync(id)).Single();
+
+        await Main.InvokeAsync(new ApproveStep(id, step.Id, step.Version), tenant, DemoUsers.Maria);
+
+        var rejected = (await Recorder.WaitForAsync(id, nameof(RequestRejected), EventTimeout)).Single(m => m.Kind == nameof(RequestRejected));
+        rejected.Text("reason").ShouldBe(ApprovalSaga.NoCatalogLines);
+        rejected.Text("rejectedBy").ShouldBeNull();
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await Task.Delay(Settle);
+        Recorder.Of(id).Count(m => m.Kind == nameof(ReleaseBudget)).ShouldBe(1);
+        Recorder.Of(id).ShouldNotContain(m => m.Kind == nameof(CreatePurchaseOrder));
+        Recorder.Of(id).ShouldNotContain(m => m.Kind == nameof(RequestApproved));
+        (await app.DeadLettersAsync()).ShouldBe(deadBefore);
     }
 
     [Fact]

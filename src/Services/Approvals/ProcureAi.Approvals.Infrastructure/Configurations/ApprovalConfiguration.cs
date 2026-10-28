@@ -80,7 +80,6 @@ internal sealed class ApprovalSagaConfiguration : IEntityTypeConfiguration<Appro
             .HasConversion(LinesConverter, LinesComparer);
         builder.Property(s => s.OrderId).HasColumnName("order_id");
         builder.Property(s => s.OrderNumber).HasColumnName("order_number").HasMaxLength(50);
-        builder.Property(s => s.GoodsReceived).HasColumnName("goods_received");
         builder.Property(s => s.StateBeforeCancel).HasColumnName("state_before_cancel").HasConversion<string>().HasMaxLength(20);
         builder.Property(s => s.CurrentStepNo).HasColumnName("current_step_no");
         builder.Property(s => s.CancelRequested).HasColumnName("cancel_requested");

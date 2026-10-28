@@ -24,6 +24,14 @@ public static class IgnoredEventsHandler
     {
     }
 
+    /// <summary>
+    /// Goods arrived; whether the order may still be cancelled is Purchasing's decision, and completion comes from Invoicing.
+    /// Not a saga handler, so a receipt does not load and rewrite the saga row (which only caused version conflicts).
+    /// </summary>
+    public static void Handle(GoodsReceived received)
+    {
+    }
+
     public static void Handle(PurchaseOrderClosedShort closedShort)
     {
     }

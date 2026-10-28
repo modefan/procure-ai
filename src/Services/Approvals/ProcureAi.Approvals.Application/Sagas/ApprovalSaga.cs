@@ -64,6 +64,9 @@ public sealed class ApprovalSaga : Saga
     /// <summary>Sent to Purchasing when the request was cancelled without a reason (Purchasing refuses a blank one).</summary>
     public const string DefaultCancelReason = "Request cancelled";
 
+    /// <summary>The rejection reason when an approved request has nothing to order (no lines or no supplier).</summary>
+    public const string NoCatalogLines = "Request has no catalog lines";
+
     /// <summary>The refusal reason when the order settled (all paid) while a cancellation was pending.</summary>
     public const string OrderSettled = "The order was settled";
 
@@ -107,9 +110,6 @@ public sealed class ApprovalSaga : Saga
     public Guid? OrderId { get; set; }
 
     public string? OrderNumber { get; set; }
-
-    /// <summary>Goods were received for the order (any receipt).</summary>
-    public bool GoodsReceived { get; set; }
 
     /// <summary>The state to return to when Purchasing refuses a cancellation (Approved or Ordered).</summary>
     public ApprovalState? StateBeforeCancel { get; set; }
@@ -275,6 +275,17 @@ public sealed class ApprovalSaga : Saga
         if (next is not null)
         {
             await OpenAsync(next, options.Value, now, context);
+            return;
+        }
+
+        if (Lines.Count == 0 || string.IsNullOrWhiteSpace(SupplierId))
+        {
+            // A saga started before plan 03 (its migration gave old rows no lines and no supplier): Purchasing cannot order
+            // that, so the request is rejected and the budget released here, instead of a CreatePurchaseOrder that dead-letters
+            // and leaves the reservation held.
+            await context.SendAsync(Release());
+            await context.PublishAsync(new RequestRejected(Id, TenantId, RequestNumber, NoCatalogLines, null, now));
+            End(ApprovalState.Rejected);
             return;
         }
 
@@ -476,15 +487,6 @@ public sealed class ApprovalSaga : Saga
     }
 
     public static void NotFound([SagaIdentityFrom(nameof(PurchaseOrderRejected.RequestId))] PurchaseOrderRejected rejected)
-    {
-    }
-
-    public void Handle([SagaIdentityFrom(nameof(ProcureAi.Contracts.Purchasing.GoodsReceived.RequestId))] GoodsReceived received)
-    {
-        GoodsReceived = true;
-    }
-
-    public static void NotFound([SagaIdentityFrom(nameof(ProcureAi.Contracts.Purchasing.GoodsReceived.RequestId))] GoodsReceived received)
     {
     }
 

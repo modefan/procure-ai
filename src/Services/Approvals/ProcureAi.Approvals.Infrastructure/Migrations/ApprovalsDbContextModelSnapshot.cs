@@ -42,10 +42,6 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("current_step_no");
 
-                    b.Property<bool>("GoodsReceived")
-                        .HasColumnType("boolean")
-                        .HasColumnName("goods_received");
-
                     b.Property<string>("Lines")
                         .IsRequired()
                         .HasColumnType("jsonb")

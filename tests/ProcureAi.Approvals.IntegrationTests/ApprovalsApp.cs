@@ -119,8 +119,10 @@ public sealed class ApprovalsApp : IAsyncLifetime
 
     public const string CostCenter = "IT-200";
 
+    /// <summary>A submission with one catalog line (an approved request with none is rejected: nothing to order).</summary>
     public static RequestSubmitted Submitted(string tenant, string requester, decimal total) =>
-        new(Guid.NewGuid(), tenant, $"PR-{Random.Shared.Next(1000, 9999)}", "Laptops", requester, CostCenter, total, DateTimeOffset.UtcNow, "SUP-1", []);
+        new(Guid.NewGuid(), tenant, $"PR-{Random.Shared.Next(1000, 9999)}", "Laptops", requester, CostCenter, total, DateTimeOffset.UtcNow, "SUP-1",
+            [new RequestLineItem(1, "LAP-14", "Laptop 14 inch", 1, total)]);
 
     public static BudgetReserved Reserved(RequestSubmitted submitted) =>
         new(submitted.RequestId, submitted.TenantId, submitted.CostCenterCode, "FY2027", submitted.TotalInclVat, DateTimeOffset.UtcNow);
