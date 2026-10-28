@@ -14,4 +14,11 @@ public sealed class ClientLogOptions
     /// <summary>A message, source or data text longer than this is cut.</summary>
     [Range(50, 10_000)]
     public int MaxMessageLength { get; set; } = 2000;
+
+    /// <summary>
+    /// Entries logged per batch. Later entries are dropped and one warning says how many (the batch is still accepted:
+    /// the browser cannot act on a refusal, and its earliest entries are the most useful).
+    /// </summary>
+    [Range(1, 1000)]
+    public int MaxEntriesPerBatch { get; set; } = 50;
 }

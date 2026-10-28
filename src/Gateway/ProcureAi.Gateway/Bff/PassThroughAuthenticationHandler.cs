@@ -20,6 +20,12 @@ public sealed class PassThroughAuthenticationHandler(
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
+        // Not a credential: the client-log endpoint only avoids the cookie handler (see BffSchemes.UsesPassThrough) and reads its session itself.
+        if (Request.Path.Equals(ClientLogEndpoints.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
         var identity = new ClaimsIdentity(BffSchemes.PassThrough);
         return Task.FromResult(AuthenticateResult.Success(
             new AuthenticationTicket(new ClaimsPrincipal(identity), BffSchemes.PassThrough)));

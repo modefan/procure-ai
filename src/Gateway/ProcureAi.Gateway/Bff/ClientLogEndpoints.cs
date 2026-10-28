@@ -3,7 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Authentication;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
 using ProcureAi.Gateway.Configuration;
@@ -24,6 +25,9 @@ public static partial class ClientLogEndpoints
     /// <summary>A batch is at most a few dozen small entries; anything bigger is not from our Logger.</summary>
     public const int MaxBodyBytes = 64 * 1024;
 
+    /// <summary>The claim the cookie handler puts in a cookie that only points to a server-side session.</summary>
+    private const string SessionIdClaim = "Microsoft.AspNetCore.Authentication.Cookies-SessionId";
+
     private const int MaxIdLength = 64;
     private const string Mask = "***";
     private const int MaxDepth = 8;
@@ -35,7 +39,8 @@ public static partial class ClientLogEndpoints
     }
 
     private static async Task<IResult> AcceptAsync(
-        HttpContext http, ClientLogRateLimiter limiter, IOptions<ClientLogOptions> options, ILoggerFactory loggers)
+        HttpContext http, ClientLogRateLimiter limiter, IOptions<ClientLogOptions> options, ILoggerFactory loggers,
+        RedisTicketStore tickets, IOptionsMonitor<CookieAuthenticationOptions> cookies, TimeProvider time)
     {
         if (http.Request.ContentLength > MaxBodyBytes)
         {
@@ -64,8 +69,9 @@ public static partial class ClientLogEndpoints
             return TooLarge();
         }
 
-        // The session is the verified cookie ticket, never a header or a cookie value the client could make up.
-        var session = (await http.AuthenticateAsync(BffSchemes.Cookie)).Principal;
+        // The session is the verified cookie ticket, never a header or a cookie value the client could make up. It is only read:
+        // authenticating through the cookie handler would slide the session's expiry and refresh its tokens on every log post.
+        var session = await ReadSessionAsync(http, tickets, cookies.Get(BffSchemes.Cookie), time);
         var userId = SafeId(session?.FindFirst("sub")?.Value);
         var tenantId = SafeId(session?.FindFirst("tenant")?.Value);
         var partition = userId is null ? $"ip:{http.Connection.RemoteIpAddress}" : $"user:{userId}";
@@ -94,11 +100,30 @@ public static partial class ClientLogEndpoints
 
             var logger = loggers.CreateLogger("Browser");
             var maxLength = options.Value.MaxMessageLength;
+            var maxEntries = options.Value.MaxEntriesPerBatch;
+            int logged = 0, dropped = 0;
             foreach (var entry in batch.RootElement.EnumerateArray())
             {
-                if (entry.ValueKind == JsonValueKind.Object)
+                if (entry.ValueKind != JsonValueKind.Object)
                 {
-                    Write(logger, entry, userId, tenantId, maxLength);
+                    continue;
+                }
+
+                if (logged >= maxEntries)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                Write(logger, entry, userId, tenantId, maxLength);
+                logged++;
+            }
+
+            if (dropped > 0)
+            {
+                using (logger.BeginScope(new Dictionary<string, object?> { ["Source"] = "browser", ["UserId"] = userId, ["TenantId"] = tenantId }))
+                {
+                    logger.LogWarning("{Dropped} client log entries dropped: more than {MaxEntries} in one batch", dropped, maxEntries);
                 }
             }
         }
@@ -108,6 +133,13 @@ public static partial class ClientLogEndpoints
 
     private static void Write(ILogger logger, JsonElement entry, string? userId, string? tenantId, int maxLength)
     {
+        var level = MapLevel(Text(entry, "level"));
+        if (userId is null && level > LogLevel.Warning)
+        {
+            // Without a verified session anybody can post: they cannot raise error events (alerts) on our dashboard.
+            level = LogLevel.Warning;
+        }
+
         var source = Clean(Text(entry, "source"), maxLength) is { Length: > 0 } s ? s : "unknown";
         var message = Clean(Text(entry, "message"), maxLength);
         var properties = new Dictionary<string, object?>
@@ -142,8 +174,29 @@ public static partial class ClientLogEndpoints
 
         using (logger.BeginScope(properties))
         {
-            logger.Log(MapLevel(Text(entry, "level")), "Browser {ClientSource}: {ClientMessage}", source, message);
+            logger.Log(level, "Browser {ClientSource}: {ClientMessage}", source, message);
         }
+    }
+
+    /// <summary>The session behind the cookie, read from Redis without touching it; null when there is none or it has expired.</summary>
+    private static async Task<ClaimsPrincipal?> ReadSessionAsync(
+        HttpContext http, RedisTicketStore tickets, CookieAuthenticationOptions cookie, TimeProvider time)
+    {
+        var value = cookie.CookieManager.GetRequestCookie(http, cookie.Cookie.Name!);
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        // The cookie holds only the session key, in a protected ticket; Unprotect returns null for a forged or damaged value.
+        var key = cookie.TicketDataFormat.Unprotect(value, null)?.Principal.FindFirst(SessionIdClaim)?.Value;
+        if (key is null)
+        {
+            return null;
+        }
+
+        var ticket = await tickets.RetrieveAsync(key, http.RequestAborted);
+        return ticket is null || ticket.Properties.ExpiresUtc is { } expires && expires <= time.GetUtcNow() ? null : ticket.Principal;
     }
 
     private static LogLevel MapLevel(string? level) => level?.ToLowerInvariant() switch

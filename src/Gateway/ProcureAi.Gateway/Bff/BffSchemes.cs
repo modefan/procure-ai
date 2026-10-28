@@ -36,6 +36,13 @@ public static class BffSchemes
             return false;
         }
 
+        // Log posts read the session themselves, read-only: authenticating by cookie here would slide the session's expiry and
+        // refresh its tokens, so background logging would keep an idle session alive.
+        if (request.Path.Equals(ClientLogEndpoints.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         return request.Headers.ContainsKey(ApiKeyHeader)
                || request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
     }

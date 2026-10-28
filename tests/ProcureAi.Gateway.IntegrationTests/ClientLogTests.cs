@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog.Core;
+using StackExchange.Redis;
 using Serilog.Events;
 
 namespace ProcureAi.Gateway.IntegrationTests;
@@ -154,6 +155,9 @@ public sealed class ClientLogTests(KeycloakFixture keycloak, RedisFixture redis)
         }
 
         statuses.ShouldBe([HttpStatusCode.Accepted, HttpStatusCode.Accepted, HttpStatusCode.TooManyRequests]);
+        using var refused = await browser.PostAsync(Path, Json("[]"), Ct);
+        refused.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+        refused.Headers.RetryAfter.ShouldNotBeNull();
         _sink.Browser().Count.ShouldBe(2);
     }
 
@@ -165,6 +169,64 @@ public sealed class ClientLogTests(KeycloakFixture keycloak, RedisFixture redis)
         using var response = await Browser().PostAsync(Path, Json("{not json"), Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Entries_over_the_batch_limit_are_dropped_with_one_warning()
+    {
+        await StartAsync(new() { ["Gateway:ClientLogs:MaxEntriesPerBatch"] = "3" });
+        var entries = string.Join(",", Enumerable.Range(0, 10).Select(i => $$"""{"level":"warn","source":"s","message":"m{{i}}"}"""));
+
+        using var response = await Browser().PostAsync(Path, Json($"[{entries}]"), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        var events = _sink.Browser();
+        events.Count.ShouldBe(4, "3 entries and one warning about the 7 that were dropped");
+        events.Take(3).Select(e => Prop(e, "ClientMessage")).ShouldBe(["m0", "m1", "m2"]);
+        events[3].Level.ShouldBe(LogEventLevel.Warning);
+        events[3].RenderMessage().ShouldContain("7 client log entries dropped");
+    }
+
+    [Fact]
+    public async Task Anonymous_error_entries_are_capped_at_warning()
+    {
+        await StartAsync();
+
+        using var response = await Browser().PostAsync(Path, Json("""[{"level":"error","source":"s","message":"m"}]"""), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        _sink.Browser().ShouldHaveSingleItem().Level.ShouldBe(LogEventLevel.Warning);
+    }
+
+    [Fact]
+    public async Task Logging_does_not_renew_or_refresh_the_session()
+    {
+        await StartAsync();
+        var driver = new LoginDriver(keycloak);
+        _disposables.Add(driver);
+        var browser = Browser();
+        await driver.LoginAsync(browser, "tom@acme.test");
+        var before = SessionTickets();
+        before.Length.ShouldBe(1);
+
+        // Past the access token's lifetime: any authentication through the cookie handler would refresh the tokens and rewrite the ticket.
+        _gateway.Clock.Advance(TimeSpan.FromHours(1));
+        using var response = await browser.PostAsync(Path, Json("""[{"level":"error","source":"s","message":"m"}]"""), Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        response.Headers.Contains("Set-Cookie").ShouldBeFalse();
+        SessionTickets().ShouldBe(before, "the stored session is untouched");
+        var entry = _sink.Browser().ShouldHaveSingleItem();
+        Prop(entry, "UserId").ShouldNotBeEmpty();
+        entry.Level.ShouldBe(LogEventLevel.Error, "a signed-in session may log errors");
+    }
+
+    private string[] SessionTickets()
+    {
+        using var connection = ConnectionMultiplexer.Connect(redis.ConnectionString + ",allowAdmin=true");
+        var server = connection.GetServer(connection.GetEndPoints().First());
+        var db = connection.GetDatabase();
+        return [.. server.Keys(pattern: $"{_gateway.KeyPrefix}session:*").Select(k => Convert.ToBase64String((byte[])db.HashGet(k, "ticket")!))];
     }
 
     [Fact]
