@@ -19,15 +19,31 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
     private const string Image = "quay.io/debezium/server:3.7.0.Final";
     private const int HttpPort = 8080;
     private static readonly TimeSpan StreamingTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan HealthyTimeout = TimeSpan.FromSeconds(120);
 
     private IContainer? _container;
 
-    /// <summary>Starts Debezium for <paramref name="database"/> and returns when its replication slot is active, so no later change is missed.</summary>
+    /// <summary>
+    /// A Docker volume for <c>/debezium/data</c> (the offsets), as the AppHost mounts one when it keeps data. Null: the
+    /// offsets live and die with the container.
+    /// </summary>
+    public string? OffsetsVolume { get; init; }
+
+    /// <summary>
+    /// Starts Debezium for <paramref name="database"/> and returns when its replication slot is active, so no later change is missed.
+    /// Fails (instead of waiting forever) when Debezium does not report healthy within <see cref="HealthyTimeout"/>.
+    /// </summary>
     public async Task StartAsync(string database, params string[] tables)
     {
         var limits = TestLimits.Section("Debezium");
         var slot = "debezium_" + database;
-        _container = new ContainerBuilder(Image)
+        var builder = new ContainerBuilder(Image);
+        if (OffsetsVolume is not null)
+        {
+            builder = builder.WithVolumeMount(OffsetsVolume, "/debezium/data");
+        }
+
+        _container = builder
             .WithNetwork(network)
             .WithBindMount(
                 Path.Combine(PostgresFixture.RepoRoot(), "infra", "debezium", "application.properties"),
@@ -43,17 +59,27 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", RabbitMqBuilder.DefaultPassword)
             .WithPortBinding(HttpPort, true)
             .WithCreateParameterModifier(p => TestLimits.Apply(p, "Debezium"))
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPath("/q/health").ForPort(HttpPort)))
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(
+                r => r.ForPath("/q/health").ForPort(HttpPort), w => w.WithTimeout(HealthyTimeout)))
             .Build();
         await _container.StartAsync();
         await WaitForReplicationSlotAsync(database, slot);
     }
 
+    /// <summary>True once Debezium has flushed an offset to <c>/debezium/data/offsets.dat</c> (it does so every 5 s after a captured change).</summary>
+    public async Task<bool> HasStoredOffsetsAsync()
+    {
+        var result = await _container!.ExecAsync(["sh", "-c", "test -s /debezium/data/offsets.dat"]);
+        return result.ExitCode == 0;
+    }
+
+    /// <summary>Stops and removes the container; a mounted <see cref="OffsetsVolume"/> keeps the offsets.</summary>
     public async ValueTask DisposeAsync()
     {
         if (_container is not null)
         {
             await _container.DisposeAsync();
+            _container = null;
         }
     }
 

@@ -86,6 +86,9 @@ public sealed class InfraFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>A separate Debezium Server on this run's network and Postgres (not started), for tests that control its lifetime.</summary>
+    public DebeziumFixture NewDebezium(string offsetsVolume) => new(_network!, _postgres!) { OffsetsVolume = offsetsVolume };
+
     /// <summary>An empty database (no migrations), for tests with their own model.</summary>
     public Task<string> CreateEmptyDatabaseAsync(string name) => _postgres!.CreateDatabaseAsync(name);
 
