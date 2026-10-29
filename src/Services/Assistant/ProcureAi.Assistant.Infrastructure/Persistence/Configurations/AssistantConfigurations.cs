@@ -145,6 +145,11 @@ internal sealed class PurchaseConfiguration : IEntityTypeConfiguration<Purchase>
         builder.Property(p => p.SubmittedAt).HasColumnName("submitted_at");
         builder.Property(p => p.ApprovedAt).HasColumnName("approved_at");
         builder.Property(p => p.CompletedAt).HasColumnName("completed_at");
+        // xmin changes on every write of the row: two events of one request handled at once cannot overwrite each other.
+        builder.Property(p => p.RowVersion).HasColumnName("xmin").HasColumnType("xid").ValueGeneratedOnAddOrUpdate().IsConcurrencyToken();
+        builder.Ignore(p => p.HasSubmitData);
+        builder.Ignore(p => p.IsIndexable);
+        builder.Ignore(p => p.ApproverIdList);
         builder.HasIndex(p => new { p.TenantId, p.Status });
     }
 }

@@ -30,6 +30,9 @@ public sealed class Chunk
     public const int EmbeddingDimensions = 1536;
 
     public const int SectionMaxLength = 500;
+
+    /// <summary>Between the headings of <see cref="SectionPath"/>: "3 Approvals › 3.2 Thresholds".</summary>
+    public const string SectionSeparator = " › ";
     public const int ModelMaxLength = 100;
     public const int HashLength = 64;
 

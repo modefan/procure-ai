@@ -7,7 +7,7 @@ namespace ProcureAi.Assistant.Application.Ai;
 /// <list type="bullet">
 /// <item><see cref="Answer"/>: the user-facing answer. Pipeline: guardrails (<see cref="IAnswerGuardrail"/>) → function invocation
 /// (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> rounds) → OpenTelemetry → logging → provider.</item>
-/// <item><see cref="Utility"/>: internal prompts (query rewrite, chunk context, guard classifier, invoice scan): OpenTelemetry →
+/// <item><see cref="Utility"/>: internal prompts (query rewrite, chunk context, guard classifier, invoice scan, rerank): OpenTelemetry →
 /// logging → provider. No tools, no guard.</item>
 /// </list>
 /// The system message's first line names the task (<see cref="AiTasks"/>), so traces, logs and the Fake model can tell them apart.
@@ -30,6 +30,7 @@ public static class AiTasks
     public const string Context = "context";
     public const string Classify = "classify";
     public const string Scan = "scan";
+    public const string Rerank = "rerank";
 
     /// <summary>The first line of a system message for <paramref name="task"/>.</summary>
     public static string Line(string task) => $"{Prefix} {task}";

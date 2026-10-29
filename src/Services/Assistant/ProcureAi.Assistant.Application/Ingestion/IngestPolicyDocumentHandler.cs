@@ -65,8 +65,6 @@ public sealed class PolicyIngestion(
     /// <summary>How often a commit that lost a race on the document row (a replace or remove meanwhile) is tried again.</summary>
     private const int CommitAttempts = 3;
 
-    private const string SectionSeparator = " › ";
-
     private sealed record Job(Guid DocumentId, int Version, string TenantId, string Title, string ContentType, byte[] Content, int ProgressStep);
 
     /// <param name="attempt">The delivery attempt, 1 for the first (Wolverine's <see cref="Envelope.Attempts"/>).</param>
@@ -412,7 +410,7 @@ public sealed class PolicyIngestion(
 
     private static string SectionPath(IReadOnlyList<string> path)
     {
-        var text = string.Join(SectionSeparator, path);
+        var text = string.Join(Chunk.SectionSeparator, path);
         return text.Length <= Chunk.SectionMaxLength ? text : text[..(Chunk.SectionMaxLength - 1)] + "…";
     }
 

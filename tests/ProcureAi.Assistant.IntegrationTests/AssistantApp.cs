@@ -8,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.Assistant.Application.Guardrails;
 using OpenTelemetry.Trace;
 using Npgsql;
+using ProcureAi.BuildingBlocks.Messaging;
+using Wolverine;
 
 namespace ProcureAi.Assistant.IntegrationTests;
 
@@ -33,7 +35,7 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 
 /// <summary>
 /// The real Assistant API on a test server, against the shared infrastructure and the stub Access, on the Fake provider. Ingestion runs
-/// in batches of 4 chunks and retries a provider failure after 0.2 s; the embedding generator is wrapped by <paramref name="embeddings"/>
+/// in batches of 4 chunks and retries a provider failure after 0.2 s, a completed request without its submit data after 1 s; the embedding generator is wrapped by <paramref name="embeddings"/>
 /// and the document guard is <see cref="MarkerPromptShield"/>.
 /// </summary>
 public sealed class AssistantApiFactory(
@@ -53,6 +55,8 @@ public sealed class AssistantApiFactory(
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
         builder.UseSetting("Assistant:Ingestion:BatchSize", "4");
         builder.UseSetting("Assistant:Ingestion:RetryDelays", "00:00:00.200, 00:00:00.200, 00:00:00.200");
+        // A completion that arrives before its submit data is retried three times, a second apart (past purchases).
+        builder.UseSetting("Assistant:Purchases:RetryDelays", "00:00:01, 00:00:01, 00:00:01");
 
         builder.ConfigureTestServices(services =>
         {
@@ -78,6 +82,19 @@ public sealed class AssistantApp : IAsyncLifetime
     public HttpClient Client { get; private set; } = null!;
 
     public IServiceProvider Services => _factory.Services;
+
+    public IMessageBus Bus => _factory.Services.GetRequiredService<IMessageBus>();
+
+    public RabbitProbe Probe => new(Infra.RabbitConnectionString);
+
+    /// <summary>Publishes to an exchange through the broker, as another service would, with the tenant and user in the headers.</summary>
+    public Task PublishAsync(object message, string exchange, string tenant, string user = "tom") =>
+        Bus.EndpointFor(new Uri($"rabbitmq://exchange/{exchange}"))
+            .SendAsync(message, new DeliveryOptions().WithHeader(CallerHeaders.TenantId, tenant).WithHeader(CallerHeaders.UserId, user))
+            .AsTask();
+
+    /// <summary>Rows of the dead-letter table plus messages in the broker's dead-letter queue.</summary>
+    public Task<long> DeadLetterCountAsync() => DeadLetters.CountAsync(Infra.DbConnectionString, Infra.RabbitConnectionString);
 
     /// <summary>The spans the service's tracer provider exported (OpenTelemetry in-memory exporter; lock it to read).</summary>
     public List<Activity> ExportedActivities { get; } = [];

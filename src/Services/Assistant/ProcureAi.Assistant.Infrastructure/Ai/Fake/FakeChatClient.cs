@@ -16,7 +16,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 /// "policy doesn't cover this" sentence.</item>
 /// <item><c>rewrite</c>: the last user message as the standalone question; <c>context</c>: its first sentence;
 /// <c>classify</c>: <c>{"flagged":...,"reason":...}</c> from a list of known injection phrases; <c>scan</c>: <c>{}</c> (the invoice reader
-/// comes with plan 05 Task 6).</item>
+/// comes with plan 05 Task 6); <c>rerank</c>: the candidates' numbers in the order given (the fusion order is kept).</item>
 /// </list>
 /// Streaming sends the text word by word with <c>AI:Fake:StreamDelayMs</c> between words. Usage counts words as tokens.
 /// </summary>
@@ -114,6 +114,7 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
             AiTasks.Context => new FakeReply(FirstSentence(lastUser), null),
             AiTasks.Classify => new FakeReply(Classify(lastUser), null),
             AiTasks.Scan => new FakeReply("{}", null),
+            AiTasks.Rerank => new FakeReply(KeepOrder(lastUser), null),
             _ => Answer(messages, lastUser, options),
         };
     }
@@ -170,6 +171,10 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
         return found.Select(kv => (kv.Key, kv.Value));
     }
 
+    /// <summary>The rerank answer that keeps the order: the numbers of the <c>[n]</c> candidates of the prompt, as they come.</summary>
+    private static string KeepOrder(string prompt) =>
+        string.Join(", ", CandidateMarker().Matches(prompt).Select(m => m.Groups["n"].Value));
+
     private static string Classify(string text)
     {
         var lower = text.ToLowerInvariant();
@@ -223,6 +228,9 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
 
     [GeneratedRegex(@"(?m)^\s*\[S(?<n>\d+)\]")]
     private static partial Regex SourceMarker();
+
+    [GeneratedRegex(@"(?m)^\[(?<n>\d+)\]")]
+    private static partial Regex CandidateMarker();
 
     [GeneratedRegex(@"[.!?](?=\s|$)")]
     private static partial Regex SentenceEnd();

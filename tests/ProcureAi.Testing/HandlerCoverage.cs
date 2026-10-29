@@ -35,6 +35,26 @@ public static class HandlerCoverage
             throw new InvalidOperationException($"No integration events found in {string.Join(", ", contractNamespaces)}: wrong namespace?");
         }
 
+        AssertHandled(handlers, events);
+    }
+
+    /// <summary>
+    /// Fails, listing the missing types, unless each of <paramref name="events"/> has a handler method in <paramref name="handlers"/> (the
+    /// same rules as <see cref="AssertEveryEventHandled"/>). For a service that needs only some events of an exchange and lets the rest
+    /// be discarded as "no handler" (the Assistant's past purchases).
+    /// </summary>
+    public static void AssertEventsHandled(Assembly handlers, params Type[] events)
+    {
+        if (events.Length == 0)
+        {
+            throw new ArgumentException("Name at least one event type.", nameof(events));
+        }
+
+        AssertHandled(handlers, events);
+    }
+
+    private static void AssertHandled(Assembly handlers, IEnumerable<Type> events)
+    {
         var handled = handlers.GetTypes()
             .Where(t => t.IsPublic && (t.Name.EndsWith("Handler", StringComparison.Ordinal) || IsSaga(t)))
             .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))

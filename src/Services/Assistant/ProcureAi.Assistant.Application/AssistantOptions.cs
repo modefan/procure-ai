@@ -1,10 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Options;
 using ProcureAi.Assistant.Application.Ingestion;
+using ProcureAi.Assistant.Application.Retrieval;
+using ProcureAi.Assistant.Application.Retrieval.PastPurchases;
 
 namespace ProcureAi.Assistant.Application;
 
-/// <summary>The <c>Assistant</c> section: the service's own limits (plan 05 rulings 7, 8 and 12). Later tasks add retrieval.</summary>
+/// <summary>The <c>Assistant</c> section: the service's own limits (plan 05 rulings 7, 8, 9 and 12).</summary>
 public sealed class AssistantOptions
 {
     public const string SectionName = "Assistant";
@@ -26,6 +28,14 @@ public sealed class AssistantOptions
     /// <summary>What may be uploaded (<c>Assistant:Uploads</c>).</summary>
     [Required, ValidateObjectMembers]
     public UploadOptions Uploads { get; set; } = new();
+
+    /// <summary>How hybrid search finds sources (<c>Assistant:Retrieval</c>).</summary>
+    [Required, ValidateObjectMembers]
+    public RetrievalOptions Retrieval { get; set; } = new();
+
+    /// <summary>How past purchases are kept and indexed (<c>Assistant:Purchases</c>).</summary>
+    [Required, ValidateObjectMembers]
+    public PastPurchasesOptions Purchases { get; set; } = new();
 }
 
 /// <summary>The ingestion job of a policy document version (<see cref="Ingestion.IngestPolicyDocument"/>).</summary>
@@ -69,7 +79,8 @@ public sealed class IngestionOptions : IValidatableObject
         }
     }
 
-    private static bool TryParseDelays(string? text, out TimeSpan[] delays)
+    /// <summary>Parses 1 to 10 comma-separated waits (<c>hh:mm:ss</c>), each more than 0 and at most 1 hour.</summary>
+    internal static bool TryParseDelays(string? text, out TimeSpan[] delays)
     {
         delays = [];
         var parts = (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
