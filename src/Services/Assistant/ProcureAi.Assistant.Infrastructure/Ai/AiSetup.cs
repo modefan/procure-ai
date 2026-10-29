@@ -29,8 +29,8 @@ public static class AiSetup
     /// <see cref="IAnswerGuardrail"/>) → default limits (<c>AI:Chat:MaxOutputTokens</c>) →
     /// function invocation (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> rounds) → OpenTelemetry (<see cref="AiClients.TelemetrySource"/>;
     /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → logging (one content-free line per call; the
-    /// message log only with LogContent) → provider;</item>
-    /// <item><c>utility</c>: default limits → OpenTelemetry → logging → provider;</item>
+    /// message log only with LogContent) → provider timeout (<c>AI:Chat:Timeout</c>, <see cref="ProviderTimeoutChatClient"/>) → provider;</item>
+    /// <item><c>utility</c>: default limits → OpenTelemetry → logging → provider timeout → provider;</item>
     /// <item><c>guard</c>: the same stages as <c>utility</c> on the classifier model (<c>AI:Guard:Model</c>; by default the chat model, and
     /// then the same provider client);</item>
     /// <item>the embedding generator: OpenTelemetry → logging → provider, at <c>AI:Embedding:Dimensions</c> (1536).</item>
@@ -58,17 +58,20 @@ public static class AiSetup
                 MaximumIterationsPerRequest = sp.GetRequiredService<IOptions<AssistantOptions>>().Value.Tools.MaxCallsPerQuestion,
             })
             .Use(Traced)
-            .Use(Logged);
+            .Use(Logged)
+            .Use(Timed);
 
         services.AddKeyedChatClient(AiClients.Utility, sp => sp.GetRequiredService<ProviderClients>().Chat)
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use(Traced)
-            .Use(Logged);
+            .Use(Logged)
+            .Use(Timed);
 
         services.AddKeyedChatClient(AiClients.Guard, sp => sp.GetRequiredService<ProviderClients>().Guard)
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use(Traced)
-            .Use(Logged);
+            .Use(Logged)
+            .Use(Timed);
 
         AddGuards(services);
 
@@ -102,6 +105,9 @@ public static class AiSetup
 
     private static IChatClient WithDefaultLimits(IChatClient inner, AiOptions ai) =>
         new ConfigureOptionsChatClient(inner, options => options.MaxOutputTokens ??= ai.Chat.MaxOutputTokens);
+
+    /// <summary>The innermost stage: a provider that stops answering fails after <c>AI:Chat:Timeout</c> (<see cref="ProviderTimeoutChatClient"/>).</summary>
+    private static IChatClient Timed(IChatClient inner, IServiceProvider services) => new ProviderTimeoutChatClient(inner, Ai(services).Chat.Timeout);
 
     private static IChatClient Traced(IChatClient inner, IServiceProvider services) =>
         new OpenTelemetryChatClient(inner, LoggerFor<OpenTelemetryChatClient>(services), AiClients.TelemetrySource)

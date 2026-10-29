@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.Assistant.Application.Guardrails;
+using ProcureAi.Assistant.Infrastructure.Ai;
 using OpenTelemetry.Trace;
 using Npgsql;
 using ProcureAi.BuildingBlocks.Messaging;
@@ -39,7 +40,7 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 /// and the real prompt guard is wrapped by <see cref="MarkerPromptShield"/>.
 /// </summary>
 public sealed class AssistantApiFactory(
-    AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings)
+    AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings, ChatScript script)
     : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -52,6 +53,8 @@ public sealed class AssistantApiFactory(
 
         builder.UseSetting($"ConnectionStrings:{AssistantInfraFixture.ChatDatabase}", infra.ChatConnectionString);
         builder.UseSetting("AI:Fake:StreamDelayMs", "0");
+        // A provider that stops answering fails the call after 2 s without an update (the scripted "hangs" question).
+        builder.UseSetting("AI:Chat:Timeout", "00:00:02");
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
         builder.UseSetting("Assistant:Ingestion:BatchSize", "4");
         builder.UseSetting("Assistant:Ingestion:RetryDelays", "00:00:00.200, 00:00:00.200, 00:00:00.200");
@@ -65,6 +68,8 @@ public sealed class AssistantApiFactory(
             services.AddOpenTelemetry().WithTracing(tracing => tracing.AddInMemoryExporter(exportedActivities));
             services.Decorate<IEmbeddingGenerator<string, Embedding<float>>>((inner, _) => new ProbeEmbeddingGenerator(inner, embeddings));
             services.Decorate<IPromptShield>((inner, _) => new MarkerPromptShield(inner));
+            // The provider's chat model is recorded and can be steered per question (ChatScript); the guard classifier stays the plain Fake.
+            services.Decorate<ProviderClients>((inner, _) => new ProviderClients(new ScriptedChatClient(inner.Chat, script), inner.Embeddings, inner.Guard));
         });
     }
 }
@@ -98,6 +103,9 @@ public sealed class AssistantApp : IAsyncLifetime
     /// <summary>The spans the service's tracer provider exported (OpenTelemetry in-memory exporter; lock it to read).</summary>
     public List<Activity> ExportedActivities { get; } = [];
 
+    /// <summary>Every chat call that reached the provider, and the per-question steering of the Fake (see <see cref="ChatScript"/>).</summary>
+    public ChatScript Script { get; } = new();
+
     /// <summary>Every embedding call of the service (see <see cref="EmbeddingProbe"/>).</summary>
     public EmbeddingProbe Embeddings { get; } = new();
 
@@ -105,7 +113,7 @@ public sealed class AssistantApp : IAsyncLifetime
     {
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
-        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities, Embeddings);
+        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities, Embeddings, Script);
         Client = _factory.CreateClient();
     }
 

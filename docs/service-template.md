@@ -157,6 +157,33 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
   `wolverine_incoming_envelopes` (Wolverine's EF `IncomingMessage`, status Incoming, owner 0, destination `local://assistant-ingestion`)
   in the same `SaveChanges` as the document; the running api's durability agent recovers and ingests it.
 
+### The Assistant: conversations and the answer stream
+
+- API `api/v1/assistant` (`assistant.use`, tenant; the owner is `ICallerContext.UserId`, so the admin key acts for `X-On-Behalf-Of-User`):
+  `GET conversations` (newest 20), `POST conversations` (`[Idempotent]`, 201 `{ id }`), `GET`/`DELETE conversations/{id}`, `GET quota`
+  (`{ used, limit }`), and `POST conversations/{id}/messages` `{ text (1–2000), mode: new | regenerate | edit }` → `text/event-stream`.
+  Admin (`admin.system`, ruling 18): `GET admin/conversations?userId&page&pageSize`, `GET admin/conversations/{id}` (also guard flags and
+  timings). Another user's or tenant's conversation is a 404, the same as an unknown ID. GETs are cached 1 s under the tags of
+  `ConversationCacheTag` (conversation, tenant list, tenant quota), all dropped on every change.
+- Storage: one MongoDB document per conversation in `assistantchatdb.conversations` (`ConversationDocument`, messages embedded, string IDs,
+  UTC dates), through `TenantCollection<T>`; the owner filter is added by `MongoConversationStore`. Index `(TenantId, UserId, UpdatedAt desc)`
+  (`ConversationIndexMigration`, run by `--migrate`). At most `Conversation.MaxMessages` (200) messages.
+- The stream (`AnswerStreamer`, ruling 6): a controller action returning `TypedResults.ServerSentEvents` (no `[Idempotent]`, no `[CachedGet]`:
+  both buffer). Before the stream: 404, 422 (nothing to regenerate or edit, or the conversation is full), 409 (the per-conversation Redis lock
+  `assistant:answer:{tenant}:{id}`, a DistributedLock lease of `Assistant:Answer:LockLease` 30 s, extended while held), 429 (the quota,
+  `Retry-After`), 400 (validation). Then: rewrite a follow-up with the last `Assistant:Answer:HistoryMessages` (6) messages (`utility`,
+  `#task: rewrite`), hybrid search (top `Assistant:Retrieval:TopK`), `sources`, the answer (`PromptBuilder`: sources in `<data>` blocks in the
+  system message, history next, the user's own question last), `delta`s, the grounding rule (`replace` with `AnswerStreamer.NotGroundedText`),
+  save, `done`. Failures after the start are an `error` event: 422 guard, 503 provider unavailable or timed out, 500 anything else. The answer
+  is saved and the lock released in the iterator's `finally` (also registered for the end of the request), so a client that leaves gets its
+  partial text saved as `Stopped` (up to `HoldBackChars` of held-back text is lost, ruling of Task 4). Event names and data: `SseEvent`.
+- Quota (ruling 7): `RedisQuestionQuota`, a Lua check-and-increment per tenant, user and calendar day of `Assistant:Quota:TimeZone`
+  (Africa/Johannesburg) on the injected `TimeProvider`; a question counts when its answer starts (also when a guard blocks it).
+- Provider timeout: every chat pipeline ends in `ProviderTimeoutChatClient` (innermost): a call may take `AI:Chat:Timeout` in all, a stream
+  may wait that long for each next update, then a `TimeoutException` (transient).
+- Gateway: the `assistant` cluster has `HttpRequest { ActivityTimeout 00:05:00, AllowResponseBuffering false }`, so long streams are not cut
+  off and events are flushed as written (`Assistant_stream_is_not_buffered`).
+
 ## A service without a database (Notifications)
 
 For a service that holds no business data of its own (Notifications: live pushes, presence, bell items in Redis). Plan 04 ruling 1.

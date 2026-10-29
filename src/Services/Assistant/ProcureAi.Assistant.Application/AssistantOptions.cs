@@ -18,6 +18,10 @@ public sealed class AssistantOptions
     [Required, ValidateObjectMembers]
     public QuotaOptions Quota { get; set; } = new();
 
+    /// <summary>How an answer is streamed (<c>Assistant:Answer</c>).</summary>
+    [Required, ValidateObjectMembers]
+    public AnswerOptions Answer { get; set; } = new();
+
     /// <summary>How documents are cut into chunks (<c>Assistant:Chunking</c>).</summary>
     [Required, ValidateObjectMembers]
     public ChunkingOptions Chunking { get; set; } = new();
@@ -126,9 +130,42 @@ public sealed class ToolOptions
     public int MaxCallsPerQuestion { get; set; } = 5;
 }
 
-public sealed class QuotaOptions
+public sealed class QuotaOptions : IValidatableObject
 {
+    public const string SectionPath = AssistantOptions.SectionName + ":Quota";
+
     /// <summary>Questions per user per South African calendar day (ruling 7).</summary>
     [Range(1, 10_000)]
     public int QuestionsPerDay { get; set; } = 50;
+
+    /// <summary>The time zone whose calendar day the quota counts (an IANA id).</summary>
+    [Required]
+    public string TimeZone { get; set; } = "Africa/Johannesburg";
+
+    /// <summary>The configured time zone, or null when the id is unknown (startup validation reports that).</summary>
+    public TimeZoneInfo? FindTimeZone() =>
+        TimeZoneInfo.TryFindSystemTimeZoneById(TimeZone, out var zone) ? zone : null;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (FindTimeZone() is null)
+        {
+            yield return new ValidationResult($"'{SectionPath}:{nameof(TimeZone)}' is not a known time zone.", [nameof(TimeZone)]);
+        }
+    }
+}
+
+/// <summary>The <c>Assistant:Answer</c> section: one streamed answer (plan 05 Task 5a).</summary>
+public sealed class AnswerOptions
+{
+    /// <summary>
+    /// The lease of the per-conversation answer lock (ruling 6). The holder extends it while the answer streams; a process that dies leaves
+    /// the lock for at most this long.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:05", "00:10:00")]
+    public TimeSpan LockLease { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>How many earlier messages a follow-up is rewritten with and the answer model sees.</summary>
+    [Range(0, 50)]
+    public int HistoryMessages { get; set; } = 6;
 }

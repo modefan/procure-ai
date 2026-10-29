@@ -1,0 +1,400 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ProcureAi.Assistant.Application.Ai;
+using ProcureAi.Assistant.Application.Guardrails;
+using ProcureAi.Assistant.Application.Retrieval;
+using ProcureAi.Assistant.Application.Telemetry;
+using ProcureAi.Assistant.Domain;
+using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Caching;
+
+namespace ProcureAi.Assistant.Application.Chat;
+
+/// <summary>
+/// Answers a question in a conversation of the caller as a stream of <see cref="SseEvent"/>s (plan 05 Task 5a, rulings 6 to 10).
+/// <see cref="StartAsync"/> does everything that can still be a plain HTTP answer: the conversation (404, also for another user's or
+/// tenant's), the mode (422), the per-conversation lock (409), the daily quota (429, counted here), then the question is stored. The stream
+/// then rewrites a follow-up with the history (<see cref="QueryRewriter"/>), searches (<see cref="IHybridSearch"/>, top
+/// <c>Assistant:Retrieval:TopK</c>) and sends <c>sources</c>, streams the <c>answer</c> client's text as <c>delta</c>s, runs the grounding rule
+/// (an answer that cites nothing is replaced: <c>replace</c>), saves the answer and sends <c>done</c>. Failures after the response started
+/// are an <c>error</c> event: 422 when a guard blocked (<see cref="GuardBlockedException"/>), 503 when the provider failed or timed out.
+/// <para>
+/// The request's cancellation token reaches every model call; when the client leaves, what was streamed is saved as
+/// <see cref="MessageStatus.Stopped"/>. The answer is saved and the lock released in a <c>finally</c>, so neither depends on how the stream
+/// ended. One log line per answer carries IDs, model, tokens, duration, outcome and guard flags, never text.
+/// </para>
+/// </summary>
+public sealed class AnswerStreamer(
+    IConversationStore store,
+    IAnswerLock locks,
+    IQuestionQuota quota,
+    IHybridSearch search,
+    QueryRewriter rewriter,
+    [FromKeyedServices(AiClients.Answer)] IChatClient answerClient,
+    ICallerContext caller,
+    ICacheInvalidator cache,
+    IAiFailures failures,
+    AssistantMetrics metrics,
+    IOptions<AssistantOptions> options,
+    IOptions<AiOptions> ai,
+    TimeProvider time,
+    ILogger<AnswerStreamer> logger)
+{
+    public const string NotFoundTitle = "The conversation was not found.";
+    public const string BusyTitle = "An answer is already being written in this conversation.";
+    public const string GuardTitle = "I can't help with that";
+    public const string UnavailableTitle = "The assistant is unavailable right now.";
+    public const string FailedTitle = "The assistant could not answer.";
+
+    /// <summary>What replaces an answer that cites none of its sources (ruling 10).</summary>
+    public const string NotGroundedText =
+        "I couldn't find this in the procurement policy or past purchases, so I can't answer it reliably. Ask your manager or finance.";
+
+    /// <summary>How long saving an answer may take after the client left.</summary>
+    private static readonly TimeSpan SaveTimeout = TimeSpan.FromSeconds(10);
+
+    public static string QuotaTitle(int limit) => $"You've used all {limit} questions for today.";
+
+    public async Task<AnswerStart> StartAsync(AskQuestion command, CancellationToken cancellationToken)
+    {
+        var tenant = caller.TenantId ?? throw new ForbiddenException("Asking needs a tenant.");
+        var owner = caller.UserId;
+        if (await RefusalAsync(command, owner, cancellationToken) is { } early)
+        {
+            return early;
+        }
+
+        var held = await locks.TryAcquireAsync(tenant, command.ConversationId, cancellationToken);
+        if (held is null)
+        {
+            return new AnswerStart.Refused(409, BusyTitle, "Wait for it to finish, or stop it, and ask again.");
+        }
+
+        try
+        {
+            // Read again under the lock: an answer that just ended may have changed it.
+            var conversation = await store.FindAsync(command.ConversationId, owner, cancellationToken);
+            if (conversation is null)
+            {
+                await held.DisposeAsync();
+                return new AnswerStart.Refused(404, NotFoundTitle);
+            }
+
+            if (conversation.CannotAsk(command.Mode) is { } reason)
+            {
+                await held.DisposeAsync();
+                return new AnswerStart.Refused(422, reason);
+            }
+
+            var count = await quota.TryCountAsync(tenant, owner, cancellationToken);
+            if (!count.Allowed)
+            {
+                await held.DisposeAsync();
+                metrics.Question("over_quota");
+                var wait = count.ResetsAt - time.GetUtcNow();
+                return new AnswerStart.Refused(429, QuotaTitle(count.Limit), "The count starts again at midnight.", wait > TimeSpan.Zero ? wait : TimeSpan.Zero);
+            }
+
+            var now = time.GetUtcNow();
+            var question = command.Mode switch
+            {
+                AskMode.Regenerate => conversation.Regenerate(now),
+                AskMode.Edit => conversation.EditLastQuestion(Guid.CreateVersion7(), command.Text, now),
+                _ => conversation.Ask(Guid.CreateVersion7(), command.Text, now),
+            };
+            await store.SaveAsync(conversation, cancellationToken);
+            await InvalidateAsync(conversation.Id);
+            return new AnswerStart.Streaming(StreamAsync(conversation, question, held, cancellationToken), held);
+        }
+        catch
+        {
+            await held.DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task<AnswerStart.Refused?> RefusalAsync(AskQuestion command, string owner, CancellationToken cancellationToken)
+    {
+        var conversation = await store.FindAsync(command.ConversationId, owner, cancellationToken);
+        return conversation is null ? new AnswerStart.Refused(404, NotFoundTitle)
+            : conversation.CannotAsk(command.Mode) is { } reason ? new AnswerStart.Refused(422, reason)
+            : null;
+    }
+
+    private async IAsyncEnumerable<SseEvent> StreamAsync(
+        Conversation conversation, Message question, IAsyncDisposable held, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var answer = new AnswerState(Guid.CreateVersion7(), Stopwatch.GetTimestamp(), ai.Value.EffectiveChatModel);
+        try
+        {
+            var history = conversation.HistoryBeforeLastQuestion(options.Value.Answer.HistoryMessages);
+
+            // 1. Retrieval: a follow-up is rewritten with the history first.
+            var (hits, failure) = await TryAsync(async () =>
+            {
+                var query = await rewriter.RewriteAsync(history, question.Text, cancellationToken);
+                return await search.SearchAsync(new SearchRequest(query, SearchRequest.AllTypes, options.Value.Retrieval.TopK), cancellationToken);
+            });
+            if (failure is not null)
+            {
+                if (await FailAsync(answer, conversation, failure, cancellationToken) is { } error)
+                {
+                    yield return error;
+                }
+
+                yield break;
+            }
+
+            answer.Sources = [.. hits!.Select((hit, i) => new SourceRef($"S{i + 1}", hit.ChunkId, hit.Type, hit.Title, hit.SectionPath, hit.Reference))];
+            yield return SseEvent.OfSources(answer.Sources);
+
+            // 2. The answer, streamed.
+            var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
+            var chatOptions = new ChatOptions
+            {
+                // Our conversation ID for the guard's log only; never ChatOptions.ConversationId (a provider-side conversation).
+                AdditionalProperties = new AdditionalPropertiesDictionary { [GuardrailChatClient.ConversationIdProperty] = conversation.Id.ToString() },
+            };
+            await using (var updates = answerClient.GetStreamingResponseAsync(prompt, chatOptions, cancellationToken).GetAsyncEnumerator(cancellationToken))
+            {
+                while (true)
+                {
+                    var (more, streamFailure) = await TryAsync(async () => await updates.MoveNextAsync());
+                    if (streamFailure is not null)
+                    {
+                        if (await FailAsync(answer, conversation, streamFailure, cancellationToken) is { } error)
+                        {
+                            yield return error;
+                        }
+
+                        yield break;
+                    }
+
+                    if (!more)
+                    {
+                        break;
+                    }
+
+                    foreach (var item in answer.Take(updates.Current))
+                    {
+                        if (item.Name == SseEvent.Delta && answer.FirstTokenTicks is null)
+                        {
+                            answer.FirstTokenTicks = Stopwatch.GetTimestamp();
+                            metrics.FirstToken(Stopwatch.GetElapsedTime(answer.StartTicks));
+                        }
+
+                        yield return item;
+                    }
+                }
+            }
+
+            // 3. The grounding rule (ruling 10): an answer that cites none of its sources and used no tool is replaced.
+            answer.Status = MessageStatus.Complete;
+            if (!OutputGuard.IsGrounded(answer.Text.ToString(), answer.Sources.Count, answer.ToolSteps.Count(s => s.Ok)))
+            {
+                answer.Text.Clear().Append(NotGroundedText);
+                answer.GuardFlags.Add($"{GuardBlockedException.OutputStage}:{GuardReasons.Ungrounded}");
+                metrics.GuardBlock(GuardBlockedException.OutputStage, GuardReasons.Ungrounded);
+                yield return SseEvent.OfReplace(NotGroundedText);
+            }
+
+            await SaveAsync(answer, conversation);
+            yield return SseEvent.OfDone(answer.Id, answer.Usage, answer.Model);
+        }
+        finally
+        {
+            // The client left (the stream was disposed while suspended) or anything else ended it early: what was streamed is kept.
+            if (!answer.Saved)
+            {
+                answer.Status ??= MessageStatus.Stopped;
+                await SaveAsync(answer, conversation);
+            }
+
+            await held.DisposeAsync();
+        }
+    }
+
+    /// <summary>Saves the failure and returns the event to send, or null when the client left (nothing can be sent).</summary>
+    private async Task<SseEvent?> FailAsync(AnswerState answer, Conversation conversation, Exception failure, CancellationToken cancellationToken)
+    {
+        SseEvent? error;
+        switch (failure)
+        {
+            case OperationCanceledException when cancellationToken.IsCancellationRequested:
+                answer.Status = MessageStatus.Stopped;
+                error = null;
+                break;
+            case GuardBlockedException blocked:
+                answer.Status = MessageStatus.Blocked;
+                answer.GuardFlags.Add($"{blocked.Stage}:{blocked.Reason}");
+                if (blocked.Stage == GuardBlockedException.InputStage)
+                {
+                    answer.Text.Clear();
+                }
+
+                error = SseEvent.OfError(422, GuardTitle, GuardReasons.Describe(blocked.Reason));
+                break;
+            case var _ when IsUnavailable(failure):
+                answer.Status = MessageStatus.Failed;
+                logger.LogWarning(failure, "The model provider failed during an answer in conversation {ConversationId}", conversation.Id);
+                error = SseEvent.OfError(503, UnavailableTitle, "Try again in a moment.");
+                break;
+            default:
+                answer.Status = MessageStatus.Failed;
+                logger.LogError(failure, "An answer failed unexpectedly in conversation {ConversationId}", conversation.Id);
+                error = SseEvent.OfError(500, FailedTitle, "Try again; if it keeps happening, tell an administrator.");
+                break;
+        }
+
+        await SaveAsync(answer, conversation);
+        return error;
+    }
+
+    /// <summary>A provider failure that may pass (unreachable, 429/5xx, a timeout).</summary>
+    private bool IsUnavailable(Exception failure) =>
+        failure is TimeoutException or OperationCanceledException || failures.IsTransient(failure);
+
+    private async Task SaveAsync(AnswerState answer, Conversation conversation)
+    {
+        answer.Saved = true;
+        var status = answer.Status ?? MessageStatus.Stopped;
+        var latency = (long)Stopwatch.GetElapsedTime(answer.StartTicks).TotalMilliseconds;
+        long? firstToken = answer.FirstTokenTicks is { } first ? (long)Stopwatch.GetElapsedTime(answer.StartTicks, first).TotalMilliseconds : null;
+        var outcome = status switch
+        {
+            MessageStatus.Complete => "answered",
+            MessageStatus.Blocked => "blocked",
+            MessageStatus.Stopped => "stopped",
+            _ => "failed",
+        };
+
+        metrics.Question(outcome);
+        metrics.ChatUsage(answer.Model, conversation.TenantId, answer.Usage.Input, answer.Usage.Output, ai.Value.EffectivePrices);
+        logger.LogInformation(
+            "Answer {Outcome} in conversation {ConversationId} for user {UserId} of tenant {TenantId}: model {Model}, {InputTokens} input and"
+            + " {OutputTokens} output tokens, {DurationMs} ms, guard flags {GuardFlags}",
+            outcome, conversation.Id, conversation.UserId, conversation.TenantId, answer.Model, answer.Usage.Input, answer.Usage.Output, latency,
+            answer.GuardFlags.Count == 0 ? "none" : string.Join(',', answer.GuardFlags));
+
+        // Saved even when the client left, so a reload shows what was streamed.
+        using var timeout = new CancellationTokenSource(SaveTimeout);
+        try
+        {
+            conversation.Answer(
+                new Message(
+                    answer.Id, MessageRole.Assistant, answer.Text.ToString(), status, time.GetUtcNow(), answer.Sources, answer.ToolSteps,
+                    answer.Usage, answer.Model, answer.GuardFlags, latency, firstToken),
+                time.GetUtcNow());
+            if (!await store.SaveAsync(conversation, timeout.Token))
+            {
+                logger.LogInformation("Conversation {ConversationId} was deleted while it was answered; the answer is dropped", conversation.Id);
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "The answer in conversation {ConversationId} could not be saved", conversation.Id);
+        }
+
+        await InvalidateAsync(conversation.Id);
+    }
+
+    private async Task InvalidateAsync(Guid conversationId)
+    {
+        try
+        {
+            await cache.RemoveByTagAsync(ConversationCacheTag.Of(caller.TenantId, conversationId), CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Cache invalidation failed for conversation {ConversationId}; cached reads expire on their own", conversationId);
+        }
+    }
+
+    /// <summary>Runs <paramref name="step"/> and returns its result or its exception (an iterator cannot yield inside a try with a catch).</summary>
+    private static async Task<(T? Result, Exception? Failure)> TryAsync<T>(Func<Task<T>> step)
+    {
+        try
+        {
+            return (await step(), null);
+        }
+        catch (Exception exception)
+        {
+            return (default, exception);
+        }
+    }
+
+    /// <summary>What one answer has gathered so far.</summary>
+    private sealed class AnswerState(Guid id, long startTicks, string model)
+    {
+        public Guid Id { get; } = id;
+
+        public long StartTicks { get; } = startTicks;
+
+        public long? FirstTokenTicks { get; set; }
+
+        public string Model { get; private set; } = model;
+
+        public StringBuilder Text { get; } = new();
+
+        public IReadOnlyList<SourceRef> Sources { get; set; } = [];
+
+        public List<ToolStep> ToolSteps { get; } = [];
+
+        public List<string> GuardFlags { get; } = [];
+
+        public TokenUsage Usage { get; private set; } = TokenUsage.None;
+
+        public MessageStatus? Status { get; set; }
+
+        public bool Saved { get; set; }
+
+        private readonly Dictionary<string, (FunctionCallContent Call, long StartTicks)> _openCalls = new(StringComparer.Ordinal);
+
+        /// <summary>The events of one model update; the text, usage, model and tool steps are recorded.</summary>
+        public IEnumerable<SseEvent> Take(ChatResponseUpdate update)
+        {
+            if (!string.IsNullOrEmpty(update.ModelId))
+            {
+                Model = update.ModelId;
+            }
+
+            var events = new List<SseEvent>();
+            foreach (var content in update.Contents)
+            {
+                switch (content)
+                {
+                    case TextContent { Text.Length: > 0 } text:
+                        Text.Append(text.Text);
+                        events.Add(SseEvent.OfDelta(text.Text));
+                        break;
+                    case UsageContent usage:
+                        Usage = new TokenUsage(
+                            Usage.Input + (usage.Details.InputTokenCount ?? 0), Usage.Output + (usage.Details.OutputTokenCount ?? 0));
+                        break;
+                    case FunctionCallContent call:
+                        _openCalls[call.CallId] = (call, Stopwatch.GetTimestamp());
+                        events.Add(SseEvent.OfToolCall(call.CallId, call.Name, JsonSerializer.SerializeToElement(call.Arguments ?? new Dictionary<string, object?>())));
+                        break;
+                    case FunctionResultContent result:
+                        var (name, arguments, started) = _openCalls.Remove(result.CallId, out var open)
+                            ? (open.Call.Name, JsonSerializer.Serialize(open.Call.Arguments ?? new Dictionary<string, object?>()), open.StartTicks)
+                            : ("unknown", "{}", Stopwatch.GetTimestamp());
+                        var step = new ToolStep(
+                            result.CallId, name, arguments, result.Exception is null, result.Exception is null ? "Done." : "The tool failed.",
+                            (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                        ToolSteps.Add(step);
+                        events.Add(SseEvent.OfToolResult(step));
+                        break;
+                }
+            }
+
+            return events;
+        }
+    }
+}

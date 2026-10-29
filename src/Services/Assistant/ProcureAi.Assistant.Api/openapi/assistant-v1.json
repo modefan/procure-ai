@@ -6,6 +6,123 @@
     "version": "1.0"
   },
   "paths": {
+    "/api/v1/assistant/admin/conversations": {
+      "get": {
+        "tags": [
+          "AdminConversations"
+        ],
+        "operationId": "AdminListConversations",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfAdminConversationListItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assistant/admin/conversations/{id}": {
+      "get": {
+        "tags": [
+          "AdminConversations"
+        ],
+        "operationId": "AdminGetConversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminConversationDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assistant/info": {
       "get": {
         "tags": [
@@ -19,6 +136,272 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AssistantInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assistant/conversations": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "operationId": "ListConversations",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationListItem"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "operationId": "CreateConversation",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value per submission (e.g. a GUID). Repeating it replays the first result.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedConversation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assistant/conversations/{id}": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "operationId": "GetConversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "operationId": "DeleteConversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assistant/quota": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "operationId": "GetAssistantQuota",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assistant/conversations/{id}/messages": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "operationId": "AskQuestion",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskQuestionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskQuestionRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -573,6 +956,182 @@
   },
   "components": {
     "schemas": {
+      "AdminConversationDto": {
+        "required": [
+          "id",
+          "userId",
+          "title",
+          "createdAt",
+          "updatedAt",
+          "messages"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminMessageDto"
+            }
+          }
+        }
+      },
+      "AdminConversationListItem": {
+        "required": [
+          "id",
+          "userId",
+          "title",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminMessageDto": {
+        "required": [
+          "id",
+          "role",
+          "text",
+          "status",
+          "createdAt",
+          "sources",
+          "toolSteps",
+          "usage",
+          "model",
+          "guardFlags",
+          "latencyMs",
+          "timeToFirstTokenMs"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "text": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceDto"
+            }
+          },
+          "toolSteps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolStepDto"
+            }
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageDto"
+          },
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "guardFlags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "latencyMs": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int64"
+          },
+          "timeToFirstTokenMs": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "AskMode": {
+        "enum": [
+          "New",
+          "Regenerate",
+          "Edit",
+          null
+        ]
+      },
+      "AskQuestionRequest": {
+        "required": [
+          "text",
+          "mode"
+        ],
+        "type": "object",
+        "properties": {
+          "text": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AskMode"
+              }
+            ]
+          }
+        }
+      },
       "AssistantInfo": {
         "required": [
           "provider",
@@ -597,9 +1156,177 @@
           }
         }
       },
+      "ConversationDto": {
+        "required": [
+          "id",
+          "title",
+          "createdAt",
+          "updatedAt",
+          "messages"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageDto"
+            }
+          }
+        }
+      },
+      "ConversationListItem": {
+        "required": [
+          "id",
+          "title",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreatedConversation": {
+        "required": [
+          "id"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "IFormFile": {
         "type": "string",
         "format": "binary"
+      },
+      "MessageDto": {
+        "required": [
+          "id",
+          "role",
+          "text",
+          "status",
+          "createdAt",
+          "sources",
+          "toolSteps",
+          "usage",
+          "model"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "text": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceDto"
+            }
+          },
+          "toolSteps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolStepDto"
+            }
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageDto"
+          },
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "MessageRole": {
+        "enum": [
+          "User",
+          "Assistant"
+        ]
+      },
+      "MessageStatus": {
+        "enum": [
+          "Complete",
+          "Stopped",
+          "Blocked",
+          "Failed"
+        ]
+      },
+      "PagedResultOfAdminConversationListItem": {
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminConversationListItem"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       },
       "PagedResultOfPolicyDocumentDto": {
         "required": [
@@ -738,6 +1465,116 @@
           }
         }
       },
+      "QuotaDto": {
+        "required": [
+          "used",
+          "limit"
+        ],
+        "type": "object",
+        "properties": {
+          "used": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "SourceDto": {
+        "required": [
+          "ref",
+          "chunkId",
+          "type",
+          "title",
+          "sectionPath",
+          "reference"
+        ],
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "chunkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/SourceType"
+          },
+          "title": {
+            "type": "string"
+          },
+          "sectionPath": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reference": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SourceType": {
+        "enum": [
+          "Policy",
+          "Purchase"
+        ]
+      },
+      "ToolStepDto": {
+        "required": [
+          "id",
+          "name",
+          "arguments",
+          "ok",
+          "summary",
+          "durationMs"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "UsageDto": {
+        "required": [
+          "input",
+          "output"
+        ],
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "output": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "ValidationProblemDetails": {
         "type": "object",
         "properties": {
@@ -822,7 +1659,13 @@
   ],
   "tags": [
     {
+      "name": "AdminConversations"
+    },
+    {
       "name": "AssistantInfo"
+    },
+    {
+      "name": "Conversations"
     },
     {
       "name": "PolicyDocuments"

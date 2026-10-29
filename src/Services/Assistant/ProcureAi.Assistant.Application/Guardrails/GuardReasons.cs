@@ -29,6 +29,9 @@ public static class GuardReasons
     public const string SaIdNumber = "sa_id_number";
     public const string MobileNumber = "mobile_number";
 
+    /// <summary>The answer cites none of its sources and used no tool (ruling 10): it is replaced.</summary>
+    public const string Ungrounded = "ungrounded";
+
     /// <summary>A sentence for people (a flagged document's reason, an admin screen). An unknown reason is returned as it is.</summary>
     public static string Describe(string? reason) => reason switch
     {
@@ -44,6 +47,7 @@ public static class GuardReasons
         SecretRequest => "The text asks for keys, passwords or other secrets.",
         OffTopic => "The question is not about procurement.",
         ClassifierUnclear => "The guard could not classify the text.",
+        Ungrounded => "The answer did not cite its sources.",
         _ => reason,
     };
 }

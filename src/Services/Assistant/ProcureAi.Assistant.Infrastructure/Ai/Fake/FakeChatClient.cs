@@ -12,7 +12,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 /// <list type="bullet">
 /// <item><c>answer</c>: first <see cref="FakeIntentRules"/> (a <see cref="FunctionCallContent"/> when a matching tool is offered and has
 /// not been called for this question yet); then extractive text: the first sentence of each of the top two sources (lines starting
-/// <c>[S1]</c>, <c>[S2]</c> in the prompt), cited, plus a summary of any tool results. Nothing to cite and no tool result: the
+/// <c>&lt;data id="S1"&gt;</c> blocks, or lines starting <c>[S1]</c>, <c>[S2]</c>, in the prompt), cited, plus a summary of any tool results. Nothing to cite and no tool result: the
 /// "policy doesn't cover this" sentence.</item>
 /// <item><c>rewrite</c>: the last user message as the standalone question; <c>context</c>: its first sentence;
 /// <c>classify</c>: <c>INJECTION</c>, <c>OFF_TOPIC</c> or <c>SAFE</c> from lists of known phrases (the guard classifier); <c>scan</c>: <c>{}</c> (the invoice reader
@@ -162,13 +162,21 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
         return new FakeReply(parts.Count == 0 ? NotCovered : string.Join(' ', parts), null);
     }
 
-    /// <summary>The numbered sources of the prompt: the text after each line-start marker <c>[S&lt;n&gt;]</c>, up to the next marker, by number.</summary>
+    /// <summary>
+    /// The numbered sources of the prompt, by number: the text of each <c>&lt;data id="S&lt;n&gt;" …&gt;…&lt;/data&gt;</c> block (the answer
+    /// prompt's format, <c>PromptBuilder</c>), and the text after each line-start marker <c>[S&lt;n&gt;]</c> up to the next marker.
+    /// </summary>
     private static IEnumerable<(int Number, string Text)> Sources(IEnumerable<ChatMessage> messages)
     {
         var found = new SortedDictionary<int, string>();
         foreach (var message in messages.Where(m => m.Role == ChatRole.User || m.Role == ChatRole.System))
         {
             var text = message.Text;
+            foreach (Match block in DataBlock().Matches(text))
+            {
+                found.TryAdd(int.Parse(block.Groups["n"].Value, System.Globalization.CultureInfo.InvariantCulture), block.Groups["text"].Value.Trim());
+            }
+
             var markers = SourceMarker().Matches(text);
             for (var i = 0; i < markers.Count; i++)
             {
@@ -239,6 +247,9 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
 
         return -1;
     }
+
+    [GeneratedRegex(@"<data\s+id=""S(?<n>\d+)""[^>]*>(?<text>.*?)</data>", RegexOptions.Singleline)]
+    private static partial Regex DataBlock();
 
     [GeneratedRegex(@"(?m)^\s*\[S(?<n>\d+)\]")]
     private static partial Regex SourceMarker();

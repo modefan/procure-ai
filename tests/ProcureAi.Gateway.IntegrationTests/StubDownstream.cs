@@ -36,6 +36,36 @@ public sealed class StubDownstream : IAsyncDisposable
 
     public SeenRequest Last => _seen.Last();
 
+    /// <summary>The pause between the events of the stub's answer stream (the Fake model's delay in the assistant test).</summary>
+    public static readonly TimeSpan StreamDelay = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>How many <c>delta</c> events the stub's answer stream sends before <c>done</c>.</summary>
+    public const int StreamDeltas = 5;
+
+    /// <summary>When the stub finished writing its last answer stream (<see cref="System.Diagnostics.Stopwatch"/> ticks); 0 before.</summary>
+    public long StreamFinishedAt => Interlocked.Read(ref _streamFinishedAt);
+
+    private long _streamFinishedAt;
+
+    /// <summary>
+    /// The Assistant's answer stream as the service writes it: server-sent events, each flushed on its own, <see cref="StreamDelay"/>
+    /// apart. A gateway that buffered the response would deliver them all at once, after the last.
+    /// </summary>
+    private async Task StreamAnswerAsync(HttpContext context)
+    {
+        context.Response.ContentType = "text/event-stream";
+        for (var i = 0; i < StreamDeltas; i++)
+        {
+            await context.Response.WriteAsync($"event: delta\ndata: {{\"text\":\"word{i} \"}}\n\n", context.RequestAborted);
+            await context.Response.Body.FlushAsync(context.RequestAborted);
+            await Task.Delay(StreamDelay, context.RequestAborted);
+        }
+
+        await context.Response.WriteAsync("event: done\ndata: {}\n\n", context.RequestAborted);
+        await context.Response.Body.FlushAsync(context.RequestAborted);
+        Interlocked.Exchange(ref _streamFinishedAt, System.Diagnostics.Stopwatch.GetTimestamp());
+    }
+
     public static async Task<StubDownstream> StartAsync()
     {
         var builder = WebApplication.CreateSlimBuilder();
@@ -55,6 +85,13 @@ public sealed class StubDownstream : IAsyncDisposable
                 var hello = System.Text.Encoding.UTF8.GetBytes($"connected:{context.Request.Path.Value}");
                 await socket.SendAsync(hello, System.Net.WebSockets.WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
                 await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+                return;
+            }
+
+            if (HttpMethods.IsPost(context.Request.Method) && context.Request.Path.StartsWithSegments("/api/v1/assistant")
+                && context.Request.Path.Value!.EndsWith("/messages", StringComparison.Ordinal))
+            {
+                await stub!.StreamAnswerAsync(context);
                 return;
             }
 

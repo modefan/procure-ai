@@ -22,6 +22,8 @@
     <PackageReference Include="WolverineFx.EntityFrameworkCore" />
     <PackageReference Include="WolverineFx.RuntimeCompilation" />
     <PackageReference Include="Microsoft.Extensions.AI" />
+    <!-- The answer lock and the question quota (plan 05 Task 5a) on the shared Redis (IConnectionMultiplexer from the Web building block). -->
+    <PackageReference Include="DistributedLock.Redis" />
     <!-- The only project that may name a provider SDK (architecture test Only_assistant_infrastructure_references_provider_sdks). -->
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
   </ItemGroup>

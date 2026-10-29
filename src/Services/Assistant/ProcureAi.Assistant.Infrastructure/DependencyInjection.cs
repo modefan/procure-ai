@@ -7,6 +7,7 @@ using ProcureAi.Assistant.Application.Abstractions;
 using ProcureAi.Assistant.Application.Ingestion;
 using ProcureAi.Assistant.Application.Retrieval.PastPurchases;
 using ProcureAi.Assistant.Infrastructure.Ai;
+using ProcureAi.Assistant.Infrastructure.Chat;
 using ProcureAi.Assistant.Infrastructure.Ingestion;
 using ProcureAi.Assistant.Infrastructure.Mongo;
 using ProcureAi.Assistant.Infrastructure.Persistence;
@@ -57,6 +58,7 @@ public static class DependencyInjection
         services.AddAssistantAi(configuration);
         services.AddAssistantIngestion();
         services.AddAssistantRetrieval();
+        services.AddAssistantChat();
         return services;
     }
 
