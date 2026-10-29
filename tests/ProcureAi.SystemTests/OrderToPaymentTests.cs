@@ -61,7 +61,8 @@ public sealed class OrderToPaymentTests(SystemFixture system)
         invoice.MismatchReasons.ShouldContain(r => r.Contains("only 2 received"));
 
         // Thandi (finance) pays what is payable: the two received laptops at the order price, R 57 960,00, exported to the ERP.
-        var (_, invoiceTag) = await thandi.GetAsync<InvoiceView>($"/api/v1/invoicing/invoices/{invoice.Id}");
+        var (current, _) = await thandi.GetAsync<InvoiceView>($"/api/v1/invoicing/invoices/{invoice.Id}");
+        var invoiceTag = $"\"{current.Version}\""; // the read is tagged by its body; the version for If-Match is in it
         var (paid, _) = await thandi.SendAsync<InvoiceView>(
             HttpMethod.Post, $"/api/v1/invoicing/invoices/{invoice.Id}/payments", HttpStatusCode.OK, ifMatch: invoiceTag);
         var payment = paid.Payments.ShouldHaveSingleItem();
