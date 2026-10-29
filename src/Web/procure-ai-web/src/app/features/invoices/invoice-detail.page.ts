@@ -11,7 +11,7 @@ import { BusyButton } from '../../core/ui/busy-button';
 import { StatusBadge } from '../requests/status-badge';
 import { VAT_RATE_PERCENT } from '../requests/request-lines';
 import { InvoiceDetailStore } from './invoice-detail.store';
-import { isLineProblem, lineResult, matchStatus, payAllLabel, paymentStatus } from './invoice-match';
+import { isLineProblem, lineResult, matchStatus, payAllLabel, payAllLines, paymentStatus } from './invoice-match';
 import { PayLinesForm } from './pay-lines-form';
 
 const MIN_REASON = 3;
@@ -323,7 +323,11 @@ export class InvoiceDetailPage {
   }
 
   protected async payAll(): Promise<void> {
-    await this.store.pay(null);
+    const invoice = this.store.invoice();
+    if (invoice) {
+      // The quantities the button's amount was worked out from, not "everything payable at the moment the server looks".
+      await this.store.pay(payAllLines(invoice));
+    }
   }
 
   protected async payChosen(lines: PayLineBody[]): Promise<void> {

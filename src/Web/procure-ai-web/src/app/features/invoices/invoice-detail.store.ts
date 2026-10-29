@@ -153,11 +153,16 @@ export const InvoiceDetailStore = signalStore(
           if (error instanceof HttpErrorResponse && (error.status === 412 || error.status === 409)) {
             await conflict.show('Someone else just changed this invoice. Showing the latest version.');
             await reload(true);
+            patchState(store, { generalError: null });
           } else {
             log.warn(`${what} failed`, error);
             const problem = problemOf(error);
             const fields = Object.values(problem.fields).flat().join(' ');
             patchState(store, { generalError: problem.general ?? (fields || `${what[0].toUpperCase()}${what.slice(1)} did not work. Please try again.`) });
+            if (busy === 'paying' && error instanceof HttpErrorResponse && error.status === 422) {
+              // What can be paid changed under the screen: show the current amount (the message stays).
+              void reload(true);
+            }
           }
           return false;
         } finally {
@@ -183,7 +188,10 @@ export const InvoiceDetailStore = signalStore(
       },
 
       /** Loads again, keeping what is shown (retry button). */
-      reload: () => reload(true),
+      reload(): Promise<void> {
+        patchState(store, { generalError: null });
+        return reload(true);
+      },
 
       /** Pays everything payable (`lines` null) or the chosen quantities. Resolves true when the server agreed. */
       pay(lines: PayLineBody[] | null): Promise<boolean> {

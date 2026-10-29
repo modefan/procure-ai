@@ -106,7 +106,7 @@ describe('InvoiceDetailPage', () => {
     fixture.detectChanges();
     await settle(fixture);
     expect(api['releasePayment']).toHaveBeenCalledTimes(1);
-    expect(api['releasePayment'].mock.calls[0][0]).toMatchObject({ id: 'i1', 'If-Match': '"6"', body: { lines: null } });
+    expect(api['releasePayment'].mock.calls[0][0]).toMatchObject({ id: 'i1', 'If-Match': '"6"', body: { lines: [{ lineNo: 1, quantity: 2 }] } });
     const payments = text(el.querySelector('[data-section="payments"]'));
     expect(payments).toContain('PAY-0001');
     expect(payments).toContain('R 57 960,00');

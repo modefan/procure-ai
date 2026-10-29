@@ -252,29 +252,9 @@ public sealed class Invoice : Entity<Guid>
     /// </summary>
     public PaymentPlan PlanPayment(OrderView order, IReadOnlyList<(int LineNo, int Quantity)>? requested)
     {
-        if (order.Id != OrderId)
+        if (PayRefusal(order) is { } refusal)
         {
-            throw new DomainException("That is not the order of this invoice.");
-        }
-
-        if (OnHold)
-        {
-            throw new DomainException($"The invoice is on hold: {HoldReason}");
-        }
-
-        if (Match is null || Status == InvoiceStatus.AwaitingOrder)
-        {
-            throw new DomainException("The invoice has not been matched against an order yet.");
-        }
-
-        if (order.ClosedReason is { } closed)
-        {
-            throw new DomainException(closed);
-        }
-
-        if (!SameSupplierAs(order))
-        {
-            throw new DomainException(SupplierReason(order));
+            throw new DomainException(refusal);
         }
 
         var chosen = new Dictionary<int, int>();
@@ -335,8 +315,7 @@ public sealed class Invoice : Entity<Guid>
     /// </summary>
     public PaymentPlan? PlanAllPayable(OrderView order)
     {
-        if (order.Id != OrderId || OnHold || Match is null || Status == InvoiceStatus.AwaitingOrder || order.ClosedReason is not null
-            || !SameSupplierAs(order))
+        if (PayRefusal(order) is not null)
         {
             return null;
         }
@@ -393,6 +372,32 @@ public sealed class Invoice : Entity<Guid>
         _payments.Add(payment);
         Status = _lines.All(l => l.Paid >= l.Quantity) ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
         return payment;
+    }
+
+    /// <summary>Why nothing can be paid on this invoice against this order right now (null: it can).</summary>
+    private string? PayRefusal(OrderView order)
+    {
+        if (order.Id != OrderId)
+        {
+            return "That is not the order of this invoice.";
+        }
+
+        if (OnHold)
+        {
+            return $"The invoice is on hold: {HoldReason}";
+        }
+
+        if (Match is null || Status == InvoiceStatus.AwaitingOrder)
+        {
+            return "The invoice has not been matched against an order yet.";
+        }
+
+        if (order.ClosedReason is { } closed)
+        {
+            return closed;
+        }
+
+        return SameSupplierAs(order) ? null : SupplierReason(order);
     }
 
     internal bool SameSupplierAs(OrderView order) => string.Equals(SupplierId, order.SupplierId, StringComparison.Ordinal);

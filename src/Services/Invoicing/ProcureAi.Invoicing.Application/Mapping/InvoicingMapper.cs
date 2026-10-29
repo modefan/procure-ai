@@ -24,7 +24,14 @@ public static class InvoicingMapper
         payable?.TotalInclVat.Amount ?? 0m, (payable?.TotalInclVat ?? Money.Zero).ToDisplayString(),
         invoice.ReceivedAt, invoice.Version);
 
-    public static InvoiceLineDto ToLineDto(InvoiceLine line, LineMatch? match, OrderViewLine? orderLine, int payable = 0) => new(
+    public static InvoiceLineDto ToLineDto(InvoiceLine line, LineMatch? match, OrderViewLine? orderLine, int payable = 0) =>
+        ToLineDtoOf(line, match, SameItem(line, orderLine) ? orderLine : null, payable);
+
+    /// <summary>The order line is the invoice line's own only when it names the same item (as the match decides: "not on the order" otherwise).</summary>
+    private static bool SameItem(InvoiceLine line, OrderViewLine? orderLine) =>
+        orderLine is not null && (line.Sku.Length == 0 || string.Equals(orderLine.Sku, line.Sku, StringComparison.OrdinalIgnoreCase));
+
+    private static InvoiceLineDto ToLineDtoOf(InvoiceLine line, LineMatch? match, OrderViewLine? orderLine, int payable) => new(
         line.LineNo, line.Sku, line.Description, line.Quantity, line.Paid, line.UnitPriceExclVat.Amount, line.LineTotalExclVat.Amount,
         line.UnitPriceExclVat.ToDisplayString(), line.LineTotalExclVat.ToDisplayString(),
         orderLine?.Ordered, orderLine?.UnitPriceExclVat.Amount, orderLine?.UnitPriceExclVat.ToDisplayString(),

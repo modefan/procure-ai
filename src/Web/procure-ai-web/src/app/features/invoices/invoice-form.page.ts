@@ -1,4 +1,4 @@
-import { Component, computed, effect, HostListener, inject, OnInit, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
 import { applyEach, form, FormField, maxLength, required, submit, validate } from '@angular/forms/signals';
 import { Router, RouterLink } from '@angular/router';
 import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto';
@@ -52,11 +52,16 @@ const statusWords = (status: string) => status.replace(/([a-z])([A-Z])/g, (_, a:
   selector: 'app-invoice-form-page',
   imports: [FormField, RouterLink, BusyButton, RandPipe],
   providers: [InvoiceFormStore],
+  host: { '(window:beforeunload)': 'warnBeforeUnload($event)' },
   template: `
     <section class="mx-auto max-w-4xl px-4 py-8">
       <a routerLink="/app/invoices" class="text-sm font-medium text-indigo-700 hover:underline">&larr; Invoices</a>
       <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-900">Enter an invoice</h1>
       <p class="mt-1 text-slate-600">Type in an invoice the supplier sent. It is matched against the order and the goods received as soon as it is saved.</p>
+
+      @if (store.moreOrders()) {
+        <p class="mt-4 text-sm text-slate-600" data-testid="more-orders">Only the newest orders are listed. Open the order from the orders screen if yours is missing.</p>
+      }
 
       @if (store.error(); as message) {
         <div role="alert" class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -306,7 +311,6 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
     return this.dirty();
   }
 
-  @HostListener('window:beforeunload', ['$event'])
   protected warnBeforeUnload(event: BeforeUnloadEvent): void {
     if (this.dirty()) {
       event.preventDefault();

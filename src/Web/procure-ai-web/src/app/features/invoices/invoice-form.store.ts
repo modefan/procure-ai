@@ -26,6 +26,8 @@ export type FieldErrors = Record<string, string[]>;
 interface FormState {
   /** The orders the caller sees (the server scopes them), newest first. */
   orders: PurchaseOrderDto[];
+  /** There are more orders than one page holds: the list shows the newest ones only. */
+  moreOrders: boolean;
   busy: boolean;
   /** A refusal that belongs to no field: 422 for an order that cannot be invoiced, 404, 409 ... */
   generalError: string | null;
@@ -33,6 +35,8 @@ interface FormState {
   fieldErrors: FieldErrors;
 }
 
+/** Orders that take no invoices (the server refuses them with a 422), so they are not offered. */
+const DEAD = new Set<string>(['Cancelled', 'Rejected', 'ClosedShort']);
 const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
 
 /**
@@ -41,7 +45,7 @@ const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
  * gets a new key; a second call while one runs shares it (double click). Writes wait for the server.
  */
 export const InvoiceFormStore = signalStore(
-  withState<FormState>({ orders: [], busy: false, generalError: null, fieldErrors: {} }),
+  withState<FormState>({ orders: [], moreOrders: false, busy: false, generalError: null, fieldErrors: {} }),
   withRequestStatus(),
   withComputed(({ busy }) => ({ isBusy: computed(() => busy()) })),
   withMethods((store) => {
@@ -103,7 +107,7 @@ export const InvoiceFormStore = signalStore(
         store.setLoading();
         try {
           const result = await orders.listOrders({ page: 1, pageSize: 100 });
-          patchState(store, { orders: result.items });
+          patchState(store, { orders: result.items.filter((o) => !DEAD.has(o.status)), moreOrders: result.total > result.items.length });
           store.setLoaded();
         } catch (error) {
           log.error('Loading the orders failed', error);

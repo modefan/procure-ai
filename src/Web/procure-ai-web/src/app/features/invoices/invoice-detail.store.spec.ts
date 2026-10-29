@@ -119,6 +119,16 @@ describe('InvoiceDetailStore', () => {
     expect(store.generalError()).toBe('Nothing is payable on this invoice yet.');
   });
 
+  it('a 422 on pay reloads the invoice so the button shows what can be paid now, and keeps the message', async () => {
+    const store = setup();
+    await store.init('i1', mismatched());
+    api['releasePayment'].mockRejectedValueOnce(new HttpErrorResponse({ status: 422, error: { detail: 'Line 1: 2 requested, but only 3 can be paid.' } }));
+    api['getInvoice'].mockResolvedValue(mismatched({ version: 1, payableInclVat: 86940, payableInclVatText: 'R 86 940,00' }));
+    await store.pay([{ lineNo: 1, quantity: 2 }]);
+    await vi.waitFor(() => expect(store.invoice()?.payableInclVat).toBe(86940));
+    expect(store.generalError()).toBe('Line 1: 2 requested, but only 3 can be paid.');
+  });
+
   it('hold and release hold send If-Match and a key', async () => {
     const store = setup();
     await store.init('i1', mismatched({ version: 4 }));

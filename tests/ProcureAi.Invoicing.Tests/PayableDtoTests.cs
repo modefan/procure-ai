@@ -38,4 +38,37 @@ public sealed class PayableDtoTests
             dto.Lines.ShouldAllBe(l => l.Payable == 0);
         }
     }
+
+    [Fact]
+    public void A_price_mismatched_line_a_closed_order_and_another_supplier_pay_nothing()
+    {
+        var order = Fixture.Order(received: 3);
+        var priced = Fixture.Matched(Fixture.Invoice(quantity: 3, price: 30_000m, number: "INV-P"), order);
+        var closed = Fixture.Order(received: 3);
+        var invoiceOnClosed = Fixture.Matched(Fixture.Invoice(quantity: 3, number: "INV-C"), closed);
+        closed.Cancel();
+        var elsewhere = Fixture.Order(received: 3, supplier: "sup-2");
+        var wrongSupplier = Fixture.Matched(Fixture.Invoice(quantity: 3, number: "INV-S"), Fixture.Order(received: 3));
+
+        foreach (var (invoice, view) in new[] { (priced, order), (invoiceOnClosed, closed), (wrongSupplier, elsewhere) })
+        {
+            var dto = InvoicingMapper.ToDto(invoice, view);
+            dto.PayableInclVat.ShouldBe(0m);
+            dto.Lines.ShouldAllBe(l => l.Payable == 0);
+        }
+    }
+
+    [Fact]
+    public void A_line_whose_sku_is_not_the_order_lines_carries_no_order_quantity_or_price()
+    {
+        var order = Fixture.Order(received: 3);
+        var invoice = Fixture.Matched(Fixture.Invoice(quantity: 1, sku: "OTHER-1", number: "INV-X"), order);
+
+        var line = InvoicingMapper.ToDto(invoice, order).Lines.ShouldHaveSingleItem();
+
+        line.Ordered.ShouldBeNull();
+        line.OrderUnitPriceExclVat.ShouldBeNull();
+        line.OrderUnitPriceText.ShouldBeNull();
+        line.MatchReason.ShouldNotBeNull();
+    }
 }

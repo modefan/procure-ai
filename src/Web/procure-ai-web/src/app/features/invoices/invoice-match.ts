@@ -1,4 +1,5 @@
 import { InvoiceDto } from '../../api/invoicing/models/invoice-dto';
+import { PayLineBody } from '../../api/invoicing/models/pay-line-body';
 import { InvoiceLineDto } from '../../api/invoicing/models/invoice-line-dto';
 import { formatRand } from '../../core/ui/money.pipe';
 
@@ -31,12 +32,12 @@ export function lineResult(line: InvoiceLineDto): string {
   if (line.quantityOk === null && line.priceOk === null) {
     return 'Waiting for the order';
   }
-  if (line.ordered === null && line.orderUnitPriceExclVat === null && line.matchReason) {
-    return line.matchReason; // the line is not on the order
+  const over = (line.invoicedBefore ?? 0) + line.quantity - (line.received ?? 0);
+  if (line.matchReason && ((line.ordered === null && line.orderUnitPriceExclVat === null) || (line.quantityOk === false && line.priceOk === false && over <= 0))) {
+    return line.matchReason; // the line is not on the order (another item), the server says so
   }
   const problems: string[] = [];
   if (line.quantityOk === false) {
-    const over = (line.invoicedBefore ?? 0) + line.quantity - (line.received ?? 0);
     problems.push(`Invoiced ${over} more than received`);
   }
   if (line.priceOk === false && line.orderUnitPriceExclVat !== null) {
@@ -60,3 +61,11 @@ export function isPartialPayment(invoice: InvoiceDto): boolean {
 export function payAllLabel(invoice: InvoiceDto): string {
   return `${isPartialPayment(invoice) ? 'Approve partial payment' : 'Pay invoice'} (${invoice.payableInclVatText})`;
 }
+
+/**
+ * What the pay-all button pays: exactly the quantities its amount was worked out from, line by line. The server pays
+ * these or refuses (422), so a receipt or a payment on another invoice that the screen has not seen yet can never make
+ * it pay a different amount than the one shown.
+ */
+export const payAllLines = (invoice: InvoiceDto): PayLineBody[] =>
+  invoice.lines.filter((l) => l.payable > 0).map((l) => ({ lineNo: l.lineNo, quantity: l.payable }));

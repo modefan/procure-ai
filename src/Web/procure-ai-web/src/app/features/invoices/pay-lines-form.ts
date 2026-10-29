@@ -109,8 +109,8 @@ export class PayLinesForm {
   });
 
   constructor() {
-    // A new version of the invoice (a payment just made) starts the form over; a push that changes nothing keeps what is typed.
-    const startKey = computed(() => `${this.invoice().id}:${this.invoice().version}`);
+    // A new version of the invoice (a payment just made, or what can be paid changing) starts the form over; a push that changes nothing keeps what is typed.
+    const startKey = computed(() => `${this.invoice().id}:${this.invoice().version}:${this.invoice().lines.map((l) => l.payable).join(',')}`);
     effect(() => {
       startKey();
       untracked(() => {

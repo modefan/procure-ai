@@ -1,6 +1,6 @@
 import { formatRand } from '../../core/ui/money.pipe';
 import { invoiceTotals } from './invoice-totals';
-import { isPartialPayment, lineResult, matchStatus, payAllLabel, paymentStatus } from './invoice-match';
+import { isPartialPayment, lineResult, matchStatus, payAllLabel, payAllLines, paymentStatus } from './invoice-match';
 import { invoiceLine, mismatched } from './invoices.testing';
 import { invoiceDto } from '../requests/request-detail.testing';
 
@@ -26,6 +26,19 @@ describe('invoice match texts', () => {
     );
     expect(lineResult(invoiceLine(9, { ordered: null, orderUnitPriceExclVat: null, priceOk: false, quantityOk: false, matchReason: 'Line 9 is not on PO-881' }))).toBe('Line 9 is not on PO-881');
     expect(lineResult(invoiceLine(1, { priceOk: null, quantityOk: null, ordered: null, received: null, orderUnitPriceExclVat: null }))).toBe('Waiting for the order');
+  });
+
+  it('a line with another SKU than the order line reads as not on the order, never as a negative quantity or another item price', () => {
+    const line = invoiceLine(1, { ordered: null, orderUnitPriceExclVat: null, orderUnitPriceText: null, priceOk: false, quantityOk: false, invoicedBefore: 0, received: 3, quantity: 1, matchReason: 'Line 1 is not on PO-881' });
+    expect(lineResult(line)).toBe('Line 1 is not on PO-881');
+    // Old DTOs still carried the order line; both flags false and nothing over-invoiced must fall back to the server's reason.
+    const old = invoiceLine(1, { priceOk: false, quantityOk: false, invoicedBefore: 0, received: 3, quantity: 1, unitPriceExclVat: 25200, matchReason: 'Line 1 is not on PO-881' });
+    expect(lineResult(old)).toBe('Line 1 is not on PO-881');
+  });
+
+  it('pay_all_sends_the_shown_quantities: explicit lines from what each line shows as payable, none for lines with 0', () => {
+    const invoice = invoiceDto({ lines: [invoiceLine(1, { payable: 2 }), invoiceLine(2, { payable: 0 }), invoiceLine(3, { payable: 5 })] });
+    expect(payAllLines(invoice)).toEqual([{ lineNo: 1, quantity: 2 }, { lineNo: 3, quantity: 5 }]);
   });
 
   it('match and payment status are separate: a paid invoice keeps its mismatch', () => {

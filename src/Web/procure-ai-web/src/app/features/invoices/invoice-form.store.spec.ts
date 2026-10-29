@@ -29,6 +29,13 @@ describe('InvoiceFormStore', () => {
     expect(store().orders()).toHaveLength(1);
   });
 
+  it('leaves out cancelled, rejected and closed-short orders, and says when there are more orders than one page', async () => {
+    listOrders.mockResolvedValue(ordersPage([order({ id: 'a', status: 'Confirmed' }), order({ id: 'b', status: 'Cancelled' }), order({ id: 'c', status: 'Rejected' }), order({ id: 'd', status: 'ClosedShort' }), order({ id: 'e', status: 'Received' })], 1, 250, 100));
+    await store().loadOrders();
+    expect(store().orders().map((o) => o.id)).toEqual(['a', 'e']);
+    expect(store().moreOrders()).toBe(true);
+  });
+
   it('a failure to load the orders sets an error', async () => {
     listOrders.mockRejectedValue(new Error('down'));
     await store().loadOrders();

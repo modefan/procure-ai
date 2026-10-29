@@ -27,6 +27,7 @@ describe('InvoiceFormPage', () => {
     lines: [orderLine(1, 3, 2, { description: 'Laptop 14"', unitPriceExclVat: 25200 }), orderLine(2, 1, 0, { description: 'Mouse', unitPriceExclVat: 100 })],
   });
   const dead = order({ id: 'o9', number: 'PO-900', status: 'Cancelled' });
+  const other = order({ id: 'o2', number: 'PO-882', status: 'Confirmed' });
 
   async function setup() {
     createInvoice = vi.fn().mockResolvedValue(mismatched({ id: 'i77' }));
@@ -34,7 +35,7 @@ describe('InvoiceFormPage', () => {
       providers: [
         provideRouter([{ path: '**', children: [] }]),
         { provide: InvoicesService, useValue: { createInvoice } },
-        { provide: OrdersService, useValue: { listOrders: vi.fn().mockResolvedValue(ordersPage([laptops, dead])) } },
+        { provide: OrdersService, useValue: { listOrders: vi.fn().mockResolvedValue(ordersPage([laptops, dead, other])) } },
         { provide: SuppliersService, useValue: { listSuppliers: vi.fn().mockResolvedValue({ items: [{ code: 'CH', name: 'Contoso Hardware', active: true, itemCount: 4 }], page: 1, pageSize: 100, total: 1 }) } },
       ],
     });
@@ -118,9 +119,15 @@ describe('InvoiceFormPage', () => {
     set(field(ctx.el, 'invoice-stated-total'), '1234,00');
     set(qty(ctx.el, 1), '1');
     await settle(ctx.fixture);
-    await choose(ctx, 'o9');
+    await choose(ctx, 'o2');
     expect(field(ctx.el, 'invoice-stated-total').value).toBe('');
     expect(qty(ctx.el, 1).value).toBe('2'); // the other order's first line: nothing received yet, so what was ordered
+  });
+
+  it('does not offer a cancelled order', async () => {
+    const ctx = await setup();
+    const options = Array.from(ctx.el.querySelectorAll('#invoice-order option')).map((o) => text(o));
+    expect(options.some((o) => o.includes('PO-900'))).toBe(false);
   });
 
   it('refuses an empty form: asks for an order and a number, sends nothing', async () => {
@@ -149,7 +156,7 @@ describe('InvoiceFormPage', () => {
   it('dead_order_422_message_shown: an order that cannot be invoiced shows the server message above the form', async () => {
     const ctx = await setup();
     createInvoice.mockRejectedValueOnce(new HttpErrorResponse({ status: 422, error: { detail: 'PO-900 is cancelled, so it cannot be invoiced.' } }));
-    await choose(ctx, 'o9');
+    await choose(ctx, 'o2');
     set(field(ctx.el, 'invoice-number'), 'INV-1');
     set(qty(ctx.el, 1), '1');
     await settle(ctx.fixture);
