@@ -59,9 +59,10 @@ public sealed class InvoicesController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<InvoiceDto>> Get(Guid id, CancellationToken cancellationToken)
     {
-        var invoice = await bus.InvokeAsync<InvoiceDto>(new GetInvoice(id), cancellationToken);
-        Response.Headers.ETag = VersionETag.Format(invoice.Version);
-        return invoice;
+        // No version ETag here: the DTO also carries what is payable now, which comes from the order view, so the invoice row's
+        // version does not change when another invoice on the order is paid. ConditionalGetFilter tags the body instead; the
+        // version for If-Match is the DTO's Version.
+        return await bus.InvokeAsync<InvoiceDto>(new GetInvoice(id), cancellationToken);
     }
 
     /// <summary>

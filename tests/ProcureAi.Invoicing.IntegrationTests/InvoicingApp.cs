@@ -280,12 +280,13 @@ public sealed class InvoicingApp : IAsyncLifetime
 
     public Task<HttpResponseMessage> SendHttpAsync(HttpRequestMessage request) => Client.SendAsync(request, TestContext.Current.CancellationToken);
 
-    /// <summary>The invoice as the API returns it, and its ETag. Asserts 200.</summary>
+    /// <summary>The invoice as the API returns it, and its version as the If-Match tag (the read itself is tagged by its body). Asserts 200.</summary>
     public async Task<(InvoiceDto Invoice, string ETag)> GetInvoiceAsync(Guid invoiceId, string token)
     {
         using var response = await SendHttpAsync(Request(HttpMethod.Get, $"/api/v1/invoicing/invoices/{invoiceId}", token));
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        return ((await response.Content.ReadFromJsonAsync<InvoiceDto>(Json))!, response.Headers.ETag!.Tag);
+        var invoice = (await response.Content.ReadFromJsonAsync<InvoiceDto>(Json))!;
+        return (invoice, $"\"{invoice.Version}\"");
     }
 
     /// <summary>Pays the invoice (all payable when <paramref name="lines"/> is null) with the version given.</summary>

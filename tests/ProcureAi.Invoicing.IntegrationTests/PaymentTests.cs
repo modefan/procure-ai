@@ -135,6 +135,47 @@ public sealed class PaymentTests(InvoicingApp app, ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// Final review I1: what is payable on invoice A comes from the order view, which paying invoice B changes while A's own row does
+    /// not. A conditional GET of A with its old tag must therefore return the lower payable, not a 304 with the stale one.
+    /// </summary>
+    [Fact]
+    public async Task Paying_another_invoice_changes_the_payable_a_conditional_get_of_this_one_returns()
+    {
+        var tenant = InvoicingApp.NewTenant();
+        var token = InvoicingApp.Token(tenant);
+        var order = await app.CreateOrderAsync(tenant);
+        await app.ReceiveAsync(order, 3);
+        var first = await app.WebhookInvoiceAsync(order.OrderId, "INV-A", 2);
+        await app.WaitForStatusAsync(first, "Matched");
+        var second = await app.WebhookInvoiceAsync(order.OrderId, "INV-B", 2);
+        await app.WaitForStatusAsync(second, "Mismatched");
+        var url = $"/api/v1/invoicing/invoices/{first}";
+        using var before = await app.SendHttpAsync(InvoicingApp.Request(HttpMethod.Get, url, token));
+        var payableBefore = (await before.Content.ReadFromJsonAsync<InvoiceDto>(InvoicingApp.Json))!.PayableInclVat;
+        var oldTag = before.Headers.ETag!.ToString();
+        var (_, secondTag) = await app.GetInvoiceAsync(second, token);
+        using var paid = await app.PayAsync(second, token, secondTag);
+        paid.StatusCode.ShouldBe(HttpStatusCode.OK, await paid.Content.ReadAsStringAsync());
+
+        InvoiceDto? now = null;
+        await InvoicingApp.EventuallyAsync(async () =>
+        {
+            var request = InvoicingApp.Request(HttpMethod.Get, url, token);
+            request.Headers.TryAddWithoutValidation("If-None-Match", oldTag);
+            using var again = await app.SendHttpAsync(request);
+            if (again.StatusCode != HttpStatusCode.OK)
+            {
+                return false;
+            }
+
+            now = await again.Content.ReadFromJsonAsync<InvoiceDto>(InvoicingApp.Json);
+            return true;
+        }, "a 200 with the new body for the old tag");
+
+        now!.PayableInclVat.ShouldBeLessThan(payableBefore);
+    }
+
     /// <summary>Ruling 15: whoever raised the request cannot release its payment, even with the finance role.</summary>
     [Fact]
     public async Task Requester_cannot_release_payment_403()

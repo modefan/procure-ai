@@ -55,10 +55,10 @@ public sealed class ApiTests(BudgetsApp app)
         var tenant = BudgetsInfraFixture.NewTenant();
         await app.Infra.CreateBudgetAsync(tenant, "CC-A", 100_000m);
         var finance = BudgetsApp.Token(tenant, "finance", "thandi");
-        var read = await SendAsync(HttpMethod.Get, $"{Base}/CC-A/{Year}", finance);
+        var version = (await ReadAsync<BudgetDto>(await SendAsync(HttpMethod.Get, $"{Base}/CC-A/{Year}", finance))).Version;
 
-        var put = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: read.Headers.ETag!.Tag, body: new { amount = 150_000m });
-        var stale = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: read.Headers.ETag!.Tag, body: new { amount = 170_000m });
+        var put = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: $"\"{version}\"", body: new { amount = 150_000m });
+        var stale = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: $"\"{version}\"", body: new { amount = 170_000m });
 
         put.StatusCode.ShouldBe(HttpStatusCode.OK);
         stale.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
@@ -102,6 +102,40 @@ public sealed class ApiTests(BudgetsApp app)
 
         list.Single().OwnerName.ShouldBe("Mia Manager");
         one.OwnerName.ShouldBe("Mia Manager");
+    }
+
+    /// <summary>
+    /// Final review I1: the owner name comes from Access, so the row version alone is not a valid validator for the read. A client holding
+    /// the tag of the read without an owner must get the new body, not a 304, once the owner is known.
+    /// </summary>
+    [Fact]
+    public async Task A_changed_owner_name_is_not_hidden_by_a_conditional_get()
+    {
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, "CC-OWN", 100_000m);
+        var finance = BudgetsApp.Token(tenant, "finance", "thandi");
+        app.Access.MissingCostCenters["CC-OWN"] = true;
+        using var first = await SendAsync(HttpMethod.Get, $"{Base}/CC-OWN/{Year}", finance);
+        (await ReadAsync<BudgetDto>(first)).OwnerName.ShouldBeNull();
+        var oldTag = first.Headers.ETag!.ToString();
+        app.Access.MissingCostCenters.TryRemove("CC-OWN", out _);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        HttpResponseMessage again;
+        while (true)
+        {
+            again = await app.Client.SendAsync(BudgetsApp.Request(HttpMethod.Get, $"{Base}/CC-OWN/{Year}", finance, null, null).WithIfNoneMatch(oldTag), Ct);
+            if (again.StatusCode != HttpStatusCode.NotModified || DateTime.UtcNow > deadline)
+            {
+                break;
+            }
+
+            again.Dispose();
+            await Task.Delay(250, Ct);
+        }
+
+        again.StatusCode.ShouldBe(HttpStatusCode.OK, "the body changed (an owner appeared), so the old tag must not match");
+        (await ReadAsync<BudgetDto>(again)).OwnerName.ShouldBe("Mia Manager");
     }
 
     [Fact]
@@ -148,9 +182,9 @@ public sealed class ApiTests(BudgetsApp app)
         var finance = BudgetsApp.Token(tenant, "finance");
         var read = await SendAsync(HttpMethod.Get, $"{Base}/CC-A/{Year}", finance);
         var budget = await ReadAsync<BudgetDto>(read);
-        read.Headers.ETag!.Tag.ShouldBe($"\"{budget.Version}\"");
+        read.Headers.ETag!.IsWeak.ShouldBeTrue("the read is tagged by its body (the owner name comes from Access), not by the row version");
 
-        var put = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: read.Headers.ETag.Tag, body: new { amount = 150_000m });
+        var put = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: $"\"{budget.Version}\"", body: new { amount = 150_000m });
 
         var updated = await ReadAsync<BudgetDto>(put);
         updated.Amount.ShouldBe(150_000m);
@@ -268,5 +302,14 @@ public sealed class ApiTests(BudgetsApp app)
         audit.TenantId.ShouldBe(tenant);
         audit.UserId.ShouldBe("tom");
         audit.PrimaryKey.ShouldStartWith(budget.Id.ToString());
+    }
+}
+
+internal static class RequestExtensions
+{
+    public static HttpRequestMessage WithIfNoneMatch(this HttpRequestMessage request, string tag)
+    {
+        request.Headers.TryAddWithoutValidation("If-None-Match", tag);
+        return request;
     }
 }

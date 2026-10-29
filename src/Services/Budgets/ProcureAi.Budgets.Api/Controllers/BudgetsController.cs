@@ -73,7 +73,8 @@ public sealed class BudgetsController(
         await EnsureVisibleAsync(costCenter, $"No budget for {costCenter} in {fiscalYear}.", cancellationToken);
 
         var budget = await bus.InvokeAsync<BudgetDto>(new GetBudget(costCenter, fiscalYear), cancellationToken);
-        Response.Headers.ETag = VersionETag.Format(budget.Version);
+        // No version ETag: OwnerName comes from Access, so the budget row's version does not cover the whole body.
+        // ConditionalGetFilter tags the body; the version for If-Match is the DTO's Version.
         return (await WithOwnersAsync([budget], cancellationToken))[0];
     }
 
@@ -121,7 +122,7 @@ public sealed class BudgetsController(
         }
     }
 
-    /// <summary>Sets the budget. Send the budget version (<c>version</c>, also the ETag of the read) in <c>If-Match</c>. It cannot go below what is reserved or spent.</summary>
+    /// <summary>Sets the budget. Send the budget version (<c>version</c> of the read) in <c>If-Match</c>. It cannot go below what is reserved or spent.</summary>
     [HttpPut("{costCenter}/{fiscalYear}", Name = "SetBudget")]
     [RequirePermission(Permissions.BudgetsManage)]
     [RequireIfMatch]
