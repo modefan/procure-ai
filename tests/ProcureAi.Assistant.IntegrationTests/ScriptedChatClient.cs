@@ -25,6 +25,9 @@ public sealed class ChatScript
     public const string Down = "zzdown";
     public const string Hangs = "zzhang";
 
+    /// <summary>The model sends a tool call whose arguments cannot be serialised: the answer flow fails outside any model call.</summary>
+    public const string Broken = "zzbroken";
+
     public static readonly TimeSpan SlowDelay = TimeSpan.FromMilliseconds(100);
 
     private readonly ConcurrentQueue<RecordedCall> _calls = new();
@@ -62,6 +65,13 @@ public sealed class ScriptedChatClient(IChatClient inner, ChatScript script) : D
             await Task.Delay(Timeout.Infinite, cancellationToken);
         }
 
+        if (question.Contains(ChatScript.Broken, StringComparison.Ordinal))
+        {
+            yield return new ChatResponseUpdate(
+                ChatRole.Assistant, [new FunctionCallContent("call_broken", "lookup", new Dictionary<string, object?> { ["x"] = new Explodes() })]);
+            yield break;
+        }
+
         var slow = question.Contains(ChatScript.Slow, StringComparison.Ordinal);
         await foreach (var update in base.GetStreamingResponseAsync(list, options, cancellationToken))
         {
@@ -73,4 +83,10 @@ public sealed class ScriptedChatClient(IChatClient inner, ChatScript script) : D
             yield return update;
         }
     }
+}
+
+/// <summary>A value whose JSON serialisation throws.</summary>
+public sealed class Explodes
+{
+    public string Value => throw new InvalidOperationException("This value cannot be serialised (test).");
 }

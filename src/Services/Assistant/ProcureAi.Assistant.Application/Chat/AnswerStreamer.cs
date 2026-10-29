@@ -51,6 +51,7 @@ public sealed class AnswerStreamer(
     public const string GuardTitle = "I can't help with that";
     public const string UnavailableTitle = "The assistant is unavailable right now.";
     public const string FailedTitle = "The assistant could not answer.";
+    public const string NotSavedTitle = "The answer could not be saved.";
 
     /// <summary>What replaces an answer that cites none of its sources (ruling 10).</summary>
     public const string NotGroundedText =
@@ -108,7 +109,14 @@ public sealed class AnswerStreamer(
                 AskMode.Edit => conversation.EditLastQuestion(Guid.CreateVersion7(), command.Text, now),
                 _ => conversation.Ask(Guid.CreateVersion7(), command.Text, now),
             };
-            await store.SaveAsync(conversation, cancellationToken);
+            if (!await store.SaveAsync(conversation, cancellationToken))
+            {
+                // Deleted between the read and the save: nothing to answer, and the question is not counted.
+                await quota.ReturnAsync(tenant, owner, CancellationToken.None);
+                await held.DisposeAsync();
+                return new AnswerStart.Refused(404, NotFoundTitle);
+            }
+
             await InvalidateAsync(conversation.Id);
             return new AnswerStart.Streaming(StreamAsync(conversation, question, held, cancellationToken), held);
         }
@@ -127,89 +135,43 @@ public sealed class AnswerStreamer(
             : null;
     }
 
+    /// <summary>
+    /// The stream around <see cref="AnswerAsync"/>: an exception that escapes it (a bug outside the model calls) ends the answer as
+    /// <see cref="MessageStatus.Failed"/> with an <c>error</c> event instead of a broken stream; a client that left gets what was streamed
+    /// saved as <see cref="MessageStatus.Stopped"/>. The lock is released here at the latest (the answer releases it before its last event).
+    /// </summary>
     private async IAsyncEnumerable<SseEvent> StreamAsync(
         Conversation conversation, Message question, IAsyncDisposable held, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var answer = new AnswerState(Guid.CreateVersion7(), Stopwatch.GetTimestamp(), ai.Value.EffectiveChatModel);
         try
         {
-            var history = conversation.HistoryBeforeLastQuestion(options.Value.Answer.HistoryMessages);
-
-            // 1. Retrieval: a follow-up is rewritten with the history first.
-            var (hits, failure) = await TryAsync(async () =>
+            await using var events = AnswerAsync(conversation, question, answer, held, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            while (true)
             {
-                var query = await rewriter.RewriteAsync(history, question.Text, cancellationToken);
-                return await search.SearchAsync(new SearchRequest(query, SearchRequest.AllTypes, options.Value.Retrieval.TopK), cancellationToken);
-            });
-            if (failure is not null)
-            {
-                if (await FailAsync(answer, conversation, failure, cancellationToken) is { } error)
+                var (more, failure) = await TryAsync(async () => await events.MoveNextAsync());
+                if (failure is not null)
                 {
-                    yield return error;
+                    if (!answer.Saved && await FailAsync(answer, conversation, failure, cancellationToken) is { } error)
+                    {
+                        await held.DisposeAsync();
+                        yield return error;
+                    }
+
+                    yield break;
                 }
 
-                yield break;
-            }
-
-            answer.Sources = [.. hits!.Select((hit, i) => new SourceRef($"S{i + 1}", hit.ChunkId, hit.Type, hit.Title, hit.SectionPath, hit.Reference))];
-            yield return SseEvent.OfSources(answer.Sources);
-
-            // 2. The answer, streamed.
-            var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
-            var chatOptions = new ChatOptions
-            {
-                // Our conversation ID for the guard's log only; never ChatOptions.ConversationId (a provider-side conversation).
-                AdditionalProperties = new AdditionalPropertiesDictionary { [GuardrailChatClient.ConversationIdProperty] = conversation.Id.ToString() },
-            };
-            await using (var updates = answerClient.GetStreamingResponseAsync(prompt, chatOptions, cancellationToken).GetAsyncEnumerator(cancellationToken))
-            {
-                while (true)
+                if (!more)
                 {
-                    var (more, streamFailure) = await TryAsync(async () => await updates.MoveNextAsync());
-                    if (streamFailure is not null)
-                    {
-                        if (await FailAsync(answer, conversation, streamFailure, cancellationToken) is { } error)
-                        {
-                            yield return error;
-                        }
-
-                        yield break;
-                    }
-
-                    if (!more)
-                    {
-                        break;
-                    }
-
-                    foreach (var item in answer.Take(updates.Current))
-                    {
-                        if (item.Name == SseEvent.Delta && answer.FirstTokenTicks is null)
-                        {
-                            answer.FirstTokenTicks = Stopwatch.GetTimestamp();
-                            metrics.FirstToken(Stopwatch.GetElapsedTime(answer.StartTicks));
-                        }
-
-                        yield return item;
-                    }
+                    yield break;
                 }
-            }
 
-            // 3. The grounding rule (ruling 10): an answer that cites none of its sources and used no tool is replaced.
-            answer.Status = MessageStatus.Complete;
-            if (!OutputGuard.IsGrounded(answer.Text.ToString(), answer.Sources.Count, answer.ToolSteps.Count(s => s.Ok)))
-            {
-                answer.Text.Clear().Append(NotGroundedText);
-                answer.GuardFlags.Add($"{GuardBlockedException.OutputStage}:{GuardReasons.Ungrounded}");
-                metrics.GuardBlock(GuardBlockedException.OutputStage, GuardReasons.Ungrounded);
-                yield return SseEvent.OfReplace(NotGroundedText);
+                yield return events.Current;
             }
-
-            await SaveAsync(answer, conversation);
-            yield return SseEvent.OfDone(answer.Id, answer.Usage, answer.Model);
         }
         finally
         {
-            // The client left (the stream was disposed while suspended) or anything else ended it early: what was streamed is kept.
+            // The client left (the stream was disposed while suspended): what was streamed is kept.
             if (!answer.Saved)
             {
                 answer.Status ??= MessageStatus.Stopped;
@@ -218,6 +180,98 @@ public sealed class AnswerStreamer(
 
             await held.DisposeAsync();
         }
+    }
+
+    private async IAsyncEnumerable<SseEvent> AnswerAsync(
+        Conversation conversation, Message question, AnswerState answer, IAsyncDisposable held,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var history = conversation.HistoryBeforeLastQuestion(options.Value.Answer.HistoryMessages);
+
+        // 1. Retrieval: a follow-up is rewritten with the history first (its tokens are metered like the answer's).
+        var (hits, failure) = await TryAsync(async () =>
+        {
+            var rewrite = await rewriter.RewriteAsync(history, question.Text, cancellationToken);
+            if (rewrite.Model is not null || rewrite.Usage != TokenUsage.None)
+            {
+                metrics.ChatUsage(
+                    rewrite.Model ?? ai.Value.EffectiveChatModel, conversation.TenantId, rewrite.Usage.Input, rewrite.Usage.Output,
+                    ai.Value.EffectivePrices);
+            }
+
+            return await search.SearchAsync(new SearchRequest(rewrite.Query, SearchRequest.AllTypes, options.Value.Retrieval.TopK), cancellationToken);
+        });
+        if (failure is not null)
+        {
+            if (await FailAsync(answer, conversation, failure, cancellationToken) is { } error)
+            {
+                await held.DisposeAsync();
+                yield return error;
+            }
+
+            yield break;
+        }
+
+        answer.Sources = [.. hits!.Select((hit, i) => new SourceRef($"S{i + 1}", hit.ChunkId, hit.Type, hit.Title, hit.SectionPath, hit.Reference))];
+        yield return SseEvent.OfSources(answer.Sources);
+
+        // 2. The answer, streamed.
+        var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
+        var chatOptions = new ChatOptions
+        {
+            // Our conversation ID for the guard's log only; never ChatOptions.ConversationId (a provider-side conversation).
+            AdditionalProperties = new AdditionalPropertiesDictionary { [GuardrailChatClient.ConversationIdProperty] = conversation.Id.ToString() },
+        };
+        await using (var updates = answerClient.GetStreamingResponseAsync(prompt, chatOptions, cancellationToken).GetAsyncEnumerator(cancellationToken))
+        {
+            while (true)
+            {
+                var (more, streamFailure) = await TryAsync(async () => await updates.MoveNextAsync());
+                if (streamFailure is not null)
+                {
+                    if (await FailAsync(answer, conversation, streamFailure, cancellationToken) is { } error)
+                    {
+                        await held.DisposeAsync();
+                        yield return error;
+                    }
+
+                    yield break;
+                }
+
+                if (!more)
+                {
+                    break;
+                }
+
+                foreach (var item in answer.Take(updates.Current))
+                {
+                    if (item.Name == SseEvent.Delta && answer.FirstTokenTicks is null)
+                    {
+                        answer.FirstTokenTicks = Stopwatch.GetTimestamp();
+                        metrics.FirstToken(Stopwatch.GetElapsedTime(answer.StartTicks));
+                    }
+
+                    yield return item;
+                }
+            }
+        }
+
+        // 3. The grounding rule (ruling 10): an answer that cites none of its sources and used no tool is replaced.
+        answer.Status = MessageStatus.Complete;
+        if (!OutputGuard.IsGrounded(answer.Text.ToString(), answer.Sources.Count, answer.ToolSteps.Count(s => s.Ok)))
+        {
+            answer.Text.Clear().Append(NotGroundedText);
+            answer.GuardFlags.Add($"{GuardBlockedException.OutputStage}:{GuardReasons.Ungrounded}");
+            metrics.GuardBlock(GuardBlockedException.OutputStage, GuardReasons.Ungrounded);
+            yield return SseEvent.OfReplace(NotGroundedText);
+        }
+
+        // 4. Saved, then the lock is free before the client hears "done" (it may ask the next question at once).
+        var saved = await SaveAsync(answer, conversation);
+        await held.DisposeAsync();
+        yield return saved
+            ? SseEvent.OfDone(answer.Id, answer.Usage, answer.Model)
+            : SseEvent.OfError(500, NotSavedTitle, "Reload the conversation and ask again.");
     }
 
     /// <summary>Saves the failure and returns the event to send, or null when the client left (nothing can be sent).</summary>
@@ -260,7 +314,8 @@ public sealed class AnswerStreamer(
     private bool IsUnavailable(Exception failure) =>
         failure is TimeoutException or OperationCanceledException || failures.IsTransient(failure);
 
-    private async Task SaveAsync(AnswerState answer, Conversation conversation)
+    /// <summary>Saves the answer (also when the client left); false when it could not be stored or the conversation is gone.</summary>
+    private async Task<bool> SaveAsync(AnswerState answer, Conversation conversation)
     {
         answer.Saved = true;
         var status = answer.Status ?? MessageStatus.Stopped;
@@ -284,6 +339,7 @@ public sealed class AnswerStreamer(
 
         // Saved even when the client left, so a reload shows what was streamed.
         using var timeout = new CancellationTokenSource(SaveTimeout);
+        var saved = false;
         try
         {
             conversation.Answer(
@@ -291,7 +347,8 @@ public sealed class AnswerStreamer(
                     answer.Id, MessageRole.Assistant, answer.Text.ToString(), status, time.GetUtcNow(), answer.Sources, answer.ToolSteps,
                     answer.Usage, answer.Model, answer.GuardFlags, latency, firstToken),
                 time.GetUtcNow());
-            if (!await store.SaveAsync(conversation, timeout.Token))
+            saved = await store.SaveAsync(conversation, timeout.Token);
+            if (!saved)
             {
                 logger.LogInformation("Conversation {ConversationId} was deleted while it was answered; the answer is dropped", conversation.Id);
             }
@@ -302,6 +359,7 @@ public sealed class AnswerStreamer(
         }
 
         await InvalidateAsync(conversation.Id);
+        return saved;
     }
 
     private async Task InvalidateAsync(Guid conversationId)

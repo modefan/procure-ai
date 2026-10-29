@@ -138,14 +138,35 @@ public sealed class Conversation : Entity<Guid>
     }
 
     /// <summary>
-    /// Up to <paramref name="count"/> messages before the last question that a follow-up builds on: questions, and answers with text that
-    /// were not blocked or failed.
+    /// Up to <paramref name="count"/> messages before the last question that a follow-up builds on, as question and answer pairs: a
+    /// question is kept only with a <see cref="MessageStatus.Complete"/> or <see cref="MessageStatus.Stopped"/> answer (the answer too when it
+    /// has text). A question whose answer was blocked or failed, or that was never answered, is left out: a blocked question must never reach
+    /// the models again through the history, where the input guard does not look.
     /// </summary>
     public IReadOnlyList<Message> HistoryBeforeLastQuestion(int count)
     {
         var last = LastQuestion;
-        var before = last is null ? _messages : _messages.Take(_messages.IndexOf(last));
-        return [.. before.Where(m => m.Text.Length > 0 && m.Status is MessageStatus.Complete or MessageStatus.Stopped).TakeLast(count)];
+        var before = last is null ? [.. _messages] : _messages.Take(_messages.IndexOf(last)).ToList();
+        var kept = new List<Message>();
+        for (var i = 0; i < before.Count; i++)
+        {
+            if (before[i].Role != MessageRole.User || i + 1 >= before.Count || before[i + 1].Role != MessageRole.Assistant)
+            {
+                continue;
+            }
+
+            var answer = before[i + 1];
+            if (answer.Status is MessageStatus.Complete or MessageStatus.Stopped)
+            {
+                kept.Add(before[i]);
+                if (answer.Text.Length > 0)
+                {
+                    kept.Add(answer);
+                }
+            }
+        }
+
+        return [.. kept.TakeLast(count)];
     }
 
     /// <summary>The first question on one line, cut to <see cref="TitleMaxLength"/> characters.</summary>

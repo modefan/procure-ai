@@ -68,6 +68,11 @@ public sealed class QuotaTests(AssistantApp app)
         next.Allowed.ShouldBeTrue();
         next.Used.ShouldBe(1);
         (await quota.GetAsync(tenant, "rita", Ct)).Used.ShouldBe(1);
+
+        // A question that was never asked after all is given back, never below zero.
+        await quota.ReturnAsync(tenant, "rita", Ct);
+        await quota.ReturnAsync(tenant, "rita", Ct);
+        (await quota.GetAsync(tenant, "rita", Ct)).Used.ShouldBe(0);
     }
 
     private sealed class ManualClock(DateTimeOffset now) : TimeProvider

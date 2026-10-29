@@ -37,6 +37,21 @@ internal sealed class RedisQuestionQuota(IConnectionMultiplexer redis, IOptions<
             : new QuotaCount(false, (int)-result, limit, resetsAt);
     }
 
+    // KEYS[1] the counter. Decrements only a positive count.
+    private const string ReturnScript = """
+        local used = tonumber(redis.call('GET', KEYS[1]) or '0')
+        if used > 0 then
+          return redis.call('DECR', KEYS[1])
+        end
+        return 0
+        """;
+
+    public async Task ReturnAsync(string tenantId, string userId, CancellationToken cancellationToken)
+    {
+        var (key, _, _) = Today(tenantId, userId);
+        await redis.GetDatabase().ScriptEvaluateAsync(ReturnScript, [key]);
+    }
+
     public async Task<QuotaCount> GetAsync(string tenantId, string userId, CancellationToken cancellationToken)
     {
         var (key, limit, resetsAt) = Today(tenantId, userId);

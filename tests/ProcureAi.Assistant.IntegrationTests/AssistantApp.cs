@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.Assistant.Application.Chat;
 using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Infrastructure.Ai;
 using OpenTelemetry.Trace;
@@ -40,7 +41,7 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 /// and the real prompt guard is wrapped by <see cref="MarkerPromptShield"/>.
 /// </summary>
 public sealed class AssistantApiFactory(
-    AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings, ChatScript script)
+    AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings, ChatScript script, ChatFaults faults)
     : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -70,6 +71,9 @@ public sealed class AssistantApiFactory(
             services.Decorate<IPromptShield>((inner, _) => new MarkerPromptShield(inner));
             // The provider's chat model is recorded and can be steered per question (ChatScript); the guard classifier stays the plain Fake.
             services.Decorate<ProviderClients>((inner, _) => new ProviderClients(new ScriptedChatClient(inner.Chat, script), inner.Embeddings, inner.Guard));
+            // Store and lock faults for the tenants a test lists (ChatFaults).
+            services.Decorate<IConversationStore>((inner, _) => new FaultyConversationStore(inner, faults));
+            services.Decorate<IAnswerLock>((inner, _) => new FaultyAnswerLock(inner, faults));
         });
     }
 }
@@ -106,6 +110,9 @@ public sealed class AssistantApp : IAsyncLifetime
     /// <summary>Every chat call that reached the provider, and the per-question steering of the Fake (see <see cref="ChatScript"/>).</summary>
     public ChatScript Script { get; } = new();
 
+    /// <summary>Store and lock faults per tenant (see <see cref="ChatFaults"/>).</summary>
+    public ChatFaults Faults { get; } = new();
+
     /// <summary>Every embedding call of the service (see <see cref="EmbeddingProbe"/>).</summary>
     public EmbeddingProbe Embeddings { get; } = new();
 
@@ -113,7 +120,7 @@ public sealed class AssistantApp : IAsyncLifetime
     {
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
-        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities, Embeddings, Script);
+        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities, Embeddings, Script, Faults);
         Client = _factory.CreateClient();
     }
 

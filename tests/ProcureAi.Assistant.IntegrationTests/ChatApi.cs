@@ -12,7 +12,8 @@ namespace ProcureAi.Assistant.IntegrationTests;
 /// <summary>One server-sent event: its name and its JSON data.</summary>
 public sealed record SseFrame(string Event, JsonElement Data)
 {
-    public string Text => Data.GetProperty("text").GetString()!;
+    /// <summary>The <c>text</c> of a <c>delta</c> or <c>replace</c> event; empty for the others.</summary>
+    public string Text => Data.ValueKind == JsonValueKind.Object && Data.TryGetProperty("text", out var text) ? text.GetString() ?? "" : "";
 }
 
 /// <summary>The answer stream of one question: the status, the frames and (for an error before the stream) the problem body.</summary>

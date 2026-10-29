@@ -29,7 +29,9 @@ public static partial class PromptBuilder
     public static List<ChatMessage> Build(IReadOnlyList<SearchHit> hits, IReadOnlyList<SourceRef> sources, IEnumerable<Message> history, string question)
     {
         var messages = new List<ChatMessage> { new(ChatRole.System, System(hits, sources)) };
-        messages.AddRange(history.Select(m => new ChatMessage(m.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant, m.Text)));
+        messages.AddRange(history.Select(m => m.Role == MessageRole.User
+            ? new ChatMessage(ChatRole.User, m.Text)
+            : new ChatMessage(ChatRole.Assistant, WithoutCitations(m.Text))));
         messages.Add(new ChatMessage(ChatRole.User, question));
         return messages;
     }
@@ -66,11 +68,20 @@ public static partial class PromptBuilder
         return builder.ToString().TrimEnd();
     }
 
+    /// <summary>
+    /// An earlier answer without its citation markers (<c>[S1]</c>, <c>[S1, S2]</c>, <c>[S1-S3]</c>): they pointed at that answer's sources,
+    /// not this one's, so a model that copied them would pass the grounding check with stale citations.
+    /// </summary>
+    public static string WithoutCitations(string text) => Citation().Replace(text ?? "", "");
+
     /// <summary>Source text with every <c>&lt;data</c> and <c>&lt;/data</c> (any case) escaped, so it cannot leave or fake a block.</summary>
     public static string Escape(string text) => DataTag().Replace(text ?? "", "&lt;$1");
 
     private static string Attribute(string value) =>
         (value ?? "").Replace("&", "&amp;").Replace("\"", "&quot;").Replace("<", "&lt;").Replace(">", "&gt;").Replace('\n', ' ').Replace('\r', ' ');
+
+    [GeneratedRegex(@"\s*\[S\d{1,3}(?:\s*[,;\-–]\s*S?\d{1,3})*\]", RegexOptions.None, 1000)]
+    private static partial Regex Citation();
 
     [GeneratedRegex(@"<(\s*/?\s*data)", RegexOptions.IgnoreCase)]
     private static partial Regex DataTag();

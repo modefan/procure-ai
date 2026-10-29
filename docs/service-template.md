@@ -176,7 +176,7 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
   system message, history next, the user's own question last), `delta`s, the grounding rule (`replace` with `AnswerStreamer.NotGroundedText`),
   save, `done`. Failures after the start are an `error` event: 422 guard, 503 provider unavailable or timed out, 500 anything else. The answer
   is saved and the lock released in the iterator's `finally` (also registered for the end of the request), so a client that leaves gets its
-  partial text saved as `Stopped` (up to `HoldBackChars` of held-back text is lost, ruling of Task 4). Event names and data: `SseEvent`.
+  partial text saved as `Stopped` (up to `HoldBackChars` of held-back text is lost, ruling of Task 4). The lock is released right after a successful save, before `done`; `done` only for a saved answer (else an `error` 500 "The answer could not be saved."). History keeps only question-answer pairs whose answer is Complete or Stopped (a blocked question never reaches the models again), and earlier answers lose their `[S<n>]` markers. Event names and data: `SseEvent`.
 - Quota (ruling 7): `RedisQuestionQuota`, a Lua check-and-increment per tenant, user and calendar day of `Assistant:Quota:TimeZone`
   (Africa/Johannesburg) on the injected `TimeProvider`; a question counts when its answer starts (also when a guard blocks it).
 - Provider timeout: every chat pipeline ends in `ProviderTimeoutChatClient` (innermost): a call may take `AI:Chat:Timeout` in all, a stream

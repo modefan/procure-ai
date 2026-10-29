@@ -15,6 +15,9 @@ public interface IQuestionQuota
     /// <summary>Counts one question unless the limit is reached (atomically: two questions at once never both take the last one).</summary>
     Task<QuotaCount> TryCountAsync(string tenantId, string userId, CancellationToken cancellationToken);
 
+    /// <summary>Gives back one counted question of today (one that was never asked after all); never below zero.</summary>
+    Task ReturnAsync(string tenantId, string userId, CancellationToken cancellationToken);
+
     /// <summary>Today's count, without counting.</summary>
     Task<QuotaCount> GetAsync(string tenantId, string userId, CancellationToken cancellationToken);
 }
