@@ -79,6 +79,7 @@ public sealed class PolicyDocumentRulesTests
         document.FlaggedReason.ShouldBeNull();
         document.Fail(3, new string('x', 600), At).ShouldBeTrue();
         document.FailureReason!.Length.ShouldBe(PolicyDocument.ReasonMaxLength);
+        document.FailureReason.ShouldEndWith("…");
         document.CurrentVersion.ShouldBe(1);
     }
 

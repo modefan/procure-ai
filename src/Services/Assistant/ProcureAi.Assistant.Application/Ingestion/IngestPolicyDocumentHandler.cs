@@ -39,8 +39,12 @@ public static class IngestPolicyDocumentHandler
 /// </list>
 /// Every status change publishes <c>PolicyDocumentStatusChanged</c> (outbox). A retry resumes: the children a failed attempt already stored
 /// are kept. A version that is no longer the newest (replaced again, or the document removed) stops at its next commit and deletes what it
-/// stored. A provider failure that may pass is rethrown as <see cref="AiProviderUnavailableException"/> (scheduled retries,
-/// <c>Assistant:Ingestion:RetryDelays</c>); on the last attempt the version is <c>Failed</c> with the reason.
+/// stored. A model call (guard, context, embeddings) that failed for a reason that may pass is rethrown as
+/// <see cref="AiProviderUnavailableException"/> (scheduled retries,
+/// <c>Assistant:Ingestion:RetryDelays</c>); on the last attempt the version is <c>Failed</c> with the reason. A passing database failure
+/// is left to the shared scheduled retry; anything else (a bug) ends the version <c>Failed</c> ("Ingestion failed unexpectedly.") instead
+/// of dead-lettering the message. A reused chunk copies the context and vector of the earlier chunk of the tenant with the same content
+/// hash and embedding model (<see cref="EmbeddingReuse"/>).
 /// </summary>
 public sealed class PolicyIngestion(
     IAssistantUnitOfWorkFactory units,
@@ -50,6 +54,7 @@ public sealed class PolicyIngestion(
     ContextWriter contextWriter,
     IEmbeddingGenerator<string, Embedding<float>> embeddings,
     IAiFailures failures,
+    IDatabaseFailures databaseFailures,
     ICacheInvalidator cache,
     AssistantMetrics metrics,
     IOptions<AiOptions> ai,
@@ -82,26 +87,40 @@ public sealed class PolicyIngestion(
             logger.LogWarning(exception, "Policy document {DocumentId} version {Version} could not be read", job.DocumentId, job.Version);
             await EndAsync(job, PolicyDocumentStatus.Failed, exception.Message, cancellationToken);
         }
-        catch (Exception exception) when (!cancellationToken.IsCancellationRequested && failures.IsTransient(exception))
+        catch (AiProviderUnavailableException exception) when (!cancellationToken.IsCancellationRequested)
         {
             var retries = options.Value.Ingestion.RetryDelaySchedule().Length;
             if (attempt <= retries)
             {
                 logger.LogWarning(
-                    exception, "The AI model failed for policy document {DocumentId} version {Version}, attempt {Attempt}; retrying",
+                    exception.InnerException, "The AI model failed for policy document {DocumentId} version {Version}, attempt {Attempt}; retrying",
                     job.DocumentId, job.Version, attempt);
-                throw new AiProviderUnavailableException(exception);
+                throw;
             }
 
             logger.LogError(
-                exception, "The AI model failed for policy document {DocumentId} version {Version} after {Attempts} attempts; giving up",
+                exception.InnerException, "The AI model failed for policy document {DocumentId} version {Version} after {Attempts} attempts; giving up",
                 job.DocumentId, job.Version, attempt);
             await EndAsync(
                 job, PolicyDocumentStatus.Failed,
-                $"The AI model could not be reached ({exception.GetType().Name}) after {attempt} attempts. Upload the file again later.",
+                $"The AI model could not be reached ({exception.InnerException?.GetType().Name}) after {attempt} attempts. Upload the file again later.",
                 cancellationToken);
         }
+        catch (Exception exception) when (
+            !cancellationToken.IsCancellationRequested && exception is not OperationCanceledException
+            && !databaseFailures.IsTransientDatabaseFailure(exception))
+        {
+            // A bug or a state nothing retries (a lost race after its retries, a domain rule): without this the message would be
+            // dead-lettered and the version left checking or embedding for good. A passing database failure is not caught, so the
+            // shared scheduled retry still applies. Only IDs are logged with the exception.
+            logger.LogError(
+                exception, "Ingestion of policy document {DocumentId} version {Version} failed unexpectedly", job.DocumentId, job.Version);
+            await EndAsync(job, PolicyDocumentStatus.Failed, UnexpectedFailure, cancellationToken);
+        }
     }
+
+    /// <summary>The reason shown for a version whose ingestion failed for an unexpected reason (details are in the log only).</summary>
+    public const string UnexpectedFailure = "Ingestion failed unexpectedly.";
 
     /// <summary>Loads the version to ingest and moves it to <c>Checking</c>; null when there is nothing (left) to do.</summary>
     private async Task<Job?> StartAsync(IngestPolicyDocument message, CancellationToken cancellationToken)
@@ -149,7 +168,10 @@ public sealed class PolicyIngestion(
             throw new TextExtractionException("The file has no text to index. A scanned PDF needs text recognition first.");
         }
 
-        var guard = await shield.CheckDocumentAsync(string.Join("\n\n", extracted.Sections.Select(s => s.Text)), cancellationToken);
+        // The guard reads everything of the document that reaches a prompt: the title (typed by the uploader), the headings (stored as
+        // the section paths) and the text.
+        var guardInput = string.Join("\n\n", [job.Title, .. extracted.Sections.Select(s => string.Join(" > ", s.Path) + "\n" + s.Text)]);
+        var guard = await ModelCallAsync(() => shield.CheckDocumentAsync(guardInput, cancellationToken), cancellationToken);
         if (guard.Blocked)
         {
             var reason = string.IsNullOrWhiteSpace(guard.Reason) ? "The document contains instructions to the assistant." : guard.Reason;
@@ -192,9 +214,11 @@ public sealed class PolicyIngestion(
             var current = await ChangeAsync(job.DocumentId, job.Version, async (unit, document) =>
             {
                 unit.Db.Chunks.AddRange(chunks);
-                document.SetProgress(job.Version, percent, time.GetUtcNow());
+                // The document row is written only when a new 10 % step is reached (one audit row, one CDC change and one new ETag per
+                // step, not per batch). A retry resumes from the stored chunks, not from this number.
                 if (newStep is { } reached)
                 {
+                    document.SetProgress(job.Version, percent, time.GetUtcNow());
                     await unit.PublishAsync(new PolicyDocumentProgressed(job.DocumentId, job.TenantId, job.Version, reached, time.GetUtcNow()));
                 }
             }, cancellationToken);
@@ -283,14 +307,15 @@ public sealed class PolicyIngestion(
             }
 
             var context = options.Value.Ingestion.ContextualRetrieval
-                ? await contextWriter.WriteAsync(job.Title, planned, cancellationToken)
+                ? await ModelCallAsync(() => contextWriter.WriteAsync(job.Title, planned, cancellationToken), cancellationToken)
                 : null;
             toEmbed.Add((chunk, context, context is null ? planned.Text : context + "\n" + planned.Text));
         }
 
         if (toEmbed.Count > 0)
         {
-            var generated = await embeddings.GenerateAsync([.. toEmbed.Select(e => e.Input)], cancellationToken: cancellationToken);
+            var generated = await ModelCallAsync(
+                () => embeddings.GenerateAsync([.. toEmbed.Select(e => e.Input)], cancellationToken: cancellationToken), cancellationToken);
             metrics.EmbeddingUsage(model, job.TenantId, generated.Usage?.InputTokenCount ?? 0, ai.Value.EffectivePrices);
             for (var i = 0; i < toEmbed.Count; i++)
             {
@@ -299,6 +324,22 @@ public sealed class PolicyIngestion(
         }
 
         return chunks;
+    }
+
+    /// <summary>
+    /// Runs a call to a model (the guard, the context writer, the embeddings); a failure of it that may pass becomes an
+    /// <see cref="AiProviderUnavailableException"/>. Only these calls are classified, so a database timeout is never reported as the model.
+    /// </summary>
+    private async Task<T> ModelCallAsync<T>(Func<Task<T>> call, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await call();
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested && failures.IsTransient(exception))
+        {
+            throw new AiProviderUnavailableException(exception);
+        }
     }
 
     /// <summary>Ends the version as <c>Failed</c> or <c>Flagged</c>: what it stored is deleted, the current version stays searchable.</summary>

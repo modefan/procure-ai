@@ -26,6 +26,7 @@ public static class IngestionSetup
         services.AddSingleton(sp => new ChunkPlanner(sp.GetRequiredService<IOptions<AssistantOptions>>().Value.Chunking));
         services.TryAddSingleton<IPromptShield, AllowAllPromptShield>();
         services.TryAddSingleton<IAiFailures, AiFailures>();
+        services.TryAddSingleton<IDatabaseFailures, DatabaseFailures>();
         services.AddSingleton<ContextWriter>();
         services.AddSingleton<IAssistantUnitOfWorkFactory, AssistantUnitOfWorkFactory>();
         services.AddScoped<PolicyIngestion>();

@@ -153,8 +153,8 @@ public sealed class IngestionTests(AssistantApp app)
         (await app.ScalarAsync<long>("SELECT count(*) FROM chunks WHERE document_id = @id", ("id", document.Id))).ShouldBe(0L);
         // Nothing went to the error queue: the job ended the version itself.
         (await app.ScalarAsync<long>(
-                "SELECT count(*) FROM wolverine.wolverine_dead_letters WHERE message_type LIKE '%IngestPolicyDocument%' AND body::text LIKE @id",
-                ("id", $"%{document.Id}%")))
+                "SELECT count(*) FROM wolverine.wolverine_dead_letters WHERE message_type LIKE '%IngestPolicyDocument%' AND position(convert_to(@id, 'UTF8') in body) > 0",
+                ("id", document.Id.ToString())))
             .ShouldBe(0L);
     }
 

@@ -139,10 +139,15 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
   DbContext (so Wolverine opens no transaction around it): `PolicyIngestion` commits step by step through `IAssistantUnitOfWorkFactory`
   (a scope per unit, `IDbContextOutbox<AssistantDbContext>`, an explicit transaction so `ExecuteDeleteAsync`, the changes and the events
   commit together). Steps: extract, `IPromptShield.CheckDocumentAsync` (allow-all until Task 4), plan, reuse by
-  `(child, content_hash, embedding_model)` in the tenant, context (`utility`, `#task: context`) and batched embeddings, progress per
+  `(child, content_hash, embedding_model)` in the tenant (a reused chunk copies the context and the vector of the earlier chunk with the
+  same text hash; never across tenants), context (`utility`, `#task: context`) and batched embeddings, progress per
   batch (`PolicyDocumentProgressed` per new 10 % step), then the switch (older versions' chunks deleted and `current_version` set in one
   transaction). `SearchableChunks.Of(db)` is what retrieval may read: purchase chunks, and policy chunks of the current version of a
   document that was not removed.
+- The document guard reads the title, every heading path and the text. The document row is written only per 10 % step (and status
+  changes), not per batch. Uploads over `MaxBytes` + 64 KB are refused (413) before the body is read (`[UploadSizeLimit]`, also lowers
+  Kestrel's body limit). An unexpected failure (a bug, a lost race after its retries) ends the version `Failed` ("Ingestion failed
+  unexpectedly.") instead of dead-lettering; a passing database failure keeps the shared scheduled retry.
 - A stale job (the document was replaced again or removed) stops at its next commit and deletes what it stored. Provider failures
   (`IAiFailures`: transient HTTP, `ClientResultException` 429/5xx, timeouts) become `AiProviderUnavailableException`, retried on the durable
   schedule `Assistant:Ingestion:RetryDelays` (one comma-separated string, default `00:00:10, 00:01:00, 00:05:00`); on the last attempt

@@ -14,6 +14,7 @@ public sealed class EmbeddingProbe
 {
     private readonly ConcurrentQueue<string[]> _calls = new();
     private readonly ConcurrentDictionary<string, bool> _failing = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Func<Exception>> _throwing = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Hold> _holds = new(StringComparer.Ordinal);
 
     /// <summary>The texts of each call, in call order.</summary>
@@ -28,6 +29,9 @@ public sealed class EmbeddingProbe
 
     public void FailWhenContains(string marker) => _failing[marker] = true;
 
+    /// <summary>Calls with <paramref name="marker"/> throw what <paramref name="exception"/> makes (an unexpected failure, a bug).</summary>
+    public void ThrowWhenContains(string marker, Func<Exception> exception) => _throwing[marker] = exception;
+
     /// <summary>Calls with <paramref name="marker"/> wait until <see cref="Hold.Release"/>; <see cref="Hold.Entered"/> completes when one arrives.</summary>
     public Hold HoldWhenContains(string marker) => _holds[marker] = new Hold();
 
@@ -40,6 +44,14 @@ public sealed class EmbeddingProbe
             {
                 hold.Enter();
                 await hold.WaitAsync(cancellationToken);
+            }
+        }
+
+        foreach (var (marker, exception) in _throwing)
+        {
+            if (texts.Any(t => t.Contains(marker, StringComparison.Ordinal)))
+            {
+                throw exception();
             }
         }
 

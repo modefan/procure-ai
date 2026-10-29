@@ -215,6 +215,6 @@ public sealed class PolicyDocument : Entity<Guid>
     private static string Shorten(string reason)
     {
         var text = string.IsNullOrWhiteSpace(reason) ? "No reason given." : reason.Trim();
-        return text.Length <= ReasonMaxLength ? text : text[..(ReasonMaxLength - 1)] + "…";
+        return text.Length <= ReasonMaxLength ? text : text[..(ReasonMaxLength - 1)] + "â€¦";
     }
 }

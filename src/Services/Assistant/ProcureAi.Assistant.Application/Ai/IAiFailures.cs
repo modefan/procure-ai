@@ -8,3 +8,12 @@ public interface IAiFailures
 {
     bool IsTransient(Exception exception);
 }
+
+/// <summary>
+/// Whether a failure is a passing database failure that the shared scheduled retry of every service handles (the Messaging building
+/// block's transient-database rule). Implemented in Infrastructure, which may reference that rule.
+/// </summary>
+public interface IDatabaseFailures
+{
+    bool IsTransientDatabaseFailure(Exception exception);
+}
