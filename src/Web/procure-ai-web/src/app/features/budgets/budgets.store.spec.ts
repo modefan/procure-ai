@@ -86,6 +86,7 @@ describe('BudgetsStore', () => {
     expect(conflict.show).toHaveBeenCalledTimes(1);
     expect(store().saveError()).toBeNull();
     expect(store().entities()[0].version).toBe(5);
+    expect(store().conflicts()).toBe(1);
   });
 
   it('one write at a time: a double click shares the call, another budget meanwhile is refused', async () => {

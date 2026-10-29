@@ -27,7 +27,7 @@ public sealed class ContractsTests
         "PurchaseOrderCancelled", "PurchaseOrderCancellationRefused",
         "InvoiceReceived", "InvoiceMatched", "InvoiceMismatched", "PaymentReleased", "PaymentExported", "PurchaseOrderSettled",
         "RequestOrdered", "RequestCancellationConfirmed", "RequestCancellationRefused", "RequestCompleted",
-        "BudgetSpent",
+        "BudgetSpent", "BudgetAmountSet",
     ];
 
     private static Type[] ContractTypes() =>

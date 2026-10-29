@@ -122,6 +122,24 @@ describe('BudgetsPage', () => {
     expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('R 633');
   });
 
+  it('after a 412 the open dialog shows the latest amount and says the figures changed', async () => {
+    const { fixture, el } = await setup();
+    (row(el, 'IT-200')!.querySelector('[data-action="edit"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await settle(fixture);
+    const dialog = el.querySelector('dialog') as HTMLDialogElement;
+    const input = dialog.querySelector('#budget-amount') as HTMLInputElement;
+    input.value = '940000';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    api.setBudget.mockRejectedValue(new HttpErrorResponse({ status: 412 }));
+    api.listBudgets.mockResolvedValue([budgetDto('IT-200', { amount: 920000, version: 5 })]);
+    (dialog.querySelector('[data-action="save-budget"] button') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(dialog.hasAttribute('open')).toBe(true);
+    expect((dialog.querySelector('#budget-amount') as HTMLInputElement).value).toBe('920000');
+    expect(text(dialog)).toContain('The figures were just updated');
+  });
+
   it('an empty amount is refused before anything is sent', async () => {
     const { fixture, el } = await setup();
     (row(el, 'IT-200')!.querySelector('[data-action="edit"]') as HTMLButtonElement).click();

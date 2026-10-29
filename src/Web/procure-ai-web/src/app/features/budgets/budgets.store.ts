@@ -17,6 +17,8 @@ interface BudgetsState {
   busyCode: string | null;
   /** The server's refusal of the last save (422 below spent plus reserved, 400 ...), in words. */
   saveError: string | null;
+  /** Counts the saves that lost to someone else (412), so an open dialog knows its figures were just refreshed. */
+  conflicts: number;
 }
 
 
@@ -30,7 +32,7 @@ interface BudgetsState {
 export const BudgetsStore = signalStore(
   { providedIn: 'root' },
   withEntities<BudgetDto>(),
-  withState<BudgetsState>({ busyCode: null, saveError: null }),
+  withState<BudgetsState>({ busyCode: null, saveError: null, conflicts: 0 }),
   withRequestStatus(),
   withCache(),
   withMethods((store) => {
@@ -109,7 +111,7 @@ export const BudgetsStore = signalStore(
             if (error instanceof HttpErrorResponse && error.status === 412) {
               await conflict.show('Someone else just changed this budget. Showing the latest version.');
               await fetchList().catch(() => undefined);
-              patchState(store, { saveError: null });
+              patchState(store, (s) => ({ saveError: null, conflicts: s.conflicts + 1 }));
             } else {
               log.warn('Saving the budget failed', error);
               const problem = problemOf(error);
@@ -144,4 +146,3 @@ export const BudgetsStore = signalStore(
     };
   }),
 );
-

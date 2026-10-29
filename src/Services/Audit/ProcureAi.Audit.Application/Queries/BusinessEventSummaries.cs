@@ -92,6 +92,7 @@ public sealed class BusinessEventSummaries
             RequestCancellationRefused r => $"Cancellation of the ordered request refused: {r.Reason}",
             RequestCompleted c => $"Request completed ({Rand(c.SpentInclVat)} spent incl. VAT)",
             BudgetSpent b => $"{Rand(b.Amount)} spent on {b.CostCenterCode}",
+            BudgetAmountSet b => $"Budget of {b.CostCenterCode} ({b.FiscalYear}) set to {Rand(b.Amount)}",
             AccessChanged a => $"Access changed ({a.Kind})" + (a.UserId is null ? "" : $" for {Name(a.UserId)}"),
             _ => e.Stored.Type,
         };

@@ -40,6 +40,7 @@ public static class LiveEventMap
         BudgetReservationFailed e => Pushes(e, e.RequestId, Budget(e.CostCenterCode)),
         BudgetReleased e => Pushes(e, e.RequestId, Budget(e.CostCenterCode)),
         BudgetSpent e => Pushes(e, e.RequestId, Budget(e.CostCenterCode)),
+        BudgetAmountSet e => [new EntityChanged(LiveEntities.Budget, e.CostCenterCode, null, nameof(BudgetAmountSet), e.OccurredAt)],
 
         // purchasing: the order (none yet when a request was cancelled before its order was created)
         PurchaseOrderCreated e => Pushes(e, e.RequestId, Order(e.OrderId)),

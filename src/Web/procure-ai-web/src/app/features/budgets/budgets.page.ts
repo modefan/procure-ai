@@ -100,7 +100,7 @@ import { fiscalYearLabel } from './fiscal-year';
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
                     <p class="truncate font-semibold text-slate-900" [title]="budget.costCenterCode">{{ budget.costCenterCode }}</p>
-                    <p class="truncate text-sm text-slate-600" [title]="budget.ownerName ?? ''">{{ budget.ownerName ?? 'No owner set' }}</p>
+                    <p class="truncate text-sm text-slate-600" [title]="budget.ownerName ?? ''">{{ budget.ownerName ?? 'Not set' }}</p>
                   </div>
                   @if (mayManage()) {
                     <button type="button" class="btn-secondary px-3 py-1" data-action="edit" [attr.aria-label]="'Change budget of ' + budget.costCenterCode" (click)="edit(budget.costCenterCode)">Edit</button>

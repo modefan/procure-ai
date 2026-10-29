@@ -74,6 +74,7 @@ public sealed class EventMapTests
         ["BudgetReservationFailed"] = (new BudgetReservationFailed(RequestId, Tenant, CostCenter, "Insufficient", 100m, 10m, At), BudgetAndRequest("BudgetReservationFailed")),
         ["BudgetReleased"] = (new BudgetReleased(RequestId, Tenant, CostCenter, 100m, At), BudgetAndRequest("BudgetReleased")),
         ["BudgetSpent"] = (new BudgetSpent(RequestId, Tenant, CostCenter, PaymentId, 100m, At), BudgetAndRequest("BudgetSpent")),
+        ["BudgetAmountSet"] = (new BudgetAmountSet(Tenant, CostCenter, "FY2027", 150000m, 7, At), [new EntityChanged(LiveEntities.Budget, CostCenter, null, "BudgetAmountSet", At)]),
 
         // purchasing: the order and the request
         ["PurchaseOrderCreated"] = (new PurchaseOrderCreated(OrderId, RequestId, Tenant, "PO-1", "PR-1", "sup-1", CostCenter, "tom", [], 100m, 15m, 115m, At), OrderAndRequest("PurchaseOrderCreated")),

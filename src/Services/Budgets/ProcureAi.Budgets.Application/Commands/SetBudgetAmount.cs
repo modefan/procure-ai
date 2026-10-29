@@ -4,6 +4,8 @@ using ProcureAi.Budgets.Application.Dtos;
 using ProcureAi.Budgets.Application.Mapping;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
+using ProcureAi.Contracts.Budgets;
+using Wolverine;
 
 namespace ProcureAi.Budgets.Application.Commands;
 
@@ -15,7 +17,8 @@ public sealed record SetBudgetAmount(string CostCenterCode, string FiscalYear, d
 
 public static class SetBudgetAmountHandler
 {
-    public static async Task<BudgetDto> Handle(SetBudgetAmount command, IBudgetsDbContext db, CancellationToken cancellationToken)
+    public static async Task<BudgetDto> Handle(
+        SetBudgetAmount command, IBudgetsDbContext db, IMessageBus bus, TimeProvider time, CancellationToken cancellationToken)
     {
         var year = FiscalYearArgument.Parse(command.FiscalYear);
         var budget = await db.Budgets.Include(b => b.Reservations).SingleOrDefaultAsync(
@@ -25,6 +28,9 @@ public static class SetBudgetAmountHandler
 
         budget.SetAmount(Money.Zar(command.Amount));
         await OptimisticConcurrency.SaveOrConflictAsync(db.SaveChangesAsync, "The budget", cancellationToken);
-        return BudgetMapper.ToDto(budget);
+        var dto = BudgetMapper.ToDto(budget);
+        // Through the outbox with the change, so a viewer of the budget list gets told (live update) and the edit lands in the business audit.
+        await bus.PublishAsync(new BudgetAmountSet(budget.TenantId, budget.CostCenterCode, dto.FiscalYear, dto.Amount, dto.Version, time.GetUtcNow()));
+        return dto;
     }
 }

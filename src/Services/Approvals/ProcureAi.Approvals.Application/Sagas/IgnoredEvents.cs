@@ -15,6 +15,11 @@ public static class IgnoredEventsHandler
     {
     }
 
+    /// <summary>A budget amount was changed by hand; nothing for a saga to do.</summary>
+    public static void Handle(BudgetAmountSet changed)
+    {
+    }
+
     /// <summary>Spend recorded on a payment; the saga learns of completion from Invoicing.</summary>
     public static void Handle(BudgetSpent spent)
     {

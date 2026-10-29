@@ -14,6 +14,7 @@ public enum BudgetEventKind
     Failed,
     Released,
     Spent,
+    AmountSet,
 }
 
 public sealed record BudgetEvent(BudgetEventKind Kind, Guid RequestId, string TenantId, JsonElement Body)
@@ -48,12 +49,13 @@ public sealed class BudgetEvents : IAsyncDisposable
         consumer.ReceivedAsync += (_, delivery) =>
         {
             var body = JsonDocument.Parse(Encoding.UTF8.GetString(delivery.Body.Span)).RootElement.Clone();
-            var kind = body.TryGetProperty("reason"u8, out JsonElement _) ? BudgetEventKind.Failed
+            var kind = body.TryGetProperty("version"u8, out JsonElement _) ? BudgetEventKind.AmountSet
+                : body.TryGetProperty("reason"u8, out JsonElement _) ? BudgetEventKind.Failed
                 : body.TryGetProperty("fiscalYear"u8, out JsonElement _) ? BudgetEventKind.Reserved
                 : body.TryGetProperty("paymentId"u8, out JsonElement _) ? BudgetEventKind.Spent
                 : BudgetEventKind.Released;
             events._events.Enqueue(new BudgetEvent(
-                kind, body.GetProperty("requestId").GetGuid(), body.GetProperty("tenantId").GetString()!, body));
+                kind, body.TryGetProperty("requestId"u8, out JsonElement id) ? id.GetGuid() : Guid.Empty, body.GetProperty("tenantId").GetString()!, body));
             return Task.CompletedTask;
         };
         await channel.BasicConsumeAsync(queue, autoAck: true, consumer);

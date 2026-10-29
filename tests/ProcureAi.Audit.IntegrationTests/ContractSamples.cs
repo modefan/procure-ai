@@ -24,6 +24,7 @@ internal static class ContractSamples
             _ when type == typeof(Guid) => Guid.NewGuid(),
             _ when type == typeof(decimal) => 1_000m,
             _ when type == typeof(int) => 1,
+            _ when type == typeof(uint) => 1u,
             _ when type == typeof(DateTimeOffset) => DateTimeOffset.UtcNow,
             _ when type == typeof(DateOnly) => DateOnly.FromDateTime(DateTime.UtcNow),
             _ when type == typeof(IReadOnlyList<string>) => new[] { userId },

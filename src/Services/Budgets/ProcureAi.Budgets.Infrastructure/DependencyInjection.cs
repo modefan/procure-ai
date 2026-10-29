@@ -54,6 +54,7 @@ public static class DependencyInjection
         options.PublishMessage<BudgetReservationFailed>().ToRabbitExchange(Exchanges.Budgets);
         options.PublishMessage<BudgetReleased>().ToRabbitExchange(Exchanges.Budgets);
         options.PublishMessage<BudgetSpent>().ToRabbitExchange(Exchanges.Budgets);
+        options.PublishMessage<BudgetAmountSet>().ToRabbitExchange(Exchanges.Budgets);
         // A spend no budget can take cannot succeed on a retry: straight to the error queue, where it is visible.
         options.OnException<SpendCannotBeBookedException>().MoveToErrorQueue();
 

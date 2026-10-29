@@ -20,4 +20,5 @@ public static class BudgetEventsHandler
 
     public static Task Handle(BudgetSpent message, ILivePushes pushes, CancellationToken cancellationToken) =>
         pushes.PushToTenantAsync(message.TenantId, LiveEventMap.For(message), cancellationToken);
+public static Task Handle(BudgetAmountSet message, ILivePushes pushes, CancellationToken cancellationToken) =>        pushes.PushToTenantAsync(message.TenantId, LiveEventMap.For(message), cancellationToken);
 }

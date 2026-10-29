@@ -49,6 +49,46 @@ public sealed class ApiTests(BudgetsApp app)
         all.Select(b => b.CostCenterCode).ShouldBe(["CC-A", "CC-B"]);
     }
 
+    [Fact]
+    public async Task Setting_a_budget_publishes_BudgetAmountSet_once_and_a_refused_change_publishes_nothing()
+    {
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, "CC-A", 100_000m);
+        var finance = BudgetsApp.Token(tenant, "finance", "thandi");
+        var read = await SendAsync(HttpMethod.Get, $"{Base}/CC-A/{Year}", finance);
+
+        var put = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: read.Headers.ETag!.Tag, body: new { amount = 150_000m });
+        var stale = await SendAsync(HttpMethod.Put, $"{Base}/CC-A/{Year}", finance, ifMatch: read.Headers.ETag!.Tag, body: new { amount = 170_000m });
+
+        put.StatusCode.ShouldBe(HttpStatusCode.OK);
+        stale.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+        var deadline = DateTime.UtcNow + BudgetsApp.EventTimeout;
+        while (DateTime.UtcNow < deadline && !app.Events.All.Any(e => e.Kind == BudgetEventKind.AmountSet && e.TenantId == tenant))
+        {
+            await Task.Delay(50, Ct);
+        }
+
+        await Task.Delay(1_000, Ct);
+        var sent = app.Events.All.Where(e => e.Kind == BudgetEventKind.AmountSet && e.TenantId == tenant).ToList();
+        var body = sent.ShouldHaveSingleItem().Body;
+        body.GetProperty("costCenterCode").GetString().ShouldBe("CC-A");
+        body.GetProperty("fiscalYear").GetString().ShouldBe(Year);
+        body.GetProperty("amount").GetDecimal().ShouldBe(150_000m);
+        body.GetProperty("version").GetUInt32().ShouldBe((await ReadAsync<BudgetDto>(await SendAsync(HttpMethod.Get, $"{Base}/CC-A/{Year}", finance))).Version);
+    }
+
+    [Fact]
+    public async Task A_cost_center_Access_does_not_know_is_listed_without_an_owner()
+    {
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, "CC-GHOST", 1_000m);
+        app.Access.MissingCostCenters["CC-GHOST"] = true;
+
+        var list = await ReadAsync<List<BudgetDto>>(await SendAsync(HttpMethod.Get, $"{Base}?fiscalYear={Year}", BudgetsApp.Token(tenant, "finance", "thandi")));
+
+        list.Single().OwnerName.ShouldBeNull();
+        list.Single().CostCenterCode.ShouldBe("CC-GHOST");
+    }
 
     [Fact]
     public async Task Budgets_carry_the_name_of_the_cost_center_manager()

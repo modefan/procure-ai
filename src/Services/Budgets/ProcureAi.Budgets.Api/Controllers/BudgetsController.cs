@@ -96,6 +96,11 @@ public sealed class BudgetsController(
                 var approvers = await access.GetApproversAsync(code, tenant, cancellationToken);
                 return (Code: code, Name: approvers.Manager?.DisplayName);
             }
+            catch (NotFoundException)
+            {
+                logger.LogDebug("{CostCenter} has no record in Access; listing its budget without an owner", code);
+                return (Code: code, Name: (string?)null);
+            }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 logger.LogWarning(exception, "The manager of {CostCenter} could not be looked up; listing its budget without an owner", code);

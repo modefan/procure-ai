@@ -1,4 +1,4 @@
-import { Component, computed, effect, ElementRef, inject, input, OnDestroy, output, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, input, OnDestroy, output, signal, untracked, viewChild } from '@angular/core';
 import { form, FormField, submit, validate } from '@angular/forms/signals';
 import { BudgetDto } from '../../api/budgets/models/budget-dto';
 import { BusyButton } from '../../core/ui/busy-button';
@@ -52,6 +52,9 @@ import { fiscalYearLabel } from './fiscal-year';
         } @else {
           <p id="budget-amount-hint" class="mt-1 text-sm text-slate-600">It cannot be lower than spent plus reserved.</p>
         }
+        @if (refreshed()) {
+          <p class="mt-1 text-sm text-amber-800" data-hint="refreshed">The figures were just updated by someone else. The amount shows the latest budget.</p>
+        }
         @if (store.saveError(); as message) {
           <p role="alert" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{{ keepAmounts(message) }}</p>
         }
@@ -74,6 +77,8 @@ export class BudgetEditDialog implements OnDestroy {
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly model = signal<{ amount: number }>({ amount: 0 });
   protected readonly tried = signal(false);
+  /** The figures were refreshed under the open dialog after a conflict. */
+  protected readonly refreshed = signal(false);
 
   protected readonly amountForm = form(this.model, (p) => {
     validate(p.amount, (ctx) => {
@@ -101,6 +106,20 @@ export class BudgetEditDialog implements OnDestroy {
         if (!element.open) {
           element.showModal();
         }
+      }
+    });
+
+    // A save that lost to someone else (412): the store has loaded the latest budget, so show its amount and say why it moved.
+    let seenConflicts = this.store.conflicts();
+    effect(() => {
+      const conflicts = this.store.conflicts();
+      if (conflicts !== seenConflicts) {
+        seenConflicts = conflicts;
+        const amount = untracked(() => this.budget().amount);
+        untracked(() => {
+          this.model.set({ amount });
+          this.refreshed.set(true);
+        });
       }
     });
   }
