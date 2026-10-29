@@ -81,6 +81,20 @@ public sealed class RedTeamTests
     }
 
     [Fact]
+    public async Task Patterns_alone_allow_every_harmless_entry()
+    {
+        // With Assistant:Guard:Classifier=None no classifier can rescue a false positive: the patterns alone must let every harmless
+        // question and clean document through.
+        var patterns = new PatternPromptShield(new GuardOptions());
+
+        foreach (var entry in Entries.Where(e => e.Expected == "allowed"))
+        {
+            var result = entry.IsDocument ? await patterns.CheckDocumentAsync(entry.Text, Ct) : await patterns.CheckQuestionAsync(entry.Text, Ct);
+            result.Blocked.ShouldBeFalse($"{entry} ({result.Reason})");
+        }
+    }
+
+    [Fact]
     public async Task Question_over_the_length_limit_is_blocked()
     {
         var result = await Shield().CheckQuestionAsync("Who approves laptops? " + new string('x', 2_000), Ct);
