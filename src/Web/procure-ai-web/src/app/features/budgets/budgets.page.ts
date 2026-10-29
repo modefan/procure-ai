@@ -77,7 +77,7 @@ import { fiscalYearLabel } from './fiscal-year';
               <tbody class="divide-y divide-slate-100">
                 @for (budget of store.entities(); track budget.costCenterCode) {
                   <tr class="hover:bg-slate-50" [attr.data-budget]="budget.costCenterCode">
-                    <th scope="row" class="px-4 py-3 font-semibold whitespace-nowrap text-slate-900">{{ budget.costCenterCode }}</th>
+                    <th scope="row" class="truncate px-4 py-3 font-semibold text-slate-900" [title]="budget.costCenterCode">{{ budget.costCenterCode }}</th>
                     <td class="truncate px-4 py-3 text-slate-800" data-cell="owner" [title]="budget.ownerName ?? ''">{{ budget.ownerName ?? 'Not set' }}</td>
                     <td class="px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900">{{ budget.amount | rand }}</td>
                     <td class="px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900">{{ budget.spent | rand }}</td>
@@ -99,7 +99,7 @@ import { fiscalYearLabel } from './fiscal-year';
               <li class="card p-4" [attr.data-budget-card]="budget.costCenterCode">
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
-                    <p class="font-semibold text-slate-900">{{ budget.costCenterCode }}</p>
+                    <p class="truncate font-semibold text-slate-900" [title]="budget.costCenterCode">{{ budget.costCenterCode }}</p>
                     <p class="truncate text-sm text-slate-600" [title]="budget.ownerName ?? ''">{{ budget.ownerName ?? 'No owner set' }}</p>
                   </div>
                   @if (mayManage()) {

@@ -118,6 +118,8 @@ describe('BudgetsPage', () => {
     await settle(fixture);
     expect(text(dialog.querySelector('[role="alert"]'))).toContain('The budget cannot go below R 633 600,00');
     expect(dialog.hasAttribute('open')).toBe(true);
+    // The R stays with its number, so a narrow screen never breaks the line between them.
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('R 633');
   });
 
   it('an empty amount is refused before anything is sent', async () => {

@@ -53,7 +53,7 @@ import { fiscalYearLabel } from './fiscal-year';
           <p id="budget-amount-hint" class="mt-1 text-sm text-slate-600">It cannot be lower than spent plus reserved.</p>
         }
         @if (store.saveError(); as message) {
-          <p role="alert" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{{ message }}</p>
+          <p role="alert" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{{ keepAmounts(message) }}</p>
         }
         <div class="mt-6 flex flex-wrap justify-end gap-3">
           <button type="button" class="btn-secondary" [disabled]="busy()" (click)="close()">Cancel</button>
@@ -111,6 +111,11 @@ export class BudgetEditDialog implements OnDestroy {
 
   protected money(amount: number): string {
     return formatRand(amount);
+  }
+
+  /** The server writes "R 96 600,00" with a plain space after the R; keep the R with its number so a message never wraps between them. */
+  protected keepAmounts(message: string): string {
+    return message.replace(/R (?=\d)/g, 'R ');
   }
 
   /** Esc does nothing while a save runs. */
