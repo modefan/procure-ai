@@ -21,6 +21,7 @@ describe('order quantities', () => {
     expect(canCloseShort(order({ status: 'Confirmed' }))).toBe(false);
     expect(canCloseShort(order({ status: 'PartiallyReceived', receipts: [receipt], lines: [orderLine(1, 2, 1)] }))).toBe(true);
     expect(canCloseShort(order({ status: 'Received', receipts: [receipt] }))).toBe(false);
+    expect(canCloseShort(order({ status: 'PartiallyReceived', receipts: [], lines: [orderLine(1, 2, 1)] }))).toBe(false); // no receipt recorded
   });
 
   it('sums invoiced and paid quantities per order line over all invoices', () => {

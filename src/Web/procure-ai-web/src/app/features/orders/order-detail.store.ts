@@ -78,6 +78,7 @@ export const OrderDetailStore = signalStore(
     let again = false;
     let seed: PurchaseOrderDto | null = null;
     let working: Promise<boolean> | null = null;
+    let workingKind: Busy = 'idle';
     const keys = new Map<string, string>();
 
     const keyFor = (...parts: (string | number | null)[]): string => {
@@ -153,8 +154,10 @@ export const OrderDetailStore = signalStore(
 
     const write = (busy: Busy, call: () => Promise<PurchaseOrderDto>, what: string): Promise<boolean> => {
       if (working) {
-        return working; // a double click shares the running call
+        // A double click shares the running call; a different action while one runs is refused, so it cannot report the other's result.
+        return busy === workingKind ? working : Promise.resolve(false);
       }
+      workingKind = busy;
       const mine = generation;
       patchState(store, { busy, generalError: null, fieldErrors: {} });
       working = (async () => {
@@ -177,15 +180,19 @@ export const OrderDetailStore = signalStore(
             log.warn(`${what} failed`, error);
             const problem = problemOf(error);
             const hasFields = Object.keys(problem.fields).length > 0;
+            const mapped = hasFields ? lineErrors(problem.fields) : {};
+            // Field errors that belong to no order line (`lines`, `deliveryNote` ...) have no input to sit under: show them as the general message.
+            const { general: unplaced, ...byLine } = mapped;
+            const fallback = problem.general ?? `${what[0].toUpperCase()}${what.slice(1)} did not work. Please try again.`;
             patchState(store, {
-              generalError: hasFields ? null : (problem.general ?? `${what[0].toUpperCase()}${what.slice(1)} did not work. Please try again.`),
-              fieldErrors: hasFields ? lineErrors(problem.fields) : {},
+              generalError: hasFields ? (unplaced?.join(' ') ?? null) : fallback,
+              fieldErrors: byLine,
             });
           }
           return false;
         } finally {
-          working = null;
           if (mine === generation) {
+            working = null;
             patchState(store, { busy: 'idle' });
           }
         }

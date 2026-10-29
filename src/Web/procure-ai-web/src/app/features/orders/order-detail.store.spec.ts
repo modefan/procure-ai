@@ -97,6 +97,48 @@ describe('OrderDetailStore', () => {
     expect(keys[0]).toBe(keys[1]);
   });
 
+  it('a 400 whose errors belong to no line (lines, deliveryNote) shows a visible general message', async () => {
+    const store = setup();
+    await store.init('o1', order());
+    api['receiveGoods'].mockRejectedValueOnce(new HttpErrorResponse({ status: 400, error: { errors: { lines: ['x'], deliveryNote: ['Too long.'] } } }));
+    const ok = await store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 1 }] });
+    expect(ok).toBe(false);
+    expect(store.generalError()).toBe('x Too long.');
+    expect(store.fieldErrors()).toEqual({});
+    expect(store.busy()).toBe('idle');
+  });
+
+  it('close short during a running receive is refused and reports false, not the receive result', async () => {
+    const store = setup();
+    await store.init('o1', order({ status: 'PartiallyReceived', version: 4 }));
+    let finish!: (o: unknown) => void;
+    api['receiveGoods'].mockReturnValueOnce(new Promise((r) => (finish = r)));
+    const receiving = store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 1 }] });
+    expect(await store.closeShort()).toBe(false);
+    expect(api['closeOrderShort']).not.toHaveBeenCalled();
+    expect(store.busy()).toBe('receiving');
+    finish(order({ version: 5 }));
+    expect(await receiving).toBe(true);
+  });
+
+  it('a stale write finishing after init does not clear the guard of a newer write', async () => {
+    const store = setup();
+    await store.init('o1', order());
+    let finishOld!: (o: unknown) => void;
+    api['receiveGoods'].mockReturnValueOnce(new Promise((r) => (finishOld = r)));
+    const old = store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 1 }] });
+    await store.init('o1', order({ version: 2 }));
+    let finishNew!: (o: unknown) => void;
+    api['receiveGoods'].mockReturnValueOnce(new Promise((r) => (finishNew = r)));
+    const fresh = store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 2 }] });
+    finishOld(order({ version: 9 }));
+    await old;
+    const duplicate = store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 2 }] });
+    expect(api['receiveGoods']).toHaveBeenCalledTimes(2); // the duplicate shares the running call
+    finishNew(order({ version: 3 }));
+    await Promise.all([fresh, duplicate]);
+  });
+
   it('a 412 opens the conflict dialog and reloads the latest order', async () => {
     const store = setup();
     await store.init('o1', order());
