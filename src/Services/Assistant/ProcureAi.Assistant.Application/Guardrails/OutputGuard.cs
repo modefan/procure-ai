@@ -30,7 +30,8 @@ public sealed partial class OutputGuard(int window)
     /// <summary>
     /// Ruling 10: an answer is grounded when it cites at least one source that exists or when at least one tool result was used. A citation
     /// is a bracket of source markers: <c>[S1]</c>, several (<c>[S1, S3]</c>, <c>[S1][S3]</c>) or a range (<c>[S1-S2]</c>, <c>[S1–S3]</c>).
-    /// It counts when every number in it is 1 to <paramref name="sourceCount"/>.
+    /// It counts when every number in it is 1 to <paramref name="sourceCount"/>. A pattern timeout counts as ungrounded (the answer is
+    /// replaced).
     /// </summary>
     public static bool IsGrounded(string answer, int sourceCount, int toolResultCount)
     {
@@ -39,7 +40,19 @@ public sealed partial class OutputGuard(int window)
             return true;
         }
 
-        foreach (Match citation in Citation().Matches(answer ?? ""))
+        try
+        {
+            return CitesAnExistingSource(answer ?? "", sourceCount);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
+    private static bool CitesAnExistingSource(string answer, int sourceCount)
+    {
+        foreach (Match citation in Citation().Matches(answer))
         {
             var numbers = citation.Groups["n"].Captures
                 .Select(c => int.TryParse(c.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : 0)

@@ -34,7 +34,7 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
     private static readonly string[] InjectionPhrases =
     [
         "ignore previous instructions", "ignore all previous", "ignore the above", "disregard your instructions", "your system prompt",
-        "your instructions", "you are now", "jailbreak", "developer mode", "do anything now", "pretend you are", "no restrictions",
+        "your instructions", "you are now", "jailbreak", "developer mode", "can do anything now", "pretend you are", "no restrictions",
         "other tenant", "another tenant", "all tenants", "every tenant",
     ];
 

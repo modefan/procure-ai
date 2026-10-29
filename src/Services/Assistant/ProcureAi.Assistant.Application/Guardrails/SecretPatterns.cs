@@ -26,7 +26,14 @@ public static partial class SecretPatterns
     /// <summary>
     /// The longest text a pattern needs before it matches, for the patterns of bounded length: a 32-character run with "secrets" up to 20
     /// characters before it (59). The streaming guard's hold-back buffer (<c>Assistant:Guard:HoldBackChars</c>) must be at least this, so a
-    /// secret is caught before any of it is passed on. Unbounded parts (a long host name, a long email local part) may reach past it.
+    /// secret is caught before any of it is passed on.
+    /// <para>
+    /// Residual exposure, accepted: parts of unbounded length can reach past the buffer. A long host name, an email local part of more than
+    /// about 40 characters, and the trailing-keyword form of <c>KeyNearLongRun</c> (a long run with "key", "secret" or "token" after it)
+    /// match only once the end of the run has streamed, so the start of a run longer than about 40 characters may have been passed on by
+    /// then. Bounding the regex would not help: the guard cannot know a run is a secret before the keyword after it arrives. The usual
+    /// form, the keyword before the value ("token: abc…"), is caught at 32 characters of the value.
+    /// </para>
     /// </summary>
     public const int LongestBoundedMatch = 59;
 
