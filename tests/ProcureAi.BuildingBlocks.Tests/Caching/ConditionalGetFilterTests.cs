@@ -192,4 +192,35 @@ public sealed class ConditionalGetFilterTests(RedisFixture redis) : IAsyncLifeti
         replay.Headers.ETag!.ToString().ShouldBe(tag);
         (await replay.Content.ReadAsByteArrayAsync(Ct)).ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task File_result_is_not_buffered_and_has_no_etag()
+    {
+        using var response = await SendAsync(Get($"{Base}/file"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.ETag.ShouldBeNull();
+        response.Headers.CacheControl.ShouldBeNull();
+        response.Headers.Vary.ShouldNotContain("Cookie");
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/pdf");
+        (await response.Content.ReadAsStringAsync(Ct)).ShouldBe("%PDF-fake");
+    }
+
+    [Fact]
+    public async Task Event_stream_response_is_not_buffered()
+    {
+        ConditionalController.EventStreamGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Buffered by mistake, the headers would not arrive until the action ends, which it never does: fail instead of hanging.
+        using var response = await _app.GetTestClient()
+            .SendAsync(Get($"{Base}/events"), HttpCompletionOption.ResponseHeadersRead, Ct)
+            .WaitAsync(TimeSpan.FromSeconds(10), Ct);
+
+        response.Headers.ETag.ShouldBeNull();
+        await using var stream = await response.Content.ReadAsStreamAsync(Ct);
+        using var reader = new StreamReader(stream);
+        // The first event arrives while the action is still waiting: nothing is held back until the response ends.
+        (await reader.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(10), Ct)).ShouldBe("data: one");
+        ConditionalController.EventStreamGate.SetResult();
+        await reader.ReadToEndAsync(Ct);
+    }
 }

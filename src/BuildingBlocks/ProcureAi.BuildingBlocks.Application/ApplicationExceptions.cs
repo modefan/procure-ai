@@ -11,3 +11,9 @@ public sealed class NotFoundException(string message) : Exception(message);
 
 /// <summary>The caller is known but may not do this (mapped to HTTP 403 by the Api).</summary>
 public sealed class ForbiddenException(string message) : Exception(message);
+
+/// <summary>
+/// A call that must be made as the signed-in user (a model tool of the Assistant) has no credential to relay: there is no current
+/// request, or it carries neither a bearer token nor the admin key. The caller turns it into an error result; not an HTTP status.
+/// </summary>
+public sealed class UserCredentialMissingException(string message) : Exception(message);

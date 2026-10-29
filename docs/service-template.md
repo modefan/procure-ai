@@ -267,6 +267,16 @@ Signed webhooks (a supplier confirming an order, an invoice arriving) use the bu
   race where the webhook committed just after that handler looked.
 - Tests sign requests with `WebhookTestSigner.Sign(request, secret, at)` (`tests/ProcureAi.Testing`).
 
+## Calling another service as the user
+
+Use this when a call must carry the **user's** permissions, not the service's: the Assistant's model tools ("what is the status of PR-1043?") must see exactly what the signed-in user may see.
+
+- Register the client with `services.AddProcureAiUserClient<TClient, TImpl>("<name>-api")` (BuildingBlocks.Web/Http), then `.WithResilienceFrom<TOptions>()` for its own retries and timeouts as with `AddProcureAiServiceClient`. The host needs a `ServiceIdentity`.
+- `UserTokenRelayHandler` takes the credential from the current `HttpContext`: the incoming `Authorization: Bearer` token as is, or the incoming `X-Api-Key` with `X-Tenant-Id` and `X-On-Behalf-Of-User` when present (Claude's testing). It always adds `X-Calling-Service` (this service) and `X-Correlation-Id`, and replaces anything the request carried before.
+- No service token is ever used: the callee's policies and resource rules judge the user. Without a current request or a credential (a background job, a message handler) it throws `UserCredentialMissingException` (BuildingBlocks.Application) and sends nothing. Callers such as tools turn that into an error result; work with no user keeps using `AddProcureAiServiceClient`.
+- The token is relayed only inside the request that carries it: the call must be made while the request is still being handled (an `await` in the action or a tool called from it), not from a hosted service or a fire-and-forget task.
+- Streaming and file responses (`text/event-stream`, `application/pdf`, any `FileResult` or `IResult`) bypass `ConditionalGetFilter`: they are written to the client as produced, with no buffering and no ETag.
+
 ## Where the pieces live
 
 | Piece | Location |
