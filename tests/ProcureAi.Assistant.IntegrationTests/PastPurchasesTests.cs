@@ -177,6 +177,33 @@ public sealed class PastPurchasesTests(AssistantApp app)
         (await ChunkCountAsync(submitted.RequestId)).ShouldBe(1L);
     }
 
+    [Fact]
+    public async Task Two_events_of_a_new_request_at_once_make_one_row_with_both()
+    {
+        var tenant = AssistantApp.NewTenant();
+        var deadLetters = await app.DeadLetterCountAsync();
+        var requests = Enumerable.Range(1, 12).Select(i => Submitted(tenant, $"Parallel {i} {Marker("parallel")}")).ToList();
+
+        // For each new request, the submit and the approval at the same moment: both handlers find no row and insert one, and the
+        // loser's unique violation (23505 on PK_purchases) is retried as a lost race, then finds the winner's row and adds its part.
+        await Task.WhenAll(requests.SelectMany(r => new[]
+        {
+            app.PublishAsync(r, Exchanges.Requests, tenant),
+            app.PublishAsync(Approved(r), Exchanges.Approvals, tenant),
+        }));
+
+        foreach (var request in requests)
+        {
+            var purchase = await WaitForPurchaseAsync(request.RequestId, p => p.HasSubmitData && p.ApprovedAt is not null);
+            purchase.Title.ShouldBe(request.Title);
+            purchase.ApproverIdList.ShouldBe(["maria", "sipho"]);
+        }
+
+        var ids = requests.Select(r => r.RequestId).ToArray();
+        (await app.ScalarAsync<long>("SELECT count(*) FROM purchases WHERE request_id = ANY(@ids)", ("ids", ids))).ShouldBe(requests.Count);
+        (await app.DeadLetterCountAsync()).ShouldBe(deadLetters);
+    }
+
     private async Task<Chunk> WaitForChunkAsync(Guid requestId, Func<Chunk, bool>? until = null)
     {
         var deadline = DateTime.UtcNow + Timeout;

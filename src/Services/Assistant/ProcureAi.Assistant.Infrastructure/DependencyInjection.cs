@@ -74,8 +74,8 @@ public static class DependencyInjection
     /// data (<see cref="PurchaseDataMissingException"/>) is retried on the durable schedule of <c>Assistant:Purchases:RetryDelays</c>; the
     /// handler itself ends the message on the attempt after the last retry, so the error queue is only a safety net. Two events of one
     /// request that race on its row are retried inline (<c>Assistant:Purchases:ConcurrencyRetry</c>), a failed Access lookup of the
-    /// approvers' names on a schedule (<c>Assistant:Purchases:DependencyRetry</c>). These rules come after the model provider rule, which
-    /// matches first for a wrapped provider failure.
+    /// approvers' names on a schedule (<c>Assistant:Purchases:DependencyRetry</c>). These rules are set on the three handler chains only
+    /// (<see cref="PastPurchaseFailurePolicy"/>), so the policy document commands and the ingestion job are unaffected.
     /// </para>
     /// </summary>
     public static void ConfigureAssistant(this WolverineOptions options, IConfiguration configuration, string serviceName)
@@ -100,11 +100,15 @@ public static class DependencyInjection
 
         options.OnException<AiProviderUnavailableException>().ScheduleRetry(delays).Then.MoveToErrorQueue();
 
-        ConfigurePastPurchases(options, configuration);
+        ConfigurePastPurchases(options, configuration, delays);
     }
 
-    private static void ConfigurePastPurchases(WolverineOptions options, IConfiguration configuration)
+    private static void ConfigurePastPurchases(WolverineOptions options, IConfiguration configuration, TimeSpan[] providerDelays)
     {
+        // The requests and approvals exchanges are fanout exchanges declared by their publishers (Wolverine's default), so a binding
+        // cannot pick event types by routing key without changing every publisher: the queue gets every event of both. Only the three of
+        // PastPurchaseFailurePolicy.Messages have handlers here; Wolverine discards the others ("had no known handlers and was discarded",
+        // logged at Information level, never dead-lettered; see Rejected_request_is_not_indexed).
         options.ListenToRabbitQueue(RequestsQueue, queue =>
         {
             queue.BindExchange(Exchanges.Requests);
@@ -114,17 +118,15 @@ public static class DependencyInjection
         options.CodeGeneration.AlwaysUseServiceLocationFor<PurchaseIndexer>();
 
         var purchases = configuration.GetSection(PastPurchasesOptions.SectionPath).Get<PastPurchasesOptions>() ?? new PastPurchasesOptions();
-        var delays = purchases.RetryDelaySchedule();
-        if (delays.Length == 0)
+        if (purchases.RetryDelaySchedule().Length == 0)
         {
             throw new InvalidOperationException(
                 $"'{PastPurchasesOptions.SectionPath}:{nameof(PastPurchasesOptions.RetryDelays)}' is not valid.");
         }
 
-        options.OnException<PurchaseDataMissingException>().ScheduleRetry(delays).Then.MoveToErrorQueue();
-        options.RetryConcurrencyConflicts(
-            purchases.ConcurrencyRetry, $"{PastPurchasesOptions.SectionPath}:{nameof(PastPurchasesOptions.ConcurrencyRetry)}");
-        options.RetryTransientDependencyFailures(
-            purchases.DependencyRetry, $"{PastPurchasesOptions.SectionPath}:{nameof(PastPurchasesOptions.DependencyRetry)}");
+        // Validates the retry sections now (startup), not when the handler chains are built.
+        purchases.ConcurrencyRetry.Delays($"{PastPurchasesOptions.SectionPath}:{nameof(PastPurchasesOptions.ConcurrencyRetry)}");
+        purchases.DependencyRetry.Delays($"{PastPurchasesOptions.SectionPath}:{nameof(PastPurchasesOptions.DependencyRetry)}");
+        options.Policies.Add(new PastPurchaseFailurePolicy(purchases, providerDelays));
     }
 }

@@ -16,8 +16,9 @@ public static class DependencyRetryPolicy
     /// error queue") and counts it (metric <c>wolverine-dead-letter-queue</c>); it can be replayed from there once the dependency
     /// is back. An answer such as "not found" is not a failure and is not retried.
     /// </summary>
+    /// <param name="options">The whole service (<see cref="WolverineOptions"/>) or one handler chain (rules scoped to its messages).</param>
     /// <param name="section">The configuration path of <paramref name="retry"/>, for the message when it is not valid.</param>
-    public static void RetryTransientDependencyFailures(this WolverineOptions options, DependencyRetryOptions retry, string section)
+    public static void RetryTransientDependencyFailures(this IWithFailurePolicies options, DependencyRetryOptions retry, string section)
     {
         var delays = retry.Delays(section);
         options.OnException(IsTransientDependencyFailure, "a call to another service failed")

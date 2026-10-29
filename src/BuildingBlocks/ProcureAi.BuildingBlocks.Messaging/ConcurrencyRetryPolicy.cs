@@ -21,8 +21,9 @@ public static class ConcurrencyRetryPolicy
     /// polling interval, so a burst re-collided each time. Waiting inline also caps the contenders at the listener parallelism.)
     /// The retried handler runs again from the start, so it sees the winner's outcome.
     /// </summary>
+    /// <param name="options">The whole service (<see cref="WolverineOptions"/>) or one handler chain (rules scoped to its messages).</param>
     /// <param name="section">The configuration path of <paramref name="retry"/>, for the message when it is not valid.</param>
-    public static void RetryConcurrencyConflicts(this WolverineOptions options, ConcurrencyRetryOptions retry, string section)
+    public static void RetryConcurrencyConflicts(this IWithFailurePolicies options, ConcurrencyRetryOptions retry, string section)
     {
         var delays = retry.Delays(section);
         InlineRetry(options.OnException<DbUpdateConcurrencyException>(), delays, retry.JitterFraction);

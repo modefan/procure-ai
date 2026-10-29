@@ -10,43 +10,70 @@ namespace ProcureAi.Assistant.IntegrationTests;
 /// <summary>
 /// Hybrid retrieval (plan 05 Task 3): the vector and full-text arms, reciprocal rank fusion, the searchable-chunk filters (ledger ruling B)
 /// and tenant isolation (Review Focus 4). The chunks are written straight to the database with Fake embeddings (<see cref="SearchSeed"/>);
-/// the Fake embedding is a hashed bag of words and bigrams, so "semantic" here means "shares words", while the full-text arm needs every
-/// stemmed term of the query (<c>websearch_to_tsquery</c> is an AND).
+/// the Fake embedding is a hashed bag of words and bigrams, so "semantic" here means "shares words" unless a test maps the query to other
+/// words (<see cref="SynonymEmbeddingGenerator"/>). The full-text arm matches any of the query's stemmed terms (an OR of
+/// <c>websearch_to_tsquery</c>'s terms) and ranks chunks with more of them higher (<c>ts_rank_cd</c>).
 /// </summary>
 [Collection(AssistantCollection.Name)]
 public sealed class HybridSearchTests(AssistantApp app)
 {
+    private static readonly IReadOnlySet<SourceType> PolicyOnly = new HashSet<SourceType> { SourceType.Policy };
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static string Marker(string name) => $"{name}{Guid.NewGuid():N}"[..(name.Length + 10)];
 
-    private static SearchRequest Policy(string query, int topK = 6) => new(query, new HashSet<SourceType> { SourceType.Policy }, topK);
+    private static SearchRequest Policy(string query, int topK = 6) => new(query, PolicyOnly, topK);
 
     [Fact]
     public async Task Keyword_only_match_found_by_full_text_arm()
     {
         var tenant = AssistantApp.NewTenant();
-        // A long chunk that has the phrase once (a weak vector match), and four short ones that share one of its words each (strong vector
-        // matches that the full-text arm rejects, since they lack the other term).
+        // The phrase is in one long chunk only. The "model" embeds the query near the furniture chunks (a model that does not know what a
+        // VAT number is), so only the full-text arm can find the target.
         const string target =
             "Accounts payable checks every supplier invoice before it is paid. The purchase order, the delivery note and the invoice must"
             + " agree on quantities and prices, the bank details must already be on file and verified by a second person, the invoice date"
             + " must fall in the current financial month, credit notes are matched to the original invoice, foreign currency invoices are"
             + " converted at the rate of the invoice date, and the document must show the supplier's registered VAT number in full.";
-        var seeded = await SearchSeed.AddTextsAsync(app, tenant, target, "VAT rates.", "VAT applies.", "Order number.", "Number pages.");
+        var seeded = await SearchSeed.AddTextsAsync(
+            app, tenant, target, "Office chairs.", "Desks and chairs.", "Chairs for meeting rooms.", "Standing desks.");
         var targetId = seeded.Children[target];
         const string query = "VAT number";
-
-        // The arms on their own, with three candidates each: only the full-text arm has the target.
-        (await SearchSeed.NearestAsync(app, tenant, query, 3)).ShouldNotContain(targetId);
-        (await SearchSeed.FullTextMatchesAsync(app, tenant, query)).ShouldBe([targetId]);
+        var model = new SynonymEmbeddingGenerator(new Dictionary<string, string> { [query] = "desks chairs" });
 
         await using var db = TenantDb(app, tenant);
-        var hits = await SearchSeed.Search(app, db, candidatesPerArm: 3, topK: 3).SearchAsync(Policy(query, 3), Ct);
+        var search = SearchSeed.Search(app, db, candidatesPerArm: 3, topK: 3, embeddings: model);
+        // The arms on their own, with three candidates each: the vector arm misses the target, the full-text arm has only the target.
+        (await search.NearestArmAsync(query, PolicyOnly, 3, Ct)).ShouldNotContain(targetId);
+        (await search.KeywordArmAsync(query, PolicyOnly, 3, Ct)).ShouldBe([targetId]);
 
-        hits.Select(h => h.ChunkId).ShouldContain(targetId);
+        var hits = await search.SearchAsync(Policy(query, 3), Ct);
+
         // Rank 1 of the full-text arm ties with rank 1 of the vector arm (1/61 each): both lead the list.
         hits.Take(2).Select(h => h.ChunkId).ShouldContain(targetId);
+    }
+
+    [Fact]
+    public async Task Natural_question_matches_by_some_words_in_full_text_arm()
+    {
+        var tenant = AssistantApp.NewTenant();
+        const string threshold = "Purchases above R 100 000 need finance approval before the order is placed.";
+        var seeded = await SearchSeed.AddTextsAsync(
+            app, tenant, "Software licences are bought through the service desk.", threshold, "Travel claims need a receipt.",
+            "Gifts above R 500 are declared.");
+        // No chunk has every term of the question ("150", "IT-200", "software" and "finance" are never together).
+        const string question = "Do I need finance approval for R 150 000 of software for IT-200?";
+
+        await using var db = TenantDb(app, tenant);
+        var search = SearchSeed.Search(app, db);
+        var keyword = await search.KeywordArmAsync(question, PolicyOnly, 20, Ct);
+
+        // The threshold rule shares the most terms (need, finance, approval, R, 000) and ranks first; the others match by fewer.
+        keyword.ShouldNotBeEmpty();
+        keyword[0].ShouldBe(seeded.Children[threshold]);
+        keyword.Count.ShouldBeGreaterThan(1);
+        (await search.SearchAsync(Policy(question), Ct))[0].ChunkId.ShouldBe(seeded.Children[threshold]);
     }
 
     [Fact]
@@ -57,13 +84,15 @@ public sealed class HybridSearchTests(AssistantApp app)
         var seeded = await SearchSeed.AddTextsAsync(
             app, tenant, "Office chairs are ordered through facilities.", target, "Travel is booked by the travel desk.");
         var targetId = seeded.Children[target];
-        // "zebra" is in no chunk, so the full-text arm (every term required) finds nothing; the shared words still make the target the
-        // nearest vector.
-        const string query = "laptop docking station zebra";
-        (await SearchSeed.FullTextMatchesAsync(app, tenant, query)).ShouldBeEmpty();
+        // The question shares no word (or stem) with any chunk, so the full-text arm finds nothing. A "model" that knows the synonyms
+        // embeds it near the laptop chunk, as a real embedding model would.
+        const string query = "portable computer accessories";
+        var model = new SynonymEmbeddingGenerator(new Dictionary<string, string> { [query] = "laptop docking station" });
 
         await using var db = TenantDb(app, tenant);
-        var hits = await SearchSeed.Search(app, db).SearchAsync(Policy(query), Ct);
+        var search = SearchSeed.Search(app, db, embeddings: model);
+        (await search.KeywordArmAsync(query, PolicyOnly, 20, Ct)).ShouldBeEmpty();
+        var hits = await search.SearchAsync(Policy(query), Ct);
 
         hits.ShouldNotBeEmpty();
         hits[0].ChunkId.ShouldBe(targetId);

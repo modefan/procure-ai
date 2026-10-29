@@ -3,7 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Npgsql;
+using Microsoft.Extensions.AI;
 using ProcureAi.Assistant.Application;
 using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Retrieval;
@@ -93,8 +93,13 @@ internal static class SearchSeed
             app, tenant, "Procurement policy", 1,
             [.. texts.Select((text, i) => (1, new SeedSection([$"{i + 1} Rule"], $"Rule {i + 1}. {text}", text)))]);
 
-    /// <summary>The service's hybrid search as a user of <paramref name="tenant"/>; <paramref name="candidatesPerArm"/> narrows the arms.</summary>
-    public static PgHybridSearch Search(AssistantApp app, AssistantDbContext tenantDb, int? candidatesPerArm = null, int? topK = null)
+    /// <summary>
+    /// The service's hybrid search as a user of the tenant of <paramref name="tenantDb"/>; <paramref name="candidatesPerArm"/> narrows the
+    /// arms, <paramref name="embeddings"/> replaces the service's embedding generator for the query.
+    /// </summary>
+    public static PgHybridSearch Search(
+        AssistantApp app, AssistantDbContext tenantDb, int? candidatesPerArm = null, int? topK = null,
+        IEmbeddingGenerator<string, Embedding<float>>? embeddings = null)
     {
         var configured = app.Services.GetRequiredService<IOptions<AssistantOptions>>().Value.Retrieval;
         var options = new AssistantOptions
@@ -107,51 +112,30 @@ internal static class SearchSeed
                 Rerank = configured.Rerank,
             },
         };
-        return ActivatorUtilities.CreateInstance<PgHybridSearch>(app.Services, tenantDb, Options.Create(options));
-    }
-
-    /// <summary>The IDs of the tenant's child chunks the full-text arm matches for <paramref name="query"/> (straight SQL, no ranking).</summary>
-    public static async Task<List<Guid>> FullTextMatchesAsync(AssistantApp app, string tenant, string query)
-    {
-        await using var connection = new NpgsqlConnection(app.Infra.DbConnectionString);
-        await connection.OpenAsync(Ct);
-        await using var command = new NpgsqlCommand(
-            "SELECT id FROM chunks WHERE tenant_id = @t AND kind = 'Child' AND search @@ websearch_to_tsquery('english', @q)", connection);
-        command.Parameters.AddWithValue("t", tenant);
-        command.Parameters.AddWithValue("q", query);
-        var ids = new List<Guid>();
-        await using var reader = await command.ExecuteReaderAsync(Ct);
-        while (await reader.ReadAsync(Ct))
-        {
-            ids.Add(reader.GetGuid(0));
-        }
-
-        return ids;
-    }
-
-    /// <summary>The IDs of the tenant's <paramref name="limit"/> child chunks nearest to the Fake embedding of <paramref name="query"/>.</summary>
-    public static async Task<List<Guid>> NearestAsync(AssistantApp app, string tenant, string query, int limit)
-    {
-        await using var connection = new NpgsqlConnection(app.Infra.DbConnectionString);
-        await connection.OpenAsync(Ct);
-        await using var command = new NpgsqlCommand(
-            "SELECT id FROM chunks WHERE tenant_id = @t AND kind = 'Child' ORDER BY embedding <=> @v::vector, id LIMIT @n", connection);
-        command.Parameters.AddWithValue("t", tenant);
-        command.Parameters.AddWithValue(
-            "v", "[" + string.Join(',', FakeEmbeddingGenerator.Embed(query).Select(f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + "]");
-        command.Parameters.AddWithValue("n", limit);
-        var ids = new List<Guid>();
-        await using var reader = await command.ExecuteReaderAsync(Ct);
-        while (await reader.ReadAsync(Ct))
-        {
-            ids.Add(reader.GetGuid(0));
-        }
-
-        return ids;
+        object[] args = embeddings is null ? [tenantDb, Options.Create(options)] : [tenantDb, Options.Create(options), embeddings];
+        return ActivatorUtilities.CreateInstance<PgHybridSearch>(app.Services, args);
     }
 
     private static AssistantDbContext NewDbContext(AssistantApp app) =>
         new(new DbContextOptionsBuilder<AssistantDbContext>().UseNpgsql(app.Infra.DbConnectionString, npgsql => npgsql.UseVector()).Options);
 
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+}
+
+/// <summary>
+/// A stand-in for a real embedding model in the tests: a query it knows (<paramref name="synonyms"/>) is embedded as the words it means,
+/// anything else as itself, both with the Fake's lexical embedding. So a test can show the vector arm finding a chunk that shares no word
+/// with the query.
+/// </summary>
+public sealed class SynonymEmbeddingGenerator(IReadOnlyDictionary<string, string> synonyms) : IEmbeddingGenerator<string, Embedding<float>>
+{
+    private readonly FakeEmbeddingGenerator _inner = new();
+
+    public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+        IEnumerable<string> values, EmbeddingGenerationOptions? options = null, CancellationToken cancellationToken = default) =>
+        _inner.GenerateAsync(values.Select(v => synonyms.TryGetValue(v, out var meant) ? meant : v), options, cancellationToken);
+
+    public object? GetService(Type serviceType, object? serviceKey = null) => _inner.GetService(serviceType, serviceKey);
+
+    public void Dispose() => _inner.Dispose();
 }
