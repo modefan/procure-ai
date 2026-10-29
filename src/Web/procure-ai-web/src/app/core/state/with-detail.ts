@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import { patchState, signalStoreFeature, withHooks, withMethods, withState } from '@ngrx/signals';
+import { patchState, signalStoreFeature, withHooks, withMethods, withProps, withState } from '@ngrx/signals';
 import { AppConfigService } from '../config/app-config';
 import { idempotencyKey } from '../http/idempotency';
 import { isConflict, problemOf } from '../http/problem-fields';
@@ -90,10 +90,12 @@ export function withDetail<T, TSeed = T>(optionsOrFactory: DetailOptions<T, TSee
   const resolve = () => (typeof optionsOrFactory === 'function' ? optionsOrFactory() : optionsOrFactory);
   const empty = (): DetailState<T> => ({ id: null, value: null, etag: null, partial: [], busyKind: null, generalError: null });
   return signalStoreFeature(
+    // The options are resolved once per store (the factory may inject services).
+    withProps(() => ({ _options: resolve() })),
     withState<DetailState<T>>(empty),
     withRequestStatus(),
     withMethods((store) => {
-      const options = resolve();
+      const options = store._options;
       const conflict = inject(ConflictDialog);
       const config = inject(AppConfigService);
       const log = inject(Logger).withSource('Detail');
@@ -286,7 +288,7 @@ export function withDetail<T, TSeed = T>(optionsOrFactory: DetailOptions<T, TSee
       return {
         onInit() {
           const live = inject(LiveConnection);
-          const entities = resolve().entity;
+          const entities = store._options.entity;
           release = [
             inject(CacheRegistry).register(store),
             ...(Array.isArray(entities) ? entities : [entities]).map((entity) => live.onEntityChanged(entity, (change) => store.onChange(change))),

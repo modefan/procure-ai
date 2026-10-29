@@ -2,6 +2,7 @@ import type { Mock } from 'vitest';
 import { HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { signalStore } from '@ngrx/signals';
+import { AppConfigService } from '../config/app-config';
 import { fakeHubFactory } from '../live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../live/hub-connection';
 import { LiveConnection } from '../live/live-connection';
@@ -91,13 +92,18 @@ describe('withDetail', () => {
   it('detail_run_write_conflict_shows_dialog_and_reloads', async () => {
     await store().open('t1');
     load.mockClear();
-    load.mockResolvedValue({ id: 't1', version: 2 });
+    const order: string[] = [];
+    conflict.show.mockImplementation(async () => void order.push('dialog'));
+    load.mockImplementation(async () => {
+      order.push('load');
+      return { id: 't1', version: 2 };
+    });
 
     const agreed = await store().runWrite(() => Promise.reject(problem(412)), options);
 
     expect(agreed).toBe(false);
     expect(conflict.show).toHaveBeenCalledWith('Someone else changed it.');
-    expect(load).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['dialog', 'load']); // the user sees the dialog first, then the latest version loads
     expect(store().value()).toEqual({ id: 't1', version: 2 });
     expect(store().busyKind()).toBeNull();
   });
@@ -160,5 +166,87 @@ describe('withDetail', () => {
 
     expect(store().value()).toEqual({ id: 't1', version: 5 });
     expect(store().etag()).toBe('"5"');
+  });
+
+  const deferred = () => {
+    let resolve!: (t: Thing) => void;
+    const promise = new Promise<Thing>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  const emit = (id: string) => fake.hubs[0].emit('EntityChanged', { entity: 'thing', id, requestId: null, eventType: 'x', occurredAt: 't' });
+  async function connect() {
+    const live = TestBed.inject(LiveConnection);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    return live;
+  }
+
+  it('open_of_another_id_drops_the_previous_answer', async () => {
+    const a = deferred();
+    load.mockImplementation((id: string) => (id === 'a' ? a.promise : Promise.resolve({ id, version: 1 })));
+    const opening = store().open('a');
+
+    await store().open('b');
+    a.resolve({ id: 'a', version: 9 });
+    await opening;
+
+    expect(store().id()).toBe('b');
+    expect(store().value()).toEqual({ id: 'b', version: 1 });
+  });
+
+  it('clear_cache_during_load_drops_the_answer', async () => {
+    const a = deferred();
+    load.mockImplementation(() => a.promise);
+    const opening = store().open('a');
+
+    TestBed.inject(CacheRegistry).clearAll();
+    a.resolve({ id: 'a', version: 1 });
+    await opening;
+
+    expect(store().value()).toBeNull();
+    expect(store().id()).toBeNull();
+  });
+
+  it('push_triggers_trailing_reload: a relevant push reloads now and once more after cache.trailingReloadMs', async () => {
+    await store().open('t1');
+    const live = await connect();
+    load.mockClear();
+    const delay = TestBed.inject(AppConfigService).config().cache.trailingReloadMs;
+    vi.useFakeTimers();
+    try {
+      emit('t1');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(load).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(delay + 1);
+      expect(load).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      live.stop();
+    }
+  });
+
+  it('reconnect_revalidates: after a reconnect the open thing is loaded again', async () => {
+    await store().open('t1');
+    const live = await connect();
+    load.mockClear();
+
+    fake.hubs[0].reconnectOk();
+
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    live.stop();
+  });
+
+  it('write_answer_after_open_of_another_id_is_ignored', async () => {
+    await store().open('a');
+    let finish!: (t: Thing) => void;
+    const writing = store().runWrite(() => new Promise<Thing>((r) => (finish = r)), { ...options, apply: (r: Thing) => ({ value: r, etag: `"${r.version}"` }) });
+
+    await store().open('b');
+    finish({ id: 'a', version: 9 });
+    await writing;
+
+    expect(store().value()).toEqual({ id: 'b', version: 1 });
+    expect(store().busyKind()).toBeNull();
   });
 });

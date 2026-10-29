@@ -1,6 +1,7 @@
 import type { Mock } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { signalStore } from '@ngrx/signals';
+import { AppConfigService } from '../config/app-config';
 import { fakeHubFactory } from '../live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../live/hub-connection';
 import { LiveConnection } from '../live/live-connection';
@@ -18,9 +19,10 @@ describe('withPagedList', () => {
 
   const Store = signalStore(
     { providedIn: 'root' },
-    withPagedList<Row, { status: string }>(() => ({
+    withPagedList<Row, { status: string; mine: boolean }>(() => ({
       entity: 'thing',
-      initialFilter: { status: 'all' },
+      trailing: true,
+      initialFilter: { status: 'all', mine: true },
       errorMessage: 'The things could not be loaded.',
       load: (filter, page, pageSize) => load(filter, page, pageSize),
     })),
@@ -36,7 +38,7 @@ describe('withPagedList', () => {
   it('loads a page with the filter and keeps page, size and total', async () => {
     await store().load(2);
 
-    expect(load).toHaveBeenCalledWith({ status: 'all' }, 2, 25);
+    expect(load).toHaveBeenCalledWith({ status: 'all', mine: true }, 2, 25);
     expect(store().entities()).toEqual([{ id: 'r2' }]);
     expect([store().page(), store().pageSize(), store().total()]).toEqual([2, 25, 100]);
     expect(store().pageCount()).toBe(4);
@@ -55,7 +57,7 @@ describe('withPagedList', () => {
 
     fake.hubs[0].emit('EntityChanged', { entity: 'thing', id: 'x', requestId: null, eventType: 'x', occurredAt: 't' });
     await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
-    expect(load).toHaveBeenCalledWith({ status: 'all' }, 1, 25);
+    expect(load).toHaveBeenCalledWith({ status: 'all', mine: true }, 1, 25);
     live.stop();
   });
 
@@ -64,8 +66,8 @@ describe('withPagedList', () => {
 
     await store().setFilter({ status: 'open' });
 
-    expect(load).toHaveBeenLastCalledWith({ status: 'open' }, 1, 25);
-    expect(store().filter()).toEqual({ status: 'open' });
+    expect(load).toHaveBeenLastCalledWith({ status: 'open', mine: true }, 1, 25);
+    expect(store().filter()).toEqual({ status: 'open', mine: true }); // merged: the field left out stays
     expect(store().page()).toBe(1);
   });
 
@@ -90,7 +92,41 @@ describe('withPagedList', () => {
 
     store().reset();
 
-    expect(store().filter()).toEqual({ status: 'all' });
+    expect(store().filter()).toEqual({ status: 'all', mine: true });
     expect(store().entities()).toEqual([]);
+  });
+
+  it('page_change_during_load_drops_the_old_page: a slow answer for page 1 arriving after page 2 is dropped', async () => {
+    let finishFirst!: (r: PagedResult<Row>) => void;
+    load.mockImplementationOnce(() => new Promise((r) => (finishFirst = r)));
+    const first = store().load(1);
+
+    await store().load(2);
+    finishFirst(result(1, ['late']));
+    await first;
+
+    expect(store().entities()).toEqual([{ id: 'r2' }]);
+    expect(store().page()).toBe(2);
+  });
+
+  it('push_triggers_trailing_reload: a push reloads now and once more after cache.trailingReloadMs', async () => {
+    await store().load(1);
+    const live = TestBed.inject(LiveConnection);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    load.mockClear();
+    const delay = TestBed.inject(AppConfigService).config().cache.trailingReloadMs;
+    vi.useFakeTimers();
+    try {
+      fake.hubs[0].emit('EntityChanged', { entity: 'thing', id: 'x', requestId: null, eventType: 'x', occurredAt: 't' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(load).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(delay + 1);
+      expect(load).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      live.stop();
+    }
   });
 });

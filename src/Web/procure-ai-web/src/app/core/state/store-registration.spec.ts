@@ -47,6 +47,9 @@ const STORE_MODULES: Record<string, Record<string, unknown>> = {
 
 type Store = { clearCache?: unknown };
 
+/** Stores are the exported classes named `*Store`; other exports (helper functions like `currentFiscalYear`, constants) are skipped. */
+const isStoreClass = (name: string, value: unknown): boolean => typeof value === 'function' && name.endsWith('Store');
+
 describe('store registration', () => {
   it('lists_every_store_file', () => {
     const name = (path: string) => path.split('/').pop()!;
@@ -58,7 +61,7 @@ describe('store registration', () => {
   it('every_cache_store_registers', () => {
     const stores = Object.entries(STORE_MODULES).flatMap(([path, exports]) =>
       Object.entries(exports)
-        .filter(([, value]) => typeof value === 'function')
+        .filter(([exportName, value]) => isStoreClass(exportName, value))
         .map(([name, value]) => ({ name: `${name} (${path})`, store: value as Type<Store> })),
     );
     expect(stores.length).toBeGreaterThan(10);

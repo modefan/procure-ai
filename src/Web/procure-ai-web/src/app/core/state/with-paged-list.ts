@@ -1,5 +1,5 @@
 import { computed, inject } from '@angular/core';
-import { patchState, signalStoreFeature, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
+import { patchState, signalStoreFeature, withComputed, withHooks, withMethods, withProps, withState, withFeature } from '@ngrx/signals';
 import { setAllEntities, withEntities } from '@ngrx/signals/entities';
 import { AppConfigService } from '../config/app-config';
 import { LiveConnection } from '../live/live-connection';
@@ -44,18 +44,19 @@ export function withPagedList<TItem extends { id: string }, TFilter extends obje
 ) {
   const resolve = () => (typeof optionsOrFactory === 'function' ? optionsOrFactory() : optionsOrFactory);
   return signalStoreFeature(
+    // The options are resolved once per store (the factory may inject services).
+    withProps(() => ({ _options: resolve() })),
     withEntities<TItem>(),
-    withState(() => {
-      const options = resolve();
-      return { page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0, filter: options.initialFilter };
-    }),
+    withFeature((store) =>
+      withState(() => ({ page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0, filter: store._options.initialFilter })),
+    ),
     withRequestStatus(),
     withComputed(({ total, pageSize }) => ({
       pageCount: computed(() => Math.max(1, Math.ceil(total() / pageSize()))),
     })),
     withCache(),
     withMethods((store) => {
-      const options = resolve();
+      const options = store._options;
       const log = inject(Logger).withSource(`PagedList(${options.entity})`);
       let latest = 0;
       /** The page the entities hold, and the cache epoch they were loaded in (a cleared cache means they are gone). */
@@ -123,7 +124,7 @@ export function withPagedList<TItem extends { id: string }, TFilter extends obje
       let off: (() => void) | null = null;
       return {
         onInit() {
-          const options = resolve();
+          const options = store._options;
           off = inject(LiveConnection).onEntityChanged(options.entity, () => store.invalidate('list', { trailing: options.trailing ?? false }));
         },
         onDestroy() {

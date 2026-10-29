@@ -128,7 +128,8 @@ export function withCache(options: CacheOptions = {}) {
          */
         invalidate(match: string | ((key: string) => boolean), invalidateOptions: { trailing?: boolean } = {}): void {
           if (invalidateOptions.trailing) {
-            // A string is its own key; a predicate is keyed by its identity, so a trailing reload with a predicate is never
+            // Callers must pass a stable function (the same reference) to get one merged trailing run: a new arrow each
+            // call is a new key. A string is its own key; a predicate is keyed by its identity, so a trailing reload with a predicate is never
             // merged with another predicate's (or the unfiltered one) and keeps only the keys it matched.
             const id = typeof match === 'string' ? match : `*${predicateId(match)}`;
             let trailer = trailers.get(id);
