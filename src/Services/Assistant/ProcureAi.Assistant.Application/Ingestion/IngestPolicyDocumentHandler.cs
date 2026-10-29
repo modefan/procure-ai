@@ -172,8 +172,10 @@ public sealed class PolicyIngestion(
         var guard = await ModelCallAsync(() => shield.CheckDocumentAsync(guardInput, cancellationToken), cancellationToken);
         if (guard.Blocked)
         {
-            var reason = string.IsNullOrWhiteSpace(guard.Reason) ? "The document contains instructions to the assistant." : guard.Reason;
-            metrics.GuardBlock("document", reason);
+            // The metric gets the reason code, the document the sentence for people.
+            var code = string.IsNullOrWhiteSpace(guard.Reason) ? GuardReasons.Injection : guard.Reason;
+            var reason = GuardReasons.Describe(code);
+            metrics.GuardBlock("document", code);
             logger.LogWarning("Policy document {DocumentId} version {Version} was flagged by the document guard", job.DocumentId, job.Version);
             await EndAsync(job, PolicyDocumentStatus.Flagged, reason, cancellationToken);
             return;

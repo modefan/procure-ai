@@ -36,7 +36,7 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 /// <summary>
 /// The real Assistant API on a test server, against the shared infrastructure and the stub Access, on the Fake provider. Ingestion runs
 /// in batches of 4 chunks and retries a provider failure after 0.2 s, a completed request without its submit data after 1 s; the embedding generator is wrapped by <paramref name="embeddings"/>
-/// and the document guard is <see cref="MarkerPromptShield"/>.
+/// and the real prompt guard is wrapped by <see cref="MarkerPromptShield"/>.
 /// </summary>
 public sealed class AssistantApiFactory(
     AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings)
@@ -64,8 +64,7 @@ public sealed class AssistantApiFactory(
             // the service defaults do not trace never shows up here.
             services.AddOpenTelemetry().WithTracing(tracing => tracing.AddInMemoryExporter(exportedActivities));
             services.Decorate<IEmbeddingGenerator<string, Embedding<float>>>((inner, _) => new ProbeEmbeddingGenerator(inner, embeddings));
-            services.RemoveAll<IPromptShield>();
-            services.AddSingleton<IPromptShield, MarkerPromptShield>();
+            services.Decorate<IPromptShield>((inner, _) => new MarkerPromptShield(inner));
         });
     }
 }

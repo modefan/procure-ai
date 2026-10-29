@@ -26,6 +26,7 @@
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Files/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Guardrails/redteam.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

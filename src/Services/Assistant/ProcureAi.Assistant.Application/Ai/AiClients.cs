@@ -5,10 +5,11 @@ namespace ProcureAi.Assistant.Application.Ai;
 /// <summary>
 /// The keys of the two keyed <see cref="IChatClient"/> services. Take them with <c>[FromKeyedServices(AiClients.Answer)]</c>.
 /// <list type="bullet">
-/// <item><see cref="Answer"/>: the user-facing answer. Pipeline: guardrails (<see cref="IAnswerGuardrail"/>) → function invocation
+/// <item><see cref="Answer"/>: the user-facing answer. Pipeline: guardrails (<see cref="IAnswerGuardrail"/>) → default limits → function invocation
 /// (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> rounds) → OpenTelemetry → logging → provider.</item>
-/// <item><see cref="Utility"/>: internal prompts (query rewrite, chunk context, guard classifier, invoice scan, rerank): OpenTelemetry →
+/// <item><see cref="Utility"/>: internal prompts (query rewrite, chunk context, invoice scan, rerank): default limits → OpenTelemetry →
 /// logging → provider. No tools, no guard.</item>
+/// <item><see cref="Guard"/>: the guard classifier, the same stages as <see cref="Utility"/> on the guard model.</item>
 /// </list>
 /// The system message's first line names the task (<see cref="AiTasks"/>), so traces, logs and the Fake model can tell them apart.
 /// </summary>
@@ -16,6 +17,9 @@ public static class AiClients
 {
     public const string Answer = "answer";
     public const string Utility = "utility";
+
+    /// <summary>The guard classifier (<c>#task: classify</c>): the <see cref="Utility"/> stages on <c>AI:Guard:Model</c> (default the chat model).</summary>
+    public const string Guard = "guard";
 
     /// <summary>The ActivitySource (and Meter) name of every model call: <c>ProcureAi.Assistant.AI</c>.</summary>
     public const string TelemetrySource = "ProcureAi.Assistant.AI";
@@ -58,8 +62,8 @@ public static class AiTasks
 }
 
 /// <summary>
-/// The outermost stage of the <see cref="AiClients.Answer"/> pipeline (the input and output guards, plan 05 Task 4). Nothing is
-/// registered until then, and the pipeline passes calls straight on.
+/// The outermost stage of the <see cref="AiClients.Answer"/> pipeline: the input and output guards (plan 05 Task 4,
+/// <see cref="Guardrails.AnswerGuardrail"/>). A test may register its own to see what reaches the pipeline.
 /// </summary>
 public interface IAnswerGuardrail
 {

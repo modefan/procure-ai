@@ -34,6 +34,8 @@
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The sample policy (Markdown and PDF) of the unit tests. -->
     <Content Include="../ProcureAi.Assistant.Tests/Files/**" LinkBase="Files" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The red-team set of the guard (its poisoned documents go through the real ingestion). -->
+    <Content Include="../ProcureAi.Assistant.Tests/Guardrails/redteam.json" Link="Guardrails/redteam.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

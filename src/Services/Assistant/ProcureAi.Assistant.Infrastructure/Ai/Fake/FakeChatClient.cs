@@ -15,7 +15,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 /// <c>[S1]</c>, <c>[S2]</c> in the prompt), cited, plus a summary of any tool results. Nothing to cite and no tool result: the
 /// "policy doesn't cover this" sentence.</item>
 /// <item><c>rewrite</c>: the last user message as the standalone question; <c>context</c>: its first sentence;
-/// <c>classify</c>: <c>{"flagged":...,"reason":...}</c> from a list of known injection phrases; <c>scan</c>: <c>{}</c> (the invoice reader
+/// <c>classify</c>: <c>INJECTION</c>, <c>OFF_TOPIC</c> or <c>SAFE</c> from lists of known phrases (the guard classifier); <c>scan</c>: <c>{}</c> (the invoice reader
 /// comes with plan 05 Task 6); <c>rerank</c>: the candidates' numbers in the order given (the fusion order is kept).</item>
 /// </list>
 /// Streaming sends the text word by word with <c>AI:Fake:StreamDelayMs</c> between words. Usage counts words as tokens.
@@ -27,11 +27,22 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
     private const int MaxSentenceLength = 300;
     private const int MaxToolSummaryLength = 200;
 
-    /// <summary>Phrases the Fake classifier flags as prompt injection (the red-team set of plan 05 Task 4 extends the real guard).</summary>
+    /// <summary>
+    /// Phrases the Fake classifier flags as prompt injection. Narrow on purpose: "system prompt" or "api key" alone would flag harmless
+    /// questions such as "What is our API key policy?" (the red-team set of plan 05 Task 4 has ten that must pass).
+    /// </summary>
     private static readonly string[] InjectionPhrases =
     [
-        "ignore previous instructions", "ignore all previous", "ignore the above", "disregard your instructions",
-        "reveal your system prompt", "print your system prompt", "system prompt", "api key", "you are now", "jailbreak",
+        "ignore previous instructions", "ignore all previous", "ignore the above", "disregard your instructions", "your system prompt",
+        "your instructions", "you are now", "jailbreak", "developer mode", "do anything now", "pretend you are", "no restrictions",
+        "other tenant", "another tenant", "all tenants", "every tenant",
+    ];
+
+    /// <summary>Words of questions that have nothing to do with procurement, which the Fake classifier calls off-topic.</summary>
+    private static readonly string[] OffTopicWords =
+    [
+        "poem", "recipe", "weather", "joke", "rugby", "football", "soccer", "cricket", "song", "lyrics", "horoscope", "movie", "bitcoin",
+        "homework",
     ];
 
     private readonly ChatClientMetadata _metadata = new("fake", null, AiOptions.FakeChatModel);
@@ -175,13 +186,16 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
     private static string KeepOrder(string prompt) =>
         string.Join(", ", CandidateMarker().Matches(prompt).Select(m => m.Groups["n"].Value));
 
+    /// <summary>The guard classifier's one-word answer: <c>INJECTION</c>, <c>OFF_TOPIC</c> or <c>SAFE</c>.</summary>
     private static string Classify(string text)
     {
-        var lower = text.ToLowerInvariant();
-        var phrase = InjectionPhrases.FirstOrDefault(p => lower.Contains(p, StringComparison.Ordinal));
-        return phrase is null
-            ? """{"flagged":false,"reason":null}"""
-            : JsonSerializer.Serialize(new { flagged = true, reason = "injection" });
+        var lower = Whitespace().Replace(text.ToLowerInvariant(), " ");
+        if (InjectionPhrases.Any(p => lower.Contains(p, StringComparison.Ordinal)))
+        {
+            return "INJECTION";
+        }
+
+        return OffTopicWords.Any(w => Regex.IsMatch(lower, $@"\b{w}s?\b")) ? "OFF_TOPIC" : "SAFE";
     }
 
     private static UsageDetails Usage(IEnumerable<ChatMessage> messages, FakeReply reply)

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Options;
+using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Ingestion;
 using ProcureAi.Assistant.Application.Retrieval;
 using ProcureAi.Assistant.Application.Retrieval.PastPurchases;
@@ -32,6 +33,10 @@ public sealed class AssistantOptions
     /// <summary>How hybrid search finds sources (<c>Assistant:Retrieval</c>).</summary>
     [Required, ValidateObjectMembers]
     public RetrievalOptions Retrieval { get; set; } = new();
+
+    /// <summary>The input and output guards (<c>Assistant:Guard</c>, ruling 11).</summary>
+    [Required, ValidateObjectMembers]
+    public GuardOptions Guard { get; set; } = new();
 
     /// <summary>How past purchases are kept and indexed (<c>Assistant:Purchases</c>).</summary>
     [Required, ValidateObjectMembers]

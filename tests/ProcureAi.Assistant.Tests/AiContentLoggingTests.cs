@@ -124,7 +124,7 @@ public sealed class AiContentLoggingTests
 
         // One structured line per model call stays: model, tokens and duration, no text.
         var calls = logs.Entries.Where(e => e.Category.EndsWith("ModelCallLogging", StringComparison.Ordinal) && e.Level == LogLevel.Information).ToList();
-        calls.Count.ShouldBe(4, "answer, streamed answer, utility, embedding");
+        calls.Count.ShouldBe(6, "answer and streamed answer (each after a guard classifier call), utility, embedding");
         calls.ShouldAllBe(c => c.Text.Contains("Model=", StringComparison.Ordinal) && c.Text.Contains("ElapsedMs=", StringComparison.Ordinal));
         calls.ShouldContain(c => c.Text.Contains("InputTokens=", StringComparison.Ordinal) && c.Text.Contains("OutputTokens=", StringComparison.Ordinal));
     }

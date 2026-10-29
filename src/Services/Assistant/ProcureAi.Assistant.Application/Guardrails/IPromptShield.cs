@@ -1,17 +1,10 @@
 namespace ProcureAi.Assistant.Application.Guardrails;
 
-/// <summary>What a prompt guard decided: <paramref name="Blocked"/> with a short, user-safe <paramref name="Reason"/>, or allowed.</summary>
-public sealed record PromptShieldResult(bool Blocked, string? Reason)
-{
-    public static PromptShieldResult Allowed { get; } = new(false, null);
-
-    public static PromptShieldResult Block(string reason) => new(true, reason);
-}
-
 /// <summary>
-/// The prompt guard (plan 05 ledger ruling A): checks a user's question before it reaches the model and a policy document before it is
-/// indexed, so injected instructions never become retrievable context. Plan 05 Task 4 registers the real guard; until then an allow-all
-/// placeholder is registered.
+/// The prompt guard (plan 05 ruling 11, ledger ruling A): checks a user's question before it reaches the model and a document (policy
+/// document, invoice) before its text reaches a prompt, so injected instructions never become retrievable context. The registered guard
+/// is <see cref="PromptShieldChain"/>: <see cref="PatternPromptShield"/> always, then <see cref="ModelPromptShield"/> when
+/// <c>Assistant:Guard:Classifier</c> is <c>Model</c>. Azure AI Content Safety Prompt Shields is a later third implementation (plan 08).
 /// </summary>
 public interface IPromptShield
 {

@@ -89,19 +89,22 @@ internal sealed class ProbeEmbeddingGenerator(IEmbeddingGenerator<string, Embedd
 }
 
 /// <summary>
-/// The document guard of the tests (ledger ruling A): blocks a document containing <see cref="Marker"/> with <see cref="Reason"/>. Plan 05
-/// Task 4 brings the real guard and completes the poisoned-document test with it.
+/// The real prompt guard of the service (patterns, then the fake classifier), plus a test marker: a document containing <see cref="Marker"/>
+/// is blocked with <see cref="Reason"/>. The marker shows exactly which part of a document reaches the guard (the title, the headings);
+/// <c>Poisoned_document_is_flagged_and_not_indexed</c> uses a red-team text through the real guard.
 /// </summary>
-public sealed class MarkerPromptShield : IPromptShield
+public sealed class MarkerPromptShield(IPromptShield real) : IPromptShield
 {
     public const string Marker = "#test-poison-marker#";
     public const string Reason = "The test guard found instructions to the assistant.";
 
     public Task<PromptShieldResult> CheckQuestionAsync(string text, CancellationToken cancellationToken) =>
-        Task.FromResult(PromptShieldResult.Allowed);
+        real.CheckQuestionAsync(text, cancellationToken);
 
     public Task<PromptShieldResult> CheckDocumentAsync(string text, CancellationToken cancellationToken) =>
-        Task.FromResult(text.Contains(Marker, StringComparison.Ordinal) ? PromptShieldResult.Block(Reason) : PromptShieldResult.Allowed);
+        text.Contains(Marker, StringComparison.Ordinal)
+            ? Task.FromResult(PromptShieldResult.Block(Reason))
+            : real.CheckDocumentAsync(text, cancellationToken);
 }
 
 internal static class TestServiceCollectionExtensions
