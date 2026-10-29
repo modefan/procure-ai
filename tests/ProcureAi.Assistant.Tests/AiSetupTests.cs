@@ -80,6 +80,16 @@ public sealed class AiSetupTests
         Should.Throw<OptionsValidationException>(() => Start(provider)).Message.ShouldContain("1536");
     }
 
+    [Theory]
+    [InlineData("Assistant:Guard:HoldBackChars", "16")] // shorter than the longest pattern prefix
+    [InlineData("Assistant:Guard:OutputWindow", "60")] // a window smaller than the hold-back buffer
+    public void Guard_buffers_too_small_for_the_patterns_fail_start(string key, string value)
+    {
+        using var provider = Build((key, value));
+
+        Should.Throw<OptionsValidationException>(() => Start(provider)).Message.ShouldContain("Assistant:Guard");
+    }
+
     [Fact]
     public void Missing_provider_fails_start()
     {

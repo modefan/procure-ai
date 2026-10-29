@@ -13,16 +13,20 @@ namespace ProcureAi.Assistant.Application.Guardrails;
 /// <see cref="GuardBlockedException"/> (<c>input</c>) and the inner client is never called. The answer flow (plan 05 Task 5a) puts the
 /// question last and the sources in the system message, so only the user's own words are checked here (sources were checked at ingestion);</item>
 /// <item>output: every text update goes through an <see cref="OutputGuard"/> (the last <c>Assistant:Guard:OutputWindow</c> characters plus
-/// the update). On a hit the update is not passed on, the inner stream is disposed (nothing more is read from the model) and
-/// <see cref="GuardBlockedException"/> (<c>output</c>) is thrown. What was already streamed is the caller's to replace.</item>
+/// the update), and the text is passed on only once it is <c>Assistant:Guard:HoldBackChars</c> (64) characters behind the newest text
+/// (<see cref="HoldBackBuffer"/>). A secret is found before its match is that long, so on a hit not one character of it has left the guard:
+/// the inner stream is disposed (nothing more is read from the model) and <see cref="GuardBlockedException"/> (<c>output</c>) is thrown.
+/// Other contents (tool calls, usage) keep their order behind the held text. The rest is passed on when the stream ends without a hit.</item>
 /// </list>
 /// Every block counts <c>assistant.guard_blocks</c> (stage, reason) and logs a warning with the stage, the reason and the conversation ID
-/// only, never the text.
+/// only, never the text. The conversation ID is read from <see cref="ChatOptions.AdditionalProperties"/>
+/// (<see cref="ConversationIdProperty"/>). Callers must not set <see cref="ChatOptions.ConversationId"/>: in Microsoft.Extensions.AI it
+/// names a provider-side stateful conversation (Responses API, Foundry agents), not ours.
 /// </summary>
 public sealed class GuardrailChatClient(IChatClient inner, IPromptShield shield, AssistantMetrics metrics, ILogger logger, GuardOptions guardOptions)
     : DelegatingChatClient(inner)
 {
-    /// <summary>The key of <see cref="ChatOptions.AdditionalProperties"/> that carries the conversation ID when <see cref="ChatOptions.ConversationId"/> is not set.</summary>
+    /// <summary>The key of <see cref="ChatOptions.AdditionalProperties"/> that carries our conversation ID, for the log.</summary>
     public const string ConversationIdProperty = "conversationId";
 
     public override async Task<ChatResponse> GetResponseAsync(
@@ -47,17 +51,30 @@ public sealed class GuardrailChatClient(IChatClient inner, IPromptShield shield,
         await CheckInputAsync(list, options, cancellationToken);
 
         var output = new OutputGuard(guardOptions.OutputWindow);
-        await using var updates = base.GetStreamingResponseAsync(list, options, cancellationToken).GetAsyncEnumerator(cancellationToken);
-        while (await updates.MoveNextAsync())
+        var held = new HoldBackBuffer(guardOptions.HoldBackChars);
+        await using (var updates = base.GetStreamingResponseAsync(list, options, cancellationToken).GetAsyncEnumerator(cancellationToken))
         {
-            var update = updates.Current;
-            if (output.Inspect(update.Text) is { } reason)
+            while (await updates.MoveNextAsync())
             {
-                // Leaving the loop disposes the inner stream (await using) before the caller sees the exception.
-                throw Blocked(GuardBlockedException.OutputStage, reason, options);
-            }
+                var update = updates.Current;
+                if (output.Inspect(update.Text) is { } reason)
+                {
+                    // Leaving the block disposes the inner stream before the caller sees the exception; the held text is dropped.
+                    throw Blocked(GuardBlockedException.OutputStage, reason, options);
+                }
 
-            yield return update;
+                held.Add(update);
+                foreach (var ready in held.Release())
+                {
+                    yield return ready;
+                }
+            }
+        }
+
+        // The stream ended and every update passed the check: the rest is passed on, in order.
+        foreach (var rest in held.Flush())
+        {
+            yield return rest;
         }
     }
 
@@ -84,6 +101,5 @@ public sealed class GuardrailChatClient(IChatClient inner, IPromptShield shield,
     }
 
     private static string? ConversationId(ChatOptions? options) =>
-        options?.ConversationId
-        ?? (options?.AdditionalProperties?.TryGetValue(ConversationIdProperty, out var id) == true ? id?.ToString() : null);
+        options?.AdditionalProperties?.TryGetValue(ConversationIdProperty, out var id) == true ? id?.ToString() : null;
 }

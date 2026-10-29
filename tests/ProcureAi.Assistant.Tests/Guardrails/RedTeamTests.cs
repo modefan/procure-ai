@@ -57,9 +57,13 @@ public sealed class RedTeamTests
     public void The_set_covers_every_kind_with_enough_entries()
     {
         Entries.Count(e => !e.IsDocument).ShouldBeGreaterThanOrEqualTo(40);
-        Entries.Count(e => e.Kind == "harmless" && e.Expected == "allowed").ShouldBe(10);
-        Entries.Count(e => e.Kind == "poisoned_document" && e.Expected == "blocked").ShouldBe(5);
-        string[] kinds = ["direct_injection", "jailbreak", "prompt_leak", "base64", "fake_tag", "cross_tenant", "secrets", "off_topic"];
+        Entries.Count(e => e.Kind == "harmless" && e.Expected == "allowed").ShouldBeGreaterThanOrEqualTo(10);
+        Entries.Count(e => e.Kind == "poisoned_document" && e.Expected == "blocked").ShouldBeGreaterThanOrEqualTo(5);
+        string[] kinds =
+        [
+            "direct_injection", "jailbreak", "prompt_leak", "base64", "fake_tag", "cross_tenant", "secrets", "off_topic",
+            "hidden_characters", "invisible_characters", "homoglyph", "spaced_letters", "leetspeak",
+        ];
         kinds.ShouldAllBe(k => Entries.Any(e => e.Kind == k && e.Expected == "blocked"));
     }
 

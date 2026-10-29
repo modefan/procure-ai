@@ -28,8 +28,9 @@ public sealed partial class OutputGuard(int window)
     }
 
     /// <summary>
-    /// Ruling 10: an answer is grounded when it cites at least one source that exists (<c>[S1]</c> … <c>[S<paramref name="sourceCount"/>]</c>)
-    /// or when at least one tool result was used.
+    /// Ruling 10: an answer is grounded when it cites at least one source that exists or when at least one tool result was used. A citation
+    /// is a bracket of source markers: <c>[S1]</c>, several (<c>[S1, S3]</c>, <c>[S1][S3]</c>) or a range (<c>[S1-S2]</c>, <c>[S1–S3]</c>).
+    /// It counts when every number in it is 1 to <paramref name="sourceCount"/>.
     /// </summary>
     public static bool IsGrounded(string answer, int sourceCount, int toolResultCount)
     {
@@ -40,8 +41,10 @@ public sealed partial class OutputGuard(int window)
 
         foreach (Match citation in Citation().Matches(answer ?? ""))
         {
-            if (int.TryParse(citation.Groups["n"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
-                && number >= 1 && number <= sourceCount)
+            var numbers = citation.Groups["n"].Captures
+                .Select(c => int.TryParse(c.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : 0)
+                .ToList();
+            if (numbers.Count > 0 && numbers.All(n => n >= 1 && n <= sourceCount))
             {
                 return true;
             }
@@ -50,6 +53,6 @@ public sealed partial class OutputGuard(int window)
         return false;
     }
 
-    [GeneratedRegex(@"\[S(?<n>\d{1,3})\]")]
+    [GeneratedRegex(@"\[S(?<n>\d{1,3})(?:\s*[,;\-–]\s*S?(?<n>\d{1,3}))*\]", RegexOptions.None, SecretPatterns.RegexTimeoutMs)]
     private static partial Regex Citation();
 }

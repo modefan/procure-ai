@@ -101,16 +101,19 @@ public sealed class ModelPromptShield(IChatClient classifier, ILogger<ModelPromp
         return label;
     }
 
-    /// <summary>The label of a reply: the first of the three words in it (case and punctuation ignored), INJECTION before the others.</summary>
+    /// <summary>
+    /// The label of a reply, or null: the whole reply, trimmed of whitespace and punctuation and upper-cased, must be exactly one of the
+    /// three words (<c>OFF-TOPIC</c> and <c>OFF TOPIC</c> count as <c>OFF_TOPIC</c>). "NOT SAFE", "UNSAFE" or "I think SAFE" are null, so
+    /// the caller blocks (fail closed).
+    /// </summary>
     internal static string? Label(string? reply)
     {
-        var upper = (reply ?? "").ToUpperInvariant().Replace("OFF-TOPIC", OffTopicLabel, StringComparison.Ordinal)
-            .Replace("OFF TOPIC", OffTopicLabel, StringComparison.Ordinal);
-        return upper.Contains(InjectionLabel, StringComparison.Ordinal) ? InjectionLabel
-            : upper.Contains(OffTopicLabel, StringComparison.Ordinal) ? OffTopicLabel
-            : upper.Contains(Safe, StringComparison.Ordinal) ? Safe
-            : null;
+        var word = (reply ?? "").Trim().Trim(ReplyPunctuation).Trim().ToUpperInvariant();
+        word = word is "OFF-TOPIC" or "OFF TOPIC" ? OffTopicLabel : word;
+        return word is Safe or InjectionLabel or OffTopicLabel ? word : null;
     }
+
+    private static readonly char[] ReplyPunctuation = ['.', '!', ',', ';', ':', '"', '\'', '`', '*', '(', ')', '[', ']'];
 
     private static IEnumerable<string> Windows(string text)
     {

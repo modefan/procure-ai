@@ -72,6 +72,13 @@ public sealed class OutputGuardTests
     [InlineData("Purchases need approval [S3].", 2, 0, false)] // a source that does not exist
     [InlineData("Purchases need approval [S0].", 2, 0, false)]
     [InlineData("Purchases need approval [S1].", 0, 0, false)]
+    [InlineData("Purchases need approval [S1, S3].", 3, 0, true)] // several in one bracket
+    [InlineData("Purchases need approval [S1,S2].", 2, 0, true)]
+    [InlineData("Purchases need approval [S1][S3].", 3, 0, true)]
+    [InlineData("Purchases need approval [S1-S2].", 2, 0, true)] // a range
+    [InlineData("Purchases need approval [S1–S3].", 3, 0, true)] // a range with an en dash
+    [InlineData("Purchases need approval [S1, S9].", 3, 0, false)] // a source that does not exist
+    [InlineData("Purchases need approval [S2-S5].", 3, 0, false)]
     public void Ungrounded_answer_detected(string answer, int sources, int toolResults, bool grounded) =>
         OutputGuard.IsGrounded(answer, sources, toolResults).ShouldBe(grounded);
 

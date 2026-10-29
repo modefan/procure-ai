@@ -7,6 +7,7 @@ namespace ProcureAi.Assistant.Application.Guardrails;
 public static class GuardReasons
 {
     public const string TooLong = "too_long";
+    public const string HiddenCharacters = "hidden_characters";
     public const string Injection = "injection";
     public const string PromptLeak = "prompt_leak";
     public const string RoleTag = "role_tag";
@@ -15,6 +16,9 @@ public static class GuardReasons
     public const string SecretRequest = "secret_request";
     public const string OffTopic = "off_topic";
     public const string ClassifierUnclear = "classifier_unclear";
+
+    /// <summary>A guard pattern ran out of time on the text (fail closed).</summary>
+    public const string TooComplex = "too_complex";
 
     /// <summary>A secret, credential or personal data in the model's answer (<see cref="SecretPatterns"/>).</summary>
     public const string ConnectionString = "connection_string";
@@ -30,6 +34,8 @@ public static class GuardReasons
     {
         null or "" => "The guard flagged this text.",
         TooLong => "The text is longer than the guard allows.",
+        HiddenCharacters => "The text contains hidden characters.",
+        TooComplex => "The guard could not check the text.",
         Injection => "The text contains instructions to the assistant.",
         PromptLeak => "The text asks for the assistant's instructions.",
         RoleTag => "The text contains chat role or data tags.",
