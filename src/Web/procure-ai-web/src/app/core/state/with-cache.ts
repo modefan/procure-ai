@@ -12,6 +12,18 @@ export interface CacheOptions {
 
 const MAX_KEYS = 50;
 
+const predicateIds = new WeakMap<object, number>();
+let nextPredicateId = 1;
+/** A stable number for a predicate function (the same function gives the same number). */
+function predicateId(predicate: (key: string) => boolean): number {
+  let id = predicateIds.get(predicate);
+  if (id === undefined) {
+    id = nextPredicateId++;
+    predicateIds.set(predicate, id);
+  }
+  return id;
+}
+
 interface Entry {
   loader: () => Promise<void>;
   /** When the last successful load finished; null until one has. */
@@ -116,10 +128,18 @@ export function withCache(options: CacheOptions = {}) {
          */
         invalidate(match: string | ((key: string) => boolean), invalidateOptions: { trailing?: boolean } = {}): void {
           if (invalidateOptions.trailing) {
-            const id = typeof match === 'string' ? match : '*';
+            // A string is its own key; a predicate is keyed by its identity, so a trailing reload with a predicate is never
+            // merged with another predicate's (or the unfiltered one) and keeps only the keys it matched.
+            const id = typeof match === 'string' ? match : `*${predicateId(match)}`;
             let trailer = trailers.get(id);
             if (!trailer) {
-              trailer = createTrailingReload(() => methods.invalidate(match), () => config.config().cache.trailingReloadMs);
+              trailer = createTrailingReload(
+                () => {
+                  trailers.delete(id);
+                  methods.invalidate(match);
+                },
+                () => config.config().cache.trailingReloadMs,
+              );
               trailers.set(id, trailer);
             }
             trailer.schedule();

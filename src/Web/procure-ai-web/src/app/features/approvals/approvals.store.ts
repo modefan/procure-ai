@@ -1,15 +1,12 @@
 import { HttpContext, HttpErrorResponse } from '@angular/common/http';
-import { computed, inject } from '@angular/core';
-import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { removeEntity, setAllEntities, withEntities } from '@ngrx/signals/entities';
+import { inject } from '@angular/core';
+import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
+import { removeEntity } from '@ngrx/signals/entities';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
-import { AppConfigService } from '../../core/config/app-config';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
-import { LiveConnection } from '../../core/live/live-connection';
+import { withPagedList } from '../../core/state/with-paged-list';
 import { Logger } from '../../core/logging/logger';
-import { withCache } from '../../core/state/with-cache';
-import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { idempotencyKey } from '../../core/http/idempotency';
 import { isConflict, problemOf } from '../../core/http/problem-fields';
@@ -17,9 +14,6 @@ import { isConflict, problemOf } from '../../core/http/problem-fields';
 export type InboxAction = 'approve' | 'reject';
 
 interface InboxState {
-  page: number;
-  pageSize: number;
-  total: number;
   /** The row being approved or rejected, by step ID: its buttons are busy. */
   acting: Record<string, InboxAction>;
   /** A refusal (403, 422 ...) or validation message for a row, by step ID. */
@@ -41,20 +35,30 @@ const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
  */
 export const ApprovalsStore = signalStore(
   { providedIn: 'root' },
-  withEntities<ApprovalStepDto>(),
-  withState<InboxState>(() => ({ page: 1, pageSize: inject(AppConfigService).config().paging.pageSize, total: 0, acting: {}, rowErrors: {}, soonestDueAt: null })),
-  withRequestStatus(),
-  withComputed(({ total, pageSize }) => ({
-    pageCount: computed(() => Math.max(1, Math.ceil(total() / pageSize()))),
-  })),
-  withCache(),
+  withPagedList(() => {
+    const api = inject(ApprovalsService);
+    return {
+      entity: 'approval',
+      trailing: true,
+      errorMessage: 'The approvals inbox could not be loaded.',
+      initialFilter: {},
+      load: (_filter: object, page: number, pageSize: number) => api.getApprovalInbox({ page, pageSize }),
+      afterLoad: (result, { load, patch }) => {
+        if (result.page === 1) {
+          patch({ soonestDueAt: result.items.map((s) => s.dueAt).filter((d): d is string => !!d).sort()[0] ?? null });
+        }
+        if (result.items.length === 0 && result.total > 0 && result.page > 1) {
+          // Rows left this page meanwhile (someone else acted): show the last page that still has some.
+          void load(Math.max(1, Math.ceil(result.total / result.pageSize)));
+        }
+      },
+    };
+  }),
+  withState<InboxState>({ acting: {}, rowErrors: {}, soonestDueAt: null }),
   withMethods((store) => {
     const api = inject(ApprovalsService);
     const conflict = inject(ConflictDialog);
     const log = inject(Logger).withSource('ApprovalsStore');
-    let latest = 0;
-    let shown: { key: string; epoch: number } | null = null;
-    let currentKey: string | null = null;
     const running = new Map<string, Promise<boolean>>();
     const keys = new Map<string, string>();
 
@@ -94,53 +98,9 @@ export const ApprovalsStore = signalStore(
       /** The message on this row, if any. */
       errorOf: (stepId: string): string | null => store.rowErrors()[stepId] ?? null,
 
-      /** Shows one page (1-based). Only the newest call may change the state; a failure sets `error` and keeps the rows. */
-      async load(page: number): Promise<void> {
-        const pageSize = store.pageSize();
-        const key = `list:${page}:${pageSize}`;
-        const onScreen = () => shown !== null && shown.key === key && shown.epoch === store.cacheEpoch();
-        if (currentKey !== key) {
-          store.clearCache();
-          currentKey = key;
-        }
-        try {
-          await store.cacheLoad(key, async () => {
-            const call = ++latest;
-            const epoch = store.cacheEpoch();
-            if (!onScreen()) {
-              store.setLoading();
-            }
-            try {
-              const result = await api.getApprovalInbox({ page, pageSize });
-              if (call !== latest || epoch !== store.cacheEpoch()) {
-                return;
-              }
-              patchState(store, setAllEntities(result.items), { page: result.page, pageSize: result.pageSize, total: result.total });
-              shown = { key, epoch };
-              store.setLoaded();
-              if (result.page === 1) {
-                patchState(store, { soonestDueAt: result.items.map((s) => s.dueAt).filter((d): d is string => !!d).sort()[0] ?? null });
-              }
-              if (result.items.length === 0 && result.total > 0 && result.page > 1) {
-                // Rows left this page meanwhile (someone else acted): show the last page that still has some.
-                void methods.load(Math.max(1, Math.ceil(result.total / result.pageSize)));
-              }
-            } catch (error) {
-              if (call === latest && epoch === store.cacheEpoch()) {
-                log.error('Loading the approvals inbox failed', error);
-                store.setError(error, 'The approvals inbox could not be loaded.');
-              }
-              throw error;
-            }
-          });
-        } catch {
-          // Already recorded in `error`.
-        }
-      },
-
       /** Loads the page on screen (the header calls this; it costs nothing while fresh). */
       refresh(): Promise<void> {
-        return methods.load(store.page());
+        return store.load(store.page());
       },
 
       /** Approves the step with the version that was read. Resolves true when the server agreed. */
@@ -187,7 +147,7 @@ export const ApprovalsStore = signalStore(
           }
           patchState(store, removeEntity(step.id), (s) => ({ total: Math.max(0, s.total - 1) }));
           if (store.entities().length === 0 && store.page() > 1) {
-            await methods.load(store.page() - 1);
+            await store.load(store.page() - 1);
           } else {
             store.invalidate('list'); // the server's view, in the background
           }
@@ -213,18 +173,5 @@ export const ApprovalsStore = signalStore(
     }
 
     return methods;
-  }),
-  withHooks((store) => {
-    const live = inject(LiveConnection);
-    let off: (() => void) | null = null;
-    return {
-      onInit() {
-        // invalidate() does nothing until a page has been loaded, so a push before anyone asked costs nothing.
-        off = live.onEntityChanged('approval', () => store.invalidate('list', { trailing: true }));
-      },
-      onDestroy() {
-        off?.();
-      },
-    };
   }),
 );

@@ -1,6 +1,6 @@
 import { HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { computed, inject } from '@angular/core';
-import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
+import { signalStore, withComputed, withMethods } from '@ngrx/signals';
 import { ApprovalChainDto } from '../../api/approvals/models/approval-chain-dto';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
 import { BusinessEventDto } from '../../api/audit/models/business-event-dto';
@@ -12,34 +12,22 @@ import { OrdersService } from '../../api/purchasing/services/orders.service';
 import { RequestDto } from '../../api/requests/models/request-dto';
 import { RequestsService } from '../../api/requests/services/requests.service';
 import { AuthStore } from '../../core/auth/auth.store';
-import { AppConfigService } from '../../core/config/app-config';
-import { EntityChanged } from '../../core/live/live.models';
-import { LiveConnection } from '../../core/live/live-connection';
 import { Logger } from '../../core/logging/logger';
-import { CacheRegistry } from '../../core/state/cache-registry';
-import { createTrailingReload } from '../../core/state/trailing-reload';
-import { withRequestStatus } from '../../core/state/with-request-status';
-import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
-import { idempotencyKey } from '../../core/http/idempotency';
-import { isConflict, problemOf } from '../../core/http/problem-fields';
+import { problemOf } from '../../core/http/problem-fields';
+import { versionEtag, withDetail } from '../../core/state/with-detail';
 import { buildTimeline } from './workflow-timeline';
 
-interface DetailState {
-  requestId: string | null;
-  request: RequestDto | null;
+/** What the page shows: the request and the parts loaded around it. */
+interface RequestDetail {
+  request: RequestDto;
   chain: ApprovalChainDto | null;
   order: PurchaseOrderDto | null;
   invoices: InvoiceDto[];
   history: BusinessEventDto[];
-  /** Parts (not the request itself) that could not be loaded, in words for the page. */
-  partial: string[];
-  busy: boolean;
-  /** A refusal of the cancel that belongs to no dialog (409, 422 ...). */
-  generalError: string | null;
 }
 
-const EMPTY: DetailState = { requestId: null, request: null, chain: null, order: null, invoices: [], history: [], partial: [], busy: false, generalError: null };
+const NO_PARTS: Omit<RequestDetail, 'request'> = { chain: null, order: null, invoices: [], history: [] };
 /** Statuses a request can still be cancelled from (the server decides about the rest). */
 const CANCELLABLE = ['Draft', 'Submitted', 'Approved', 'Ordered'];
 /** Calls whose 403 must not take the page away: the user may simply not be allowed to read that part. */
@@ -55,8 +43,77 @@ const isNotFound = (error: unknown) => error instanceof HttpErrorResponse && err
  * `If-Match` with the loaded version and one `Idempotency-Key` per version, and answer a 412 with the conflict dialog.
  */
 export const RequestDetailStore = signalStore(
-  withState<DetailState>(EMPTY),
-  withRequestStatus(),
+  withDetail<RequestDetail, RequestDto>(() => {
+    const requests = inject(RequestsService);
+    const approvals = inject(ApprovalsService);
+    const orders = inject(OrdersService);
+    const invoicing = inject(InvoicesService);
+    const audit = inject(AuditService);
+    const auth = inject(AuthStore);
+    const log = inject(Logger).withSource('RequestDetailStore');
+    return {
+      // The audit trail and the order are written by other services from the same events, a moment after the push that told us
+      // about them: a push is followed by one more quiet load (`cache.trailingReloadMs`).
+      entity: ['request', 'approval', 'order', 'invoice'],
+      errorMessage: 'The request could not be loaded.',
+      isRelevant: (change, id) => change.requestId === id || change.id === id,
+      fromSeed: (request) => ({ value: { ...NO_PARTS, request }, etag: versionEtag(request) }),
+      load: async (requestId, { background, current, seed }) => {
+        const canSeeOrder = auth.hasPermission('orders.read');
+        const canSeeInvoices = canSeeOrder && auth.hasPermission('invoices.read');
+        const requestCall = seed ? Promise.resolve(seed) : requests.getRequest({ id: requestId });
+        const chainCall = approvals.getApprovalChain({ requestId }, quietly()).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)));
+        const orderCall: Promise<PurchaseOrderDto | null> = canSeeOrder
+          ? orders.getOrderForRequest({ requestId }, quietly()).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)))
+          : Promise.resolve(null);
+        const invoicesCall: Promise<InvoiceDto[]> = orderCall.then(async (order) =>
+          order && canSeeInvoices ? (await invoicing.listInvoices({ orderId: order.id, page: 1, pageSize: 50 }, quietly())).items : [],
+        );
+        const historyCall: Promise<BusinessEventDto[]> = audit.getRequestHistory({ requestId }, quietly()).catch((e: unknown) => (isNotFound(e) ? [] : Promise.reject(e)));
+
+        const [request, chain, order, invoices, history] = await Promise.allSettled([requestCall, chainCall, orderCall, invoicesCall, historyCall]);
+        if (request.status === 'rejected') {
+          if (!(background && current)) {
+            throw request.reason; // nothing to show
+          }
+          log.warn('Refreshing the request failed; keeping what is shown', request.reason);
+        }
+        const partial: string[] = [];
+        const note = (name: string, result: PromiseSettledResult<unknown>) => {
+          if (result.status === 'rejected') {
+            log.warn(`Loading the ${name} failed`, result.reason);
+            partial.push(name);
+          }
+        };
+        note('approval steps', chain);
+        note('order', order);
+        // The invoices are asked for only once the order is known: when the order failed, that is the one thing missing.
+        if (order.status === 'fulfilled') {
+          note('invoices', invoices);
+        }
+        note('audit trail', history);
+        // A part that could not be loaded keeps what was shown before.
+        const value: RequestDetail = {
+          request: request.status === 'fulfilled' ? request.value : current!.request,
+          chain: chain.status === 'fulfilled' ? chain.value : (current?.chain ?? null),
+          order: order.status === 'fulfilled' ? order.value : (current?.order ?? null),
+          invoices: invoices.status === 'fulfilled' ? invoices.value : (current?.invoices ?? []),
+          history: history.status === 'fulfilled' ? history.value : (current?.history ?? []),
+        };
+        return { value, etag: versionEtag(value.request), partial };
+      },
+    };
+  }),
+  withComputed((store) => ({
+    requestId: store.id,
+    request: computed(() => store.value()?.request ?? null),
+    chain: computed(() => store.value()?.chain ?? null),
+    order: computed(() => store.value()?.order ?? null),
+    invoices: computed(() => store.value()?.invoices ?? []),
+    history: computed(() => store.value()?.history ?? []),
+    busy: computed(() => store.busyKind() !== null),
+    partialFailures: store.partial,
+  })),
   withComputed((store) => {
     const auth = inject(AuthStore);
     const canSeeOrder = computed(() => auth.hasPermission('orders.read'));
@@ -68,7 +125,6 @@ export const RequestDetailStore = signalStore(
       canSeeInvoices,
       /** "you", the requester's name when Audit knows it (their submit event), else null (a draft has none). */
       requestedBy: computed(() => (mine() ? 'you' : (store.history().find((e) => e.type === 'RequestSubmitted')?.actorName ?? null))),
-      partialFailures: computed(() => store.partial()),
       canEdit: computed(() => store.request()?.status === 'Draft' && auth.hasPermission('requests.create') && mine()),
       canCancel: computed(() => {
         const request = store.request();
@@ -93,204 +149,25 @@ export const RequestDetailStore = signalStore(
   }),
   withMethods((store) => {
     const requests = inject(RequestsService);
-    const approvals = inject(ApprovalsService);
-    const orders = inject(OrdersService);
-    const invoicing = inject(InvoicesService);
-    const audit = inject(AuditService);
-    const conflict = inject(ConflictDialog);
-    const log = inject(Logger).withSource('RequestDetailStore');
-
-    /** Changes at logout, so an answer that was on its way for the old user is dropped. */
-    let generation = 0;
-    let running: Promise<void> | null = null;
-    let again = false;
-    let seed: RequestDto | null = null;
-    let cancelling: Promise<void> | null = null;
-    // The audit trail and the order are written by other services from the same events, a moment after the push that told us
-    // about them: a push is followed by one more quiet load (`cache.trailingReloadMs`).
-    const config = inject(AppConfigService);
-    const trailing = createTrailingReload(() => void reload(true), () => config.config().cache.trailingReloadMs);
-    const cancelKeys = new Map<string, string>();
-
-    const loadAll = async (background: boolean): Promise<void> => {
-      const id = store.requestId();
-      if (!id) {
-        return;
-      }
-      const mine = generation;
-      if (!background) {
-        store.setLoading();
-      }
-      const fromSeed = seed;
-      seed = null;
-      const requestCall = fromSeed ? Promise.resolve(fromSeed) : requests.getRequest({ id });
-      const chainCall = approvals.getApprovalChain({ requestId: id }, quietly()).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)));
-      const orderCall: Promise<PurchaseOrderDto | null> = store.canSeeOrder()
-        ? orders.getOrderForRequest({ requestId: id }, quietly()).catch((e: unknown) => (isNotFound(e) ? null : Promise.reject(e)))
-        : Promise.resolve(null);
-      const invoicesCall: Promise<InvoiceDto[]> = orderCall.then(async (order) =>
-        order && store.canSeeInvoices() ? (await invoicing.listInvoices({ orderId: order.id, page: 1, pageSize: 50 }, quietly())).items : [],
-      );
-      const historyCall: Promise<BusinessEventDto[]> = audit.getRequestHistory({ requestId: id }, quietly()).catch((e: unknown) => (isNotFound(e) ? [] : Promise.reject(e)));
-
-      const [request, chain, order, invoices, history] = await Promise.allSettled([requestCall, chainCall, orderCall, invoicesCall, historyCall]);
-      if (mine !== generation || store.requestId() !== id) {
-        return;
-      }
-
-      if (request.status === 'rejected') {
-        if (background && store.request()) {
-          log.warn('Refreshing the request failed; keeping what is shown', request.reason);
-        } else {
-          log.error('Loading the request failed', request.reason);
-          store.setError(request.reason, 'The request could not be loaded.');
-          return;
-        }
-      }
-      const partial: string[] = [];
-      const note = (name: string, result: PromiseSettledResult<unknown>) => {
-        if (result.status === 'rejected') {
-          log.warn(`Loading the ${name} failed`, result.reason);
-          partial.push(name);
-        }
-      };
-      note('approval steps', chain);
-      note('order', order);
-      // The invoices are asked for only once the order is known: when the order failed, that is the one thing missing.
-      if (order.status === 'fulfilled') {
-        note('invoices', invoices);
-      }
-      note('audit trail', history);
-      patchState(store, {
-        ...(request.status === 'fulfilled' ? { request: request.value } : {}),
-        ...(chain.status === 'fulfilled' ? { chain: chain.value } : {}),
-        ...(order.status === 'fulfilled' ? { order: order.value } : {}),
-        ...(invoices.status === 'fulfilled' ? { invoices: invoices.value } : {}),
-        ...(history.status === 'fulfilled' ? { history: history.value } : {}),
-        partial,
-      });
-      store.setLoaded();
-    };
-
-    /** Runs one load; a call while one runs asks for exactly one more load afterwards. */
-    const reload = (background: boolean): Promise<void> => {
-      if (running) {
-        again = true;
-        return running;
-      }
-      const call: Promise<void> = loadAll(background)
-        .catch((error: unknown) => log.error('Loading the request failed unexpectedly', error))
-        .finally(() => {
-          if (running !== call) {
-            return; // init() or logout started over meanwhile
-          }
-          running = null;
-          if (again) {
-            again = false;
-            void reload(true);
-          }
-        });
-      running = call;
-      return call;
-    };
-
-    const keyFor = (id: string, version: number): string => {
-      const k = `${id}:${version}`;
-      let key = cancelKeys.get(k);
-      if (!key) {
-        key = idempotencyKey();
-        cancelKeys.set(k, key);
-      }
-      return key;
-    };
 
     return {
       /** Shows request `id`. `initial` is what the route resolver already fetched, so it is not asked for twice. */
-      async init(id: string, initial: RequestDto | null): Promise<void> {
-        generation++;
-        running = null;
-        again = false;
-        cancelling = null;
-        trailing.cancel();
-        seed = initial;
-        patchState(store, { ...EMPTY, requestId: id, request: initial });
-        await reload(false);
-      },
-
-      /** Loads again, keeping what is shown (retry button, or after a conflict). */
-      reload: () => reload(true),
+      init: (id: string, initial: RequestDto | null): Promise<void> => store.open(id, initial),
 
       /** Cancels the request, after the page has asked the user. */
-      cancel(): Promise<void> {
+      async cancel(): Promise<void> {
         const request = store.request();
         if (!request) {
-          return Promise.resolve();
+          return;
         }
-        if (cancelling) {
-          return cancelling; // a double click shares the running call
-        }
-        patchState(store, { busy: true, generalError: null });
-        const key = keyFor(request.id, request.version);
-        cancelling = (async () => {
-          try {
-            const updated = await requests.cancelRequest({ id: request.id, 'If-Match': `"${request.version}"`, 'Idempotency-Key': key }, quietly());
-            patchState(store, { request: updated });
-            void reload(true);
-          } catch (error) {
-            const problem = problemOf(error);
-            if (isConflict(error)) {
-              await conflict.show(problem.general ?? 'This request was changed by someone else. The latest version is loaded.');
-              await reload(true);
-            } else {
-              log.warn('Cancelling the request failed', error);
-              patchState(store, { generalError: problem.general ?? 'The request could not be cancelled. Please try again.' });
-            }
-          } finally {
-            cancelling = null;
-            patchState(store, { busy: false });
-          }
-        })();
-        return cancelling;
-      },
-
-      /** Logout: forget everything and drop answers still on their way. */
-      clearCache(): void {
-        generation++;
-        trailing.cancel();
-        running = null;
-        seed = null;
-        patchState(store, EMPTY);
-      },
-
-      /** A push or a reconnect: refresh quietly. */
-      onChange: (change: EntityChanged): void => {
-        const id = store.requestId();
-        if (id && (change.requestId === id || change.id === id)) {
-          void reload(true);
-          trailing.schedule();
-        }
-      },
-
-      /** Stops the pending trailing load (the page is going away). */
-      stop(): void {
-        trailing.cancel();
-      },
-    };
-  }),
-  withHooks((store) => {
-    const live = inject(LiveConnection);
-    let release: (() => void)[] = [];
-    return {
-      onInit() {
-        release = [
-          inject(CacheRegistry).register(store),
-          ...['request', 'approval', 'order', 'invoice'].map((entity) => live.onEntityChanged(entity, (change) => store.onChange(change))),
-          live.onReconnected(() => void store.reload()),
-        ];
-      },
-      onDestroy() {
-        release.forEach((off) => off());
-        store.stop();
+        await store.runWrite((etag, key) => requests.cancelRequest({ id: request.id, 'If-Match': etag ?? versionEtag(request), 'Idempotency-Key': key }, quietly()), {
+          what: 'Cancelling the request',
+          failureMessage: 'The request could not be cancelled. Please try again.',
+          conflictMessage: (error) => problemOf(error).general ?? 'This request was changed by someone else. The latest version is loaded.',
+          keyParts: [request.id, request.version],
+          apply: (updated, current) => ({ value: { ...(current ?? NO_PARTS), request: updated }, etag: versionEtag(updated) }),
+          reloadAfter: true,
+        });
       },
     };
   }),

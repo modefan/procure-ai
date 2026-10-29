@@ -330,6 +330,34 @@ describe('withCache', () => {
       expect(loader).toHaveBeenCalledTimes(4);
     });
 
+    it('trailing_with_predicate_is_not_merged_with_unfiltered', async () => {
+      const a = counting();
+      const b = counting();
+      await store().cacheLoad('a', a);
+      await store().cacheLoad('b', b);
+
+      store().invalidate((key) => key === 'a', { trailing: true });
+      store().invalidate((key) => key === 'b', { trailing: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect([a.mock.calls.length, b.mock.calls.length]).toEqual([2, 2]);
+      await vi.advanceTimersByTimeAsync(2001);
+
+      // each predicate gets its own trailing run, and only for the keys it matched
+      expect([a.mock.calls.length, b.mock.calls.length]).toEqual([3, 3]);
+    });
+
+    it('trailing_with_the_same_predicate_is_merged', async () => {
+      const a = counting();
+      await store().cacheLoad('a', a);
+      const onlyA = (key: string) => key === 'a';
+
+      store().invalidate(onlyA, { trailing: true });
+      store().invalidate(onlyA, { trailing: true });
+      await vi.advanceTimersByTimeAsync(2501);
+
+      expect(a).toHaveBeenCalledTimes(4); // two immediate runs and one trailing run
+    });
+
     it('a_plain_invalidate_has_no_trailing_run', async () => {
       const loader = counting();
       await store().cacheLoad('list', loader);
