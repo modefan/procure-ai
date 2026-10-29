@@ -1,3 +1,4 @@
+using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Invoicing.Application.Dtos;
 using ProcureAi.Invoicing.Domain;
@@ -8,22 +9,26 @@ namespace ProcureAi.Invoicing.Application.Mapping;
 public static class InvoicingMapper
 {
     /// <summary>The invoice with its match lines; <paramref name="order"/> (its order view) adds the ordered quantities and prices.</summary>
-    public static InvoiceDto ToDto(Invoice invoice, OrderView? order) => new(
+    public static InvoiceDto ToDto(Invoice invoice, OrderView? order) => ToDto(invoice, order, order is null ? null : invoice.PlanAllPayable(order));
+
+    private static InvoiceDto ToDto(Invoice invoice, OrderView? order, PaymentPlan? payable) => new(
         invoice.Id, invoice.OrderId, order?.OrderNumber, invoice.RequestId, invoice.SupplierId, invoice.SupplierInvoiceNumber, invoice.InvoiceDate,
         invoice.Sequence, invoice.Source, invoice.Status, invoice.OnHold, invoice.HoldReason,
         invoice.Match?.Reasons ?? [],
         [.. invoice.Lines.OrderBy(l => l.LineNo).Select(l => ToLineDto(
-            l, invoice.Match?.Lines.FirstOrDefault(m => m.LineNo == l.LineNo), order?.Lines.FirstOrDefault(o => o.LineNo == l.LineNo)))],
+            l, invoice.Match?.Lines.FirstOrDefault(m => m.LineNo == l.LineNo), order?.Lines.FirstOrDefault(o => o.LineNo == l.LineNo),
+            payable?.Lines.FirstOrDefault(p => p.LineNo == l.LineNo)?.Quantity ?? 0))],
         [.. invoice.Payments.OrderBy(p => p.ReleasedAt).Select(ToPaymentDto)],
         invoice.TotalExclVat.Amount, invoice.Vat.Amount, invoice.TotalInclVat.Amount,
         invoice.TotalExclVat.ToDisplayString(), invoice.Vat.ToDisplayString(), invoice.TotalInclVat.ToDisplayString(),
+        payable?.TotalInclVat.Amount ?? 0m, (payable?.TotalInclVat ?? Money.Zero).ToDisplayString(),
         invoice.ReceivedAt, invoice.Version);
 
-    public static InvoiceLineDto ToLineDto(InvoiceLine line, LineMatch? match, OrderViewLine? orderLine) => new(
+    public static InvoiceLineDto ToLineDto(InvoiceLine line, LineMatch? match, OrderViewLine? orderLine, int payable = 0) => new(
         line.LineNo, line.Sku, line.Description, line.Quantity, line.Paid, line.UnitPriceExclVat.Amount, line.LineTotalExclVat.Amount,
         line.UnitPriceExclVat.ToDisplayString(), line.LineTotalExclVat.ToDisplayString(),
         orderLine?.Ordered, orderLine?.UnitPriceExclVat.Amount, orderLine?.UnitPriceExclVat.ToDisplayString(),
-        match?.PriceOk, match?.QuantityOk, match?.Received, match?.InvoicedBefore, match?.Reason);
+        match?.PriceOk, match?.QuantityOk, match?.Received, match?.InvoicedBefore, match?.Reason, payable);
 
     public static PaymentDto ToPaymentDto(Payment payment) => new(
         payment.Id, payment.Number.ToString(),

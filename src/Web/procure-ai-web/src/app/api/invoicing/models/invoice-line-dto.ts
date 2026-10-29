@@ -12,6 +12,7 @@ export interface InvoiceLineDto {
   orderUnitPriceText: (string | null);
   ordered: (number | null);
   paid: number;
+  payable: number;
   priceOk: (boolean | null);
   quantity: number;
   quantityOk: (boolean | null);

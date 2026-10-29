@@ -1002,6 +1002,8 @@
           "totalExclVatText",
           "vatText",
           "totalInclVatText",
+          "payableInclVat",
+          "payableInclVatText",
           "receivedAt",
           "version"
         ],
@@ -1093,6 +1095,13 @@
           "totalInclVatText": {
             "type": "string"
           },
+          "payableInclVat": {
+            "type": "number",
+            "format": "double"
+          },
+          "payableInclVatText": {
+            "type": "string"
+          },
           "receivedAt": {
             "type": "string",
             "format": "date-time"
@@ -1143,7 +1152,8 @@
           "quantityOk",
           "received",
           "invoicedBefore",
-          "matchReason"
+          "matchReason",
+          "payable"
         ],
         "type": "object",
         "properties": {
@@ -1230,6 +1240,10 @@
               "null",
               "string"
             ]
+          },
+          "payable": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

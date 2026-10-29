@@ -25,13 +25,15 @@ public sealed record InvoiceDto(
     string TotalExclVatText,
     string VatText,
     string TotalInclVatText,
+    decimal PayableInclVat,
+    string PayableInclVatText,
     DateTimeOffset ReceivedAt,
     uint Version);
 
 /// <summary>
 /// An invoice line with the outcome of its match (screen 11): what was ordered at which price, what was received, what earlier
 /// invoices claimed, and what this one invoices. The match fields are null until it was matched; the order fields are null while the
-/// order is not known or the line is not on it.
+/// order is not known or the line is not on it. <c>Payable</c> is the quantity "pay all payable" would pay now.
 /// </summary>
 public sealed record InvoiceLineDto(
     int LineNo,
@@ -50,7 +52,8 @@ public sealed record InvoiceLineDto(
     bool? QuantityOk,
     int? Received,
     int? InvoicedBefore,
-    string? MatchReason);
+    string? MatchReason,
+    int Payable);
 
 public sealed record PaymentDto(
     Guid Id,

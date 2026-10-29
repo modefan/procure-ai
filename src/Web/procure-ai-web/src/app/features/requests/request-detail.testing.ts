@@ -37,5 +37,5 @@ export const orderDto = (o: Partial<PurchaseOrderDto> = {}): PurchaseOrderDto =>
 export const invoiceDto = (o: Partial<InvoiceDto> = {}): InvoiceDto => ({
   id: 'i1', orderId: 'o1', orderNumber: 'PO-881', requestId: 'r1', sequence: 1, supplierId: 'CH', supplierInvoiceNumber: 'INV-77', source: 'Webhook',
   status: 'Matched', holdReason: null, onHold: false, mismatchReasons: [], payments: [], lines: [], invoiceDate: '2026-10-29', receivedAt: '2026-10-29T08:00:00Z',
-  totalExclVat: 75600, totalExclVatText: 'R 75 600,00', vat: 11340, vatText: 'R 11 340,00', totalInclVat: 86940, totalInclVatText: 'R 86 940,00', version: 1, ...o,
+  totalExclVat: 75600, totalExclVatText: 'R 75 600,00', vat: 11340, vatText: 'R 11 340,00', totalInclVat: 86940, totalInclVatText: 'R 86 940,00', payableInclVat: 0, payableInclVatText: 'R 0,00', version: 1, ...o,
 });

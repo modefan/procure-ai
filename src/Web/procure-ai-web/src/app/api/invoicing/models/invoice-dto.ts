@@ -14,6 +14,8 @@ export interface InvoiceDto {
   onHold: boolean;
   orderId: string;
   orderNumber: (string | null);
+  payableInclVat: number;
+  payableInclVatText: string;
   payments: Array<PaymentDto>;
   receivedAt: string;
   requestId: string;

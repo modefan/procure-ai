@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { permissionGuard } from '../core/auth/permission.guard';
 import { unsavedChangesGuard } from '../core/auth/unsaved-changes.guard';
+import { invoiceResolver } from './invoices/invoice.resolver';
 import { orderResolver } from './orders/order.resolver';
 import { requestResolver } from './requests/request.resolver';
 
@@ -68,5 +69,29 @@ export const APP_ROUTES: Routes = [
     data: { permission: 'orders.read' },
     resolve: { order: orderResolver },
     loadComponent: () => import('./orders/order-detail.page').then((m) => m.OrderDetailPage),
+  },
+  {
+    path: 'invoices',
+    title: 'Invoices',
+    canActivate: [permissionGuard],
+    data: { permission: 'invoices.read' },
+    loadComponent: () => import('./invoices/invoices.page').then((m) => m.InvoicesPage),
+  },
+  {
+    // Before ':id', so "new" is not read as an id.
+    path: 'invoices/new',
+    title: 'Enter an invoice',
+    canActivate: [permissionGuard],
+    canDeactivate: [unsavedChangesGuard],
+    data: { permission: 'invoices.create' },
+    loadComponent: () => import('./invoices/invoice-form.page').then((m) => m.InvoiceFormPage),
+  },
+  {
+    path: 'invoices/:id',
+    title: 'Invoice',
+    canActivate: [permissionGuard],
+    data: { permission: 'invoices.read' },
+    resolve: { invoice: invoiceResolver },
+    loadComponent: () => import('./invoices/invoice-detail.page').then((m) => m.InvoiceDetailPage),
   },
 ];

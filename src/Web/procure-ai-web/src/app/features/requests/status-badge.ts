@@ -45,6 +45,7 @@ const STATUS_GROUPS: Record<string, StatusGroup> = {
   Paid: 'ok',
   // Payment export
   Exported: 'ok',
+  'Export pending': 'warn',
   // Generic words other screens use
   InProgress: 'info',
   Waiting: 'warn',

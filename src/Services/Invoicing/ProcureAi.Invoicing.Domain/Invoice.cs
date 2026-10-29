@@ -329,6 +329,33 @@ public sealed class Invoice : Entity<Guid>
     }
 
     /// <summary>
+    /// What "pay everything payable" would pay right now, or null when nothing can be paid (on hold, not matched, order closed or
+    /// from another supplier, nothing received and unpaid). Same rules as <see cref="PlanPayment"/>, but a screen can ask without an
+    /// exception.
+    /// </summary>
+    public PaymentPlan? PlanAllPayable(OrderView order)
+    {
+        if (order.Id != OrderId || OnHold || Match is null || Status == InvoiceStatus.AwaitingOrder || order.ClosedReason is not null
+            || !SameSupplierAs(order))
+        {
+            return null;
+        }
+
+        var planned = new List<PaymentPlanLine>();
+        foreach (var line in _lines.OrderBy(l => l.LineNo))
+        {
+            var payable = Payable(line, order);
+            if (payable > 0)
+            {
+                var orderLine = order.Lines.First(o => o.LineNo == line.LineNo);
+                planned.Add(new PaymentPlanLine(line.LineNo, line.Sku, payable, orderLine.UnitPriceExclVat * payable));
+            }
+        }
+
+        return planned.Count == 0 ? null : new PaymentPlan(this, order, planned);
+    }
+
+    /// <summary>
     /// Applies a plan: the paid quantities go onto the invoice lines and onto the order view lines, in the same unit of work, so
     /// the order view's version serialises the payments of one order. The plan must have been made for this invoice.
     /// </summary>

@@ -23,3 +23,21 @@ describe('APP_ROUTES orders', () => {
     expect(APP_ROUTES.find((r) => r.path === 'orders/:id')?.resolve?.['order']).toBeDefined();
   });
 });
+
+describe('APP_ROUTES invoices', () => {
+  it('invoices needs invoices.read, invoices/new needs invoices.create and the unsaved guard, invoices/:id resolves the invoice', async () => {
+    const expected: Record<string, string> = { invoices: 'invoices.read', 'invoices/new': 'invoices.create', 'invoices/:id': 'invoices.read' };
+    for (const [path, permission] of Object.entries(expected)) {
+      const route = APP_ROUTES.find((r) => r.path === path);
+      expect(route, path).toBeDefined();
+      expect(route?.data?.['permission']).toBe(permission);
+      expect(route?.canActivate?.length).toBe(1);
+      expect(await (route!.loadComponent as () => Promise<unknown>)()).toBeTruthy();
+    }
+    expect(APP_ROUTES.find((r) => r.path === 'invoices/new')?.canDeactivate?.length).toBe(1);
+    expect(APP_ROUTES.find((r) => r.path === 'invoices/:id')?.resolve?.['invoice']).toBeDefined();
+    // "new" must be matched before ":id"
+    const paths = APP_ROUTES.map((r) => r.path);
+    expect(paths.indexOf('invoices/new')).toBeLessThan(paths.indexOf('invoices/:id'));
+  });
+});
