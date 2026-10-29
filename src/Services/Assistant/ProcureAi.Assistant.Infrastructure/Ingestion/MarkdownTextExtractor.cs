@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using ProcureAi.Assistant.Application.Ingestion;
 
 namespace ProcureAi.Assistant.Infrastructure.Ingestion;
@@ -8,7 +7,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ingestion;
 /// Reads Markdown: <c>#</c> headings give the section path, pipe tables become sections of their own, everything else is text.
 /// Lines inside code fences are text, never headings.
 /// </summary>
-public sealed partial class MarkdownTextExtractor : ITextExtractor
+public sealed class MarkdownTextExtractor : ITextExtractor
 {
     public const string ContentType = "text/markdown";
 
@@ -57,7 +56,10 @@ public sealed partial class MarkdownTextExtractor : ITextExtractor
                 FlushTable();
                 FlushText();
                 headings.RemoveAll(h => h.Level >= level);
-                headings.Add((level, title));
+                if (title.Length > 0)
+                {
+                    headings.Add((level, title));
+                }
             }
             else if (!inFence && trimmed.StartsWith('|'))
             {
@@ -90,11 +92,27 @@ public sealed partial class MarkdownTextExtractor : ITextExtractor
             return false;
         }
 
-        // CommonMark: a closing run of # counts only when a space precedes it, so "## Learning C#" keeps its #.
-        title = ClosingHashes().Replace(line[level..].Trim(), "").Trim();
-        return title.Length > 0;
+        title = StripClosingHashes(line[level..].Trim());
+        return true;
     }
 
-    [GeneratedRegex(@"[ \t]+#+$")]
-    private static partial Regex ClosingHashes();
+    /// <summary>
+    /// CommonMark: a closing run of # counts only when a space or tab precedes it, so "## Learning C#" keeps its #; a title of only #s
+    /// is empty. Done by hand, not by regex: a pattern like a space-or-tab run followed by #s at the end backtracks quadratically on a long run of spaces.
+    /// </summary>
+    private static string StripClosingHashes(string title)
+    {
+        var end = title.Length;
+        while (end > 0 && title[end - 1] == '#')
+        {
+            end--;
+        }
+
+        if (end == 0)
+        {
+            return "";
+        }
+
+        return end < title.Length && title[end - 1] is ' ' or '\t' ? title[..end].Trim() : title;
+    }
 }

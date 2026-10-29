@@ -290,6 +290,21 @@ public sealed class ChunkingTests
     }
 
     [Fact]
+    public void Markdown_heading_with_only_hashes_is_empty_and_long_space_runs_are_fast()
+    {
+        var markdown = "# Doc\n## #\nBody under an empty heading.\n\n## " + "x" + new string(' ', 100_000) + "y" + "\nTail.\n";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var sections = new MarkdownTextExtractor().Extract(new MemoryStream(Encoding.UTF8.GetBytes(markdown))).Sections;
+        var planned = Planner().Plan(new ExtractedDocument([new Section(["Doc"], new string(' ', 100_000) + "a" + new string(' ', 100_000) + "\n", false)]));
+
+        watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(1));
+        sections.Select(s => s.Path.Count).ShouldBe([1, 2], "the empty heading adds no path element");
+        sections[1].Path[1].Length.ShouldBe(100_002);
+        planned[1].Text.ShouldBe("a");
+    }
+
+    [Fact]
     public void Corrupt_pdf_gives_a_typed_user_safe_error()
     {
         using var garbage = new MemoryStream(Encoding.UTF8.GetBytes("this is not a pdf at all"));
