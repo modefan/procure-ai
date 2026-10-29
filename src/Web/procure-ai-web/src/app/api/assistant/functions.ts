@@ -3,3 +3,13 @@
 
 export type { GetAssistantInfo$Params as GetAssistantInfo$Params } from './fn/assistant-info/get-assistant-info';
 export { getAssistantInfo as getAssistantInfo } from './fn/assistant-info/get-assistant-info';
+export type { ListPolicyDocuments$Params as ListPolicyDocuments$Params } from './fn/policy-documents/list-policy-documents';
+export { listPolicyDocuments as listPolicyDocuments } from './fn/policy-documents/list-policy-documents';
+export type { UploadPolicyDocument$Params as UploadPolicyDocument$Params } from './fn/policy-documents/upload-policy-document';
+export { uploadPolicyDocument as uploadPolicyDocument } from './fn/policy-documents/upload-policy-document';
+export type { GetPolicyDocument$Params as GetPolicyDocument$Params } from './fn/policy-documents/get-policy-document';
+export { getPolicyDocument as getPolicyDocument } from './fn/policy-documents/get-policy-document';
+export type { RemovePolicyDocument$Params as RemovePolicyDocument$Params } from './fn/policy-documents/remove-policy-document';
+export { removePolicyDocument as removePolicyDocument } from './fn/policy-documents/remove-policy-document';
+export type { ReplacePolicyDocumentFile$Params as ReplacePolicyDocumentFile$Params } from './fn/policy-documents/replace-policy-document-file';
+export { replacePolicyDocumentFile as replacePolicyDocumentFile } from './fn/policy-documents/replace-policy-document-file';
