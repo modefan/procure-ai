@@ -15,11 +15,37 @@ export interface LoggerConfig {
   serverMaxPerMinute: number;
 }
 
+/** Live updates (SignalR). */
+export interface LiveConfig {
+  /**
+   * How often a connected client tells the server it is still there, in ms. Keep it well under the server's
+   * `Presence:Ttl` (45 s) and near its `Presence:HeartbeatInterval` (15 s): a silent client drops off "viewing" after the TTL.
+   */
+  heartbeatMs: number;
+  /** Delays (ms) of the built-in reconnect attempts; after the last one fails the connection is closed. */
+  reconnectDelaysMs: number[];
+  /** After the reconnect attempts ran out ("Offline"), how long to wait before connecting again, in ms. */
+  offlineRetryMs: number;
+}
+
+/** In-memory store caches. */
+export interface CacheConfig {
+  /** How long a loaded list or detail counts as fresh, in ms (reference data is session-long). */
+  staleMs: number;
+  /**
+   * A push can arrive before another service has written the change it announces (Notifications and that service read the same
+   * event). The stores that show such data read again this long after the push, in ms.
+   */
+  trailingReloadMs: number;
+}
+
 export interface AppConfig {
   /** Absolute origin of the gateway when the app is not served by it (development only); empty = same origin. */
   apiBaseUrl: string;
   logger: LoggerConfig;
   paging: { pageSize: number };
+  live: LiveConfig;
+  cache: CacheConfig;
 }
 
 /**
@@ -49,6 +75,8 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const source = (isRecord(loaded) ? loaded : {}) as Record<string, unknown>;
   const logger = (isRecord(source['logger']) ? source['logger'] : {}) as Record<string, unknown>;
   const paging = (isRecord(source['paging']) ? source['paging'] : {}) as Record<string, unknown>;
+  const live = (isRecord(source['live']) ? source['live'] : {}) as Record<string, unknown>;
+  const cache = (isRecord(source['cache']) ? source['cache'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
@@ -61,6 +89,15 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
       serverMaxPerMinute: positive(logger['serverMaxPerMinute'], d.serverMaxPerMinute),
     },
     paging: { pageSize: positive(paging['pageSize'], defaults.paging.pageSize) },
+    live: {
+      heartbeatMs: positive(live['heartbeatMs'], defaults.live.heartbeatMs),
+      reconnectDelaysMs: delays(live['reconnectDelaysMs'], defaults.live.reconnectDelaysMs),
+      offlineRetryMs: positive(live['offlineRetryMs'], defaults.live.offlineRetryMs),
+    },
+    cache: {
+      staleMs: positive(cache['staleMs'], defaults.cache.staleMs),
+      trailingReloadMs: positive(cache['trailingReloadMs'], defaults.cache.trailingReloadMs),
+    },
   };
 }
 
@@ -69,6 +106,11 @@ const level = (value: unknown, fallback: LogLevel): LogLevel =>
   LOG_LEVELS.includes(value as LogLevel) ? (value as LogLevel) : fallback;
 const positive = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+
+const delays = (value: unknown, fallback: number[]): number[] =>
+  Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+    ? (value as number[])
+    : fallback;
 
 /** Loads config.json before the app finishes starting. List it before every provider that reads the config. */
 export function provideAppConfig(): EnvironmentProviders {

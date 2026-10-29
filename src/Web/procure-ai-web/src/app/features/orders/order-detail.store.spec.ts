@@ -139,10 +139,10 @@ describe('OrderDetailStore', () => {
     await Promise.all([fresh, duplicate]);
   });
 
-  it('a 412 opens the conflict dialog and reloads the latest order', async () => {
+  it.each([412, 409])('a %i opens the conflict dialog and reloads the latest order', async (status) => {
     const store = setup();
     await store.init('o1', order());
-    api['receiveGoods'].mockRejectedValue(new HttpErrorResponse({ status: 412 }));
+    api['receiveGoods'].mockRejectedValue(new HttpErrorResponse({ status }));
     api['getOrder'].mockResolvedValue(order({ version: 5 }));
     const ok = await store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 1 }] });
     expect(ok).toBe(false);

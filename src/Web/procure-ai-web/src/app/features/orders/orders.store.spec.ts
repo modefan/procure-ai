@@ -3,6 +3,7 @@ import { OrdersService } from '../../api/purchasing/services/orders.service';
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
+import { environment } from '../../../environments/environment';
 import { OrdersStore } from './orders.store';
 import { order, ordersPage } from './orders.testing';
 
@@ -51,5 +52,27 @@ describe('OrdersStore', () => {
     await vi.waitFor(() => expect(store().entities()).toHaveLength(2));
     expect(store().isLoading()).toBe(false);
     live.stop();
+  });
+
+  it('trailing_reload: an order push is followed by a second read, for what Purchasing saves from another event', async () => {
+    const live = TestBed.inject(LiveConnection);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    TestBed.inject(OrdersStore);
+    await store().load(1);
+    listOrders.mockClear();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fake.hubs[0].emit('EntityChanged', { entity: 'order', id: 'o1', requestId: 'r1', eventType: 'PaymentReleased', occurredAt: 't' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listOrders).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(environment.cache.trailingReloadMs + 10);
+
+      expect(listOrders).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+    await live.stop();
   });
 });

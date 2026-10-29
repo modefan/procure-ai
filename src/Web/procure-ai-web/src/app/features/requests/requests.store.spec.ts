@@ -6,6 +6,7 @@ import { RequestsStore } from './requests.store';
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
+import { environment } from '../../../environments/environment';
 
 function dto(n: number, overrides: Partial<RequestDto> = {}): RequestDto {
   return {
@@ -249,6 +250,37 @@ describe('RequestsStore live refresh', () => {
     expect(store.isLoading()).toBe(false);
     await vi.waitFor(() => expect(store.entities()).toHaveLength(2));
     expect(listRequests).toHaveBeenCalledTimes(1);
+    await live.stop();
+  });
+  it('trailing_reload: a push that comes before Requests saved the new status is followed by a second read (a rejection in another tab)', async () => {
+    const fake = fakeHubFactory();
+    const listRequests = vi.fn().mockResolvedValue(page([dto(1, { status: 'Submitted' })], 1, 1));
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: RequestsService, useValue: { listRequests } },
+        { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
+      ],
+    });
+    const live = TestBed.inject(LiveConnection);
+    const store = TestBed.inject(RequestsStore);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+    await store.load(1);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // The push beats the write: the first re-read still returns Submitted. The write lands before the second.
+      fake.hubs[0].emit('EntityChanged', { entity: 'request', id: 'id-1', requestId: 'id-1', eventType: 'RequestRejected', occurredAt: 't' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.entities()[0].status).toBe('Submitted');
+      listRequests.mockResolvedValue(page([dto(1, { status: 'Rejected' })], 1, 1));
+
+      await vi.advanceTimersByTimeAsync(environment.cache.trailingReloadMs + 10);
+
+      expect(store.entities()[0].status).toBe('Rejected');
+      expect(listRequests).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
     await live.stop();
   });
 });

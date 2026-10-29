@@ -5,14 +5,17 @@ import { InvoiceDto } from '../../api/invoicing/models/invoice-dto';
 import { PayLineBody } from '../../api/invoicing/models/pay-line-body';
 import { InvoicesService } from '../../api/invoicing/services/invoices.service';
 import { AuthStore } from '../../core/auth/auth.store';
+import { AppConfigService } from '../../core/config/app-config';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { EntityChanged } from '../../core/live/live.models';
 import { LiveConnection } from '../../core/live/live-connection';
 import { Logger } from '../../core/logging/logger';
 import { CacheRegistry } from '../../core/state/cache-registry';
+import { createTrailingReload } from '../../core/state/trailing-reload';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
-import { problemOf } from '../requests/problem-fields';
+import { idempotencyKey } from '../../core/http/idempotency';
+import { isConflict, problemOf } from '../../core/http/problem-fields';
 
 type Busy = 'idle' | 'paying' | 'holding' | 'releasing';
 
@@ -53,6 +56,9 @@ export const InvoiceDetailStore = signalStore(
     const api = inject(InvoicesService);
     const conflict = inject(ConflictDialog);
     const log = inject(Logger).withSource('InvoiceDetailStore');
+    // Other services (Invoicing, Purchasing) update their own view of this from the same events: read again after the push.
+    const config = inject(AppConfigService);
+    const trailing = createTrailingReload(() => void reload(true), () => config.config().cache.trailingReloadMs);
 
     /** Changes at init and logout, so an answer on its way for the invoice before is dropped. */
     let generation = 0;
@@ -67,7 +73,7 @@ export const InvoiceDetailStore = signalStore(
       const id = parts.join('|');
       let key = keys.get(id);
       if (!key) {
-        key = crypto.randomUUID();
+        key = idempotencyKey();
         keys.set(id, key);
       }
       return key;
@@ -150,7 +156,7 @@ export const InvoiceDetailStore = signalStore(
           if (mine !== generation) {
             return false;
           }
-          if (error instanceof HttpErrorResponse && (error.status === 412 || error.status === 409)) {
+          if (isConflict(error)) {
             await conflict.show('Someone else just changed this invoice. Showing the latest version.');
             await reload(true);
             patchState(store, { generalError: null });
@@ -179,6 +185,7 @@ export const InvoiceDetailStore = signalStore(
       /** Shows invoice `id`. `initial` is what the route resolver already fetched, so it is not asked for twice. */
       async init(id: string, initial: InvoiceDto | null): Promise<void> {
         generation++;
+        trailing.cancel();
         running = null;
         again = false;
         working = null;
@@ -230,6 +237,7 @@ export const InvoiceDetailStore = signalStore(
       /** Logout: forget everything and drop answers still on their way. */
       clearCache(): void {
         generation++;
+        trailing.cancel();
         running = null;
         working = null;
         seed = null;
@@ -245,7 +253,13 @@ export const InvoiceDetailStore = signalStore(
         }
         if (change.id === id || (invoice !== null && change.requestId === invoice.requestId)) {
           void reload(true);
+          trailing.schedule();
         }
+      },
+
+      /** Stops the pending trailing load (the page is going away). */
+      stop(): void {
+        trailing.cancel();
       },
     };
   }),
@@ -262,6 +276,7 @@ export const InvoiceDetailStore = signalStore(
       },
       onDestroy() {
         release.forEach((off) => off());
+        store.stop();
       },
     };
   }),

@@ -11,7 +11,8 @@ import { Logger } from '../../core/logging/logger';
 import { withCache } from '../../core/state/with-cache';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
-import { problemOf } from '../requests/problem-fields';
+import { idempotencyKey } from '../../core/http/idempotency';
+import { isConflict, problemOf } from '../../core/http/problem-fields';
 
 export type InboxAction = 'approve' | 'reject';
 
@@ -61,7 +62,7 @@ export const ApprovalsStore = signalStore(
       const id = parts.join(':');
       let key = keys.get(id);
       if (!key) {
-        key = crypto.randomUUID();
+        key = idempotencyKey();
         keys.set(id, key);
       }
       return key;
@@ -192,7 +193,7 @@ export const ApprovalsStore = signalStore(
           }
           return true;
         } catch (error) {
-          if (error instanceof HttpErrorResponse && (error.status === 412 || error.status === 409)) {
+          if (isConflict(error)) {
             // 412: the step changed since it was read. 409: it is not open any more (someone else got there first; the server
             // checks that before the version). Either way the user sees the same conflict and the latest inbox.
             await conflict.show(`Someone else just changed ${step.requestNumber}. Showing the latest version.`);
@@ -219,7 +220,7 @@ export const ApprovalsStore = signalStore(
     return {
       onInit() {
         // invalidate() does nothing until a page has been loaded, so a push before anyone asked costs nothing.
-        off = live.onEntityChanged('approval', () => store.invalidate('list'));
+        off = live.onEntityChanged('approval', () => store.invalidate('list', { trailing: true }));
       },
       onDestroy() {
         off?.();

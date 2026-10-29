@@ -10,7 +10,7 @@ import { withCache } from '../../core/state/with-cache';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { currentFiscalYear } from '../dashboard/dashboard.store';
-import { problemOf } from '../requests/problem-fields';
+import { isConflict, problemOf } from '../../core/http/problem-fields';
 
 interface BudgetsState {
   /** The cost center whose amount is being saved; null when no write runs. */
@@ -108,7 +108,7 @@ export const BudgetsStore = signalStore(
             if (epoch !== store.cacheEpoch()) {
               return false;
             }
-            if (error instanceof HttpErrorResponse && error.status === 412) {
+            if (isConflict(error)) {
               await conflict.show('Someone else just changed this budget. Showing the latest version.');
               await fetchList().catch(() => undefined);
               patchState(store, (s) => ({ saveError: null, conflicts: s.conflicts + 1 }));

@@ -13,7 +13,6 @@ import { ReferenceDataStore } from '../../core/reference/reference-data.store';
 import { withCache } from '../../core/state/with-cache';
 import { errorMessage } from '../../core/state/with-request-status';
 import { ApprovalsStore } from '../approvals/approvals.store';
-import { AUDIT_LAG_MS } from '../requests/request-detail.store';
 
 const ACTIVITY_LIMIT = 10;
 /** Users with budget access but no cost center of their own (finance) get an overview of this many budgets. */
@@ -106,7 +105,6 @@ export const DashboardStore = signalStore(
     const refs = inject(ReferenceDataStore);
     const approvals = inject(ApprovalsStore);
     const log = inject(Logger).withSource('DashboardStore');
-    let trailing: ReturnType<typeof setTimeout> | null = null;
 
     /** One tile: cached load; a failure is recorded for the tile and does not stop the others. */
     const tile = async (key: string, read: () => Promise<Partial<DashboardState>>): Promise<void> => {
@@ -162,28 +160,16 @@ export const DashboardStore = signalStore(
 
       /** A push: refresh what it concerns. */
       onChange(entity: string): void {
+        // Every tile is fed by a service that reads the same event as Notifications, so each is read again after the push.
+        const trailing = { trailing: true };
         if (entity === 'request') {
-          store.invalidate('myOpen');
+          store.invalidate('myOpen', trailing);
         } else if (entity === 'budget') {
-          store.invalidate('budgets');
+          store.invalidate('budgets', trailing);
         } else if (entity === 'invoice') {
-          store.invalidate('mismatched');
+          store.invalidate('mismatched', trailing);
         }
-        store.invalidate('activity');
-        if (trailing) {
-          clearTimeout(trailing);
-        }
-        trailing = setTimeout(() => {
-          trailing = null;
-          store.invalidate('activity');
-        }, AUDIT_LAG_MS);
-      },
-
-      stop(): void {
-        if (trailing) {
-          clearTimeout(trailing);
-          trailing = null;
-        }
+        store.invalidate('activity', trailing);
       },
     };
   }),
@@ -196,7 +182,6 @@ export const DashboardStore = signalStore(
       },
       onDestroy() {
         release.forEach((off) => off());
-        store.stop();
       },
     };
   }),

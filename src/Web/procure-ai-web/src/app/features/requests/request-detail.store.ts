@@ -12,14 +12,17 @@ import { OrdersService } from '../../api/purchasing/services/orders.service';
 import { RequestDto } from '../../api/requests/models/request-dto';
 import { RequestsService } from '../../api/requests/services/requests.service';
 import { AuthStore } from '../../core/auth/auth.store';
+import { AppConfigService } from '../../core/config/app-config';
 import { EntityChanged } from '../../core/live/live.models';
 import { LiveConnection } from '../../core/live/live-connection';
 import { Logger } from '../../core/logging/logger';
 import { CacheRegistry } from '../../core/state/cache-registry';
+import { createTrailingReload } from '../../core/state/trailing-reload';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
-import { problemOf } from './problem-fields';
+import { idempotencyKey } from '../../core/http/idempotency';
+import { isConflict, problemOf } from '../../core/http/problem-fields';
 import { buildTimeline } from './workflow-timeline';
 
 interface DetailState {
@@ -39,11 +42,6 @@ interface DetailState {
 const EMPTY: DetailState = { requestId: null, request: null, chain: null, order: null, invoices: [], history: [], partial: [], busy: false, generalError: null };
 /** Statuses a request can still be cancelled from (the server decides about the rest). */
 const CANCELLABLE = ['Draft', 'Submitted', 'Approved', 'Ordered'];
-/**
- * The audit trail is written by another service from the same events, a moment after the push that told us about them.
- * So a push is followed by one more quiet load after this long.
- */
-export const AUDIT_LAG_MS = 2000;
 /** Calls whose 403 must not take the page away: the user may simply not be allowed to read that part. */
 const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
 const isNotFound = (error: unknown) => error instanceof HttpErrorResponse && error.status === 404;
@@ -108,7 +106,10 @@ export const RequestDetailStore = signalStore(
     let again = false;
     let seed: RequestDto | null = null;
     let cancelling: Promise<void> | null = null;
-    let trailing: ReturnType<typeof setTimeout> | null = null;
+    // The audit trail and the order are written by other services from the same events, a moment after the push that told us
+    // about them: a push is followed by one more quiet load (`cache.trailingReloadMs`).
+    const config = inject(AppConfigService);
+    const trailing = createTrailingReload(() => void reload(true), () => config.config().cache.trailingReloadMs);
     const cancelKeys = new Map<string, string>();
 
     const loadAll = async (background: boolean): Promise<void> => {
@@ -197,7 +198,7 @@ export const RequestDetailStore = signalStore(
       const k = `${id}:${version}`;
       let key = cancelKeys.get(k);
       if (!key) {
-        key = crypto.randomUUID();
+        key = idempotencyKey();
         cancelKeys.set(k, key);
       }
       return key;
@@ -210,10 +211,7 @@ export const RequestDetailStore = signalStore(
         running = null;
         again = false;
         cancelling = null;
-        if (trailing) {
-          clearTimeout(trailing);
-          trailing = null;
-        }
+        trailing.cancel();
         seed = initial;
         patchState(store, { ...EMPTY, requestId: id, request: initial });
         await reload(false);
@@ -240,7 +238,7 @@ export const RequestDetailStore = signalStore(
             void reload(true);
           } catch (error) {
             const problem = problemOf(error);
-            if (error instanceof HttpErrorResponse && error.status === 412) {
+            if (isConflict(error)) {
               await conflict.show(problem.general ?? 'This request was changed by someone else. The latest version is loaded.');
               await reload(true);
             } else {
@@ -258,10 +256,7 @@ export const RequestDetailStore = signalStore(
       /** Logout: forget everything and drop answers still on their way. */
       clearCache(): void {
         generation++;
-        if (trailing) {
-          clearTimeout(trailing);
-          trailing = null;
-        }
+        trailing.cancel();
         running = null;
         seed = null;
         patchState(store, EMPTY);
@@ -272,22 +267,13 @@ export const RequestDetailStore = signalStore(
         const id = store.requestId();
         if (id && (change.requestId === id || change.id === id)) {
           void reload(true);
-          if (trailing) {
-            clearTimeout(trailing);
-          }
-          trailing = setTimeout(() => {
-            trailing = null;
-            void reload(true);
-          }, AUDIT_LAG_MS);
+          trailing.schedule();
         }
       },
 
       /** Stops the pending trailing load (the page is going away). */
       stop(): void {
-        if (trailing) {
-          clearTimeout(trailing);
-          trailing = null;
-        }
+        trailing.cancel();
       },
     };
   }),

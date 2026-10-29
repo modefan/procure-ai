@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { AuthStore } from '../auth/auth.store';
+import { AppConfigService } from '../config/app-config';
 import { CacheRegistry } from '../state/cache-registry';
 import { FakeHub, fakeHubFactory } from './fake-hub.testing';
 import { LIVE_HUB_FACTORY } from './hub-connection';
@@ -114,6 +115,16 @@ describe('PresenceStore', () => {
     TestBed.tick();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(hubs[0].invokedMethods().filter((m) => m === 'Heartbeat')).toHaveLength(3);
+  });
+
+  it('heartbeat_interval_comes_from_the_config', async () => {
+    TestBed.inject(AppConfigService).config.update((c) => ({ ...c, live: { ...c.live, heartbeatMs: 5000 } }));
+    await connect();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(hubs[0].invokedMethods().filter((m) => m === 'Heartbeat')).toHaveLength(2);
   });
 
   it('a_failing_watch_is_not_an_unhandled_error', async () => {

@@ -101,7 +101,7 @@ export const RequestsStore = signalStore(
     return {
       onInit() {
         // A push about a request refreshes the page on screen in the background (nothing happens if none was loaded).
-        off = inject(LiveConnection).onEntityChanged('request', () => store.invalidate('list'));
+        off = inject(LiveConnection).onEntityChanged('request', () => store.invalidate('list', { trailing: true }));
       },
       onDestroy() {
         off?.();

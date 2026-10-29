@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { AUDIT_LAG_MS } from '../requests/request-detail.store';
+import { environment } from '../../../environments/environment';
 import { currentFiscalYear, DashboardStore } from './dashboard.store';
 import { DashboardHarness, setupDashboard } from './dashboard.testing';
 
@@ -95,7 +95,7 @@ describe('DashboardStore', () => {
     await vi.waitFor(() => expect(store.activity()[0].requestNumber).toBe('PR-9'));
     expect(h.api.getActivity).toHaveBeenCalledTimes(2);
 
-    await vi.advanceTimersByTimeAsync(AUDIT_LAG_MS + 10);
+    await vi.advanceTimersByTimeAsync(environment.cache.trailingReloadMs + 10);
     expect(h.api.getActivity).toHaveBeenCalledTimes(3);
   });
 

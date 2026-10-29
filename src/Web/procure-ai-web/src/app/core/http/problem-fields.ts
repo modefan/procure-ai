@@ -7,7 +7,7 @@ export interface ParsedProblem {
   fields: Record<string, string[]>;
 }
 
-/** Server property names (any casing, with or without a leading `$.`) to the form's field paths. */
+/** Server property names (any casing, with or without a leading `$.`) to form field paths; the request form's names are mapped, any other key stays as sent (lower case). */
 function pathOf(serverKey: string): string {
   const key = serverKey.replace(/^\$\.?/, '').toLowerCase();
   const line = /^lines\[(\d+)\]\.(sku|quantity)$/.exec(key);
@@ -52,4 +52,12 @@ export function problemOf(error: unknown): ParsedProblem {
   }
   const text = [body.detail, body.title].find((t): t is string => typeof t === 'string' && t.trim() !== '');
   return { general: text ?? null, fields: {} };
+}
+
+/**
+ * True when a write lost to someone else: 412 (the `If-Match` version is old) or 409 (the thing is not in the state the write
+ * needs any more). Stores answer both the same way: the conflict dialog, then the latest version.
+ */
+export function isConflict(error: unknown): boolean {
+  return error instanceof HttpErrorResponse && (error.status === 412 || error.status === 409);
 }

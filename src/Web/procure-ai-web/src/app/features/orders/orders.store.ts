@@ -91,7 +91,7 @@ export const OrdersStore = signalStore(
     let off: (() => void) | null = null;
     return {
       onInit() {
-        off = inject(LiveConnection).onEntityChanged('order', () => store.invalidate('list'));
+        off = inject(LiveConnection).onEntityChanged('order', () => store.invalidate('list', { trailing: true }));
       },
       onDestroy() {
         off?.();

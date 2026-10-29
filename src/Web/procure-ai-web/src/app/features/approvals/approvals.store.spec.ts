@@ -7,6 +7,7 @@ import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
 import { CacheRegistry } from '../../core/state/cache-registry';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
+import { environment } from '../../../environments/environment';
 import { inboxPage, inboxStep } from './approvals.testing';
 import { ApprovalsStore } from './approvals.store';
 
@@ -186,6 +187,24 @@ describe('ApprovalsStore', () => {
     expect(api['getApprovalInbox']).toHaveBeenCalledTimes(1);
     fake.hubs[0].emit('EntityChanged', { entity: 'approval', id: 'r1', requestId: 'r1', eventType: 'x', occurredAt: 't' });
     await vi.waitFor(() => expect(store.entities().map((s) => s.id)).toEqual(['s3']));
+  });
+
+  it('trailing_reload: an approval push is followed by a second read, for a cancel that Approvals handles after the push', async () => {
+    const store = await setup();
+    await store.load(1);
+    api['getApprovalInbox'].mockClear();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fake.hubs[0].emit('EntityChanged', { entity: 'approval', id: 'r1', requestId: 'r1', eventType: 'RequestCancelled', occurredAt: 't' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(api['getApprovalInbox']).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(environment.cache.trailingReloadMs + 10);
+
+      expect(api['getApprovalInbox']).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a failed load shows the error and keeps the rows of a background refresh', async () => {

@@ -1,5 +1,6 @@
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { AppConfigService } from '../config/app-config';
 import { Logger } from '../logging/logger';
 import { patchState, signalStore, withState } from '@ngrx/signals';
 import { withCache } from './with-cache';
@@ -298,5 +299,72 @@ describe('withCache', () => {
     TestBed.inject(CacheRegistry).clearAll();
 
     expect(scoped.value()).toBe('changed'); // not reset: it is no longer registered
+  });
+
+  describe('trailing invalidation', () => {
+    it('trailing_runs_the_loaders_once_more_after_the_configured_delay', async () => {
+      const loader = counting();
+      await store().cacheLoad('list', loader);
+
+      store().invalidate('list', { trailing: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loader).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(loader).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(loader).toHaveBeenCalledTimes(3);
+    });
+
+    it('pushes_in_a_row_restart_the_wait_and_cause_one_extra_run', async () => {
+      const loader = counting();
+      await store().cacheLoad('list', loader);
+
+      store().invalidate('list', { trailing: true });
+      await vi.advanceTimersByTimeAsync(1500);
+      store().invalidate('list', { trailing: true });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(loader).toHaveBeenCalledTimes(3); // two immediate runs, nothing trailing yet
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(loader).toHaveBeenCalledTimes(4);
+    });
+
+    it('a_plain_invalidate_has_no_trailing_run', async () => {
+      const loader = counting();
+      await store().cacheLoad('list', loader);
+
+      store().invalidate('list');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(loader).toHaveBeenCalledTimes(2);
+    });
+
+    it('logout_cancels_the_pending_trailing_run', async () => {
+      const loader = counting();
+      await store().cacheLoad('list', loader);
+      store().invalidate('list', { trailing: true });
+      await vi.advanceTimersByTimeAsync(0);
+
+      TestBed.inject(CacheRegistry).clearAll();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(loader).toHaveBeenCalledTimes(2);
+    });
+
+    it('the_delay_and_the_default_stale_time_come_from_the_config', async () => {
+      TestBed.inject(AppConfigService).config.update((c) => ({ ...c, cache: { staleMs: 5000, trailingReloadMs: 300 } }));
+      const store = TestBed.inject(Default);
+      const loader = vi.fn(async () => patchState(store, { value: 'x' }));
+      await store.cacheLoad('a', loader);
+      await vi.advanceTimersByTimeAsync(4999);
+      await store.cacheLoad('a', loader);
+      expect(loader).toHaveBeenCalledTimes(1); // still fresh at 4,999 ms (the built-in default would be 30 000)
+
+      store.invalidate('a', { trailing: true });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(310);
+      expect(loader).toHaveBeenCalledTimes(3);
+    });
   });
 });

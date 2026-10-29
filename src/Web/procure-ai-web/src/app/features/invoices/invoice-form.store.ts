@@ -9,7 +9,8 @@ import { OrdersService } from '../../api/purchasing/services/orders.service';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { Logger } from '../../core/logging/logger';
 import { withRequestStatus } from '../../core/state/with-request-status';
-import { problemOf } from '../requests/problem-fields';
+import { idempotencyKey } from '../../core/http/idempotency';
+import { problemOf } from '../../core/http/problem-fields';
 
 /** What the form sends: only lines with a quantity, stated total including VAT as printed on the invoice. */
 export interface InvoiceDraft {
@@ -58,7 +59,7 @@ export const InvoiceFormStore = signalStore(
     const keyFor = (data: string): string => {
       let key = keys.get(data);
       if (!key) {
-        key = crypto.randomUUID();
+        key = idempotencyKey();
         keys.set(data, key);
       }
       return key;

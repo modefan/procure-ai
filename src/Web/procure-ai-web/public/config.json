@@ -10,5 +10,14 @@
   },
   "paging": {
     "pageSize": 25
+  },
+  "live": {
+    "heartbeatMs": 15000,
+    "reconnectDelaysMs": [0, 2000, 5000, 10000, 30000],
+    "offlineRetryMs": 30000
+  },
+  "cache": {
+    "staleMs": 30000,
+    "trailingReloadMs": 2000
   }
 }

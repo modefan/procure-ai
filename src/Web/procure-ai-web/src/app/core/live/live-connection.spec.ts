@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { AppConfigService } from '../config/app-config';
 import { CacheRegistry } from '../state/cache-registry';
 import { FakeHub, fakeHubFactory } from './fake-hub.testing';
 import { LIVE_HUB_FACTORY } from './hub-connection';
@@ -196,5 +197,18 @@ describe('LiveConnection', () => {
     await settle();
     expect(hubs).toHaveLength(2);
     expect(live.state()).toBe('connected');
+  });
+
+  it('the_offline_retry_delay_comes_from_the_config', async () => {
+    TestBed.inject(AppConfigService).config.update((c) => ({ ...c, live: { ...c.live, offlineRetryMs: 7000 } }));
+    live.start();
+    await settle();
+    failFrom = 1;
+    hubs[0].giveUp();
+
+    await vi.advanceTimersByTimeAsync(6900);
+    expect(hubs).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(hubs).toHaveLength(2);
   });
 });

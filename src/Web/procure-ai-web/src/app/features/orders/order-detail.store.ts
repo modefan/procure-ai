@@ -7,14 +7,17 @@ import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto
 import { ReceiptLineBody } from '../../api/purchasing/models/receipt-line-body';
 import { OrdersService } from '../../api/purchasing/services/orders.service';
 import { AuthStore } from '../../core/auth/auth.store';
+import { AppConfigService } from '../../core/config/app-config';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { EntityChanged } from '../../core/live/live.models';
 import { LiveConnection } from '../../core/live/live-connection';
 import { Logger } from '../../core/logging/logger';
 import { CacheRegistry } from '../../core/state/cache-registry';
+import { createTrailingReload } from '../../core/state/trailing-reload';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
-import { problemOf } from '../requests/problem-fields';
+import { idempotencyKey } from '../../core/http/idempotency';
+import { isConflict, problemOf } from '../../core/http/problem-fields';
 import { canCloseShort, canReceive, invoicedAndPaid } from './order-quantities';
 
 export interface ReceiptInput {
@@ -71,6 +74,9 @@ export const OrderDetailStore = signalStore(
     const invoicing = inject(InvoicesService);
     const conflict = inject(ConflictDialog);
     const log = inject(Logger).withSource('OrderDetailStore');
+    // Other services (Invoicing, Purchasing) update their own view of this from the same events: read again after the push.
+    const config = inject(AppConfigService);
+    const trailing = createTrailingReload(() => void reload(true), () => config.config().cache.trailingReloadMs);
 
     /** Changes at init and logout, so an answer on its way for the order before is dropped. */
     let generation = 0;
@@ -85,7 +91,7 @@ export const OrderDetailStore = signalStore(
       const id = parts.join('|');
       let key = keys.get(id);
       if (!key) {
-        key = crypto.randomUUID();
+        key = idempotencyKey();
         keys.set(id, key);
       }
       return key;
@@ -173,7 +179,7 @@ export const OrderDetailStore = signalStore(
           if (mine !== generation) {
             return false;
           }
-          if (error instanceof HttpErrorResponse && error.status === 412) {
+          if (isConflict(error)) {
             await conflict.show('Someone else just changed this order. Showing the latest version.');
             await reload(true);
           } else {
@@ -217,6 +223,7 @@ export const OrderDetailStore = signalStore(
       /** Shows order `id`. `initial` is what the route resolver already fetched, so it is not asked for twice. */
       async init(id: string, initial: PurchaseOrderDto | null): Promise<void> {
         generation++;
+        trailing.cancel();
         running = null;
         again = false;
         working = null;
@@ -262,6 +269,7 @@ export const OrderDetailStore = signalStore(
       /** Logout: forget everything and drop answers still on their way. */
       clearCache(): void {
         generation++;
+        trailing.cancel();
         running = null;
         working = null;
         seed = null;
@@ -277,7 +285,13 @@ export const OrderDetailStore = signalStore(
         }
         if (change.id === id || (order !== null && change.requestId === order.requestId)) {
           void reload(true);
+          trailing.schedule();
         }
+      },
+
+      /** Stops the pending trailing load (the page is going away). */
+      stop(): void {
+        trailing.cancel();
       },
     };
   }),
@@ -294,6 +308,7 @@ export const OrderDetailStore = signalStore(
       },
       onDestroy() {
         release.forEach((off) => off());
+        store.stop();
       },
     };
   }),

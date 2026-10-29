@@ -7,7 +7,8 @@ import { RequestsService } from '../../api/requests/services/requests.service';
 import { Logger } from '../../core/logging/logger';
 import { withRequestStatus } from '../../core/state/with-request-status';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
-import { problemOf } from './problem-fields';
+import { idempotencyKey } from '../../core/http/idempotency';
+import { isConflict, problemOf } from '../../core/http/problem-fields';
 
 /** What the form sends. Supplier and cost center are fixed once the draft exists (the API cannot change them). */
 export interface RequestDraft {
@@ -29,7 +30,6 @@ interface FormState {
   fieldErrors: FieldErrors;
 }
 
-const idempotencyKey = () => crypto.randomUUID();
 const fingerprint = (title: string, lines: readonly LineBody[]) => JSON.stringify([title, lines.map((l) => [l.sku, l.quantity])]);
 
 /**
@@ -72,7 +72,7 @@ export const RequestFormStore = signalStore(
 
     const fail = async (error: unknown): Promise<null> => {
       const problem = problemOf(error);
-      if (error instanceof HttpErrorResponse && error.status === 412) {
+      if (isConflict(error)) {
         await conflict.show(problem.general ?? 'This request was changed by someone else. The latest version is loaded; check your edits and save again.');
         const current = store.request();
         if (current) {

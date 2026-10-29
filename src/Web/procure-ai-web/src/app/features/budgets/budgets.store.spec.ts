@@ -77,9 +77,9 @@ describe('BudgetsStore', () => {
     expect(store().saveError()).toBe('Must be positive. Bad.');
   });
 
-  it('412 opens the conflict dialog, loads the latest budgets and reports no error', async () => {
+  it.each([412, 409])('%i opens the conflict dialog, loads the latest budgets and reports no error', async (status) => {
     await store().load();
-    api.setBudget.mockRejectedValue(new HttpErrorResponse({ status: 412 }));
+    api.setBudget.mockRejectedValue(new HttpErrorResponse({ status }));
     api.listBudgets.mockResolvedValue([budgetDto('IT-200', { amount: 920000, version: 5 })]);
     const saved = await store().save('IT-200', 950000);
     expect(saved).toBe(false);

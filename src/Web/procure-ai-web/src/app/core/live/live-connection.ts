@@ -1,13 +1,11 @@
 import { inject, Service, signal } from '@angular/core';
+import { AppConfigService } from '../config/app-config';
 import { Logger } from '../logging/logger';
 import { CacheRegistry } from '../state/cache-registry';
 import { LIVE_HUB_FACTORY, LiveHub } from './hub-connection';
 import { EntityChanged, Viewer } from './live.models';
 
 export type LiveState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
-
-/** After SignalR's built-in retries give up, the whole connection is tried again this often. */
-export const OFFLINE_RETRY_MS = 30_000;
 
 /** Server-to-client methods the hub sends. */
 const SERVER_METHODS = ['EntityChanged', 'ViewersChanged', 'OnlineChanged', 'NotificationAdded'] as const;
@@ -18,8 +16,8 @@ type Handler = (...args: any[]) => void;
  * The one SignalR connection to the Notifications hub. Started after sign-in, stopped at logout.
  *
  * - `state` follows the lifecycle; the header shows it.
- * - After SignalR's built-in retries (0, 2, 5, 10, 30 s) give up, the state is `offline` and a new connection is
- *   tried every 30 s until it works or `stop()` is called.
+ * - After SignalR's built-in retries (`live.reconnectDelaysMs` in config.json: 0, 2, 5, 10, 30 s) give up, the state is `offline`
+ *   and a new connection is tried every `live.offlineRetryMs` (30 s) until it works or `stop()` is called.
  * - Handlers belong to this service, not to a hub: they keep working when a new hub replaces a dead one.
  * - `start()` resolves before the server has put the connection in its groups, so a push right after can be missed.
  *   After **every** connect (the first one too) and reconnect the registered stores revalidate and every
@@ -29,6 +27,7 @@ type Handler = (...args: any[]) => void;
 export class LiveConnection {
   private readonly factory = inject(LIVE_HUB_FACTORY);
   private readonly caches = inject(CacheRegistry);
+  private readonly config = inject(AppConfigService);
   private readonly log = inject(Logger).withSource('LiveConnection');
 
   private readonly _state = signal<LiveState>('offline');
@@ -176,7 +175,7 @@ export class LiveConnection {
       if (this.running && session === this.session) {
         void this.connect(session);
       }
-    }, OFFLINE_RETRY_MS);
+    }, this.config.config().live.offlineRetryMs);
   }
 
   private clearRetry(): void {

@@ -13,7 +13,8 @@ import { LiveConnection } from '../../core/live/live-connection';
 import { SKIP_FORBIDDEN_REDIRECT } from '../../core/http/errors.interceptor';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { chainDto, eventDto, invoiceDto, orderDto, requestDto, stepDto } from './request-detail.testing';
-import { AUDIT_LAG_MS, RequestDetailStore } from './request-detail.store';
+import { environment } from '../../../environments/environment';
+import { RequestDetailStore } from './request-detail.store';
 
 describe('RequestDetailStore', () => {
   let api: Record<string, ReturnType<typeof vi.fn>>;
@@ -156,7 +157,7 @@ describe('RequestDetailStore', () => {
       await vi.advanceTimersByTimeAsync(0);
       await store.init('r2', null); // the next request opens before the lag has passed
       api['getRequest'].mockClear();
-      await vi.advanceTimersByTimeAsync(AUDIT_LAG_MS + 10);
+      await vi.advanceTimersByTimeAsync(environment.cache.trailingReloadMs + 10);
       expect(api['getRequest']).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -210,7 +211,7 @@ describe('RequestDetailStore', () => {
       await vi.advanceTimersByTimeAsync(0);
       const afterPush = api['getRequestHistory'].mock.calls.length;
       expect(afterPush).toBe(1);
-      await vi.advanceTimersByTimeAsync(AUDIT_LAG_MS + 10);
+      await vi.advanceTimersByTimeAsync(environment.cache.trailingReloadMs + 10);
       expect(api['getRequestHistory'].mock.calls.length).toBe(2);
     } finally {
       vi.useRealTimers();
@@ -281,12 +282,17 @@ describe('RequestDetailStore', () => {
       expect(((api['cancelRequest'].mock.calls[0] as unknown[])[1] as HttpContext).get(SKIP_FORBIDDEN_REDIRECT)).toBe(true);
     });
 
-    it('a refusal (409) is shown as the server message', async () => {
+    it('a refusal (409) is a conflict like a 412: the dialog says why (the server message) and the latest request is loaded', async () => {
       const store = setup();
       await store.init('r1', null);
       api['cancelRequest'].mockRejectedValue(new HttpErrorResponse({ status: 409, error: { detail: 'Goods have been received.' } }));
+      api['getRequest'].mockResolvedValue(requestDto({ status: 'Ordered', version: 2001 }));
+
       await store.cancel();
-      expect(store.generalError()).toBe('Goods have been received.');
+
+      expect(conflict.show).toHaveBeenCalledWith('Goods have been received.');
+      expect(store.request()?.version).toBe(2001);
+      expect(store.generalError()).toBeNull();
     });
   });
 

@@ -6,6 +6,7 @@ import { Logger } from '../logging/logger';
 import { withCache } from '../state/with-cache';
 import { withRequestStatus } from '../state/with-request-status';
 import { LiveConnection } from './live-connection';
+import { idempotencyKey } from '../http/idempotency';
 
 interface NotificationsState {
   /** Newest first. */
@@ -82,7 +83,7 @@ export const NotificationsStore = signalStore(
         }
         patchState(store, (s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, read: true } : i)) }));
         try {
-          await api.markNotificationRead({ id, 'Idempotency-Key': crypto.randomUUID() });
+          await api.markNotificationRead({ id, 'Idempotency-Key': idempotencyKey() });
         } catch (error) {
           log.warn('Marking a notification read failed', error);
           patchState(store, (s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, read: false } : i)) }));
@@ -97,7 +98,7 @@ export const NotificationsStore = signalStore(
         }
         patchState(store, (s) => ({ items: s.items.map((i) => ({ ...i, read: true })) }));
         try {
-          await api.markAllNotificationsRead({ 'Idempotency-Key': crypto.randomUUID() });
+          await api.markAllNotificationsRead({ 'Idempotency-Key': idempotencyKey() });
         } catch (error) {
           log.warn('Marking all notifications read failed', error);
           patchState(store, (s) => ({ items: s.items.map((i) => (unreadIds.has(i.id) ? { ...i, read: false } : i)) }));

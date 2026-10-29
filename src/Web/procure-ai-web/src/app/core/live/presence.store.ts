@@ -1,13 +1,11 @@
 import { computed, effect, inject, Signal } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
+import { AppConfigService } from '../config/app-config';
 import { AuthStore } from '../auth/auth.store';
 import { Logger } from '../logging/logger';
 import { CacheRegistry } from '../state/cache-registry';
 import { LiveConnection } from './live-connection';
 import { Viewer } from './live.models';
-
-/** The server drops a connection that is silent for 45 s; it expects a heartbeat every 15 s. */
-export const HEARTBEAT_MS = 15_000;
 
 interface PresenceState {
   /** Everyone online in my tenant, me included (the server sends distinct users, sorted by name). */
@@ -23,7 +21,7 @@ const keyOf = (entity: string, id: string) => `${entity}:${id}`;
  * Who is online and who is viewing what, from the hub. The lists the server sends include me; this store hides me.
  * `watch(entity, id)` is ref-counted: two components on the same entity send one `Watch`, and `Unwatch` goes when the
  * last one lets go. Active watches are re-sent after every (re)connect, because a dropped connection loses them
- * on the server. A heartbeat every 15 s runs while connected. Logout (CacheRegistry) empties everything and forgets
+ * on the server. A heartbeat (`live.heartbeatMs`, 15 s; the server drops a silent connection after 45 s) runs while connected. Logout (CacheRegistry) empties everything and forgets
  * all watches, so the next user starts clean.
  */
 export const PresenceStore = signalStore(
@@ -139,6 +137,7 @@ export const PresenceStore = signalStore(
   }),
   withHooks((store) => {
     const live = inject(LiveConnection);
+    const config = inject(AppConfigService);
     let release: (() => void)[] = [];
     return {
       onInit() {
@@ -150,7 +149,7 @@ export const PresenceStore = signalStore(
         ];
         effect((onCleanup) => {
           if (live.state() === 'connected') {
-            const timer = setInterval(() => store.sendHeartbeat(), HEARTBEAT_MS);
+            const timer = setInterval(() => store.sendHeartbeat(), config.config().live.heartbeatMs);
             onCleanup(() => clearInterval(timer));
           }
         });
