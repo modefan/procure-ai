@@ -32,6 +32,8 @@
 
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The sample policy (Markdown and PDF) of the unit tests. -->
+    <Content Include="../ProcureAi.Assistant.Tests/Files/**" LinkBase="Files" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

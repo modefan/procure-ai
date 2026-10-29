@@ -129,6 +129,29 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
 - AppHost: the `AI:*` settings of the AppHost's configuration (user secrets) are passed as `AI__*` only when set (`AiSettings`, the key as a
   secret parameter); nothing is required. Metrics: meter `ProcureAi.Assistant` (`AssistantMetrics`).
 
+### The Assistant: policy documents and ingestion
+
+- API `api/v1/assistant/policy-documents` (`admin.policies`): `POST` multipart `file` + `title?` (`[Idempotent]`, 202), `PUT {id}/file`
+  (new version, `If-Match`), `DELETE {id}` (soft remove, `If-Match`), `GET` (list, ETag = body hash), `GET {id}` (ETag = `rowVersion`).
+  PDF or Markdown only, checked from the content (`PolicyFileType`: `%PDF-`, or strict UTF-8 without NUL): else 415; over
+  `Assistant:Uploads:MaxBytes` (10 MB): 413.
+- Ingestion is the durable local message `IngestPolicyDocument(DocumentId, Version)` on `assistant-ingestion`. Its handler takes no
+  DbContext (so Wolverine opens no transaction around it): `PolicyIngestion` commits step by step through `IAssistantUnitOfWorkFactory`
+  (a scope per unit, `IDbContextOutbox<AssistantDbContext>`, an explicit transaction so `ExecuteDeleteAsync`, the changes and the events
+  commit together). Steps: extract, `IPromptShield.CheckDocumentAsync` (allow-all until Task 4), plan, reuse by
+  `(child, content_hash, embedding_model)` in the tenant, context (`utility`, `#task: context`) and batched embeddings, progress per
+  batch (`PolicyDocumentProgressed` per new 10 % step), then the switch (older versions' chunks deleted and `current_version` set in one
+  transaction). `SearchableChunks.Of(db)` is what retrieval may read: purchase chunks, and policy chunks of the current version of a
+  document that was not removed.
+- A stale job (the document was replaced again or removed) stops at its next commit and deletes what it stored. Provider failures
+  (`IAiFailures`: transient HTTP, `ClientResultException` 429/5xx, timeouts) become `AiProviderUnavailableException`, retried on the durable
+  schedule `Assistant:Ingestion:RetryDelays` (one comma-separated string, default `00:00:10, 00:01:00, 00:05:00`); on the last attempt
+  (`Envelope.Attempts`) the job marks the version `Failed` itself. A retry resumes: stored children are kept.
+- Demo seed (`--migrate` with `DemoSeed:Enabled`): `infra/seed/procurement-policy.md` (embedded in Infrastructure) for `acme` and
+  `globex`, fixed IDs. The migrate run never starts Wolverine, so the seed writes the `IngestPolicyDocument` envelope straight into
+  `wolverine_incoming_envelopes` (Wolverine's EF `IncomingMessage`, status Incoming, owner 0, destination `local://assistant-ingestion`)
+  in the same `SaveChanges` as the document; the running api's durability agent recovers and ingests it.
+
 ## A service without a database (Notifications)
 
 For a service that holds no business data of its own (Notifications: live pushes, presence, bell items in Redis). Plan 04 ruling 1.
@@ -158,9 +181,9 @@ For a service that holds no business data of its own (Notifications: live pushes
   WebSockets (through the gateway) and long polling (the in-memory test server).
 - Server to client method `EntityChanged` (`LiveHubContract.EntityChangedMethod`) with `EntityChanged(entity, id, requestId, eventType,
   occurredAt)` (`ProcureAi.Contracts.Notifications`), camelCase JSON, IDs only (ruling 2): clients refetch through the authorized APIs.
-  `entity` is `request | approval | budget | order | invoice`; `id` is the request ID for `request` and `approval` (the approval chain of
-  that request), the cost center code for `budget`, the order ID and the invoice ID.
-- Feed: the buffered queue `notifications-api-live`, bound to `requests`, `approvals`, `budgets`, `purchasing` and `invoicing`. One handler
+  `entity` is `request | approval | budget | order | invoice | policy-document`; `id` is the request ID for `request` and `approval` (the approval chain of
+  that request), the cost center code for `budget`, the order ID, the invoice ID and the policy document ID (no `requestId`).
+- Feed: the buffered queue `notifications-api-live`, bound to `requests`, `approvals`, `budgets`, `purchasing`, `invoicing` and `assistant`. One handler
   method per event type (`...EventsHandler`, Application), each sending the pushes of `LiveEventMap.For(event)` to the event's tenant group,
   one push per entity, the most specific first and the request last. `HandlerCoverageTests` and `EventMapTests` fail when an event is
   added to one of those namespaces without a handler and a mapping.

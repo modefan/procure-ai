@@ -2,7 +2,10 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.Assistant.Application.Guardrails;
 using OpenTelemetry.Trace;
 using Npgsql;
 
@@ -28,8 +31,13 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
             environment: new Dictionary<string, string> { [$"ConnectionStrings__{ChatDatabase}"] = ChatConnectionString });
 }
 
-/// <summary>The real Assistant API on a test server, against the shared infrastructure and the stub Access, on the Fake provider.</summary>
-public sealed class AssistantApiFactory(AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities)
+/// <summary>
+/// The real Assistant API on a test server, against the shared infrastructure and the stub Access, on the Fake provider. Ingestion runs
+/// in batches of 4 chunks and retries a provider failure after 0.2 s; the embedding generator is wrapped by <paramref name="embeddings"/>
+/// and the document guard is <see cref="MarkerPromptShield"/>.
+/// </summary>
+public sealed class AssistantApiFactory(
+    AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings)
     : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -43,10 +51,18 @@ public sealed class AssistantApiFactory(AssistantInfraFixture infra, StubAccessS
         builder.UseSetting($"ConnectionStrings:{AssistantInfraFixture.ChatDatabase}", infra.ChatConnectionString);
         builder.UseSetting("AI:Fake:StreamDelayMs", "0");
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
+        builder.UseSetting("Assistant:Ingestion:BatchSize", "4");
+        builder.UseSetting("Assistant:Ingestion:RetryDelays", "00:00:00.200, 00:00:00.200, 00:00:00.200");
+
         builder.ConfigureTestServices(services =>
+        {
             // A second exporter on the service's own tracer provider: what reaches it is what the OTLP exporter gets, so a source
             // the service defaults do not trace never shows up here.
-            services.AddOpenTelemetry().WithTracing(tracing => tracing.AddInMemoryExporter(exportedActivities)));
+            services.AddOpenTelemetry().WithTracing(tracing => tracing.AddInMemoryExporter(exportedActivities));
+            services.Decorate<IEmbeddingGenerator<string, Embedding<float>>>((inner, _) => new ProbeEmbeddingGenerator(inner, embeddings));
+            services.RemoveAll<IPromptShield>();
+            services.AddSingleton<IPromptShield, MarkerPromptShield>();
+        });
     }
 }
 
@@ -66,11 +82,14 @@ public sealed class AssistantApp : IAsyncLifetime
     /// <summary>The spans the service's tracer provider exported (OpenTelemetry in-memory exporter; lock it to read).</summary>
     public List<Activity> ExportedActivities { get; } = [];
 
+    /// <summary>Every embedding call of the service (see <see cref="EmbeddingProbe"/>).</summary>
+    public EmbeddingProbe Embeddings { get; } = new();
+
     public async ValueTask InitializeAsync()
     {
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
-        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities);
+        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities, Embeddings);
         Client = _factory.CreateClient();
     }
 

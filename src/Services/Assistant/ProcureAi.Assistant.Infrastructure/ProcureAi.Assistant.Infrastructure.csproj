@@ -27,6 +27,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The demo seed's policy (plan 05 ruling 17): one file in infra/seed, embedded so the migrate run needs no path. -->
+    <EmbeddedResource Include="../../../../infra/seed/procurement-policy.md" LogicalName="ProcureAi.Assistant.Infrastructure.Seed.procurement-policy.md" Link="Seed/procurement-policy.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="ProcureAi.Assistant.Tests" />
     <InternalsVisibleTo Include="ProcureAi.Assistant.IntegrationTests" />
   </ItemGroup>
