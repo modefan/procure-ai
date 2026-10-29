@@ -102,7 +102,9 @@ export class PayLinesForm {
 
   protected readonly noQuantity = computed(() => !this.model().lines.some((l) => typeof l.quantity === 'number' && l.quantity > 0));
   protected readonly preview = computed(() => {
-    const totals = invoiceTotals(this.model().lines.map((l) => ({ quantity: l.quantity, unitPriceExclVat: l.unitPrice })));
+    // A quantity that is not valid (more than payable, not a number) counts as at most what can be paid: the preview never shows more than a payment could.
+    const clamp = (l: Row) => (Number.isFinite(l.quantity) ? Math.min(Math.max(Math.floor(l.quantity), 0), l.payable) : 0);
+    const totals = invoiceTotals(this.model().lines.map((l) => ({ quantity: clamp(l), unitPriceExclVat: l.unitPrice })));
     return formatRand(totals.inclVat);
   });
 

@@ -8,6 +8,7 @@ import { SuppliersService } from '../../api/suppliers/services/suppliers.service
 import { AuthStore } from '../../core/auth/auth.store';
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
+import { formatRand } from '../../core/ui/money.pipe';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { invoiceDto } from '../requests/request-detail.testing';
 import { InvoiceDetailPage } from './invoice-detail.page';
@@ -17,6 +18,8 @@ const FINANCE = ['invoices.read', 'invoices.release-payment', 'orders.read', 're
 
 describe('InvoiceDetailPage', () => {
   let api: Record<string, ReturnType<typeof vi.fn>>;
+  /** `text()` turns no-break spaces into plain ones; so must the expected amount. */
+  const spaced = (value: string) => value.replace(/\s+/g, ' ');
   const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   /** Clicks the button an action marker points at (the marker may be the button or hold it). */
   const press = (el: Element, action: string) => {
@@ -148,6 +151,22 @@ describe('InvoiceDetailPage', () => {
     expect(text(el)).toContain('Only 2 can be paid');
   });
 
+  it('the chosen-quantities button shows what the quantities cost, never more than can be paid', async () => {
+    const { fixture, el } = await setup();
+    press(el, 'choose-quantities');
+    fixture.detectChanges();
+    const input = el.querySelector('input[aria-label^="Quantity to pay"]') as HTMLInputElement;
+    const label = () => text(el.querySelector('[data-action="pay-chosen"]'));
+    input.value = '1';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(label()).toBe(`Pay chosen quantities (${spaced(formatRand(28980))})`); // 1 x R 25 200,00 + 15 % VAT
+    input.value = '9';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(label()).toBe(`Pay chosen quantities (${spaced(formatRand(57960))})`); // clamped to the 2 that can be paid
+  });
+
   it('hold asks for a reason first (at least 3 characters), then holds with If-Match', async () => {
     const { fixture, el } = await setup(mismatched({ version: 4 }));
     press(el, 'hold');
@@ -163,7 +182,7 @@ describe('InvoiceDetailPage', () => {
     press(el, 'confirm-hold');
     await settle(fixture);
     expect(api['holdInvoice'].mock.calls[0][0]).toMatchObject({ id: 'i1', 'If-Match': '"4"', body: { reason: 'Bank details changed' } });
-    expect(text(el.querySelector('header'))).toContain('On hold');
+    expect(text(el.querySelector('header'))).toContain('Held');
     expect(text(el.querySelector('[data-section="hold"]'))).toContain('Bank details changed');
     expect(el.querySelector('[data-action="pay-all"]')).toBeNull();
     expect(el.querySelector('[data-action="release-hold"]')).not.toBeNull();
@@ -192,6 +211,24 @@ describe('InvoiceDetailPage', () => {
     expect(el.querySelector('[data-action="pay-all"]')).toBeNull();
     expect(text(el.querySelector('[data-section="actions"]'))).toContain('Nothing can be paid yet');
     expect(el.querySelector('[data-action="hold"]')).not.toBeNull();
+  });
+
+  it('a paid invoice offers no hold, and says it is paid in full', async () => {
+    const { el } = await setup(invoiceDto({ status: 'Paid', lines: [invoiceLine(1, { paid: 3, payable: 0 })], payments: [payment()] }));
+    expect(el.querySelector('[data-action="hold"]')).toBeNull();
+    expect(text(el.querySelector('[data-section="actions"]'))).toContain('paid in full');
+  });
+
+  it('says "released by you" for the caller, names a readable releaser and never shows a user ID', async () => {
+    const mine = await setup(mismatched({ payments: [payment({ releasedBy: 'thandi' })] }));
+    expect(text(mine.el.querySelector('[data-section="payments"]'))).toContain('released by you');
+    TestBed.resetTestingModule();
+    const named = await setup(mismatched({ payments: [payment({ releasedBy: 'Ben Finance' })] }));
+    expect(text(named.el.querySelector('[data-section="payments"]'))).toContain('released by Ben Finance');
+    TestBed.resetTestingModule();
+    const id = await setup(mismatched({ payments: [payment({ releasedBy: '00000000-0000-4000-8000-000000000009' })] }));
+    expect(text(id.el.querySelector('[data-section="payments"]'))).not.toContain('00000000');
+    expect(text(id.el.querySelector('[data-section="payments"]'))).not.toContain('released by');
   });
 
   it('links to the order only for callers who may read orders', async () => {

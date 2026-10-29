@@ -180,7 +180,7 @@ const statusWords = (status: string) => status.replace(/([a-z])([A-Z])/g, (_, a:
                   </div>
                   <p class="col-span-2 flex items-baseline justify-between gap-2 text-sm font-medium whitespace-nowrap tabular-nums text-slate-900 md:col-span-1 md:block md:pt-2 md:text-right">
                     <span class="text-xs font-normal text-slate-500 md:hidden">Line total</span>
-                    <span>{{ lineTotal(i) | rand }}</span>
+                    <span>{{ (lineTotal(i) | rand) || '–' }}</span>
                   </p>
                 </li>
               }
@@ -283,6 +283,7 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
         const order = this.store.orders().find((o) => o.id === orderId);
         this.model.update((m) => ({
           ...m,
+          statedTotal: '', // the total printed on another invoice says nothing about this order
           lines: (order?.lines ?? []).map((l) => ({
             lineNo: l.lineNo,
             description: l.description,

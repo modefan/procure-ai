@@ -5,6 +5,7 @@ import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import { InvoiceDto } from '../../api/invoicing/models/invoice-dto';
 import { PayLineBody } from '../../api/invoicing/models/pay-line-body';
+import { AuthStore } from '../../core/auth/auth.store';
 import { ReferenceDataStore } from '../../core/reference/reference-data.store';
 import { BusyButton } from '../../core/ui/busy-button';
 import { StatusBadge } from '../requests/status-badge';
@@ -46,9 +47,6 @@ const MAX_REASON = 500;
               <span class="text-xl font-semibold whitespace-nowrap tabular-nums text-slate-900">{{ invoice.totalInclVatText }}</span>
               <app-status-badge [status]="match()" />
               <app-status-badge [status]="payment()" />
-              @if (invoice.onHold) {
-                <span class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap text-amber-800 ring-1 ring-amber-300 ring-inset">On hold</span>
-              }
               <span class="text-sm whitespace-nowrap text-slate-600">Invoice date {{ invoice.invoiceDate | date: 'd MMM y' }}</span>
             </div>
           </div>
@@ -72,7 +70,7 @@ const MAX_REASON = 500;
 
         <section class="card mt-6" aria-labelledby="lines-heading" data-section="lines">
           <h2 id="lines-heading" class="mb-3 text-base font-semibold text-slate-900">Three-way match</h2>
-          <div class="hidden md:block">
+          <div class="hidden lg:block">
             <table class="w-full table-fixed text-left text-sm">
               <caption class="sr-only">Lines of {{ invoice.supplierInvoiceNumber }}: ordered, received and invoiced</caption>
               <colgroup>
@@ -87,7 +85,7 @@ const MAX_REASON = 500;
                 <tr>
                   <th scope="col" class="py-2 pr-3">Item</th>
                   <th scope="col" class="py-2 pr-3 whitespace-nowrap">Ordered (PO)</th>
-                  <th scope="col" class="py-2 pr-3 text-right whitespace-nowrap">Received</th>
+                  <th scope="col" class="py-2 pr-6 text-right whitespace-nowrap">Received</th>
                   <th scope="col" class="py-2 pr-3 whitespace-nowrap">Invoiced</th>
                   <th scope="col" class="py-2 pr-3 text-right whitespace-nowrap">Paid</th>
                   <th scope="col" class="py-2">Result</th>
@@ -98,7 +96,7 @@ const MAX_REASON = 500;
                   <tr class="align-top" [attr.data-line]="line.lineNo">
                     <td class="py-2 pr-3 break-words text-slate-800">{{ line.description }}</td>
                     <td class="py-2 pr-3 whitespace-nowrap tabular-nums">{{ orderedText(line) }}</td>
-                    <td class="py-2 pr-3 text-right tabular-nums">{{ line.received ?? '–' }}</td>
+                    <td class="py-2 pr-6 text-right tabular-nums">{{ line.received ?? '–' }}</td>
                     <td class="py-2 pr-3 whitespace-nowrap tabular-nums">{{ line.quantity }} &times; {{ line.unitPriceText }}</td>
                     <td class="py-2 pr-3 text-right tabular-nums">{{ line.paid }}</td>
                     <td class="py-2 font-medium" [class]="problem(line) ? 'text-rose-800' : 'text-emerald-800'">{{ result(line) }}</td>
@@ -108,7 +106,7 @@ const MAX_REASON = 500;
             </table>
           </div>
 
-          <ul class="divide-y divide-slate-100 md:hidden" aria-label="Invoice lines">
+          <ul class="divide-y divide-slate-100 lg:hidden" aria-label="Invoice lines">
             @for (line of invoice.lines; track line.lineNo) {
               <li class="py-3 text-sm" [attr.data-line]="line.lineNo">
                 <p class="font-medium break-words text-slate-900">{{ line.description }}</p>
@@ -157,7 +155,7 @@ const MAX_REASON = 500;
                 } @else {
                   <p class="text-sm text-slate-700">{{ nothingPayableText() }}</p>
                 }
-                @if (!holding()) {
+                @if (!holding() && invoice.status !== 'Paid') {
                   <button type="button" class="btn-secondary whitespace-nowrap" data-action="hold" [disabled]="store.busy() !== 'idle'" (click)="startHold()">Hold invoice</button>
                 }
               </div>
@@ -203,7 +201,7 @@ const MAX_REASON = 500;
                     <app-status-badge [status]="payment.exportStatus === 'Exported' ? 'Exported' : 'Export pending'" />
                   </div>
                   <p class="mt-1 text-slate-600">
-                    {{ payment.releasedAt | date: 'd MMM y, HH:mm' }} &middot; released by {{ payment.releasedBy }}
+                    {{ payment.releasedAt | date: 'd MMM y, HH:mm' }}{{ releasedBy(payment) }}
                     @if (payment.erpReference) {
                       &middot; ERP reference <span class="whitespace-nowrap">{{ payment.erpReference }}</span>
                     }
@@ -241,6 +239,7 @@ export class InvoiceDetailPage {
 
   protected readonly store = inject(InvoiceDetailStore);
   private readonly reference = inject(ReferenceDataStore);
+  private readonly auth = inject(AuthStore);
   private readonly title = inject(Title);
   protected readonly skeletonRows = [1, 2, 3, 4];
   protected readonly vatRate = VAT_RATE_PERCENT;
@@ -306,6 +305,17 @@ export class InvoiceDetailPage {
   protected paymentLines(payment: InvoiceDto['payments'][number]): string {
     const invoice = this.store.invoice();
     return payment.lines.map((l) => `${l.quantity} × ${invoice?.lines.find((i) => i.lineNo === l.lineNo)?.description ?? `line ${l.lineNo}`}`).join(', ');
+  }
+
+  /**
+   * " · released by you". The payment holds the releaser's user ID, not a name (names come from Access, which the API
+   * does not call for this): the caller's own payments say "you", an ID is never shown, a readable name is.
+   */
+  protected releasedBy(payment: InvoiceDto['payments'][number]): string {
+    if (payment.releasedBy === this.auth.user()?.userId) {
+      return ' · released by you';
+    }
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(payment.releasedBy) ? '' : ` · released by ${payment.releasedBy}`;
   }
 
   protected retry(): void {

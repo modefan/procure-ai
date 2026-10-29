@@ -112,6 +112,17 @@ describe('InvoiceFormPage', () => {
     expect(createInvoice.mock.calls[0][0].body.statedTotalInclVat).toBe(58000.5);
   });
 
+  it('choosing another order starts its lines again and forgets the total typed for the first', async () => {
+    const ctx = await setup();
+    await choose(ctx);
+    set(field(ctx.el, 'invoice-stated-total'), '1234,00');
+    set(qty(ctx.el, 1), '1');
+    await settle(ctx.fixture);
+    await choose(ctx, 'o9');
+    expect(field(ctx.el, 'invoice-stated-total').value).toBe('');
+    expect(qty(ctx.el, 1).value).toBe('2'); // the other order's first line: nothing received yet, so what was ordered
+  });
+
   it('refuses an empty form: asks for an order and a number, sends nothing', async () => {
     const ctx = await setup();
     click(ctx.el.querySelector('[data-testid="save-invoice"] button'));
