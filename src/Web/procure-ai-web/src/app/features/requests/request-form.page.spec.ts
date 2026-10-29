@@ -26,13 +26,14 @@ describe('RequestFormPage', () => {
   let checkBudget: ReturnType<typeof vi.fn>;
   let previewApproval: ReturnType<typeof vi.fn>;
 
-  async function setup(id: string | null = null, loaded: RequestDto | HttpErrorResponse | Promise<RequestDto> = dto()) {
+  async function setup(id: string | null = null, loaded: RequestDto | HttpErrorResponse | Promise<RequestDto> = dto(), meGate?: Promise<void>) {
     api = {
       createRequest: vi.fn().mockResolvedValue(dto()),
       updateRequest: vi.fn().mockResolvedValue(dto({ version: 2 })),
       submitRequest: vi.fn().mockResolvedValue(dto({ status: 'Submitted', version: 3 })),
       getRequest: loaded instanceof HttpErrorResponse ? vi.fn().mockRejectedValue(loaded) : loaded instanceof Promise ? vi.fn().mockReturnValue(loaded) : vi.fn().mockResolvedValue(loaded),
     };
+    const me = { userId: 'u', name: 'Tom', roles: [], approvalLimit: null, costCenters: [{ code: 'IT-200', name: 'IT', departmentCode: 'IT' }] };
     checkBudget = vi.fn().mockResolvedValue({ available: 266400, fiscalYear: '2026', fits: true });
     previewApproval = vi.fn().mockResolvedValue({ possible: true, reason: null, steps: [{ stepNo: 1, level: 'Manager', approverNames: ['Maria'] }] });
     TestBed.configureTestingModule({
@@ -44,7 +45,7 @@ describe('RequestFormPage', () => {
         { provide: ConflictDialog, useValue: { show: vi.fn().mockResolvedValue(undefined) } },
         {
           provide: AccessService,
-          useValue: { getMe: vi.fn().mockResolvedValue({ userId: 'u', name: 'Tom', roles: [], approvalLimit: null, costCenters: [{ code: 'IT-200', name: 'IT', departmentCode: 'IT' }] }) },
+          useValue: { getMe: vi.fn().mockImplementation(() => (meGate ? meGate.then(() => me) : Promise.resolve(me))) },
         },
         {
           provide: SuppliersService,
@@ -175,6 +176,24 @@ describe('RequestFormPage', () => {
     click(ctx.el.querySelector('[data-testid="save-draft"] button'));
     await settle(ctx.fixture);
     expect(ctx.page.hasUnsavedChanges()).toBe(false);
+  });
+
+  it('keeps what is typed while the reference data is still loading, and still defaults the only cost center', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { fixture, el, page } = await setup(null, dto(), gate);
+    set(field(el, 'title'), 'Typed early');
+    await settle(fixture);
+
+    release();
+    await vi.waitFor(async () => {
+      await settle(fixture);
+      expect(page.hasUnsavedChanges()).toBe(true); // the starting values arrived (the baseline is set)
+    });
+
+    expect(field(el, 'title').value).toBe('Typed early');
+    expect(field(el, 'cost-center').value).toBe('IT-200');
+    expect(page.hasUnsavedChanges()).toBe(true);
   });
 
   it('blocks Submit and says why when no approver exists for the total', async () => {

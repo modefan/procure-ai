@@ -406,7 +406,10 @@ export class RequestFormPage implements OnInit, HasUnsavedChanges {
     }
     await reference;
     const centers = this.ref.costCenters();
-    this.start({ ...emptyModel(), costCenter: centers.length === 1 ? centers[0].code : '' });
+    const starting = { ...emptyModel(), costCenter: centers.length === 1 ? centers[0].code : '' };
+    // The form is usable before the reference data arrives: whatever was typed meanwhile stays (and counts as an edit).
+    this.model.update((m) => ({ ...m, costCenter: m.costCenter || starting.costCenter }));
+    this.baseline.set(JSON.stringify(starting));
   }
 
   hasUnsavedChanges(): boolean {
