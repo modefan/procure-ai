@@ -28,6 +28,7 @@ public sealed class ContractsTests
         "InvoiceReceived", "InvoiceMatched", "InvoiceMismatched", "PaymentReleased", "PaymentExported", "PurchaseOrderSettled",
         "RequestOrdered", "RequestCancellationConfirmed", "RequestCancellationRefused", "RequestCompleted",
         "BudgetSpent", "BudgetAmountSet",
+        "PolicyDocumentProgressed", "PolicyDocumentStatusChanged",
     ];
 
     private static Type[] ContractTypes() =>
@@ -72,6 +73,7 @@ public sealed class ContractsTests
         Exchanges.Access.ShouldBe("access");
         Exchanges.Purchasing.ShouldBe("purchasing");
         Exchanges.Invoicing.ShouldBe("invoicing");
+        Exchanges.Assistant.ShouldBe("assistant");
         Queues.BudgetCommands.ShouldBe("budgets-commands");
         Queues.PurchasingCommands.ShouldBe("purchasing-commands");
     }

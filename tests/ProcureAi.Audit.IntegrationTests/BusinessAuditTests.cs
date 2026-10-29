@@ -54,9 +54,15 @@ public sealed class BusinessAuditTests(AuditApp app)
 
         stored.Select(e => e.Type).ShouldBe(EventTypes.Select(t => t.Name), ignoreOrder: true);
         stored.ShouldAllBe(e => e.UserId == Tom && e.TenantId == tenant);
-        // Access changes and budget amount changes belong to no purchase request.
-        stored.Where(e => e.Type is not (nameof(ProcureAi.Contracts.Access.AccessChanged) or nameof(ProcureAi.Contracts.Budgets.BudgetAmountSet))).ShouldAllBe(e => e.SubjectId == requestId);
-        stored.Single(e => e.Type == nameof(ProcureAi.Contracts.Budgets.BudgetAmountSet)).SubjectId.ShouldBeNull();
+        // Access changes, budget amount changes and policy document events belong to no purchase request.
+        string[] withoutRequest =
+        [
+            nameof(ProcureAi.Contracts.Access.AccessChanged), nameof(ProcureAi.Contracts.Budgets.BudgetAmountSet),
+            nameof(ProcureAi.Contracts.Assistant.PolicyDocumentProgressed), nameof(ProcureAi.Contracts.Assistant.PolicyDocumentStatusChanged),
+        ];
+        stored.Where(e => !withoutRequest.Contains(e.Type)).ShouldAllBe(e => e.SubjectId == requestId);
+        stored.Where(e => withoutRequest.Contains(e.Type) && e.Type != nameof(ProcureAi.Contracts.Access.AccessChanged))
+            .ShouldAllBe(e => e.SubjectId == null);
     }
 
     [Fact]
