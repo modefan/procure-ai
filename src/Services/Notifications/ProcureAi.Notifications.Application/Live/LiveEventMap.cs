@@ -20,7 +20,8 @@ public static class LiveEventMap
     {
         // requests
         RequestSubmitted e => Pushes(e, e.RequestId),
-        RequestCancelled e => Pushes(e, e.RequestId),
+        // a cancelled request drops its open approval step from the approver's inbox
+        RequestCancelled e => Pushes(e, e.RequestId, Approval(e.RequestId)),
 
         // approvals: a step asked for, decided or moved changes the approval chain too
         ApprovalRequested e => Pushes(e, e.RequestId, Approval(e.RequestId)),
@@ -32,7 +33,7 @@ public static class LiveEventMap
         ApprovalAlertRaised e => Pushes(e, e.RequestId),
         RequestOrdered e => Pushes(e, e.RequestId),
         RequestCompleted e => Pushes(e, e.RequestId),
-        RequestCancellationConfirmed e => Pushes(e, e.RequestId),
+        RequestCancellationConfirmed e => Pushes(e, e.RequestId, Approval(e.RequestId)),
         RequestCancellationRefused e => Pushes(e, e.RequestId),
 
         // budgets: the cost center's budget

@@ -54,7 +54,7 @@ public sealed class EventMapTests
     {
         // requests
         ["RequestSubmitted"] = (new RequestSubmitted(RequestId, Tenant, "PR-1", "Laptops", "tom", CostCenter, 100m, At, "sup-1", []), RequestOnly("RequestSubmitted")),
-        ["RequestCancelled"] = (new RequestCancelled(RequestId, Tenant, "PR-1", "tom", null, At), RequestOnly("RequestCancelled")),
+        ["RequestCancelled"] = (new RequestCancelled(RequestId, Tenant, "PR-1", "tom", null, At), ApprovalAndRequest("RequestCancelled")),
 
         // approvals: the request always; the approval chain too where a step was asked for, decided or moved
         ["ApprovalRequested"] = (new ApprovalRequested(RequestId, Tenant, "PR-1", StepId, 1, "Manager", Approvers, At.AddDays(2), At), ApprovalAndRequest("ApprovalRequested")),
@@ -66,7 +66,7 @@ public sealed class EventMapTests
         ["ApprovalAlertRaised"] = (new ApprovalAlertRaised(RequestId, Tenant, StepId, "Overdue", At), RequestOnly("ApprovalAlertRaised")),
         ["RequestOrdered"] = (new RequestOrdered(RequestId, Tenant, "PR-1", OrderId, "PO-1", At), RequestOnly("RequestOrdered")),
         ["RequestCompleted"] = (new RequestCompleted(RequestId, Tenant, "PR-1", 100m, At), RequestOnly("RequestCompleted")),
-        ["RequestCancellationConfirmed"] = (new RequestCancellationConfirmed(RequestId, Tenant, "PR-1", At), RequestOnly("RequestCancellationConfirmed")),
+        ["RequestCancellationConfirmed"] = (new RequestCancellationConfirmed(RequestId, Tenant, "PR-1", At), ApprovalAndRequest("RequestCancellationConfirmed")),
         ["RequestCancellationRefused"] = (new RequestCancellationRefused(RequestId, Tenant, "PR-1", "Delivered", At), RequestOnly("RequestCancellationRefused")),
 
         // budgets: the cost center's budget (ID = cost center code) and the request
