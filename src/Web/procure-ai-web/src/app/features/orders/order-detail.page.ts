@@ -85,18 +85,18 @@ import { ReceiptForm } from './receipt-form';
             <thead class="border-b border-slate-200 text-xs font-semibold tracking-wide text-slate-600 uppercase">
               <tr>
                 <th scope="col" class="py-2 pr-2">Item</th>
-                <th scope="col" class="w-16 py-2 pr-2 text-right whitespace-nowrap sm:w-20">Ordered</th>
-                <th scope="col" class="w-16 py-2 pr-2 text-right whitespace-nowrap sm:w-20">Received</th>
+                <th scope="col" class="w-10 py-2 pr-2 text-right whitespace-nowrap sm:w-20"><span class="sm:hidden" aria-hidden="true">Ord.</span><span class="sr-only sm:not-sr-only">Ordered</span></th>
+                <th scope="col" class="w-10 py-2 pr-2 text-right whitespace-nowrap sm:w-20"><span class="sm:hidden" aria-hidden="true">Rec.</span><span class="sr-only sm:not-sr-only">Received</span></th>
                 @if (store.canSeeInvoices()) {
-                  <th scope="col" class="w-16 py-2 pr-2 text-right whitespace-nowrap sm:w-20">Invoiced</th>
-                  <th scope="col" class="w-12 py-2 text-right whitespace-nowrap sm:w-20">Paid</th>
+                  <th scope="col" class="w-10 py-2 pr-2 text-right whitespace-nowrap sm:w-20"><span class="sm:hidden" aria-hidden="true">Inv.</span><span class="sr-only sm:not-sr-only">Invoiced</span></th>
+                  <th scope="col" class="w-10 py-2 text-right whitespace-nowrap sm:w-20">Paid</th>
                 }
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
               @for (line of order.lines; track line.lineNo) {
                 <tr [attr.data-line]="line.lineNo">
-                  <td class="truncate py-2 pr-2 text-slate-800" [title]="line.description">
+                  <td class="py-2 pr-2 break-words text-slate-800" [title]="line.description">
                     {{ line.description }}
                     @if (line.closedShort > 0) {
                       <span class="block text-xs whitespace-nowrap text-amber-800">{{ line.closedShort }} closed short</span>

@@ -54,6 +54,7 @@ describe('OrdersPage', () => {
     const row = el.querySelector('tbody tr')!;
     expect(text(row)).toContain('Supplier unavailable · retrying (attempt 3)');
     expect(text(row)).toContain('0 of 6');
+    expect(text(row.querySelector('details'))).toContain('2 failed attempts so far');
     expect(text(row.querySelector('details'))).toContain('Supplier unavailable (HTTP 503) for placing the order.');
     expect(row.querySelector('a.btn-secondary')).toBeNull(); // nothing to receive yet
   });
@@ -68,6 +69,13 @@ describe('OrdersPage', () => {
     TestBed.resetTestingModule();
     const without = await setup([confirmed], ['orders.read']);
     expect(text(without.el)).not.toContain('Record delivery');
+  });
+
+  it('shows the order status next to the number, apart from the supplier status', async () => {
+    const { el } = await setup([order({ status: 'ClosedShort', supplierStatus: 'Confirmed, delivery 2026-11-03' })]);
+    const cells = el.querySelectorAll('tbody tr td');
+    expect(text(cells[0])).toContain('Closed short');
+    expect(text(cells[3])).toContain('Confirmed, delivery 2026-11-03');
   });
 
   it('no button sits inside a link', async () => {

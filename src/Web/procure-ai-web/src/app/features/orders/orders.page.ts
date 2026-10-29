@@ -11,7 +11,7 @@ import { OrdersStore, OrderStatusFilter } from './orders.store';
 
 /**
  * Screen 9: purchase orders with the supplier's state and how much has been received (needs `orders.read`).
- * A table from the md breakpoint up; below it, one card per order. The supplier name comes from the supplier list
+ * A table from the lg breakpoint up; below it, one card per order. The supplier name comes from the supplier list
  * that is cached for the session (the order holds only the supplier code).
  */
 @Component({
@@ -60,16 +60,16 @@ import { OrdersStore, OrderStatusFilter } from './orders.store';
         </div>
       } @else if (store.entities().length > 0) {
         <div class="mt-6" [attr.aria-busy]="store.isLoading()" [class.opacity-60]="store.isLoading()">
-          <div class="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
+          <div class="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:block">
             <table class="w-full table-fixed text-left text-sm">
               <caption class="sr-only">Purchase orders, page {{ store.page() }} of {{ store.pageCount() }}</caption>
               <colgroup>
-                <col class="w-24 lg:w-28" />
-                <col class="w-32 lg:w-40" />
-                <col class="w-28 lg:w-32" />
+                <col class="w-36" />
+                <col class="w-40" />
+                <col class="w-32" />
                 <col />
                 <col class="w-24" />
-                <col class="w-36 lg:w-40" />
+                <col class="w-40" />
               </colgroup>
               <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
                 <tr>
@@ -84,7 +84,10 @@ import { OrdersStore, OrderStatusFilter } from './orders.store';
               <tbody class="divide-y divide-slate-100">
                 @for (order of store.entities(); track order.id) {
                   <tr class="align-top hover:bg-slate-50" [attr.data-order]="order.id">
-                    <td class="px-4 py-3 font-medium whitespace-nowrap"><a [routerLink]="['/app/orders', order.id]" class="text-indigo-700 hover:underline">{{ order.number }}</a></td>
+                    <td class="px-4 py-3 font-medium whitespace-nowrap">
+                      <a [routerLink]="['/app/orders', order.id]" class="text-indigo-700 hover:underline">{{ order.number }}</a>
+                      <div class="mt-1"><app-status-badge [status]="order.status" /></div>
+                    </td>
                     <td class="truncate px-4 py-3 text-slate-800" [title]="supplierName(order)">{{ supplierName(order) }}</td>
                     <td class="px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900">{{ order.totalInclVatDisplay }}</td>
                     <td class="px-4 py-3">
@@ -102,13 +105,14 @@ import { OrdersStore, OrderStatusFilter } from './orders.store';
             </table>
           </div>
 
-          <ul class="space-y-3 md:hidden" aria-label="Purchase orders">
+          <ul class="space-y-3 lg:hidden" aria-label="Purchase orders">
             @for (order of store.entities(); track order.id) {
               <li class="card p-4">
                 <div class="flex items-center justify-between gap-3">
                   <a [routerLink]="['/app/orders', order.id]" class="font-semibold whitespace-nowrap text-indigo-700 hover:underline">{{ order.number }}</a>
                   <span class="font-semibold whitespace-nowrap tabular-nums text-slate-900">{{ order.totalInclVatDisplay }}</span>
                 </div>
+                <div class="mt-1"><app-status-badge [status]="order.status" /></div>
                 <p class="mt-1 truncate text-slate-800" [title]="supplierName(order)">{{ supplierName(order) }}</p>
                 <div class="mt-2">
                   <ng-container [ngTemplateOutlet]="supplierState" [ngTemplateOutletContext]="{ $implicit: order }" />
@@ -132,7 +136,7 @@ import { OrdersStore, OrderStatusFilter } from './orders.store';
       <app-status-badge [status]="order.supplierStatus" />
       @if (order.supplierLastError) {
         <details class="mt-1 text-xs text-slate-700">
-          <summary class="cursor-pointer text-amber-800">Why? ({{ order.supplierAttempts }} {{ order.supplierAttempts === 1 ? 'attempt' : 'attempts' }} so far)</summary>
+          <summary class="cursor-pointer text-amber-800">Why? ({{ order.supplierAttempts }} failed {{ order.supplierAttempts === 1 ? 'attempt' : 'attempts' }} so far)</summary>
           <p class="mt-1 break-words">Last error: {{ order.supplierLastError }}</p>
         </details>
       }
