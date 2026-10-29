@@ -94,4 +94,11 @@ export const APP_ROUTES: Routes = [
     resolve: { invoice: invoiceResolver },
     loadComponent: () => import('./invoices/invoice-detail.page').then((m) => m.InvoiceDetailPage),
   },
+  {
+    path: 'budgets',
+    title: 'Budgets',
+    canActivate: [permissionGuard],
+    data: { permission: 'budgets.read' },
+    loadComponent: () => import('./budgets/budgets.page').then((m) => m.BudgetsPage),
+  },
 ];

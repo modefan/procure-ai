@@ -49,6 +49,33 @@ public sealed class ApiTests(BudgetsApp app)
         all.Select(b => b.CostCenterCode).ShouldBe(["CC-A", "CC-B"]);
     }
 
+
+    [Fact]
+    public async Task Budgets_carry_the_name_of_the_cost_center_manager()
+    {
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, "CC-A", 100_000m);
+        var finance = BudgetsApp.Token(tenant, "finance", "thandi");
+
+        var list = await ReadAsync<List<BudgetDto>>(await SendAsync(HttpMethod.Get, $"{Base}?fiscalYear={Year}", finance));
+        var one = await ReadAsync<BudgetDto>(await SendAsync(HttpMethod.Get, $"{Base}/CC-A/{Year}", finance));
+
+        list.Single().OwnerName.ShouldBe("Mia Manager");
+        one.OwnerName.ShouldBe("Mia Manager");
+    }
+
+    [Fact]
+    public async Task Budgets_are_listed_without_an_owner_when_access_cannot_answer()
+    {
+        var tenant = BudgetsInfraFixture.NewTenant();
+        await app.Infra.CreateBudgetAsync(tenant, "CC-A", 100_000m);
+        app.Access.FailApprovers(tenant, TimeSpan.FromSeconds(20));
+
+        var list = await ReadAsync<List<BudgetDto>>(await SendAsync(HttpMethod.Get, $"{Base}?fiscalYear={Year}", BudgetsApp.Token(tenant, "finance", "thandi")));
+
+        list.Single().OwnerName.ShouldBeNull("a budget screen must not fail because the owner's name is unknown");
+        list.Single().Amount.ShouldBe(100_000m);
+    }
     [Fact]
     public async Task Reading_budgets_needs_the_permission_and_a_tenant()
     {

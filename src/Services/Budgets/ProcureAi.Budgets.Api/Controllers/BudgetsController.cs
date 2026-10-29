@@ -8,6 +8,7 @@ using ProcureAi.Budgets.Application.Commands;
 using ProcureAi.Budgets.Application.Dtos;
 using ProcureAi.Budgets.Application.Queries;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
@@ -26,7 +27,7 @@ namespace ProcureAi.Budgets.Api.Controllers;
 [Route("api/v{version:apiVersion}/budgets")]
 [RequireTenant]
 public sealed class BudgetsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, BudgetScope scope, ILogger<BudgetsController> logger) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, BudgetScope scope, IAccessDirectory access, ILogger<BudgetsController> logger) : ControllerBase
 {
     /// <summary>The budgets the caller may see, optionally of one fiscal year (<c>FY2027</c>). Callers who do not manage budgets see only their cost centers.</summary>
     [HttpGet(Name = "ListBudgets")]
@@ -39,7 +40,8 @@ public sealed class BudgetsController(
     {
         var budgets = await bus.InvokeAsync<IReadOnlyList<BudgetDto>>(new ListBudgets(fiscalYear), cancellationToken);
         var visible = await scope.VisibleCostCentersAsync(cancellationToken);
-        return Ok(visible is null ? budgets : budgets.Where(b => visible.Contains(b.CostCenterCode)).ToList());
+        var shown = visible is null ? budgets : budgets.Where(b => visible.Contains(b.CostCenterCode)).ToList();
+        return Ok(await WithOwnersAsync(shown, cancellationToken));
     }
 
     /// <summary>Whether an amount in Rand fits what is left of the cost center budget of the current fiscal year (the live check of the request form).</summary>
@@ -72,7 +74,36 @@ public sealed class BudgetsController(
 
         var budget = await bus.InvokeAsync<BudgetDto>(new GetBudget(costCenter, fiscalYear), cancellationToken);
         Response.Headers.ETag = VersionETag.Format(budget.Version);
-        return budget;
+        return (await WithOwnersAsync([budget], cancellationToken))[0];
+    }
+
+    /// <summary>
+    /// Adds the cost center manager's name to each budget (the screen's "owner"). Access answers are cached by the shared client;
+    /// when Access cannot say, the budget is returned without an owner rather than failing the read.
+    /// </summary>
+    private async Task<List<BudgetDto>> WithOwnersAsync(IReadOnlyList<BudgetDto> budgets, CancellationToken cancellationToken)
+    {
+        var tenant = user.TenantId;
+        if (tenant is null || budgets.Count == 0)
+        {
+            return [.. budgets];
+        }
+
+        var owners = await Task.WhenAll(budgets.Select(b => b.CostCenterCode).Distinct().Select(async code =>
+        {
+            try
+            {
+                var approvers = await access.GetApproversAsync(code, tenant, cancellationToken);
+                return (Code: code, Name: approvers.Manager?.DisplayName);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogWarning(exception, "The manager of {CostCenter} could not be looked up; listing its budget without an owner", code);
+                return (Code: code, Name: (string?)null);
+            }
+        }));
+        var byCode = owners.ToDictionary(o => o.Code, o => o.Name);
+        return [.. budgets.Select(b => b with { OwnerName = byCode.GetValueOrDefault(b.CostCenterCode) })];
     }
 
     /// <summary>A cost center the caller may not see looks the same as one that does not exist.</summary>
@@ -108,7 +139,7 @@ public sealed class BudgetsController(
         var updated = await bus.InvokeAsync<BudgetDto>(new SetBudgetAmount(costCenter, fiscalYear, body.Amount, version), cancellationToken);
         await InvalidateAsync();
         Response.Headers.ETag = VersionETag.Format(updated.Version);
-        return updated;
+        return (await WithOwnersAsync([updated], cancellationToken))[0];
     }
 
     /// <summary>

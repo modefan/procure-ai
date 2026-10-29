@@ -6,6 +6,7 @@ export interface BudgetDto {
   available: number;
   costCenterCode: string;
   fiscalYear: string;
+  ownerName?: (string | null);
   reserved: number;
   spent: number;
   version: number;

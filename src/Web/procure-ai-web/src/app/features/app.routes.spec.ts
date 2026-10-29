@@ -41,3 +41,13 @@ describe('APP_ROUTES invoices', () => {
     expect(paths.indexOf('invoices/new')).toBeLessThan(paths.indexOf('invoices/:id'));
   });
 });
+
+describe('APP_ROUTES budgets', () => {
+  it('budgets needs budgets.read and loads its page', async () => {
+    const route = APP_ROUTES.find((r) => r.path === 'budgets');
+    expect(route).toBeDefined();
+    expect(route?.data?.['permission']).toBe('budgets.read');
+    expect(route?.canActivate?.length).toBe(1);
+    expect(await (route!.loadComponent as () => Promise<unknown>)()).toBeTruthy();
+  });
+});

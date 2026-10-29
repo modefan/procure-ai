@@ -407,6 +407,12 @@
           "version": {
             "type": "integer",
             "format": "uint32"
+          },
+          "ownerName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
