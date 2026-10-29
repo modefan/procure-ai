@@ -1,10 +1,10 @@
-import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, effect, inject, OnInit, signal } from '@angular/core';
 import { form, FormField, maxLength, validate } from '@angular/forms/signals';
 import { RouterLink } from '@angular/router';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
 import { BusyButton } from '../../core/ui/busy-button';
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Pager } from '../../core/ui/pager';
 import { ApprovalsStore } from './approvals.store';
 import { escalatesIn, waitedFor } from './inbox-time';

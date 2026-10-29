@@ -1,8 +1,8 @@
-import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, computed, effect, input, output, signal, untracked } from '@angular/core';
 import { applyEach, form, FormField, maxLength, submit, validate } from '@angular/forms/signals';
 import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto';
 import { BusyButton } from '../../core/ui/busy-button';
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { ReceiptInput } from './order-detail.store';
 
 interface Row {

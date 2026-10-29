@@ -24,7 +24,7 @@ const NAMES_SHOWN = 3;
         <p class="mt-1 text-slate-600">Welcome back, {{ user.name }}.</p>
       }
 
-      <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(15rem,1fr))]">
+      <div [class]="tilesClass()" class="mt-6 grid gap-4 sm:grid-cols-2">
         @if (store.tiles().approvals) {
           <div data-tile="approvals" class="card flex flex-col gap-1">
             <a routerLink="/app/approvals" class="text-sm text-slate-600 hover:underline">Waiting for my approval</a>
@@ -132,6 +132,13 @@ export class DashboardPage implements OnInit {
   protected readonly store = inject(DashboardStore);
   private readonly presence = inject(PresenceStore);
   private readonly now = signal(Date.now());
+
+  /** Four tiles fill a row at lg; any other number goes three to a row, so no tile is left alone on the last row. */
+  protected readonly tilesClass = computed(() => {
+    const t = this.store.tiles();
+    const count = (t.approvals ? 1 : 0) + (t.myOpen ? 1 : 0) + (t.budgets ? Math.max(1, this.store.budgetTiles().length) : 0) + (t.mismatched ? 1 : 0);
+    return count === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3';
+  });
 
   /** The first three names online (me excluded) and how many more there are. */
   protected readonly online = computed(() => {

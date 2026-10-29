@@ -43,6 +43,11 @@
     @apply bg-indigo-50 text-indigo-800;
   }
 
+  /* A nav that scrolls sideways fades at its right edge while more lies beyond it. */
+  .nav-fade-end {
+    mask-image: linear-gradient(to right, black calc(100% - 2.5rem), transparent);
+  }
+
   .card {
     @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm;
   }

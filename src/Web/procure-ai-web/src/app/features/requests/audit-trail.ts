@@ -1,6 +1,6 @@
-import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, computed, input } from '@angular/core';
 import { BusinessEventDto } from '../../api/audit/models/business-event-dto';
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { formatWhen } from './workflow-timeline';
 
 /** The business history of one request, newest first: when, what happened (the sentence Audit wrote), and the event type. */

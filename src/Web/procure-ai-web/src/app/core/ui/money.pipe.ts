@@ -23,7 +23,7 @@ export class RandPipe implements PipeTransform {
  * a no-break one, so a sentence never wraps between the R and its number.
  */
 export function keepRand(text: string | null | undefined): string {
-  return (text ?? '').replace(/R (?=\d)/g, 'R\u00a0');
+  return (text ?? '').replace(/\bR (?=\d)/g, 'R\u00a0');
 }
 
 /** `{{ sentence | keepRand }}`: a server sentence with its amounts kept in one piece. */

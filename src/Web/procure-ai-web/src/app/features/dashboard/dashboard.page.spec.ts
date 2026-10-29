@@ -29,6 +29,18 @@ describe('DashboardPage', () => {
     expect(text(el)).toContain('Recent activity');
   });
 
+  it('five tiles go three to a row at lg, so none is left alone on the last row', async () => {
+    const { el } = await render(['requests.read', 'requests.approve', 'budgets.read', 'invoices.read'], ['IT-200', 'OPS-100']);
+    expect(el.querySelectorAll('[data-tile]').length).toBe(5);
+    expect(el.querySelector('[data-tile="approvals"]')!.parentElement!.className).toContain('lg:grid-cols-3');
+  });
+
+  it('four tiles go four to a row at lg', async () => {
+    const { el } = await render(['requests.read', 'requests.approve', 'budgets.read', 'invoices.read']);
+    expect(el.querySelectorAll('[data-tile]').length).toBe(4);
+    expect(el.querySelector('[data-tile="approvals"]')!.parentElement!.className).toContain('lg:grid-cols-4');
+  });
+
   it('a manager sees every tile with its numbers', async () => {
     const { el } = await render(['requests.read', 'requests.approve', 'budgets.read', 'invoices.read']);
     expect(text(el.querySelector('[data-tile="approvals"]'))).toContain('3');

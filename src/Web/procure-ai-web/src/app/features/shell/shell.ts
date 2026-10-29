@@ -1,4 +1,5 @@
-import { Component, computed, effect, inject, untracked } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, signal, untracked, viewChild } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@angular/aria/menu';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { ApprovalsStore } from '../approvals/approvals.store';
@@ -22,6 +23,7 @@ interface NavLink {
  */
 @Component({
   selector: 'app-shell',
+  host: { '(window:resize)': 'updateFade()' },
   imports: [RouterLink, RouterLinkActive, RouterOutlet, Menu, MenuContent, MenuItem, MenuTrigger, BellMenu, LiveIndicator, OnlineUsers],
   template: `
     <a
@@ -37,16 +39,17 @@ interface NavLink {
           <span aria-hidden="true" class="text-indigo-700">&#9670;</span> Procure<span class="text-indigo-700">AI</span>
         </a>
 
-        <nav aria-label="Main" class="order-3 -mx-4 flex w-[calc(100%+2rem)] items-center gap-1 overflow-x-auto px-4 py-1 lg:order-none lg:mx-0 lg:w-auto lg:flex-wrap lg:overflow-visible lg:px-0">
+        <nav #nav aria-label="Main" [class.nav-fade-end]="fadeEnd()" (scroll)="updateFade()" class="order-3 -mx-4 flex w-[calc(100%+2rem)] items-center gap-1 overflow-x-auto px-4 py-1 lg:order-none lg:mx-0 lg:w-auto lg:flex-wrap lg:overflow-visible lg:px-0">
           @if (!auth.isLoggedIn()) {
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" class="nav-link">Welcome</a>
           }
           @if (auth.isLoggedIn()) {
-            <a routerLink="/app/dashboard" routerLinkActive="active" class="nav-link">Dashboard</a>
+            <a routerLink="/app/dashboard" routerLinkActive="active" (isActiveChange)="$event && revealActive()" class="nav-link">Dashboard</a>
             @for (link of links(); track link.path) {
               <a
                 [routerLink]="'/app/' + link.path"
                 routerLinkActive="active"
+                (isActiveChange)="$event && revealActive()"
                 class="nav-link"
                 [attr.aria-label]="link.count ? link.label + ', ' + link.count + ' waiting' : null"
               >
@@ -110,6 +113,9 @@ interface NavLink {
   `,
 })
 export class Shell {
+  private readonly nav = viewChild<ElementRef<HTMLElement>>('nav');
+  /** True while more of the phone nav lies off to the right: the nav then fades out at its right edge. */
+  protected readonly fadeEnd = signal(false);
   protected readonly auth = inject(AuthStore);
   protected readonly live = inject(LiveConnection);
   private readonly notifications = inject(NotificationsStore);
@@ -135,6 +141,9 @@ export class Shell {
   });
 
   constructor() {
+    // On phones the nav scrolls sideways: the active link is brought into view when it becomes active (isActiveChange on each link) and when the links appear.
+    toObservable(this.links).pipe(takeUntilDestroyed()).subscribe(() => this.revealActive());
+
     // Fill the bell and the approvals count once somebody is signed in (the connection itself is started by the app initializer).
     effect(() => {
       if (this.auth.isLoggedIn()) {
@@ -147,6 +156,19 @@ export class Shell {
         });
       }
     });
+  }
+
+  /** Scrolls the active nav link into view (after the router has marked it) and refreshes the fade. */
+  protected revealActive(): void {
+    setTimeout(() => {
+      this.nav()?.nativeElement.querySelector('a.active')?.scrollIntoView?.({ inline: 'center', block: 'nearest' });
+      this.updateFade();
+    });
+  }
+
+  protected updateFade(): void {
+    const el = this.nav()?.nativeElement;
+    this.fadeEnd.set(!!el && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
   }
 
   protected onMenuItem(value: string | undefined): void {

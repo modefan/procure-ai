@@ -1,4 +1,3 @@
-import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, computed, effect, inject, input, untracked } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
@@ -6,6 +5,7 @@ import { RequestDto } from '../../api/requests/models/request-dto';
 import { PresenceStore } from '../../core/live/presence.store';
 import { BusyButton } from '../../core/ui/busy-button';
 import { ConfirmDialog } from '../../core/ui/confirm-dialog';
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { AuditTrail } from './audit-trail';
 import { RequestDetailStore } from './request-detail.store';
 import { StatusBadge } from './status-badge';

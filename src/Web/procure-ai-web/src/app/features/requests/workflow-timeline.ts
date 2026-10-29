@@ -1,4 +1,3 @@
-import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, input } from '@angular/core';
 import { ApprovalChainDto } from '../../api/approvals/models/approval-chain-dto';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
@@ -6,6 +5,7 @@ import { BusinessEventDto } from '../../api/audit/models/business-event-dto';
 import { InvoiceDto } from '../../api/invoicing/models/invoice-dto';
 import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto';
 import { RequestDto } from '../../api/requests/models/request-dto';
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 
 /**
  * done = happened, active = happening now, warn = needs attention (moved up, retrying, mismatch), failed = ended badly,

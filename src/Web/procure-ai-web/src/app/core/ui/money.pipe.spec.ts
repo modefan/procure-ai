@@ -41,6 +41,14 @@ describe('keepRand', () => {
     expect(text).toBe('R\u00a086 940,00 reserved on IT-200, R\u00a05,00 left (R is a letter)');
   });
 
+  it('leaves letters before an R alone (PR 12, DR 5)', () => {
+    expect(keepRand('See PR 12 and DR 5, then R 5,00')).toBe('See PR 12 and DR 5, then R 5,00');
+  });
+
+  it('leaves letters before an R alone (PR 12, DR 5)', () => {
+    expect(keepRand('See PR 12 and DR 5, then R 5,00')).toBe('See PR 12 and DR 5, then R 5,00');
+  });
+
   it('leaves a sentence without amounts alone, and copes with nothing', () => {
     expect(keepRand('Approved by Maria')).toBe('Approved by Maria');
     expect(keepRand(null)).toBe('');

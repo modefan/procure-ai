@@ -16,8 +16,6 @@ paid (for example a R 86 940,00 order), with cancellation and rejection returnin
 all visible in the app, which updates live as other people act. The AI assistant, invoice scanning and the admin screens
 arrive in later plans.
 
-![Dashboard](docs/screenshots/dashboard.png)
-
 ## Architecture at a glance
 
 ```mermaid

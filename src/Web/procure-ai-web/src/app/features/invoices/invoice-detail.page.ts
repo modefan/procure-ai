@@ -1,4 +1,3 @@
-import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { DatePipe } from '@angular/common';
 import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField, submit, validate } from '@angular/forms/signals';
@@ -9,6 +8,7 @@ import { PayLineBody } from '../../api/invoicing/models/pay-line-body';
 import { AuthStore } from '../../core/auth/auth.store';
 import { ReferenceDataStore } from '../../core/reference/reference-data.store';
 import { BusyButton } from '../../core/ui/busy-button';
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { StatusBadge } from '../requests/status-badge';
 import { VAT_RATE_PERCENT } from '../requests/request-lines';
 import { InvoiceDetailStore } from './invoice-detail.store';

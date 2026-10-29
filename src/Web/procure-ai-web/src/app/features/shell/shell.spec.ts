@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
 import { ApprovalsStore } from '../approvals/approvals.store';
 import { LiveConnection, LiveState } from '../../core/live/live-connection';
@@ -93,6 +93,84 @@ describe('Shell header', () => {
     const el = await render();
     const link = [...el.querySelectorAll('nav a')].find((a) => text(a)?.startsWith('Approvals'))!;
     expect(text(link)).toBe('Approvals');
+  });
+
+
+  it('scrolls the active nav link into view after a navigation (the phone nav scrolls sideways)', async () => {
+    signIn(['requests.read', 'orders.read', 'invoices.read', 'budgets.read']);
+    const scrolled: string[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: Element, options?: boolean | ScrollIntoViewOptions) {
+      scrolled.push(this.textContent?.trim() + '|' + JSON.stringify(options));
+    };
+    try {
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      TestBed.inject(Router).resetConfig([{ path: 'app/budgets', children: [] }]);
+      await TestBed.inject(Router).navigateByUrl('/app/budgets');
+      fixture.detectChanges();
+      for (let i = 0; i < 40 && scrolled.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(scrolled).toContain('Budgets|{"inline":"center","block":"nearest"}');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('the nav fades at its right edge only while it overflows', async () => {
+    signIn(['requests.read']);
+    const fixture = TestBed.createComponent(Shell);
+    fixture.detectChanges();
+    const nav = (fixture.nativeElement as HTMLElement).querySelector('nav')!;
+    expect(nav.classList.contains('nav-fade-end')).toBe(false);
+    Object.defineProperty(nav, 'scrollWidth', { configurable: true, value: 600 });
+    Object.defineProperty(nav, 'clientWidth', { configurable: true, value: 358 });
+    nav.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(nav.classList.contains('nav-fade-end')).toBe(true);
+    Object.defineProperty(nav, 'scrollLeft', { configurable: true, value: 242 });
+    nav.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(nav.classList.contains('nav-fade-end')).toBe(false);
+  });
+
+  it('scrolls the active nav link into view after a navigation (the phone nav scrolls sideways)', async () => {
+    signIn(['requests.read', 'orders.read', 'invoices.read', 'budgets.read']);
+    const scrolled: string[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: Element, options?: boolean | ScrollIntoViewOptions) {
+      scrolled.push(this.textContent?.trim() + '|' + JSON.stringify(options));
+    };
+    try {
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      const router = TestBed.inject(Router);
+      router.resetConfig([{ path: 'app/budgets', children: [] }]);
+      await router.navigateByUrl('/app/budgets');
+      fixture.detectChanges();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(scrolled).toContain('Budgets|{"inline":"center","block":"nearest"}');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('the nav fades at its right edge only while it overflows', async () => {
+    signIn(['requests.read']);
+    const fixture = TestBed.createComponent(Shell);
+    fixture.detectChanges();
+    const nav = (fixture.nativeElement as HTMLElement).querySelector('nav')!;
+    expect(nav.classList.contains('nav-fade-end')).toBe(false);
+    Object.defineProperty(nav, 'scrollWidth', { configurable: true, value: 600 });
+    Object.defineProperty(nav, 'clientWidth', { configurable: true, value: 358 });
+    nav.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(nav.classList.contains('nav-fade-end')).toBe(true);
+    Object.defineProperty(nav, 'scrollLeft', { configurable: true, value: 242 });
+    nav.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(nav.classList.contains('nav-fade-end')).toBe(false);
   });
 
   it('signed out shows only Log in and Register and no live widgets', async () => {
