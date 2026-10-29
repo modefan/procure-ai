@@ -4,6 +4,7 @@ using ProcureAi.Audit.Application.Dtos;
 using ProcureAi.Contracts;
 using ProcureAi.Testing;
 using ProcureAi.Contracts.Budgets;
+using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Requests;
 using Shouldly;
 
@@ -80,7 +81,7 @@ public sealed class ActivityTests(AuditApp app)
         await app.WaitForStoredAsync(acme, s => s.Count == 1);
         await app.WaitForStoredAsync(globex, s => s.Count == 1);
 
-        using var response = await app.Client.SendAsync(AuditApp.Get(Activity, TestAuth.CreateToken("rita", acme, "requester")), Ct);
+        using var response = await app.Client.SendAsync(AuditApp.Get(Activity, TestAuth.CreateToken("fiona", acme, "finance")), Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
         var feed = (await response.Content.ReadFromJsonAsync<List<ActivityDto>>(Ct))!;
@@ -105,5 +106,62 @@ public sealed class ActivityTests(AuditApp app)
             using var response = await app.Client.SendAsync(AuditApp.GetWithApiKey($"{Activity}?limit={bad}", tenant), Ct);
             response.StatusCode.ShouldBe(HttpStatusCode.BadRequest, bad);
         }
+    }
+
+    private async Task<List<ActivityDto>> ReadAsAsync(string tenant, string role)
+    {
+        using var response = await app.Client.SendAsync(AuditApp.Get(Activity, TestAuth.CreateToken($"{role}-user", tenant, role)), Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        return (await response.Content.ReadFromJsonAsync<List<ActivityDto>>(Ct)).ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Final review ruling: the feed is tenant-wide, but budget amounts and invoice and payment events belong to people who may see
+    /// them. A requester gets the request events only; finance (budgets.manage, invoices.release-payment) and the admin key get all.
+    /// </summary>
+    [Fact]
+    public async Task Budget_invoice_and_payment_events_are_for_finance_not_for_a_requester()
+    {
+        var tenant = AuditApp.NewTenant();
+        var request = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        await app.PublishAsync(new RequestSubmitted(request, tenant, "PR-7", "Laptop", Tom, "FIN-100", 30_000m, now.AddMinutes(-10), "SUP-1", []),
+            Exchanges.Requests, tenant, Tom);
+        await app.PublishAsync(new BudgetReserved(request, tenant, "FIN-100", "FY2027", 30_000m, now.AddMinutes(-9)), Exchanges.Budgets, tenant, Tom);
+        await app.PublishAsync(new BudgetAmountSet(tenant, "FIN-100", "FY2027", 150_000m, 3, now.AddMinutes(-8)), Exchanges.Budgets, tenant, "fiona");
+        await app.PublishAsync(
+            new PaymentReleased(Guid.NewGuid(), "PAY-1", Guid.NewGuid(), Guid.NewGuid(), request, tenant, 115m, [], "fiona", now.AddMinutes(-7)),
+            Exchanges.Invoicing, tenant, "fiona");
+        await app.PublishAsync(new InvoiceMatched(Guid.NewGuid(), Guid.NewGuid(), request, tenant, now.AddMinutes(-6)), Exchanges.Invoicing, tenant, "fiona");
+        await app.WaitForStoredAsync(tenant, s => s.Count == 5);
+
+        var requester = await ReadAsAsync(tenant, "requester");
+        var finance = await ReadAsAsync(tenant, "finance");
+        var admin = await ReadAsync(tenant);
+
+        requester.Select(f => f.EventType).ShouldBe(["RequestSubmitted"]);
+        requester.Any(f => f.Summary.Contains("150")).ShouldBeFalse("a budget amount is not for every requests.read user");
+        finance.Select(f => f.EventType).ShouldBe(["InvoiceMatched", "PaymentReleased", "BudgetAmountSet", "BudgetReserved", "RequestSubmitted"]);
+        admin.Count.ShouldBe(5);
+    }
+
+    /// <summary>The limit counts only what the caller may see: hidden events do not eat into the page.</summary>
+    [Fact]
+    public async Task Hidden_events_do_not_use_up_the_limit()
+    {
+        var tenant = AuditApp.NewTenant();
+        var now = DateTimeOffset.UtcNow;
+        await app.PublishAsync(new RequestSubmitted(Guid.NewGuid(), tenant, "PR-1", "Old", Tom, "IT-200", 1m, now.AddMinutes(-30), "SUP-1", []),
+            Exchanges.Requests, tenant, Tom);
+        for (var i = 0; i < 3; i++)
+        {
+            await app.PublishAsync(new BudgetReserved(Guid.NewGuid(), tenant, "IT-200", "FY2027", 1m, now.AddMinutes(-i)), Exchanges.Budgets, tenant, Tom);
+        }
+
+        await app.WaitForStoredAsync(tenant, s => s.Count == 4);
+        using var response = await app.Client.SendAsync(
+            AuditApp.Get(Activity + "?limit=2", TestAuth.CreateToken("req-user", tenant, "requester")), Ct);
+
+        (await response.Content.ReadFromJsonAsync<List<ActivityDto>>(Ct))!.Select(f => f.EventType).ShouldBe(["RequestSubmitted"]);
     }
 }

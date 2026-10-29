@@ -43,11 +43,13 @@ public sealed class MartenAuditStore(IDocumentStore store) : IAuditStore
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<BusinessEvent>> LatestAsync(string tenantId, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<BusinessEvent>> LatestAsync(
+        string tenantId, int limit, IReadOnlyCollection<string> excludedTypes, CancellationToken cancellationToken)
     {
         await using var session = store.QuerySession();
+        var excluded = excludedTypes.ToArray();
         return await session.Query<BusinessEvent>()
-            .Where(e => e.TenantId == tenantId)
+            .Where(e => e.TenantId == tenantId && !excluded.Contains(e.Type))
             .OrderByDescending(e => e.OccurredAt).ThenByDescending(e => e.Id)
             .Take(limit)
             .ToListAsync(cancellationToken);

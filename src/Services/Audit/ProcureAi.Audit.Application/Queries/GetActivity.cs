@@ -6,12 +6,38 @@ using ProcureAi.Audit.Application.Dtos;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Domain;
+using ProcureAi.Contracts;
 using ProcureAi.Contracts.Requests;
 
 namespace ProcureAi.Audit.Application.Queries;
 
-/// <summary>The latest business events of the caller tenant, newest first.</summary>
-public sealed record GetActivity(int Limit);
+/// <summary>
+/// The latest business events of the caller tenant, newest first. Budget events (amounts of cost centers the caller may not see) and
+/// invoice and payment events are left out unless the caller may see them all: <paramref name="IncludeBudgetEvents"/> is for
+/// <c>budgets.manage</c>, <paramref name="IncludeFinanceEvents"/> for finance (<c>invoices.release-payment</c>) and the admin key.
+/// </summary>
+public sealed record GetActivity(int Limit, bool IncludeBudgetEvents, bool IncludeFinanceEvents)
+{
+    /// <summary>The event types a caller without the wider view must not see, from the contract namespaces of Budgets and Invoicing.</summary>
+    public IReadOnlyCollection<string> ExcludedTypes =>
+        [.. (IncludeBudgetEvents ? [] : ActivityEventTypes.Budget), .. (IncludeFinanceEvents ? [] : ActivityEventTypes.Finance)];
+}
+
+/// <summary>Event type names by area, taken from the contracts so a new Budgets or Invoicing event is hidden by default.</summary>
+public static class ActivityEventTypes
+{
+    public static IReadOnlyList<string> Budget { get; } = NamesIn("ProcureAi.Contracts.Budgets");
+
+    public static IReadOnlyList<string> Finance { get; } = NamesIn("ProcureAi.Contracts.Invoicing");
+
+    private static string[] NamesIn(string contractNamespace) =>
+    [
+        .. typeof(IIntegrationEvent).Assembly.GetTypes()
+            .Where(t => t.Namespace == contractNamespace && t.IsClass && typeof(IIntegrationEvent).IsAssignableFrom(t))
+            .Select(t => t.Name)
+            .Order(StringComparer.Ordinal),
+    ];
+}
 
 public static class GetActivityHandler
 {
@@ -27,7 +53,7 @@ public static class GetActivityHandler
         ILogger<GetActivity> logger, CancellationToken cancellationToken)
     {
         var tenant = caller.TenantId ?? throw new NotFoundException("No tenant.");
-        var latest = await store.LatestAsync(tenant, query.Limit, cancellationToken);
+        var latest = await store.LatestAsync(tenant, query.Limit, query.ExcludedTypes, cancellationToken);
         if (latest.Count == 0)
         {
             return [];

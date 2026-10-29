@@ -1,14 +1,13 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using ProcureAi.Audit.Application.Dtos;
 using ProcureAi.Audit.Application.Queries;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
-using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
+using ProcureAi.BuildingBlocks.Web.Paging;
 using Wolverine;
 
 namespace ProcureAi.Audit.Api.Controllers;
