@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Options;
+using ProcureAi.Assistant.Application.Ingestion;
 
 namespace ProcureAi.Assistant.Application;
 
@@ -13,6 +14,10 @@ public sealed class AssistantOptions
 
     [Required, ValidateObjectMembers]
     public QuotaOptions Quota { get; set; } = new();
+
+    /// <summary>How documents are cut into chunks (<c>Assistant:Chunking</c>).</summary>
+    [Required, ValidateObjectMembers]
+    public ChunkingOptions Chunking { get; set; } = new();
 }
 
 public sealed class ToolOptions

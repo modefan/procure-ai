@@ -17,6 +17,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="Pgvector.EntityFrameworkCore" />
+    <!-- PDF text extraction (Apache 2.0), plan 05 ruling: Infrastructure only. -->
+    <PackageReference Include="PdfPig" />
     <PackageReference Include="WolverineFx.EntityFrameworkCore" />
     <PackageReference Include="WolverineFx.RuntimeCompilation" />
     <PackageReference Include="Microsoft.Extensions.AI" />

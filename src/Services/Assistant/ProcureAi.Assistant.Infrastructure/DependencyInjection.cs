@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.Assistant.Application;
 using ProcureAi.Assistant.Application.Abstractions;
 using ProcureAi.Assistant.Infrastructure.Ai;
+using ProcureAi.Assistant.Infrastructure.Ingestion;
 using ProcureAi.Assistant.Infrastructure.Mongo;
 using ProcureAi.Assistant.Infrastructure.Persistence;
 using ProcureAi.BuildingBlocks.Messaging;
@@ -41,6 +42,7 @@ public static class DependencyInjection
 
         services.AddAssistantChatDatabase(configuration, ChatDatabaseConnectionName);
         services.AddAssistantAi(configuration);
+        services.AddAssistantIngestion();
         return services;
     }
 
