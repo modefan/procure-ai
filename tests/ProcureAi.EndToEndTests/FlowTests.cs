@@ -56,6 +56,37 @@ public sealed class FlowTests(AppFixture fixture)
         (await tom.EvaluateAsync<bool>("window.__noReload === true")).ShouldBeTrue("the page was reloaded");
     }
 
+    /// <summary>
+    /// Final review I2: Notifications and Requests read the approval event at the same moment, so the push can beat the status write.
+    /// Tom's request list, left open in a second tab, must still end up with the new status (the trailing reload), without a reload.
+    /// </summary>
+    [Fact]
+    public async Task Requests_list_in_another_tab_shows_the_new_status_after_an_approval()
+    {
+        fixture.RequireReady();
+        var (_, number) = await fixture.SubmitRequestAsync(NewTitle("E2E list"));
+
+        await using var tomContext = await fixture.NewContextAsync();
+        var tom = await tomContext.NewPageAsync();
+        await Pages.LogInAsync(fixture, tom, AppFixture.DemoUser, "/app/requests");
+        var rowTom = tom.Locator("tr").Filter(new() { HasText = number });
+        await Assertions.Expect(rowTom.Locator("app-status-badge")).ToHaveTextAsync("Submitted", new() { Timeout = Pages.Timeout });
+        await Pages.ExpectLiveAsync(tom);
+        await tom.EvaluateAsync("window.__noReload = true");
+
+        await using var mariaContext = await fixture.NewContextAsync("maria");
+        var maria = await mariaContext.NewPageAsync();
+        await Pages.LogInAsync(fixture, maria, "maria@acme.test", "/app/approvals");
+        var row = Pages.InboxRow(maria, number);
+        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
+        await row.Locator("[data-action=approve] button").ClickAsync();
+        await Assertions.Expect(row).ToHaveCountAsync(0, new() { Timeout = Pages.Timeout });
+
+        await Assertions.Expect(rowTom.Locator("app-status-badge")).ToHaveTextAsync(new Regex("^(Approved|Ordered|Completed)$"), new() { Timeout = Pages.Timeout });
+        (await tom.EvaluateAsync<bool>("window.__noReload === true")).ShouldBeTrue("the page was reloaded");
+        await tom.ScreenshotAsync(new() { Path = Path.Combine(AppFixture.ArtifactsDirectory, "final-requests-list-live.png") });
+    }
+
     [Fact]
     public async Task Maria_sees_Tom_viewing_the_request()
     {
