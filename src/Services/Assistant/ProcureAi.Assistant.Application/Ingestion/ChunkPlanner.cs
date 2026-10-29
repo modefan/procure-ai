@@ -11,7 +11,11 @@ namespace ProcureAi.Assistant.Application.Ingestion;
 /// <param name="ParentOrdinal">The parent's <paramref name="Ordinal"/> for a child; null for a parent.</param>
 /// <param name="SectionPath">The headings above the text.</param>
 /// <param name="Text">The normalised text.</param>
-/// <param name="ContentHash">Hex SHA-256 of the section path joined with <c> &gt; </c>, a newline and the normalised text.</param>
+/// <param name="ContentHash">
+/// Hex SHA-256 of the section path joined with <c> &gt; </c>, a newline and the normalised text. It does not include the kind: the parent
+/// and the only child of a short section have the same path and text, hence the same hash. That is intended. Reuse of an embedding or
+/// context is keyed by (kind, content hash, embedding model), and only children are embedded.
+/// </param>
 public sealed record PlannedChunk(
     int Ordinal, ChunkKind Kind, int? ParentOrdinal, IReadOnlyList<string> SectionPath, string Text, string ContentHash);
 
@@ -28,12 +32,14 @@ public sealed partial class ChunkPlanner
     private readonly int _minChars;
     private readonly int _maxChars;
     private readonly int _overlapChars;
+    private readonly int _maxParentChars;
 
     public ChunkPlanner(ChunkingOptions options)
     {
         _minChars = options.MinTokens * CharsPerToken;
         _maxChars = options.MaxTokens * CharsPerToken;
         _overlapChars = _maxChars * options.OverlapPercent / 100;
+        _maxParentChars = options.MaxParentTokens * CharsPerToken;
     }
 
     public IReadOnlyList<PlannedChunk> Plan(ExtractedDocument document)
@@ -48,12 +54,12 @@ public sealed partial class ChunkPlanner
             }
 
             var path = group[0].Path;
-            var parentOrdinal = chunks.Count;
-            var parentText = string.Join("\n\n", pieces.Select(p => p.Text));
-            chunks.Add(new PlannedChunk(parentOrdinal, ChunkKind.Parent, null, path, parentText, Hash(path, parentText)));
-            foreach (var (text, isTable) in pieces)
+            foreach (var window in ParentWindows(pieces))
             {
-                foreach (var child in isTable ? [text] : Split(text))
+                var parentOrdinal = chunks.Count;
+                var parentText = window.Text;
+                chunks.Add(new PlannedChunk(parentOrdinal, ChunkKind.Parent, null, path, parentText, Hash(path, parentText)));
+                foreach (var child in window.Children)
                 {
                     chunks.Add(new PlannedChunk(chunks.Count, ChunkKind.Child, parentOrdinal, path, child, Hash(path, child)));
                 }
@@ -61,6 +67,73 @@ public sealed partial class ChunkPlanner
         }
 
         return chunks;
+    }
+
+    /// <summary>
+    /// Cuts a section into parents: the whole section when it fits <c>MaxParentTokens</c>, else windows of whole children (a table is
+    /// its own window when it alone is over the cap). Neighbouring windows share the overlap of the children where they meet.
+    /// </summary>
+    private List<(string Text, List<string> Children)> ParentWindows(List<(string Text, bool IsTable)> pieces)
+    {
+        var windows = new List<(string Text, List<string> Children)>();
+        var parts = new List<string>();
+        var children = new List<string>();
+        var covered = 0;
+        var pieceStart = 0;
+        var pieceEnd = 0;
+        var openPiece = -1;
+
+        void Close()
+        {
+            if (openPiece >= 0)
+            {
+                parts.Add(pieces[openPiece].Text[pieceStart..pieceEnd].Trim());
+            }
+
+            if (children.Count > 0)
+            {
+                windows.Add((string.Join("\n\n", parts), children));
+            }
+
+            parts = [];
+            children = [];
+            covered = 0;
+            openPiece = -1;
+        }
+
+        for (var p = 0; p < pieces.Count; p++)
+        {
+            var (text, isTable) = pieces[p];
+            foreach (var (start, end) in isTable ? [(0, text.Length)] : Split(text))
+            {
+                var sameWindowPiece = openPiece == p;
+                var added = sameWindowPiece ? end - pieceEnd : end - start + (children.Count > 0 ? 2 : 0);
+                if (children.Count > 0 && covered + added > _maxParentChars)
+                {
+                    Close();
+                    added = end - start;
+                    sameWindowPiece = false;
+                }
+
+                if (!sameWindowPiece)
+                {
+                    if (openPiece >= 0)
+                    {
+                        parts.Add(pieces[openPiece].Text[pieceStart..pieceEnd].Trim());
+                    }
+
+                    openPiece = p;
+                    pieceStart = start;
+                }
+
+                pieceEnd = end;
+                covered += added;
+                children.Add(text[start..end].Trim());
+            }
+        }
+
+        Close();
+        return windows;
     }
 
     private static List<List<Section>> GroupBySection(IReadOnlyList<Section> sections)
@@ -81,28 +154,28 @@ public sealed partial class ChunkPlanner
         return groups;
     }
 
-    /// <summary>Cuts normalised text into windows of <c>_minChars.._maxChars</c>, each starting inside the end of the one before.</summary>
-    private List<string> Split(string text)
+    /// <summary>Cuts normalised text into spans of <c>_minChars.._maxChars</c>, each starting inside the end of the one before.</summary>
+    private List<(int Start, int End)> Split(string text)
     {
         if (text.Length <= _maxChars)
         {
-            return [text];
+            return [(0, text.Length)];
         }
 
-        var result = new List<string>();
+        var result = new List<(int Start, int End)>();
         var start = 0;
         while (true)
         {
             if (text.Length - start <= _maxChars)
             {
-                result.Add(text[start..].Trim());
+                result.Add((start, text.Length));
                 return result;
             }
 
             // The next child starts about _overlapChars before this one's end, so end must leave it at least _minChars of text.
             var high = Math.Min(start + _maxChars, text.Length - _minChars + _overlapChars);
             var end = FindBreak(text, start + _minChars, high);
-            result.Add(text[start..end].Trim());
+            result.Add((start, end));
             start = NextStart(text, start, end);
         }
     }
@@ -163,7 +236,7 @@ public sealed partial class ChunkPlanner
     private static string Hash(IReadOnlyList<string> path, string text) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(" > ", path) + "\n" + text)));
 
-    [GeneratedRegex(@"[ \t]+")]
+    [GeneratedRegex(@"[\p{Zs}\t]+")]
     private static partial Regex SpaceRuns();
 
     [GeneratedRegex(@"\n{3,}")]

@@ -84,12 +84,14 @@ public sealed class ChunkingTests
                 overlap.ShouldBeLessThanOrEqualTo((3200 * 12 / 100) + 20);
             }
 
-            // Nothing is lost: every word of the parent is in some child.
-            var all = string.Join(' ', children.Select(c => c.Text));
-            foreach (var word in parent.Text.Split([' ', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            // Nothing is lost: joining the children without their overlaps gives the section text back.
+            var rebuilt = children[0].Text;
+            for (var i = 1; i < children.Count; i++)
             {
-                all.ShouldContain(word);
+                rebuilt += children[i].Text[LongestSuffixPrefix(children[i - 1].Text, children[i].Text)..];
             }
+
+            rebuilt.ShouldBe(parent.Text);
         }
     }
 
@@ -104,7 +106,29 @@ public sealed class ChunkingTests
         children.Count.ShouldBeGreaterThan(3);
         children.ShouldAllBe(c => Tokens(c.Text) <= 800);
         children.ShouldAllBe(c => Tokens(c.Text) >= 300);
-        children.ShouldAllBe(c => c.Text.StartsWith("word") && !c.Text.EndsWith("wor") && !c.Text.EndsWith("word"), "no word is cut in half");
+        // Every child is a run of whole words, consecutive in the input; together they reach both ends.
+        var firstIndexes = new List<int>();
+        foreach (var child in children)
+        {
+            var words = child.Text.Split(' ');
+            var first = int.Parse(words[0]["word".Length..]);
+            words.ShouldBe(Enumerable.Range(first, words.Length).Select(i => $"word{i}"));
+            firstIndexes.Add(first);
+        }
+
+        firstIndexes[0].ShouldBe(0);
+        children[^1].Text.ShouldEndWith("word2499");
+    }
+
+    [Fact]
+    public void A_giant_word_still_splits_and_terminates()
+    {
+        var document = new ExtractedDocument([new Section(["Doc"], new string('x', 20_000), false)]);
+
+        var children = Planner().Plan(document).Where(c => c.Kind == ChunkKind.Child).ToList();
+
+        children.Count.ShouldBeGreaterThan(5);
+        children.ShouldAllBe(c => Tokens(c.Text) <= 800);
     }
 
     [Fact]
@@ -184,11 +208,96 @@ public sealed class ChunkingTests
     }
 
     [Fact]
+    public void Parent_cap_below_child_size_fails_validation()
+    {
+        var options = new ChunkingOptions { MaxTokens = 800, MaxParentTokens = 500 };
+
+        Validator.TryValidateObject(options, new ValidationContext(options), [], true).ShouldBeFalse();
+        var defaults = new ChunkingOptions();
+        Validator.TryValidateObject(defaults, new ValidationContext(defaults), [], true).ShouldBeTrue();
+    }
+
+    [Fact]
     public void Invalid_chunking_options_fail_validation()
     {
         var options = new ChunkingOptions { MinTokens = 500, MaxTokens = 600 };
 
         Validator.TryValidateObject(options, new ValidationContext(options), [], true).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Pdf_table_keeps_its_cells_through_planning()
+    {
+        var chunks = Planner().Plan(ExtractPdf()).Where(c => c.Kind == ChunkKind.Child && c.Text.Contains("Executive committee")).ToList();
+
+        chunks.Count.ShouldBe(1);
+        var rows = chunks[0].Text.Split('\n');
+        rows.Length.ShouldBe(5);
+        rows.ShouldAllBe(r => r.Split(" | ").Length == 3, "three cells per row");
+        rows.ShouldContain("Up to R 20 000,00 | Line manager | 2 working days");
+        rows[0].ShouldBe("Amount (ZAR) | Approver | Maximum time to decide");
+    }
+
+    [Fact]
+    public void Undetected_headings_give_bounded_parents()
+    {
+        var paragraph = string.Join(' ', Enumerable.Range(0, 90).Select(i => $"Sentence number {i} says something."));
+        var text = string.Join("\n\n", Enumerable.Repeat(paragraph, 12));
+        var document = new ExtractedDocument([new Section([], text, false)]);
+
+        var chunks = Planner().Plan(document);
+
+        var parents = chunks.Where(c => c.Kind == ChunkKind.Parent).ToList();
+        parents.Count.ShouldBeGreaterThan(1);
+        parents.ShouldAllBe(p => Tokens(p.Text) <= 2000);
+        foreach (var child in chunks.Where(c => c.Kind == ChunkKind.Child))
+        {
+            var parent = parents.Single(p => p.Ordinal == child.ParentOrdinal);
+            parent.Text.ShouldContain(child.Text);
+        }
+    }
+
+    [Fact]
+    public void Parent_and_child_of_short_section_differ_by_kind_not_hash()
+    {
+        var chunks = Planner().Plan(new ExtractedDocument([new Section(["Doc", "1 A"], "Orders need approval.", false)]));
+
+        chunks.Count.ShouldBe(2);
+        chunks[0].ContentHash.ShouldBe(chunks[1].ContentHash, "same path and text");
+        chunks.Select(c => (c.Kind, c.ContentHash)).Distinct().Count().ShouldBe(2, "reuse is keyed by (kind, hash)");
+    }
+
+    [Fact]
+    public void Non_breaking_and_other_unicode_spaces_are_normalised_like_spaces()
+    {
+        static ExtractedDocument Doc(string text) => new([new Section(["Doc"], text, false)]);
+
+        var plain = Planner().Plan(Doc("Orders need approval above R 5 000,00."));
+        var odd = Planner().Plan(Doc("Orders\u00A0need\u2009approval  above\u3000R\u00A05\u202F000,00."));
+
+        odd[1].Text.ShouldBe(plain[1].Text);
+        odd[1].ContentHash.ShouldBe(plain[1].ContentHash);
+    }
+
+    [Fact]
+    public void Markdown_closing_hashes_are_stripped_only_after_a_space()
+    {
+        const string markdown = "## Learning C#\nText one.\n\n## Closed ##\nText two.\n\n### Tagged C# ###\nText three.\n";
+
+        var sections = new MarkdownTextExtractor().Extract(new MemoryStream(Encoding.UTF8.GetBytes(markdown))).Sections;
+
+        sections.Select(s => s.Path[^1]).ShouldBe(["Learning C#", "Closed", "Tagged C#"]);
+    }
+
+    [Fact]
+    public void Corrupt_pdf_gives_a_typed_user_safe_error()
+    {
+        using var garbage = new MemoryStream(Encoding.UTF8.GetBytes("this is not a pdf at all"));
+
+        var error = Should.Throw<TextExtractionException>(() => new PdfPigTextExtractor().Extract(garbage));
+
+        error.InnerException.ShouldNotBeNull();
+        error.Message.ShouldNotContain("PdfPig");
     }
 
     /// <summary>The length of the longest end of <paramref name="previous"/> that is also the start of <paramref name="next"/>.</summary>

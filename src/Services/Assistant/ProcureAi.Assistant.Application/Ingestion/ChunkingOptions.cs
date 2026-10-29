@@ -17,8 +17,22 @@ public sealed class ChunkingOptions : IValidatableObject
     [Range(0, 40)]
     public int OverlapPercent { get; set; } = 12;
 
+    /// <summary>
+    /// The most a parent may hold. A section over this becomes several parents, each a window of whole children (a PDF whose headings were
+    /// not detected is one huge section).
+    /// </summary>
+    [Range(100, 32_000)]
+    public int MaxParentTokens { get; set; } = 2_000;
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (MaxParentTokens < MaxTokens)
+        {
+            yield return new ValidationResult(
+                $"'Assistant:Chunking:{nameof(MaxParentTokens)}' must be at least '{nameof(MaxTokens)}' ({MaxParentTokens} < {MaxTokens}).",
+                [nameof(MaxParentTokens), nameof(MaxTokens)]);
+        }
+
         // With max < 2 * min the last child of a split could not reach the minimum.
         if (MaxTokens < 2 * MinTokens)
         {

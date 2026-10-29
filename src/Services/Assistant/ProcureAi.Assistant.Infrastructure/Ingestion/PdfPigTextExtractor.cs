@@ -32,6 +32,19 @@ public sealed partial class PdfPigTextExtractor : ITextExtractor
 
     public ExtractedDocument Extract(Stream content)
     {
+        try
+        {
+            return Read(content);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // PdfPig has no common exception type for damaged, encrypted or non-PDF input; its message is for the log, not the user.
+            throw new TextExtractionException("The PDF could not be read. It may be damaged, password protected or not a PDF.", ex);
+        }
+    }
+
+    private static ExtractedDocument Read(Stream content)
+    {
         using var pdf = PdfDocument.Open(content);
         var lines = pdf.GetPages().SelectMany(ReadLines).ToList();
         if (lines.Count == 0)
@@ -160,7 +173,7 @@ public sealed partial class PdfPigTextExtractor : ITextExtractor
                     yield return before;
                 }
 
-                yield return new Section(path, string.Join('\n', lines.Skip(i).Take(run).Select(l => l.Text)), true);
+                yield return new Section(path, string.Join('\n', lines.Skip(i).Take(run).Select(l => ToRow(l.Text))), true);
                 i += run;
                 continue;
             }
@@ -175,6 +188,9 @@ public sealed partial class PdfPigTextExtractor : ITextExtractor
             yield return last;
         }
     }
+
+    /// <summary>A table row with its cells joined by <c> | </c>, like a Markdown table, so the columns survive whitespace normalisation.</summary>
+    private static string ToRow(string text) => string.Join(" | ", ColumnGap().Split(text.Trim()).Select(Collapse));
 
     private static bool IsTableLine(string text) => ColumnGap().Matches(text.Trim()).Count >= 2;
 

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using ProcureAi.Assistant.Application.Ingestion;
 
 namespace ProcureAi.Assistant.Infrastructure.Ingestion;
@@ -7,7 +8,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ingestion;
 /// Reads Markdown: <c>#</c> headings give the section path, pipe tables become sections of their own, everything else is text.
 /// Lines inside code fences are text, never headings.
 /// </summary>
-public sealed class MarkdownTextExtractor : ITextExtractor
+public sealed partial class MarkdownTextExtractor : ITextExtractor
 {
     public const string ContentType = "text/markdown";
 
@@ -89,7 +90,11 @@ public sealed class MarkdownTextExtractor : ITextExtractor
             return false;
         }
 
-        title = line[level..].Trim().TrimEnd('#').Trim();
+        // CommonMark: a closing run of # counts only when a space precedes it, so "## Learning C#" keeps its #.
+        title = ClosingHashes().Replace(line[level..].Trim(), "").Trim();
         return title.Length > 0;
     }
+
+    [GeneratedRegex(@"[ \t]+#+$")]
+    private static partial Regex ClosingHashes();
 }

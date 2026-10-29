@@ -6,7 +6,10 @@ public interface ITextExtractor
     /// <summary>Whether this extractor reads files of the content type (parameters such as <c>; charset=utf-8</c> are ignored).</summary>
     bool Supports(string contentType);
 
-    /// <summary>Reads the file. A file without text (an empty or scanned PDF) gives a document without sections.</summary>
+    /// <summary>
+    /// Reads the file. A file without text (an empty or scanned PDF) gives a document without sections.
+    /// </summary>
+    /// <exception cref="TextExtractionException">The file is damaged, encrypted or not of this type.</exception>
     ExtractedDocument Extract(Stream content);
 }
 
