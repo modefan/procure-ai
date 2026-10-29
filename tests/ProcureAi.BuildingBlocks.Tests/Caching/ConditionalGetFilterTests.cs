@@ -200,27 +200,68 @@ public sealed class ConditionalGetFilterTests(RedisFixture redis) : IAsyncLifeti
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Headers.ETag.ShouldBeNull();
-        response.Headers.CacheControl.ShouldBeNull();
-        response.Headers.Vary.ShouldNotContain("Cookie");
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/pdf");
         (await response.Content.ReadAsStringAsync(Ct)).ShouldBe("%PDF-fake");
     }
+
 
     [Fact]
     public async Task Event_stream_response_is_not_buffered()
     {
         ConditionalController.EventStreamGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        // Buffered by mistake, the headers would not arrive until the action ends, which it never does: fail instead of hanging.
-        using var response = await _app.GetTestClient()
-            .SendAsync(Get($"{Base}/events"), HttpCompletionOption.ResponseHeadersRead, Ct)
-            .WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        try
+        {
+            // Buffered by mistake, the headers would not arrive until the action ends, which it never does: fail instead of hanging.
+            using var response = await _app.GetTestClient()
+                .SendAsync(Get($"{Base}/events"), HttpCompletionOption.ResponseHeadersRead, Ct)
+                .WaitAsync(TimeSpan.FromSeconds(10), Ct);
 
+            response.Headers.ETag.ShouldBeNull();
+            await using var stream = await response.Content.ReadAsStreamAsync(Ct);
+            using var reader = new StreamReader(stream);
+            // The first event arrives while the action is still waiting: nothing is held back until the response ends.
+            (await reader.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(10), Ct)).ShouldBe("data: one");
+        }
+        finally
+        {
+            // Also when an assertion or the timeout failed: never leave the action blocked on the gate.
+            ConditionalController.EventStreamGate.TrySetResult();
+        }
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("events")]
+    [InlineData("octet")]
+    public async Task Skipped_responses_keep_private_no_cache_and_vary_cookie(string path)
+    {
+        ConditionalController.EventStreamGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            using var response = await _app.GetTestClient()
+                .SendAsync(Get($"{Base}/{path}"), HttpCompletionOption.ResponseHeadersRead, Ct)
+                .WaitAsync(TimeSpan.FromSeconds(10), Ct);
+
+            // A user file or stream must not be stored by a shared cache or served to another session.
+            response.Headers.ETag.ShouldBeNull();
+            response.Headers.CacheControl.ShouldNotBeNull();
+            response.Headers.CacheControl.Private.ShouldBeTrue();
+            response.Headers.CacheControl.NoCache.ShouldBeTrue();
+            response.Headers.Vary.ShouldContain("Cookie");
+        }
+        finally
+        {
+            ConditionalController.EventStreamGate.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task IResult_file_with_octet_stream_is_not_buffered()
+    {
+        using var response = await SendAsync(Get($"{Base}/octet"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Headers.ETag.ShouldBeNull();
-        await using var stream = await response.Content.ReadAsStreamAsync(Ct);
-        using var reader = new StreamReader(stream);
-        // The first event arrives while the action is still waiting: nothing is held back until the response ends.
-        (await reader.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(10), Ct)).ShouldBe("data: one");
-        ConditionalController.EventStreamGate.SetResult();
-        await reader.ReadToEndAsync(Ct);
+        (await response.Content.ReadAsStringAsync(Ct)).ShouldBe("binary");
     }
 }

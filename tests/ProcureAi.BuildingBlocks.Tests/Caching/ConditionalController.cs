@@ -27,6 +27,9 @@ public sealed class ConditionalController(ICurrentUser user) : ControllerBase
     [HttpGet("file")]
     public IActionResult Pdf() => File(System.Text.Encoding.UTF8.GetBytes("%PDF-fake"), "application/pdf");
 
+    [HttpGet("octet")]
+    public IResult Octet() => TypedResults.File(System.Text.Encoding.UTF8.GetBytes("binary"), "application/octet-stream");
+
     /// <summary>Writes one event, then waits for <see cref="EventStreamGate"/> before the second: proves the body is not held back.</summary>
     [HttpGet("events")]
     public async Task Events(CancellationToken cancellationToken)

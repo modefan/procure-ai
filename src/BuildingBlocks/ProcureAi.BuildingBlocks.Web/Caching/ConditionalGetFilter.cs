@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -29,10 +31,40 @@ public sealed class ConditionalGetFilter : IAsyncResourceFilter, IResultFilter
     /// <summary>Runs just before the result is written: a file or <see cref="IResult"/> result is marked to bypass the buffer.</summary>
     public void OnResultExecuting(ResultExecutingContext context)
     {
-        if (context.Result is FileResult or IResult)
+        if (IsFileOrResult(context.Result))
         {
             context.HttpContext.Items[UnbufferedItemKey] = true;
         }
+    }
+
+    // An IResult returned by a controller action (TypedResults.File(...), Results.Stream(...)) reaches the filters wrapped in an
+    // internal MVC type (HttpActionResult), so "is IResult" never matches. There is no public way to unwrap it: the public
+    // IActionResultTypeMapper creates it but does not expose it. Last resort, so: read its public "Result" property of type
+    // IResult by reflection (cached per type). If a future MVC changes this, the content-type check still covers pdf and event streams.
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> WrappedResultProperties = new();
+
+    private static bool IsFileOrResult(IActionResult? result) =>
+        result is FileResult or IResult
+        || (result is not null
+            && WrappedResultProperties.GetOrAdd(
+                result.GetType(),
+                type => type.GetProperty("Result", BindingFlags.Public | BindingFlags.Instance) is { } property
+                    && property.PropertyType == typeof(IResult) ? property : null) is not null);
+
+    /// <summary>A skipped response is never held back or tagged, but a user file or stream must not be stored by a shared cache either.</summary>
+    private static void KeepPrivate(HttpResponse response)
+    {
+        if (response.HasStarted)
+        {
+            return;
+        }
+
+        if (!response.Headers.ContainsKey(HeaderNames.CacheControl))
+        {
+            response.Headers.CacheControl = CacheControlValue;
+        }
+
+        response.Headers.Append(HeaderNames.Vary, HeaderNames.Cookie);
     }
 
     public void OnResultExecuted(ResultExecutedContext context)
@@ -63,8 +95,14 @@ public sealed class ConditionalGetFilter : IAsyncResourceFilter, IResultFilter
             response.Body = original;
         }
 
-        if (body.PassedThrough || http.Items.ContainsKey(UnbufferedItemKey))
+        if (body.PassedThrough)
         {
+            return;
+        }
+
+        if (http.Items.ContainsKey(UnbufferedItemKey))
+        {
+            KeepPrivate(response); // a skipped result that wrote nothing (a headers-only answer)
             return;
         }
 
@@ -144,7 +182,21 @@ public sealed class ConditionalGetFilter : IAsyncResourceFilter, IResultFilter
 
         public bool PassedThrough => _passThrough == true;
 
-        private Stream Target => (_passThrough ??= IsUnbuffered(http)) ? original : buffer;
+        private Stream Target => Decide() ? original : buffer;
+
+        private bool Decide()
+        {
+            if (_passThrough is null)
+            {
+                _passThrough = IsUnbuffered(http);
+                if (_passThrough == true)
+                {
+                    KeepPrivate(http.Response); // before the first byte: the headers are still ours
+                }
+            }
+
+            return _passThrough == true;
+        }
 
         public override bool CanRead => false;
         public override bool CanSeek => false;
