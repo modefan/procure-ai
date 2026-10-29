@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using ProcureAi.Approvals.Application.Abstractions;
 using ProcureAi.Approvals.Application.Dtos;
 using ProcureAi.Approvals.Domain;
