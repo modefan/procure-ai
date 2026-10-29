@@ -16,6 +16,10 @@ public sealed class AppFixture : IAsyncLifetime
     public const string TenantId = "acme";
     public const string DemoUser = "tom@acme.test";
 
+    /// <summary>The Keycloak user IDs of the demo realm (infra/keycloak): the admin key acts on behalf of them.</summary>
+    public const string TomId = "00000000-0000-4000-8000-000000000001";
+    public const string MariaId = "00000000-0000-4000-8000-000000000002";
+
     // The first start pulls images and runs npm install for the Angular app.
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(12);
 
@@ -146,6 +150,79 @@ public sealed class AppFixture : IAsyncLifetime
         }
         using var json = System.Text.Json.JsonDocument.Parse(body);
         return json.RootElement.GetProperty("number").GetString()!;
+    }
+
+    /// <summary>
+    /// Creates a request of one catalog item from contoso-hardware on IT-200 for Tom and submits it (the admin key, on behalf of Tom), so it
+    /// is waiting for Maria. MON-27 x 1 is R 4 830,00 incl. VAT: one approval step, by the manager.
+    /// </summary>
+    public async Task<(Guid Id, string Number)> SubmitRequestAsync(string title, string sku = "MON-27", int quantity = 1)
+    {
+        using var http = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true })
+        {
+            BaseAddress = GatewayUrl,
+        };
+
+        async Task<(System.Text.Json.JsonDocument Body, string? ETag)> SendAsync(string path, object? body, string? ifMatch, System.Net.HttpStatusCode expected)
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Post, path);
+            message.Headers.Add("X-Api-Key", _adminApiKey);
+            message.Headers.Add("X-Tenant-Id", TenantId);
+            message.Headers.Add("X-On-Behalf-Of-User", TomId);
+            message.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            if (ifMatch is not null)
+            {
+                message.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+            }
+            if (body is not null)
+            {
+                message.Content = JsonContent.Create(body);
+            }
+            using var response = await http.SendAsync(message);
+            var text = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode != expected)
+            {
+                throw new InvalidOperationException($"POST {path}: expected {(int)expected}, got {(int)response.StatusCode}: {text}");
+            }
+            return (System.Text.Json.JsonDocument.Parse(text), response.Headers.ETag?.ToString());
+        }
+
+        var (created, tag) = await SendAsync("/api/v1/requests", new
+        {
+            title,
+            costCenterCode = "IT-200",
+            supplierId = "contoso-hardware",
+            lines = new[] { new { sku, quantity } },
+        }, null, System.Net.HttpStatusCode.Created);
+        var id = created.RootElement.GetProperty("id").GetGuid();
+        var number = created.RootElement.GetProperty("number").GetString()!;
+        (await SendAsync($"/api/v1/requests/{id}/submit", null, tag, System.Net.HttpStatusCode.Accepted)).Body.Dispose();
+        created.Dispose();
+        return (id, number);
+    }
+
+    /// <summary>Stops a resource the way the dashboard's Stop command does, and waits until it has ended.</summary>
+    public async Task StopAsync(string resource)
+    {
+        var result = await _app!.ResourceCommands.ExecuteCommandAsync(resource, KnownResourceCommands.StopCommand);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException($"Stopping {resource} failed: {result.Message}");
+        }
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        await _app.ResourceNotifications.WaitForResourceAsync(resource, KnownResourceStates.TerminalStates, cts.Token);
+    }
+
+    /// <summary>Starts a stopped resource (the dashboard's Start command) and waits until it is running and healthy.</summary>
+    public async Task StartAsync(string resource)
+    {
+        var result = await _app!.ResourceCommands.ExecuteCommandAsync(resource, KnownResourceCommands.StartCommand);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException($"Starting {resource} failed: {result.Message}");
+        }
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        await _app.ResourceNotifications.WaitForResourceHealthyAsync(resource, cts.Token);
     }
 
     public async ValueTask DisposeAsync()

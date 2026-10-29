@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Testing" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
@@ -23,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AppHost\ProcureAi.AppHost\ProcureAi.AppHost.csproj" />
+    <ProjectReference Include="..\..\src\Contracts\ProcureAi.Contracts\ProcureAi.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

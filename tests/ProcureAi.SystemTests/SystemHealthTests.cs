@@ -10,7 +10,7 @@ namespace ProcureAi.SystemTests;
 public sealed class SystemHealthTests(SystemFixture system)
 {
     [Fact]
-    public async Task Every_resource_is_healthy_and_swagger_lists_eight_definitions()
+    public async Task Every_resource_is_healthy_and_swagger_lists_nine_definitions()
     {
         system.RequireReady();
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -22,7 +22,7 @@ public sealed class SystemHealthTests(SystemFixture system)
             .ToList();
         resources.Count(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal))
             .ShouldBe(6, "requestsdb, accessdb, budgetsdb, approvalsdb, purchasingdb, invoicingdb");
-        foreach (var expected in new[] { "suppliers-api", "purchasing-api", "invoicing-api", "simulators" })
+        foreach (var expected in new[] { "suppliers-api", "purchasing-api", "invoicing-api", "notifications-api", "simulators" })
         {
             resources.ShouldContain(r => r.Name == expected);
         }
