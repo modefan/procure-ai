@@ -313,6 +313,25 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         _gateway.Stub.Last.Path.ShouldBe("/api/v1/invoicing/invoices");
     }
 
+    [Fact]
+    public async Task Swagger_ui_lists_the_assistant_definition_and_the_gateway_serves_its_document_and_api()
+    {
+        var browser = Browser();
+        using var initializer = await browser.GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+        using var document = await browser.GetAsync("/openapi/assistant/v1.json", Ct);
+        using var anonymous = await browser.GetAsync("/api/v1/assistant/info", Ct);
+        using var withKey = await browser.SendAsync(
+            Request(HttpMethod.Get, "/api/v1/assistant/info", headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+
+        config.ShouldContain("/openapi/assistant/v1.json");
+        config.ShouldContain("\"assistant\"");
+        await ExpectOkAsync(document);
+        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the assistant API needs a session or key like every API");
+        await ExpectOkAsync(withKey);
+        _gateway.Stub.Last.Path.ShouldBe("/api/v1/assistant/info");
+    }
+
     // ---- the rest of the contract ----
 
     [Fact]

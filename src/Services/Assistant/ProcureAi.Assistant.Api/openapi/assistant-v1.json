@@ -1,0 +1,98 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "ProcureAi Assistant API",
+    "description": "HTTP API of the assistant-api service of the ProcureAi demo.",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/v1/assistant/info": {
+      "get": {
+        "tags": [
+          "AssistantInfo"
+        ],
+        "operationId": "GetAssistantInfo",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AssistantInfo": {
+        "required": [
+          "provider",
+          "chatModel",
+          "demoModel",
+          "questionsPerDay"
+        ],
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "chatModel": {
+            "type": "string"
+          },
+          "demoModel": {
+            "type": "boolean"
+          },
+          "questionsPerDay": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "description": "The admin API key (Claude's testing access). Send X-Tenant-Id with it on tenant endpoints.",
+        "name": "X-Api-Key",
+        "in": "header"
+      },
+      "OAuth2": {
+        "type": "oauth2",
+        "description": "Keycloak login: authorization code flow with PKCE.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://openapi.invalid/auth",
+            "tokenUrl": "https://openapi.invalid/token",
+            "scopes": {
+              "email": "Email address",
+              "openid": "OpenID Connect",
+              "profile": "Profile"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKey": [ ]
+    },
+    {
+      "OAuth2": [
+        "email",
+        "openid",
+        "profile"
+      ]
+    }
+  ],
+  "tags": [
+    {
+      "name": "AssistantInfo"
+    }
+  ]
+}

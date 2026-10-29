@@ -209,6 +209,17 @@ var notificationsApi = builder.AddProcureAiService<Projects.ProcureAi_Notificati
     .WithEnvironment("Notifications__Smtp__From", "no-reply@procure-ai.local")
     .WaitFor(mailpit);
 
+// The Assistant (plan 05): Postgres assistantdb (pgvector, outbox and inbox; Debezium captures the documents and audit rows) plus MongoDB
+// assistantchatdb (conversations, invoice scans). Its tools read requests, approvals, budgets and suppliers as the signed-in user (token
+// relay), so it references and waits for them. The model provider is configuration: without AI settings here it runs on the Fake provider
+// (no key, no account); with AppHost user secrets AI:Provider, AI:Endpoint, AI:ApiKey, AI:Chat:Model, AI:Embedding:Model, AI:Guard:Model
+// it uses that provider. Each is passed only when set, so nothing is required.
+var assistantApi = builder.AddProcureAiService<Projects.ProcureAi_Assistant_Api>(
+    new ServiceSpec("assistant", ResourceNames.AssistantDb, CapturedTables: ["policy_documents", "audit_entries"], GatewayCluster: "assistant", ApiRoutePrefix: "/api/assistant", SecondaryMongoDatabase: ResourceNames.AssistantChatDb),
+    shared)
+    .CallsServices(accessApi, requestsApi, approvalsApi, budgetsApi, suppliersApi)
+    .WithOptionalAiSettings(builder);
+
 // The supplier calls the services directly, not through the gateway (exposing the webhooks publicly is plan 07/08): order webhooks to
 // Purchasing, invoice webhooks to Invoicing, both signed with the shared secret. Endpoint references only, no wait: the simulator's own
 // delivery retries cover a receiver that is still starting.
@@ -247,6 +258,7 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
     .WithReference(purchasingApi)
     .WithReference(invoicingApi)
     .WithReference(notificationsApi)
+    .WithReference(assistantApi)
     .WithEnvironment("Oidc__Authority", keycloakAuthority)
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
@@ -264,6 +276,7 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
     .WithEnvironment("ReverseProxy__Clusters__purchasing__Destinations__d1__Address", purchasingApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__invoicing__Destinations__d1__Address", invoicingApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__notifications__Destinations__d1__Address", notificationsApi.GetEndpoint("http"))
+    .WithEnvironment("ReverseProxy__Clusters__assistant__Destinations__d1__Address", assistantApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__web__Destinations__d1__Address", web.GetEndpoint("http"))
     .WithOtlpEndpoint(otlpEndpoint)
     .WaitFor(keycloak)
@@ -277,6 +290,7 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
     .WaitFor(purchasingApi)
     .WaitFor(invoicingApi)
     .WaitFor(notificationsApi)
+    .WaitFor(assistantApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
     .WithDotNetLimits(limits.DotNet);

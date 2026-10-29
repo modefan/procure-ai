@@ -345,6 +345,86 @@ public sealed class ServiceResourcesTests
         gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
     }
 
+    /// <summary>
+    /// The Assistant (plan 05 ruling 4): Postgres <c>assistantdb</c> (pgvector, outbox and inbox) as its main store with its own Debezium
+    /// (documents and audit rows), MongoDB <c>assistantchatdb</c> as its second database, and calls to the services its tools read as the
+    /// user. With no AI settings in the AppHost's configuration it runs on the Fake provider: no <c>AI__*</c> variable at all.
+    /// </summary>
+    [Fact]
+    public async Task Assistant_service_resources()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "assistant-migrate");
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "assistant-api");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-assistantdb");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+        var mongo = model.Resources.OfType<MongoDBServerResource>().Single();
+
+        var migrateEnv = await EnvironmentOfAsync(migrate);
+        var apiEnv = await EnvironmentOfAsync(api);
+        var debeziumEnv = await EnvironmentOfAsync(debezium);
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        model.Resources.OfType<PostgresDatabaseResource>().ShouldContain(d => d.Name == "assistantdb");
+        var chat = model.Resources.OfType<MongoDBDatabaseResource>().Single(d => d.Name == "assistantchatdb");
+        chat.Parent.ShouldBeSameAs(mongo);
+        model.Resources.OfType<PostgresDatabaseResource>().ShouldNotContain(d => d.Name == "assistantchatdb");
+        foreach (var env in new[] { migrateEnv, apiEnv })
+        {
+            env.ShouldContainKey("ConnectionStrings__assistantdb");
+            env.ShouldContainKey("ConnectionStrings__assistantchatdb");
+            env.ShouldContainKeyAndValue("Service__Store", "Postgres");
+            env.ShouldContainKeyAndValue("Service__SecondaryMongoConnectionName", "assistantchatdb");
+        }
+
+        migrateEnv.ShouldContainKeyAndValue("DemoSeed__Enabled", "true");
+        debeziumEnv.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_DBNAME", "assistantdb");
+        debeziumEnv.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", "public.policy_documents,public.audit_entries");
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+        migrate.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == chat, "the migration creates the chat database's indexes");
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == chat);
+        gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__assistant__Destinations__d1__Address");
+        gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
+        foreach (var cap in CapResources)
+        {
+            apiEnv.ShouldContainKey(cap);
+        }
+
+        // The Fake provider by default: nothing to pass, nothing required.
+        apiEnv.Keys.ShouldNotContain(k => k.StartsWith("AI__", StringComparison.OrdinalIgnoreCase));
+        migrateEnv.Keys.ShouldNotContain(k => k.StartsWith("AI__", StringComparison.OrdinalIgnoreCase));
+        model.Resources.OfType<ParameterResource>().ShouldNotContain(p => p.Name.StartsWith("ai-", StringComparison.Ordinal));
+    }
+
+    /// <summary>A real provider is configuration only: the AppHost's AI settings (user secrets) reach the API, the key as a secret parameter.</summary>
+    [Fact]
+    public async Task Assistant_gets_the_ai_settings_the_apphost_is_configured_with()
+    {
+        await using var scope = await ModelScope.BuildAsync(
+        [
+            "AI:Provider=OpenAI", "AI:Endpoint=https://example.openai.azure.com/openai/v1/", "AI:ApiKey=test-only-key",
+            "AI:Chat:Model=gpt-4.1-mini", "AI:Embedding:Model=text-embedding-3-small", "AI:Guard:Model=gpt-4.1-nano",
+        ]);
+        var api = scope.Model.Resources.OfType<ProjectResource>().Single(r => r.Name == "assistant-api");
+
+        var env = await EnvironmentOfAsync(api);
+
+        env.ShouldContainKeyAndValue("AI__Provider", "OpenAI");
+        env.ShouldContainKeyAndValue("AI__Endpoint", "https://example.openai.azure.com/openai/v1/");
+        env.ShouldContainKeyAndValue("AI__Chat__Model", "gpt-4.1-mini");
+        env.ShouldContainKeyAndValue("AI__Embedding__Model", "text-embedding-3-small");
+        env.ShouldContainKeyAndValue("AI__Guard__Model", "gpt-4.1-nano");
+        var key = env["AI__ApiKey"].ShouldBeOfType<ParameterResource>();
+        key.Secret.ShouldBeTrue("the key is shown masked in the dashboard");
+        // Only the Assistant gets the key.
+        foreach (var other in scope.Model.Resources.OfType<ProjectResource>().Where(r => r.Name != "assistant-api"))
+        {
+            (await EnvironmentOfAsync(other)).Values.ShouldNotContain(v => ReferenceEquals(v, key), other.Name);
+        }
+    }
+
     [Fact]
     public void A_service_without_a_database_cannot_ask_for_debezium_tables()
     {
@@ -424,6 +504,24 @@ public sealed class ServiceResourcesTests
         apiResource.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
         await Task.CompletedTask;
+    }
+
+    [Fact]
+    public void A_second_mongo_database_is_only_for_a_postgres_service()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "testcontainers.settings.json"), optional: false);
+        var secret = builder.AddParameter("secret", secret: true);
+        #pragma warning disable ASPIREMONGODB001
+        var shared = new SharedResources(
+            builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
+            builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
+        #pragma warning restore ASPIREMONGODB001
+
+        var refused = Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
+            new ServiceSpec("suppliers", "suppliersdb", [], "suppliers", "/api/suppliers", ServiceStore.MongoDB, SecondaryMongoDatabase: "otherdb"), shared));
+        refused.Message.ShouldContain("SecondaryMongoDatabase");
     }
 
     [Fact]
@@ -512,7 +610,7 @@ public sealed class ServiceResourcesTests
         await using var scope = await ModelScope.BuildAsync(configured is null ? [] : [$"Debezium:SelfHealLostOffsets={configured}"]);
         var debeziums = scope.Model.Resources.OfType<ContainerResource>().Where(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal)).ToList();
 
-        debeziums.Count.ShouldBe(6);
+        debeziums.Count.ShouldBe(7);
         foreach (var debezium in debeziums)
         {
             (await EnvironmentOfAsync(debezium)).ShouldContainKeyAndValue(ServiceResources.SelfHealEnvironmentVariable, expected, debezium.Name);
@@ -616,6 +714,8 @@ public sealed class ServiceResourcesTests
     [InlineData("purchasing-api", new[] { "access-api" })]
     [InlineData("invoicing-api", new[] { "access-api" })]
     [InlineData("notifications-api", new[] { "access-api" })]
+    // The Assistant's tools read requests, approvals, budgets and suppliers as the user (plan 05 Task 5b).
+    [InlineData("assistant-api", new[] { "access-api", "requests-api", "approvals-api", "budgets-api", "suppliers-api" })]
     [InlineData("access-api", new string[0])]
     public async Task Every_service_references_and_waits_for_the_services_it_calls(string service, string[] calls)
     {
@@ -670,7 +770,7 @@ public sealed class ServiceResourcesTests
             totalCpus += double.Parse(texts[cpus + 1], System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(6, "one Debezium per captured database");
+        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(7, "one Debezium per captured database");
         totalMemoryMb.ShouldBeLessThanOrEqualTo(8 * 1024, "container memory caps in MB");
         totalCpus.ShouldBeLessThanOrEqualTo(8.0, "container CPU caps");
     }

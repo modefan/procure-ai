@@ -29,6 +29,12 @@ public static class Extensions
     public const string BusinessMeters = "ProcureAi.*";
 
     /// <summary>
+    /// The services' own activity sources (e.g. <c>ProcureAi.Assistant.AI</c>: every model call, from Microsoft.Extensions.AI's
+    /// OpenTelemetry middleware): every source whose name starts with <c>ProcureAi.</c> is traced, like the meters.
+    /// </summary>
+    public const string BusinessSources = "ProcureAi.*";
+
+    /// <summary>
     /// Polly's meter: the <c>resilience.polly.*</c> metrics of every resilience pipeline (retries, timeouts, a circuit breaker
     /// opening and closing, e.g. Purchasing's supplier client).
     /// </summary>
@@ -76,6 +82,7 @@ public static class Extensions
                 .AddFusionCacheInstrumentation())
             .WithTracing(tracing => tracing
                 .AddSource(builder.Environment.ApplicationName)
+                .AddSource(BusinessSources)
                 .AddAspNetCoreInstrumentation(options =>
                     // Health probes would otherwise flood the traces.
                     options.Filter = context =>

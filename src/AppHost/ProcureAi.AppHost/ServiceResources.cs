@@ -19,8 +19,11 @@ public enum ServiceStore
 /// <param name="GatewayCluster">The YARP cluster the gateway routes this service's traffic to, e.g. <c>requests</c>.</param>
 /// <param name="ApiRoutePrefix">The path the gateway exposes the service under, e.g. <c>/api/requests</c>.</param>
 /// <param name="Store">Which server holds the database, or <see cref="ServiceStore.None"/>. MongoDB services and services without a database have no Debezium (it reads the Postgres WAL), so <c>CapturedTables</c> must be empty.</param>
+/// <param name="SecondaryMongoDatabase">A second database on the <c>mongo</c> resource next to a Postgres store (the Assistant's chat history,
+/// <c>assistantchatdb</c>), also its connection-string name; null for none. Only for <see cref="ServiceStore.Postgres"/>.</param>
 public sealed record ServiceSpec(
-    string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix, ServiceStore Store = ServiceStore.Postgres);
+    string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix, ServiceStore Store = ServiceStore.Postgres,
+    string? SecondaryMongoDatabase = null);
 
 /// <summary>The infrastructure and settings every service resource is wired to.</summary>
 /// <param name="InternalClientSecret">Secret of the Keycloak client <c>procure-internal</c>, with which services call each other (<c>Auth:Internal:ClientSecret</c>).</param>
@@ -84,6 +87,12 @@ public static class ServiceResources
             throw new ArgumentException($"{spec.Name}: a {spec.Store} service has no Debezium capture (CapturedTables must be empty).", nameof(spec));
         }
 
+        if (spec.SecondaryMongoDatabase is not null && spec.Store != ServiceStore.Postgres)
+        {
+            throw new ArgumentException(
+                $"{spec.Name}: a SecondaryMongoDatabase is only for a service whose main store is Postgres, not {spec.Store}.", nameof(spec));
+        }
+
         IResourceBuilder<IResourceWithConnectionString>? database = spec.Store switch
         {
             ServiceStore.MongoDB => shared.Mongo.AddDatabase(spec.Database),
@@ -132,6 +141,18 @@ public static class ServiceResources
         if (database is not null && migrate is not null)
         {
             api.WithReference(database).WaitForCompletion(migrate);
+        }
+
+        if (spec.SecondaryMongoDatabase is not null && migrate is not null)
+        {
+            // A second database on MongoDB (the Assistant's chat history): both resources get its connection string and its name
+            // (Service__SecondaryMongoConnectionName), so the readiness check pings it and --migrate creates its indexes.
+            var secondary = shared.Mongo.AddDatabase(spec.SecondaryMongoDatabase);
+            foreach (var resource in new[] { migrate, api })
+            {
+                resource.WithReference(secondary).WaitFor(secondary)
+                    .WithEnvironment("Service__SecondaryMongoConnectionName", spec.SecondaryMongoDatabase);
+            }
         }
 
         if (migrate is not null && spec.CapturedTables.Length > 0)

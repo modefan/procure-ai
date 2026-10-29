@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "generate:api": "ng-openapi-gen -c ng-openapi-gen.requests.json && ng-openapi-gen -c ng-openapi-gen.approvals.json && ng-openapi-gen -c ng-openapi-gen.budgets.json && ng-openapi-gen -c ng-openapi-gen.purchasing.json && ng-openapi-gen -c ng-openapi-gen.invoicing.json && ng-openapi-gen -c ng-openapi-gen.suppliers.json && ng-openapi-gen -c ng-openapi-gen.access.json && ng-openapi-gen -c ng-openapi-gen.audit.json && ng-openapi-gen -c ng-openapi-gen.notifications.json"
+    "generate:api": "ng-openapi-gen -c ng-openapi-gen.requests.json && ng-openapi-gen -c ng-openapi-gen.approvals.json && ng-openapi-gen -c ng-openapi-gen.budgets.json && ng-openapi-gen -c ng-openapi-gen.purchasing.json && ng-openapi-gen -c ng-openapi-gen.invoicing.json && ng-openapi-gen -c ng-openapi-gen.suppliers.json && ng-openapi-gen -c ng-openapi-gen.access.json && ng-openapi-gen -c ng-openapi-gen.audit.json && ng-openapi-gen -c ng-openapi-gen.notifications.json && ng-openapi-gen -c ng-openapi-gen.assistant.json"
   },
   "private": true,
   "packageManager": "npm@11.16.0",

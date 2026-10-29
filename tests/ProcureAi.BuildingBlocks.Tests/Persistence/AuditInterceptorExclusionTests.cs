@@ -6,7 +6,8 @@ namespace ProcureAi.BuildingBlocks.Tests.Persistence;
 
 /// <summary>
 /// Final review I2: the data-change audit records the service's own data, never Wolverine's message tables (its envelope rows,
-/// which carry message bodies) or other internal tables marked <see cref="AuditExcludeAttribute"/>.
+/// which carry message bodies) or other internal tables marked <see cref="AuditExcludeAttribute"/>
+/// or excluded in the model (<see cref="AuditExclusion"/>).
 /// </summary>
 public sealed class AuditInterceptorExclusionTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
@@ -17,6 +18,14 @@ public sealed class AuditInterceptorExclusionTests(PostgresFixture postgres) : I
         public Guid Id { get; set; }
 
         public string Name { get; set; } = "";
+    }
+
+    /// <summary>A technical table whose class cannot carry the attribute (a Domain class), excluded in the model instead.</summary>
+    public sealed class ModelExcludedRow
+    {
+        public Guid Id { get; set; }
+
+        public string Text { get; set; } = "";
     }
 
     /// <summary>Shaped like Wolverine's EF Core envelope entities: a <c>wolverine_*</c> table in the <c>wolverine</c> schema.</summary>
@@ -37,6 +46,12 @@ public sealed class AuditInterceptorExclusionTests(PostgresFixture postgres) : I
             {
                 e.ToTable("things");
                 e.Property(t => t.Id).ValueGeneratedNever();
+            });
+            modelBuilder.Entity<ModelExcludedRow>(e =>
+            {
+                e.ToTable("model_excluded");
+                e.Property(t => t.Id).ValueGeneratedNever();
+                e.ExcludeFromAudit();
             });
             modelBuilder.Entity<EnvelopeRow>(e =>
             {
@@ -63,6 +78,7 @@ public sealed class AuditInterceptorExclusionTests(PostgresFixture postgres) : I
         {
             db.Add(new Thing { Id = Guid.NewGuid(), Name = "laptop" });
             db.Add(new EnvelopeRow { Id = Guid.NewGuid(), Body = [1, 2, 3] });
+            db.Add(new ModelExcludedRow { Id = Guid.NewGuid(), Text = "chunk" });
             await new WebhookInbox<TestDbContext>(db).TryRecordAsync("supplier", "e1", Ct);
             await db.SaveChangesAsync(Ct);
         }

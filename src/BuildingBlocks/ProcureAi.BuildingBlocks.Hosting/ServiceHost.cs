@@ -98,6 +98,12 @@ public static class ServiceHost
         else if (service.Store == ServiceStore.Postgres)
         {
             services.AddPostgresReadiness(Required(builder.Configuration, DatabaseName(service)));
+            if (!string.IsNullOrWhiteSpace(service.SecondaryMongoConnectionName))
+            {
+                // A second database on MongoDB (the Assistant's chat history): ready only while both answer.
+                Required(builder.Configuration, service.SecondaryMongoConnectionName);
+                MongoReadinessCheck.AddMongoReadiness(services);
+            }
         }
 
         // ServiceStore.None (Notifications): no database to be ready for.
@@ -121,7 +127,8 @@ public static class ServiceHost
     /// With <c>--migrate</c>: runs <paramref name="migrate"/> (the service's EF Core migrations), then Wolverine's message store
     /// (outbox and inbox tables), then <paramref name="seedDemoData"/> when <c>DemoSeed:Enabled</c> is true, and returns.
     /// A MongoDB service (<c>Service:Store=MongoDB</c>) has no message store: it runs every registered <see cref="IMongoMigration"/>
-    /// (indexes), then <paramref name="migrate"/> when given, then the seed.
+    /// (indexes), then <paramref name="migrate"/> when given, then the seed. A Postgres service with a second database on MongoDB
+    /// (<see cref="ServiceOptions.SecondaryMongoConnectionName"/>) runs its <see cref="IMongoMigration"/>s first, then the Postgres steps.
     /// A service without a database (<c>Service:Store=None</c>) has nothing to migrate: only <paramref name="migrate"/> and the seed run,
     /// when given (the AppHost adds no migrate resource for it).
     /// Otherwise runs the application. Nothing migrates at normal startup.
@@ -139,11 +146,13 @@ public static class ServiceHost
         }
 
         var cancellationToken = app.Lifetime.ApplicationStopping;
-        var store = app.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>()?.Store ?? ServiceStore.Postgres;
-        var mongo = store == ServiceStore.MongoDB;
+        var service = app.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>();
+        var store = service?.Store ?? ServiceStore.Postgres;
+        var mongo = store == ServiceStore.MongoDB || !string.IsNullOrWhiteSpace(service?.SecondaryMongoConnectionName);
         if (mongo)
         {
-            // A MongoDB service has no message store: its migrations are the registered IMongoMigrations (indexes).
+            // A MongoDB service has no message store: its migrations are the registered IMongoMigrations (indexes). A Postgres service
+            // with a second database on MongoDB runs them too, before its EF Core migrations and message store.
             var database = app.Services.GetRequiredService<IMongoDatabase>();
             foreach (var step in app.Services.GetServices<IMongoMigration>())
             {

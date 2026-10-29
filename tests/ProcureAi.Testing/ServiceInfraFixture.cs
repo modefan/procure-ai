@@ -7,7 +7,8 @@ namespace ProcureAi.Testing;
 /// <summary>
 /// The infrastructure of one service's integration tests, shared by every service so none copies it: Postgres (the project's
 /// custom image), RabbitMQ and Redis from the fixtures above (memory and CPU caps from tests/testcontainers.settings.json),
-/// the service's migrated database, the <c>cdc</c> exchange, and Debezium Server for that database on demand.
+/// the service's migrated database, the <c>cdc</c> exchange, and Debezium Server for that database on demand. A service with a second
+/// database on MongoDB (the Assistant) sets <see cref="UsesMongo"/>, and a MongoDB replica set starts too (<see cref="MongoConnectionStringFor"/>).
 /// A service derives from it, says how its database is migrated, and registers it as an xUnit collection fixture.
 /// </summary>
 /// <param name="databaseName">The service's database, e.g. <c>accessdb</c> (also the Debezium topic prefix).</param>
@@ -21,6 +22,7 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
     private PostgresFixture? _postgres;
     private RabbitFixture? _rabbit;
     private RedisFixture? _redis;
+    private MongoFixture? _mongo;
     private DebeziumFixture? _debezium;
     private readonly List<DebeziumFixture> _otherDebeziums = [];
 
@@ -34,6 +36,15 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
 
     public string RedisConnectionString => _redis!.ConnectionString;
 
+    /// <summary>True for a service that also keeps a database on MongoDB: the fixture then starts <see cref="MongoFixture"/> as well.</summary>
+    protected virtual bool UsesMongo => false;
+
+    /// <summary>The MongoDB server (only when <see cref="UsesMongo"/>).</summary>
+    public MongoFixture Mongo => _mongo ?? throw new InvalidOperationException($"{GetType().Name} does not use MongoDB (override {nameof(UsesMongo)}).");
+
+    /// <summary>A connection string that opens <paramref name="database"/> on the MongoDB server (only when <see cref="UsesMongo"/>).</summary>
+    public string MongoConnectionStringFor(string database) => Mongo.ConnectionStringFor(database);
+
     /// <summary>Migrates (and seeds, if the service wants that in tests) a database on the running infrastructure.</summary>
     protected abstract Task MigrateAsync(string connectionString);
 
@@ -46,7 +57,14 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         _postgres = new PostgresFixture { Network = _network };
         _rabbit = new RabbitFixture { Network = _network };
         _redis = new RedisFixture();
-        await Task.WhenAll(_postgres.InitializeAsync().AsTask(), _rabbit.InitializeAsync().AsTask(), _redis.InitializeAsync().AsTask());
+        var starting = new List<Task> { _postgres.InitializeAsync().AsTask(), _rabbit.InitializeAsync().AsTask(), _redis.InitializeAsync().AsTask() };
+        if (UsesMongo)
+        {
+            _mongo = new MongoFixture();
+            starting.Add(_mongo.InitializeAsync().AsTask());
+        }
+
+        await Task.WhenAll(starting);
 
         // The init script only creates the debezium role; the database (as in the AppHost, where Aspire creates it) comes here.
         DbConnectionString = await _postgres.CreateDatabaseAsync(databaseName);
@@ -133,6 +151,11 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         if (_redis is not null)
         {
             await _redis.DisposeAsync();
+        }
+
+        if (_mongo is not null)
+        {
+            await _mongo.DisposeAsync();
         }
 
         if (_network is not null)

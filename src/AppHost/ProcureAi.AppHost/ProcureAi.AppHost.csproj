@@ -17,6 +17,7 @@
     <ProjectReference Include="../../Services/Purchasing/ProcureAi.Purchasing.Api/ProcureAi.Purchasing.Api.csproj" />
     <ProjectReference Include="../../Services/Invoicing/ProcureAi.Invoicing.Api/ProcureAi.Invoicing.Api.csproj" />
     <ProjectReference Include="../../Services/Notifications/ProcureAi.Notifications.Api/ProcureAi.Notifications.Api.csproj" />
+    <ProjectReference Include="../../Services/Assistant/ProcureAi.Assistant.Api/ProcureAi.Assistant.Api.csproj" />
     <ProjectReference Include="../../Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" />
     <ProjectReference Include="../../Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />
   </ItemGroup>

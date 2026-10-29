@@ -65,6 +65,11 @@
     <!-- Notifications: SignalR live updates, scaled out over Redis; the .NET client for the tests -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.13" />
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+    <!-- Assistant: model abstractions (IChatClient, IEmbeddingGenerator, the middleware pipeline), the OpenAI-compatible provider
+         (Assistant.Infrastructure only; it brings the OpenAI SDK 2.14.0) and pgvector for EF Core -->
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.11.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
+    <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
     <!-- Tests -->
     <PackageVersion Include="Testcontainers" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.MongoDb" Version="4.16.0" />

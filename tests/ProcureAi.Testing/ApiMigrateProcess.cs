@@ -17,9 +17,10 @@ public static class ApiMigrateProcess
     /// Needed when the test project references several Api projects: their <c>appsettings.json</c> files all land in the test
     /// output folder, and only one of them survives there. Default: the test output folder.
     /// </param>
+    /// <param name="environment">More settings as environment variables (e.g. <c>ConnectionStrings__assistantchatdb</c>, a second database).</param>
     public static async Task RunAsync(
         string apiAssembly, string databaseConnectionName, string database, string rabbit, string redis, bool demoSeed,
-        string? contentRoot = null)
+        string? contentRoot = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         var dll = Path.Combine(AppContext.BaseDirectory, apiAssembly);
         var start = new ProcessStartInfo("dotnet", ["exec", dll, "--migrate"])
@@ -34,6 +35,10 @@ public static class ApiMigrateProcess
         start.Environment["ConnectionStrings__rabbitmq"] = rabbit;
         start.Environment["ConnectionStrings__Redis"] = redis;
         start.Environment["DemoSeed__Enabled"] = demoSeed ? "true" : "false";
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
+        {
+            start.Environment[name] = value;
+        }
         if (contentRoot is not null)
         {
             // The environment variable, not --contentRoot: WebApplication.CreateBuilder ignores the command-line content root for appsettings.

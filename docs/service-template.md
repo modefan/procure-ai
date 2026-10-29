@@ -44,7 +44,7 @@ Every service is built the same way from shared pieces. Nothing is copied from a
    service publishes and sends) and `RabbitContainer` (a broker of its own to stop, for outage tests). Never copy a fixture.
 8. **Gateway**: add the YARP route and cluster, and the service's OpenAPI document to the Swagger dropdown.
 
-## A service on MongoDB (Suppliers, the Assistant's chat history)
+## A service on MongoDB (Suppliers; the Assistant's chat database, see below)
 
 For a service whose data is documents and that publishes no integration events. Everything is in `BuildingBlocks.Persistence.Mongo`
 (only a service's Infrastructure and `Hosting` may use it; an architecture test enforces that).
@@ -79,6 +79,53 @@ For a service whose data is documents and that publishes no integration events. 
 - **Tests**: `MongoFixture` (`ProcureAi.Testing`) starts `mongo:8.0` as a single-node replica set like the AppHost, with the limits of
   `Resources:Mongo` (including the WiredTiger cache size), and fails at startup if it is not the replica set's PRIMARY.
   `Client` and `ConnectionStringFor(database)` give a client or a connection string.
+
+## A service with Postgres and a second MongoDB database (the Assistant)
+
+For a service whose main data is relational (and that publishes or consumes events, so it needs the outbox and inbox) but that also keeps
+documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Postgres stays the main store with everything above
+(EF Core, Wolverine's message store, Debezium); MongoDB is a second database next to it.
+
+- **AppHost**: `ServiceSpec(..., Store: ServiceStore.Postgres, SecondaryMongoDatabase: "<name>chatdb")`. `AddProcureAiService` then also
+  creates that database on the `mongo` resource and gives `-migrate` and `-api` its connection string, a wait for it and
+  `Service__SecondaryMongoConnectionName=<name>chatdb`. Only for a Postgres service (anything else throws). Debezium captures the Postgres
+  tables as usual; MongoDB change streams are not captured yet (plan 06).
+- **`Service:SecondaryMongoConnectionName`** (`ServiceOptions`): also set it in the api's `appsettings.json`, so a bare `--migrate` run works.
+  `ServiceHost` then adds the MongoDB readiness check (`mongodb`, a ping) next to `postgres`, and `--migrate` runs every registered
+  `IMongoMigration` against it first, then the EF Core migrations, Wolverine's message store and the seed.
+- **Infrastructure**: `services.AddProcureAiMongo(configuration, "<name>chatdb")` (the one `IMongoClient` and `IMongoDatabase` of the
+  service; the Postgres side never registers either) and `AddTenantCollection<T>` per collection, exactly as in "A service on MongoDB".
+- **OpenAPI build step**: `OpenApiDatabaseConnectionName` is the Postgres database as usual; add the Mongo placeholder through
+  `OpenApiExtraSettings`: `ConnectionStrings__<name>chatdb=mongodb://openapi.invalid/<name>chatdb`.
+- **Tests**: derive from `ServiceInfraFixture` and override `UsesMongo => true`: a `MongoFixture` (replica set) starts with Postgres, RabbitMQ
+  and Redis, and `MongoConnectionStringFor(database)` gives its connection string. Pass it to `ApiMigrateProcess.RunAsync(..., environment:
+  { ["ConnectionStrings__<name>chatdb"] = ... })` and to the factory (`UseSetting`).
+- **Domain classes stay free of persistence**: a table that must not get audit rows but whose class lives in a Domain project (which cannot
+  carry `[AuditExclude]`, a Persistence type) is excluded in its EF configuration with `builder.ExcludeFromAudit()` (BuildingBlocks.Persistence,
+  `AuditExclusion`). The Assistant does this for `chunks` and `policy_document_files`. A captured database still needs every table of its
+  model in Audit's `Audit:Cdc:KeyColumns` when the key is not `id` (`CdcKeyColumnsTests` lists the Assistant too).
+- **pgvector**: in the custom Postgres image already. The model calls `HasPostgresExtension("vector")`, so the first migration creates the
+  extension, and the context uses `UseNpgsql(..., npgsql => npgsql.UseVector())` (Pgvector.EntityFrameworkCore 0.3.0, which works with
+  EF Core 10.0.13 and Npgsql 10.0.3). The Domain keeps embeddings as `float[]`; the configuration converts them to the `vector(1536)` column.
+
+### The Assistant: AI providers and pipelines
+
+- `AI` section (`AiOptions`, validated at startup): `Provider` (`Fake` | `OpenAI`), `Endpoint` and `ApiKey` (both required for `OpenAI`, the
+  key from user secrets or `AI__ApiKey`), `Chat { Model, MaxOutputTokens 800, Timeout 60 s }`, `Embedding { Model, Dimensions }` (must be
+  1536, the column), `Guard { Model? }`, `Telemetry { LogContent }` (true only in Development), `Prices` (USD per million tokens, for the
+  cost metric), `Fake { StreamDelayMs 15 }`. `Fake` is the default in appsettings: no key, no account. `OpenAI` covers any OpenAI-compatible
+  endpoint (Azure Foundry's `/openai/v1`, OpenAI).
+- `AiSetup.AddAssistantAi` (Assistant.Infrastructure, the only project that may name a provider SDK:
+  `Only_assistant_infrastructure_references_provider_sdks`) registers keyed `IChatClient`s `answer` (an `IAnswerGuardrail` when one is
+  registered, then default limits, function invocation (at most `Assistant:Tools:MaxCallsPerQuestion` rounds), OpenTelemetry, logging,
+  provider) and `utility` (default limits, OpenTelemetry, logging, provider), and one `IEmbeddingGenerator<string, Embedding<float>>`
+  (OpenTelemetry, logging, provider). Spans go to the activity source `ProcureAi.Assistant.AI` (every `ProcureAi.*` source is traced by
+  the service defaults); prompt and answer text only with `LogContent`.
+- The first line of a system message names the task: `#task: answer|rewrite|context|classify|scan` (`AiTasks`). The Fake model routes on
+  it (`FakeChatClient`, `FakeIntentRules`, `FakeEmbeddingGenerator`: hashed bag of words and bigrams, 1536 buckets, L2-normalised).
+  The Fake provider reports its own model names (`fake-chat`, `fake-embedding-1536`), so its vectors are never taken for a real model's.
+- AppHost: the `AI:*` settings of the AppHost's configuration (user secrets) are passed as `AI__*` only when set (`AiSettings`, the key as a
+  secret parameter); nothing is required. Metrics: meter `ProcureAi.Assistant` (`AssistantMetrics`).
 
 ## A service without a database (Notifications)
 
@@ -215,7 +262,7 @@ the processes' working sets. Budget for Claude's work on the shared PC (CLAUDE.m
 | Containers | Used | Cap |
 |---|---|---|
 | keycloak | 634 MB | 768 MB |
-| debezium-requestsdb / -accessdb / -budgetsdb / -approvalsdb / -purchasingdb / -invoicingdb | 288 + 289 + 293 + 294 + 301 + 295 MB | 6 x 512 MB, 0.4 CPU each |
+| debezium-requestsdb / -accessdb / -budgetsdb / -approvalsdb / -purchasingdb / -invoicingdb | 288 + 289 + 293 + 294 + 301 + 295 MB | 6 x 512 MB, 0.4 CPU each (0.35 since plan 05) |
 | postgres | 268 MB | 768 MB |
 | mongo | 244 MB | 512 MB |
 | rabbitmq | 126 MB | 384 MB |
@@ -243,7 +290,9 @@ Plus the Angular dev server (`ng serve`, Node) at about 0.6 GB. The services' GC
 256 MB hard limit each); the rest of a working set is runtime, JIT code and native memory. The .NET total is over the ~3 GB of the
 budget (plan 03 ruling 20: nine .NET processes; it was 2.8 GB with five services after plan 02); full-system runs are kept short.
 Debezium stays at 512 MB / `-Xmx256m`; its CPU cap is 0.4 per instance so the six instances fit: 6 x 0.4 + 5.5 = 7.9 CPUs, and
-6 x 512 MB + 2.6 GB = 5.6 GB of memory caps (plan 03 ruling 19; the cost is slower CDC catch-up under load).
+6 x 512 MB + 2.6 GB = 5.6 GB of memory caps (plan 03 ruling 19; the cost is slower CDC catch-up under load). Plan 05 adds a seventh
+(`debezium-assistantdb`) and lowers the cap to 0.35 per instance: 7 x 0.35 + 5.5 = 7.95 CPUs, and 7 x 512 MB + 2.6 GB = 6.1 GB of memory
+caps (plan 05 ruling 4; not measured yet).
 
 ## Business metrics
 
@@ -283,6 +332,9 @@ Use this when a call must carry the **user's** permissions, not the service's: t
 |---|---|
 | `ServiceHost`, `ServiceOptions`, `ServiceStore` (`Postgres`, `MongoDB`, `None`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Hosting` (references Web, Messaging, Persistence and Persistence.Mongo; only `*.Api` projects may use it) |
 | MongoDB: `AddProcureAiMongo`, `TenantCollection<T>`, `ITenantDocument`, `IMongoMigration`, `MongoReadinessCheck` (see "A service on MongoDB") | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence.Mongo` |
+| A second database on MongoDB next to Postgres: `ServiceSpec.SecondaryMongoDatabase`, `ServiceOptions.SecondaryMongoConnectionName`, `ServiceInfraFixture.UsesMongo` (see "A service with Postgres and a second MongoDB database") | AppHost `ServiceResources.cs`, `BuildingBlocks.Hosting`, `tests/ProcureAi.Testing` |
+| `ExcludeFromAudit()` (no audit rows for a table whose class cannot carry `[AuditExclude]`) | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/AuditExcludeAttribute.cs` |
+| The Assistant's AI providers and pipelines (`AiSetup`, `AiOptions`, the Fake provider) | `src/Services/Assistant/ProcureAi.Assistant.Infrastructure/Ai`, `.Application/Ai` |
 | `ApplicationExceptionFilter` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/Errors` |
 | OpenAPI build step | `src/Services/Directory.Build.targets` |
 | `AddProcureAiService`, `ServiceSpec`, `SharedResources` | `src/AppHost/ProcureAi.AppHost/ServiceResources.cs` |

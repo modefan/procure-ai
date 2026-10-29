@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ProcureAi.Assistant.Domain</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

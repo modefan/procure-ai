@@ -232,6 +232,33 @@ public sealed class LayerRulesTests
             .Check(Architecture);
     }
 
+    /// <summary>The model provider SDKs: only the Assistant's DI/config setup may name them (plan 05 Global Constraints).</summary>
+    private static readonly string[] ProviderSdks = ["OpenAI", "Microsoft.Extensions.AI.OpenAI"];
+
+    [Fact]
+    public void Only_assistant_infrastructure_references_provider_sdks()
+    {
+        // Application code sees IChatClient, IEmbeddingGenerator and AIFunction (Microsoft.Extensions.AI); the provider (OpenAI, Azure
+        // Foundry's OpenAI v1 endpoint) is chosen by configuration in ProcureAi.Assistant.Infrastructure (AiSetup). Checked on the compiled
+        // references: an assembly references another only when its code uses a type of it.
+        const string allowed = "ProcureAi.Assistant.Infrastructure";
+        var ours = Directory.EnumerateFiles(AppContext.BaseDirectory, "ProcureAi.*.dll")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => !name!.EndsWith("Tests", StringComparison.Ordinal))
+            .Select(name => Assembly.Load(name!))
+            .ToList();
+        ours.Select(Name).ShouldContain(allowed);
+
+        foreach (var assembly in ours.Where(a => Name(a) != allowed))
+        {
+            assembly.GetReferencedAssemblies().Select(r => r.Name).ShouldNotContain(
+                r => ProviderSdks.Contains(r), $"{Name(assembly)} references a provider SDK; only {allowed} may");
+        }
+
+        // The rule only means something while the provider really is wired there.
+        ours.Single(a => Name(a) == allowed).GetReferencedAssemblies().Select(r => r.Name).ShouldContain("Microsoft.Extensions.AI.OpenAI");
+    }
+
     [Fact]
     public void No_static_Serilog_Log_in_src()
     {

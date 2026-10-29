@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ProcureAi.Access.Infrastructure;
 using ProcureAi.Approvals.Infrastructure;
+using ProcureAi.Assistant.Infrastructure.Persistence;
 using ProcureAi.Audit.Application;
 using ProcureAi.Budgets.Infrastructure;
 using ProcureAi.Invoicing.Infrastructure;
@@ -22,7 +23,7 @@ namespace ProcureAi.Audit.IntegrationTests;
 [Collection(AuditCollection.Name)]
 public sealed class CdcKeyColumnsTests(AuditApp app)
 {
-    public static TheoryData<string> Services => ["requests", "budgets", "access", "approvals", "purchasing", "invoicing"];
+    public static TheoryData<string> Services => ["requests", "budgets", "access", "approvals", "purchasing", "invoicing", "assistant"];
 
     [Theory]
     [MemberData(nameof(Services))]
@@ -49,7 +50,7 @@ public sealed class CdcKeyColumnsTests(AuditApp app)
     public void Every_configured_key_column_table_exists_in_a_services_model()
     {
         var cdc = app.Services.GetRequiredService<IOptions<AuditOptions>>().Value.Cdc;
-        var modelTables = new[] { "requests", "budgets", "access", "approvals", "purchasing", "invoicing" }.SelectMany(service =>
+        var modelTables = new[] { "requests", "budgets", "access", "approvals", "purchasing", "invoicing", "assistant" }.SelectMany(service =>
         {
             using var db = Model(service);
             return db.Model.GetEntityTypes().Select(e => e.GetTableName()).OfType<string>().ToList();
@@ -66,6 +67,9 @@ public sealed class CdcKeyColumnsTests(AuditApp app)
         "approvals" => new ApprovalsDbContext(new DbContextOptionsBuilder<ApprovalsDbContext>().UseNpgsql("Host=model-only").Options),
         "purchasing" => new PurchasingDbContext(new DbContextOptionsBuilder<PurchasingDbContext>().UseNpgsql("Host=model-only").Options),
         "invoicing" => new InvoicingDbContext(new DbContextOptionsBuilder<InvoicingDbContext>().UseNpgsql("Host=model-only").Options),
+        // pgvector's type mapping is needed to build the model (the embedding column).
+        "assistant" => new AssistantDbContext(
+            new DbContextOptionsBuilder<AssistantDbContext>().UseNpgsql("Host=model-only", npgsql => npgsql.UseVector()).Options),
         _ => throw new ArgumentOutOfRangeException(nameof(service)),
     };
 }

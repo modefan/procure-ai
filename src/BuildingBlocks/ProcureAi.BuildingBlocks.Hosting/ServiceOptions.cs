@@ -21,12 +21,27 @@ public sealed class ServiceOptions : IValidatableObject
     /// </summary>
     public ServiceStore Store { get; set; } = ServiceStore.Postgres;
 
+    /// <summary>
+    /// A second database on MongoDB next to a Postgres store (the Assistant: chat history and invoice scans in <c>assistantchatdb</c>):
+    /// the name of its connection string. When set, the readiness check also pings MongoDB and <c>--migrate</c> also runs the registered
+    /// <c>IMongoMigration</c>s against it. The service registers the client with <c>AddProcureAiMongo(configuration, name)</c>. The AppHost
+    /// sets it (<c>Service__SecondaryMongoConnectionName</c>) from the service's <c>ServiceSpec.SecondaryMongoDatabase</c>.
+    /// </summary>
+    public string? SecondaryMongoConnectionName { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (Store != ServiceStore.None && string.IsNullOrWhiteSpace(DatabaseConnectionName))
         {
             yield return new ValidationResult(
                 $"'{nameof(DatabaseConnectionName)}' is required for a service whose store is {Store}.", [nameof(DatabaseConnectionName)]);
+        }
+
+        if (!string.IsNullOrWhiteSpace(SecondaryMongoConnectionName) && Store != ServiceStore.Postgres)
+        {
+            yield return new ValidationResult(
+                $"'{nameof(SecondaryMongoConnectionName)}' is only for a service whose main store is {ServiceStore.Postgres}, not {Store}.",
+                [nameof(SecondaryMongoConnectionName)]);
         }
     }
 }

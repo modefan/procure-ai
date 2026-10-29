@@ -38,6 +38,7 @@
     <ProjectReference Include="../../src/Services/Approvals/ProcureAi.Approvals.Infrastructure/ProcureAi.Approvals.Infrastructure.csproj" />
     <ProjectReference Include="../../src/Services/Purchasing/ProcureAi.Purchasing.Infrastructure/ProcureAi.Purchasing.Infrastructure.csproj" />
     <ProjectReference Include="../../src/Services/Invoicing/ProcureAi.Invoicing.Infrastructure/ProcureAi.Invoicing.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Assistant/ProcureAi.Assistant.Infrastructure/ProcureAi.Assistant.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

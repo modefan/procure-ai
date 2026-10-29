@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ProcureAi.Assistant.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ProcureAi.Assistant.Application/ProcureAi.Assistant.Application.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Messaging/ProcureAi.BuildingBlocks.Messaging.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/ProcureAi.BuildingBlocks.Persistence.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Persistence.Mongo/ProcureAi.BuildingBlocks.Persistence.Mongo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- Explicit, so the Npgsql provider does not pull in an older Relational than the rest of EF Core. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <PackageReference Include="Pgvector.EntityFrameworkCore" />
+    <PackageReference Include="WolverineFx.EntityFrameworkCore" />
+    <PackageReference Include="WolverineFx.RuntimeCompilation" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <!-- The only project that may name a provider SDK (architecture test Only_assistant_infrastructure_references_provider_sdks). -->
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ProcureAi.Assistant.Tests" />
+    <InternalsVisibleTo Include="ProcureAi.Assistant.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

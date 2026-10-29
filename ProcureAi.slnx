@@ -46,6 +46,10 @@
     <Project Path="src/Services/Notifications/ProcureAi.Notifications.Application/ProcureAi.Notifications.Application.csproj" />
     <Project Path="src/Services/Notifications/ProcureAi.Notifications.Infrastructure/ProcureAi.Notifications.Infrastructure.csproj" />
     <Project Path="src/Services/Notifications/ProcureAi.Notifications.Api/ProcureAi.Notifications.Api.csproj" />
+    <Project Path="src/Services/Assistant/ProcureAi.Assistant.Domain/ProcureAi.Assistant.Domain.csproj" />
+    <Project Path="src/Services/Assistant/ProcureAi.Assistant.Application/ProcureAi.Assistant.Application.csproj" />
+    <Project Path="src/Services/Assistant/ProcureAi.Assistant.Infrastructure/ProcureAi.Assistant.Infrastructure.csproj" />
+    <Project Path="src/Services/Assistant/ProcureAi.Assistant.Api/ProcureAi.Assistant.Api.csproj" />
     <Project Path="src/Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
@@ -69,6 +73,8 @@
     <Project Path="tests/ProcureAi.Suppliers.IntegrationTests/ProcureAi.Suppliers.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Notifications.Tests/ProcureAi.Notifications.Tests.csproj" />
     <Project Path="tests/ProcureAi.Notifications.IntegrationTests/ProcureAi.Notifications.IntegrationTests.csproj" />
+    <Project Path="tests/ProcureAi.Assistant.Tests/ProcureAi.Assistant.Tests.csproj" />
+    <Project Path="tests/ProcureAi.Assistant.IntegrationTests/ProcureAi.Assistant.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Simulators.Tests/ProcureAi.Simulators.Tests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />

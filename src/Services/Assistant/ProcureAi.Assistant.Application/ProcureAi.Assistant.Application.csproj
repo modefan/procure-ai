@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ProcureAi.Assistant.Application</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ProcureAi.Assistant.Domain/ProcureAi.Assistant.Domain.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Application/ProcureAi.BuildingBlocks.Application.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/ProcureAi.BuildingBlocks.Domain/ProcureAi.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="../../../Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Only the provider-neutral abstractions and middleware (IChatClient, IEmbeddingGenerator, AIFunction): never a provider SDK. -->
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="WolverineFx" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ProcureAi.Assistant.Tests" />
+  </ItemGroup>
+
+</Project>

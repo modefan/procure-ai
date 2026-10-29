@@ -104,12 +104,14 @@ public sealed class AuditSaveChangesInterceptor(TimeProvider timeProvider) : Sav
 
     /// <summary>
     /// Internal tables are not data a person changed, so they get no audit row (CLAUDE.md "Audit": internal tables are not
-    /// captured): entity types marked <see cref="AuditExcludeAttribute"/> (the audit rows themselves, the webhook inbox), and
+    /// captured): entity types marked <see cref="AuditExcludeAttribute"/> (the audit rows themselves, the webhook inbox) or excluded in the model
+    /// (<see cref="AuditExclusion.ExcludeFromAudit{T}"/>), and
     /// Wolverine's own entities, which its EF Core integration maps into every service's DbContext (the outbox and inbox envelope
     /// tables, <c>wolverine_*</c>, whose rows carry whole message bodies and come and go with every message).
     /// </summary>
     private static bool IsInternal(IEntityType entityType) =>
         entityType.ClrType.GetCustomAttribute<AuditExcludeAttribute>() is not null
+        || entityType.FindAnnotation(AuditExclusion.Annotation)?.Value is true
         || entityType.ClrType.Assembly.GetName().Name?.StartsWith(WolverinePrefix, StringComparison.Ordinal) == true
         || entityType.GetTableName()?.StartsWith(WolverineTablePrefix, StringComparison.Ordinal) == true;
 
