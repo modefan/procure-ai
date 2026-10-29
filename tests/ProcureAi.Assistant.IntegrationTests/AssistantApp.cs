@@ -36,18 +36,21 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 }
 
 /// <summary>
-/// The real Assistant API on a test server, against the shared infrastructure and the stub Access, on the Fake provider. Ingestion runs
-/// in batches of 4 chunks and retries a provider failure after 0.2 s, a completed request without its submit data after 1 s; the embedding generator is wrapped by <paramref name="embeddings"/>
-/// and the real prompt guard is wrapped by <see cref="MarkerPromptShield"/>.
+/// The real Assistant API on a test server, against the shared infrastructure, the stub Access and the stub services the tools call as the
+/// user (<paramref name="services"/>: Requests, Approvals, Budgets, Suppliers), on the Fake provider. A tool call gives up after 2 s.
+/// Ingestion runs in batches of 4 chunks and retries a provider failure after 0.2 s, a completed request without its submit data after
+/// 1 s; the embedding generator is wrapped by <paramref name="embeddings"/> and the real prompt guard is wrapped by
+/// <see cref="MarkerPromptShield"/>.
 /// </summary>
 public sealed class AssistantApiFactory(
-    AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities, EmbeddingProbe embeddings, ChatScript script, ChatFaults faults)
+    AssistantInfraFixture infra, StubAccessServer access, IEnumerable<KeyValuePair<string, string?>> services, List<Activity> exportedActivities,
+    EmbeddingProbe embeddings, ChatScript script, ChatFaults faults)
     : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
-        foreach (var (key, value) in access.Settings)
+        foreach (var (key, value) in access.Settings.Concat(services))
         {
             builder.UseSetting(key, value);
         }
@@ -61,6 +64,8 @@ public sealed class AssistantApiFactory(
         builder.UseSetting("Assistant:Ingestion:RetryDelays", "00:00:00.200, 00:00:00.200, 00:00:00.200");
         // A completion that arrives before its submit data is retried three times, a second apart (past purchases).
         builder.UseSetting("Assistant:Purchases:RetryDelays", "00:00:01, 00:00:01, 00:00:01");
+        // A tool call that hangs is given up after 2 s (the stub Budgets can hang; its client's own timeouts are longer).
+        builder.UseSetting("Assistant:Tools:Timeout", "00:00:02");
 
         builder.ConfigureTestServices(services =>
         {
@@ -86,6 +91,15 @@ public sealed class AssistantApp : IAsyncLifetime
     public AssistantInfraFixture Infra { get; } = new();
 
     public StubAccessServer Access { get; private set; } = null!;
+
+    /// <summary>The services the tools call as the user (plan 05 Task 5b); each records the relayed headers.</summary>
+    public StubRequestsServer Requests { get; private set; } = null!;
+
+    public StubApprovalsServer Approvals { get; private set; } = null!;
+
+    public StubBudgetsServer Budgets { get; private set; } = null!;
+
+    public StubSuppliersServer Suppliers { get; private set; } = null!;
 
     public HttpClient Client { get; private set; } = null!;
 
@@ -120,7 +134,12 @@ public sealed class AssistantApp : IAsyncLifetime
     {
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
-        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities, Embeddings, Script, Faults);
+        Requests = await StubRequestsServer.StartAsync();
+        Approvals = await StubApprovalsServer.StartAsync();
+        Budgets = await StubBudgetsServer.StartAsync();
+        Suppliers = await StubSuppliersServer.StartAsync();
+        var services = Requests.Settings.Concat(Approvals.Settings).Concat(Budgets.Settings).Concat(Suppliers.Settings);
+        _factory = new AssistantApiFactory(Infra, Access, services, ExportedActivities, Embeddings, Script, Faults);
         Client = _factory.CreateClient();
     }
 
@@ -132,9 +151,12 @@ public sealed class AssistantApp : IAsyncLifetime
             await _factory.DisposeAsync();
         }
 
-        if (Access is not null)
+        foreach (var stub in new IAsyncDisposable?[] { Access, Requests, Approvals, Budgets, Suppliers })
         {
-            await Access.DisposeAsync();
+            if (stub is not null)
+            {
+                await stub.DisposeAsync();
+            }
         }
 
         await Infra.DisposeAsync();

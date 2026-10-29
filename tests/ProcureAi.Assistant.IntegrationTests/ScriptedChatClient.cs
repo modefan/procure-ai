@@ -6,8 +6,8 @@ using ProcureAi.Assistant.Application.Ai;
 
 namespace ProcureAi.Assistant.IntegrationTests;
 
-/// <summary>A model call the provider saw: its task (<c>#task:</c> line) and the messages.</summary>
-public sealed record RecordedCall(string? Task, IReadOnlyList<ChatMessage> Messages)
+/// <summary>A model call the provider saw: its task (<c>#task:</c> line), the messages and the names of the tools it was offered.</summary>
+public sealed record RecordedCall(string? Task, IReadOnlyList<ChatMessage> Messages, IReadOnlyList<string> Tools)
 {
     public string LastUserText => Messages.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "";
 
@@ -28,6 +28,17 @@ public sealed class ChatScript
     /// <summary>The model sends a tool call whose arguments cannot be serialised: the answer flow fails outside any model call.</summary>
     public const string Broken = "zzbroken";
 
+    /// <summary>While <c>get_budget</c> is offered, the model asks for it again and again (one call per turn) for IT-200.</summary>
+    public const string Loop = "zzloop";
+
+    /// <summary>The model asks for <c>get_budget</c> six times in its first turn.</summary>
+    public const string Burst = "zzburst";
+
+    /// <summary>The model calls <c>search_policy</c> once for <see cref="PolicyLookupQuery"/>, then answers as the Fake.</summary>
+    public const string PolicyLookup = "zzpolicy";
+
+    public const string PolicyLookupQuery = "submarines";
+
     public static readonly TimeSpan SlowDelay = TimeSpan.FromMilliseconds(100);
 
     private readonly ConcurrentQueue<RecordedCall> _calls = new();
@@ -44,7 +55,7 @@ public sealed class ScriptedChatClient(IChatClient inner, ChatScript script) : D
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         var list = messages.ToList();
-        script.Record(new RecordedCall(AiTasks.Of(list), list));
+        script.Record(new RecordedCall(AiTasks.Of(list), list, ToolNames(options)));
         return base.GetResponseAsync(list, options, cancellationToken);
     }
 
@@ -52,7 +63,7 @@ public sealed class ScriptedChatClient(IChatClient inner, ChatScript script) : D
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var list = messages.ToList();
-        var call = new RecordedCall(AiTasks.Of(list), list);
+        var call = new RecordedCall(AiTasks.Of(list), list, ToolNames(options));
         script.Record(call);
         var question = call.Task == AiTasks.Answer ? call.LastUserText : "";
         if (question.Contains(ChatScript.Down, StringComparison.Ordinal))
@@ -72,6 +83,14 @@ public sealed class ScriptedChatClient(IChatClient inner, ChatScript script) : D
             yield break;
         }
 
+        var resultsSinceQuestion = list.SkipWhile(m => m != list.LastOrDefault(x => x.Role == ChatRole.User))
+            .SelectMany(m => m.Contents.OfType<FunctionResultContent>()).Count();
+        if (Scripted(question, call.Tools, resultsSinceQuestion) is { } calls)
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, calls) { FinishReason = ChatFinishReason.ToolCalls };
+            yield break;
+        }
+
         var slow = question.Contains(ChatScript.Slow, StringComparison.Ordinal);
         await foreach (var update in base.GetStreamingResponseAsync(list, options, cancellationToken))
         {
@@ -82,6 +101,37 @@ public sealed class ScriptedChatClient(IChatClient inner, ChatScript script) : D
 
             yield return update;
         }
+    }
+
+    private static IReadOnlyList<string> ToolNames(ChatOptions? options) => [.. (options?.Tools ?? []).Select(t => t.Name)];
+
+    /// <summary>The tool calls a scripted question asks for in this turn, or null to let the Fake answer.</summary>
+    private static List<AIContent>? Scripted(string question, IReadOnlyList<string> tools, int resultsSinceQuestion)
+    {
+        static FunctionCallContent Budget() =>
+            new("call_" + Guid.NewGuid().ToString("N")[..12], "get_budget", new Dictionary<string, object?> { ["costCenter"] = "IT-200" });
+
+        if (question.Contains(ChatScript.Loop, StringComparison.Ordinal) && tools.Contains("get_budget"))
+        {
+            return [Budget()];
+        }
+
+        if (question.Contains(ChatScript.Burst, StringComparison.Ordinal) && tools.Contains("get_budget") && resultsSinceQuestion == 0)
+        {
+            return [.. Enumerable.Range(0, 6).Select(_ => Budget())];
+        }
+
+        if (question.Contains(ChatScript.PolicyLookup, StringComparison.Ordinal) && tools.Contains("search_policy") && resultsSinceQuestion == 0)
+        {
+            return
+            [
+                new FunctionCallContent(
+                    "call_" + Guid.NewGuid().ToString("N")[..12], "search_policy",
+                    new Dictionary<string, object?> { ["query"] = ChatScript.PolicyLookupQuery }),
+            ];
+        }
+
+        return null;
     }
 }
 

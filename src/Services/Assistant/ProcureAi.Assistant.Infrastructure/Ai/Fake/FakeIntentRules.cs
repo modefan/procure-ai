@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using ProcureAi.Assistant.Application.Tools;
 
 namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 
@@ -11,18 +12,22 @@ public sealed record FakeToolCall(string Name, IDictionary<string, object?> Argu
 /// caller offered. The first rule that matches wins, in this order:
 /// <list type="number">
 /// <item>a request number (<c>PR-1043</c>) → <see cref="RequestStatus"/> <c>{ number }</c>;</item>
-/// <item>an amount in Rand and a cost center code (<c>R 150 000 ... IT-200</c>) → <see cref="ApprovalChain"/> <c>{ amount, costCenterCode }</c>;</item>
-/// <item>"budget" and a cost center code → <see cref="Budget"/> <c>{ costCenterCode }</c>;</item>
-/// <item>"supplier" or "suppliers" and the words after it → <see cref="SearchSuppliers"/> <c>{ query }</c>.</item>
+/// <item>an amount in Rand and a cost center code (<c>R 150 000 ... IT-200</c>) → <see cref="ApprovalChain"/> <c>{ amountInclVat, costCenter }</c>;</item>
+/// <item>"budget" and a cost center code → <see cref="Budget"/> <c>{ costCenter }</c>;</item>
+/// <item>"supplier" or "suppliers" and the words after it → <see cref="Supplier"/> <c>{ name }</c>;</item>
+/// <item>"similar", "past" or "previous" purchases and the words after it → <see cref="SimilarPurchases"/> <c>{ description }</c>;</item>
+/// <item>"search" (or "check", "look up") "the policy for" and the words after it → <see cref="SearchPolicy"/> <c>{ query }</c>.</item>
 /// </list>
-/// The tool names and argument names are the contract with the Assistant's tools (plan 05 Task 5b).
+/// The tool and argument names are those of the Assistant's tools (<see cref="AssistantTools"/>, plan 05 Task 5b).
 /// </summary>
 public static partial class FakeIntentRules
 {
-    public const string RequestStatus = "get_request_status";
-    public const string ApprovalChain = "explain_approval_chain";
-    public const string Budget = "get_budget";
-    public const string SearchSuppliers = "search_suppliers";
+    public const string RequestStatus = AssistantTools.GetRequestStatus;
+    public const string ApprovalChain = AssistantTools.ExplainApprovalChain;
+    public const string Budget = AssistantTools.GetBudget;
+    public const string Supplier = AssistantTools.GetSupplier;
+    public const string SimilarPurchases = AssistantTools.FindSimilarPurchases;
+    public const string SearchPolicy = AssistantTools.SearchPolicy;
 
     public static FakeToolCall? Match(string question, IReadOnlySet<string> offeredTools)
     {
@@ -39,17 +44,27 @@ public static partial class FakeIntentRules
         var costCenter = CostCenter(question);
         if (offeredTools.Contains(ApprovalChain) && costCenter is not null && Amount(question) is { } amount)
         {
-            return new FakeToolCall(ApprovalChain, new Dictionary<string, object?> { ["amount"] = amount, ["costCenterCode"] = costCenter });
+            return new FakeToolCall(ApprovalChain, new Dictionary<string, object?> { ["amountInclVat"] = amount, ["costCenter"] = costCenter });
         }
 
         if (offeredTools.Contains(Budget) && costCenter is not null && question.Contains("budget", StringComparison.OrdinalIgnoreCase))
         {
-            return new FakeToolCall(Budget, new Dictionary<string, object?> { ["costCenterCode"] = costCenter });
+            return new FakeToolCall(Budget, new Dictionary<string, object?> { ["costCenter"] = costCenter });
         }
 
-        if (offeredTools.Contains(SearchSuppliers) && SupplierQuery().Match(question) is { Success: true } supplier)
+        if (offeredTools.Contains(Supplier) && SupplierQuery().Match(question) is { Success: true } supplier)
         {
-            return new FakeToolCall(SearchSuppliers, new Dictionary<string, object?> { ["query"] = supplier.Groups["query"].Value.Trim() });
+            return new FakeToolCall(Supplier, new Dictionary<string, object?> { ["name"] = supplier.Groups["query"].Value.Trim() });
+        }
+
+        if (offeredTools.Contains(SimilarPurchases) && SimilarPurchasesQuery().Match(question) is { Success: true } similar)
+        {
+            return new FakeToolCall(SimilarPurchases, new Dictionary<string, object?> { ["description"] = similar.Groups["query"].Value.Trim() });
+        }
+
+        if (offeredTools.Contains(SearchPolicy) && PolicySearchQuery().Match(question) is { Success: true } policy)
+        {
+            return new FakeToolCall(SearchPolicy, new Dictionary<string, object?> { ["query"] = policy.Groups["query"].Value.Trim() });
         }
 
         return null;
@@ -92,4 +107,12 @@ public static partial class FakeIntentRules
 
     [GeneratedRegex(@"\bsuppliers?\b(?:\s+(?:for|of|that|who|which|selling|with))?\s+(?<query>[\p{L}\p{N} -]{2,60})", RegexOptions.IgnoreCase)]
     private static partial Regex SupplierQuery();
+
+    [GeneratedRegex(
+        @"\b(?:similar|past|previous|earlier)\s+purchases?\b(?:\s+(?:of|for|like|to|with))?\s+(?<query>[\p{L}\p{N} -]{2,60})", RegexOptions.IgnoreCase)]
+    private static partial Regex SimilarPurchasesQuery();
+
+    [GeneratedRegex(
+        @"\b(?:search|check|look\s+up)\s+(?:in\s+)?the\s+polic(?:y|ies)\s+(?:for|on|about)\s+(?<query>[\p{L}\p{N} -]{2,60})", RegexOptions.IgnoreCase)]
+    private static partial Regex PolicySearchQuery();
 }

@@ -27,7 +27,7 @@ public static class AiSetup
     /// <list type="bullet">
     /// <item><c>answer</c>: the guardrails (<see cref="ChatClientBuilderExtensions.UseGuardrails"/>: <see cref="GuardrailChatClient"/> through
     /// <see cref="IAnswerGuardrail"/>) → default limits (<c>AI:Chat:MaxOutputTokens</c>) →
-    /// function invocation (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> rounds) → OpenTelemetry (<see cref="AiClients.TelemetrySource"/>;
+    /// function invocation (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> tool calls, then an answer without tools) → OpenTelemetry (<see cref="AiClients.TelemetrySource"/>;
     /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → logging (one content-free line per call; the
     /// message log only with LogContent) → provider timeout (<c>AI:Chat:Timeout</c>, <see cref="ProviderTimeoutChatClient"/>) → provider;</item>
     /// <item><c>utility</c>: default limits → OpenTelemetry → logging → provider timeout → provider;</item>
@@ -55,6 +55,9 @@ public static class AiSetup
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use((inner, sp) => new FunctionInvokingChatClient(inner, sp.GetService<ILoggerFactory>(), sp)
             {
+                // One iteration per round of tool calls; after the last one the model is asked once more without tools, so it answers
+                // with what it has (Sixth_tool_call_is_not_made). The calls themselves are capped by AssistantTools (ToolSession),
+                // also when the model asks for several in one turn.
                 MaximumIterationsPerRequest = sp.GetRequiredService<IOptions<AssistantOptions>>().Value.Tools.MaxCallsPerQuestion,
             })
             .Use(Traced)

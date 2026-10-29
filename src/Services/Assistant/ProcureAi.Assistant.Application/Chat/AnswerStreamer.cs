@@ -10,6 +10,7 @@ using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Retrieval;
 using ProcureAi.Assistant.Application.Telemetry;
+using ProcureAi.Assistant.Application.Tools;
 using ProcureAi.Assistant.Domain;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Caching;
@@ -21,7 +22,10 @@ namespace ProcureAi.Assistant.Application.Chat;
 /// <see cref="StartAsync"/> does everything that can still be a plain HTTP answer: the conversation (404, also for another user's or
 /// tenant's), the mode (422), the per-conversation lock (409), the daily quota (429, counted here), then the question is stored. The stream
 /// then rewrites a follow-up with the history (<see cref="QueryRewriter"/>), searches (<see cref="IHybridSearch"/>, top
-/// <c>Assistant:Retrieval:TopK</c>) and sends <c>sources</c>, streams the <c>answer</c> client's text as <c>delta</c>s, runs the grounding rule
+/// <c>Assistant:Retrieval:TopK</c>) and sends <c>sources</c>, streams the <c>answer</c> client's text as <c>delta</c>s with the six read-only
+/// tools offered (<see cref="AssistantTools"/>, Task 5b: each call is a <c>tool_call</c> and a <c>tool_result</c> event and a saved
+/// <see cref="ToolStep"/>; a <c>search_policy</c> result that adds sources is followed by a further <c>sources</c> event with every source
+/// so far), runs the grounding rule
 /// (an answer that cites nothing is replaced: <c>replace</c>), saves the answer and sends <c>done</c>. Failures after the response started
 /// are an <c>error</c> event: 422 when a guard blocked (<see cref="GuardBlockedException"/>), 503 when the provider failed or timed out.
 /// <para>
@@ -36,6 +40,7 @@ public sealed class AnswerStreamer(
     IQuestionQuota quota,
     IHybridSearch search,
     QueryRewriter rewriter,
+    AssistantToolsFactory toolsFactory,
     [FromKeyedServices(AiClients.Answer)] IChatClient answerClient,
     ICallerContext caller,
     ICacheInvalidator cache,
@@ -52,6 +57,9 @@ public sealed class AnswerStreamer(
     public const string UnavailableTitle = "The assistant is unavailable right now.";
     public const string FailedTitle = "The assistant could not answer.";
     public const string NotSavedTitle = "The answer could not be saved.";
+
+    /// <summary>What a tool step's summary or arguments show when they contain what the output guard calls a secret (<see cref="SecretPatterns"/>).</summary>
+    public const string HiddenSummary = "(hidden)";
 
     /// <summary>What replaces an answer that cites none of its sources (ruling 10).</summary>
     public const string NotGroundedText =
@@ -215,10 +223,13 @@ public sealed class AnswerStreamer(
         answer.Sources = [.. hits!.Select((hit, i) => new SourceRef($"S{i + 1}", hit.ChunkId, hit.Type, hit.Title, hit.SectionPath, hit.Reference))];
         yield return SseEvent.OfSources(answer.Sources);
 
-        // 2. The answer, streamed.
+        // 2. The answer, streamed, with the tools of this question (they act as the caller and number new sources on from these).
         var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
+        var tools = toolsFactory.Create(answer.Sources);
+        answer.Tools = tools.Session;
         var chatOptions = new ChatOptions
         {
+            Tools = [.. tools.Functions],
             // Our conversation ID for the guard's log only; never ChatOptions.ConversationId (a provider-side conversation).
             AdditionalProperties = new AdditionalPropertiesDictionary
             {
@@ -411,6 +422,9 @@ public sealed class AnswerStreamer(
 
         public List<ToolStep> ToolSteps { get; } = [];
 
+        /// <summary>The tools' state of this question: the outcome of each call and the sources <c>search_policy</c> added.</summary>
+        public ToolSession? Tools { get; set; }
+
         public List<string> GuardFlags { get; } = [];
 
         public TokenUsage Usage { get; private set; } = TokenUsage.None;
@@ -419,7 +433,7 @@ public sealed class AnswerStreamer(
 
         public bool Saved { get; set; }
 
-        private readonly Dictionary<string, (FunctionCallContent Call, long StartTicks)> _openCalls = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, (FunctionCallContent Call, string Arguments, long StartTicks)> _openCalls = new(StringComparer.Ordinal);
 
         /// <summary>The events of one model update; the text, usage, model and tool steps are recorded.</summary>
         public IEnumerable<SseEvent> Take(ChatResponseUpdate update)
@@ -443,23 +457,50 @@ public sealed class AnswerStreamer(
                             Usage.Input + (usage.Details.InputTokenCount ?? 0), Usage.Output + (usage.Details.OutputTokenCount ?? 0));
                         break;
                     case FunctionCallContent call:
-                        _openCalls[call.CallId] = (call, Stopwatch.GetTimestamp());
-                        events.Add(SseEvent.OfToolCall(call.CallId, call.Name, JsonSerializer.SerializeToElement(call.Arguments ?? new Dictionary<string, object?>())));
+                        var json = Arguments(call);
+                        _openCalls[call.CallId] = (call, json, Stopwatch.GetTimestamp());
+                        events.Add(SseEvent.OfToolCall(call.CallId, call.Name, JsonSerializer.Deserialize<JsonElement>(json)));
                         break;
                     case FunctionResultContent result:
-                        var (name, arguments, started) = _openCalls.Remove(result.CallId, out var open)
-                            ? (open.Call.Name, JsonSerializer.Serialize(open.Call.Arguments ?? new Dictionary<string, object?>()), open.StartTicks)
-                            : ("unknown", "{}", Stopwatch.GetTimestamp());
-                        var step = new ToolStep(
-                            result.CallId, name, arguments, result.Exception is null, result.Exception is null ? "Done." : "The tool failed.",
-                            (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-                        ToolSteps.Add(step);
-                        events.Add(SseEvent.OfToolResult(step));
+                        events.AddRange(ToolResult(result));
                         break;
                 }
             }
 
             return events;
+        }
+
+        /// <summary>
+        /// The <c>tool_result</c> of a finished call, from the tool's own outcome (<see cref="ToolSession"/>: ok, summary, how long the call
+        /// took); a call the tool never ran (unknown tool, arguments that did not bind) failed. The summary goes to the browser, so it is
+        /// checked like the answer's text and shown as <see cref="HiddenSummary"/> on a hit. Sources added by the call follow as a
+        /// <c>sources</c> event with every source so far (the client replaces its list).
+        /// </summary>
+        private IEnumerable<SseEvent> ToolResult(FunctionResultContent result)
+        {
+            var (name, arguments, started) = _openCalls.Remove(result.CallId, out var open)
+                ? (open.Call.Name, open.Arguments, open.StartTicks)
+                : ("unknown", "{}", Stopwatch.GetTimestamp());
+            var outcome = Tools?.TakeOutcome(result.CallId);
+            var summary = outcome?.Summary ?? "The tool failed.";
+            var step = new ToolStep(
+                result.CallId, name, arguments, outcome?.Ok ?? false, SecretPatterns.Find(summary) is null ? summary : HiddenSummary,
+                outcome?.DurationMs ?? (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            ToolSteps.Add(step);
+            yield return SseEvent.OfToolResult(step);
+
+            if (outcome?.AddedSources == true && Tools is not null)
+            {
+                Sources = Tools.Sources;
+                yield return SseEvent.OfSources(Sources);
+            }
+        }
+
+        /// <summary>The call's arguments as JSON for the event and the saved step; <c>{"hidden":true}</c> when they contain a secret.</summary>
+        private static string Arguments(FunctionCallContent call)
+        {
+            var json = JsonSerializer.Serialize(call.Arguments ?? new Dictionary<string, object?>());
+            return SecretPatterns.Find(json) is null ? json : "{\"hidden\":true}";
         }
     }
 }

@@ -125,15 +125,19 @@ public sealed class FakeProviderTests
     }
 
     [Theory]
-    [InlineData("Who approves R 150 000 for IT-200?", FakeIntentRules.ApprovalChain, "amount", 150000)]
-    [InlineData("What is left in the budget of it-200?", FakeIntentRules.Budget, "costCenterCode", "IT-200")]
-    [InlineData("Which suppliers sell laptops", FakeIntentRules.SearchSuppliers, "query", "sell laptops")]
+    [InlineData("Who approves R 150 000 for IT-200?", FakeIntentRules.ApprovalChain, "amountInclVat", 150000)]
+    [InlineData("Who approves R 150 000 for IT-200?", FakeIntentRules.ApprovalChain, "costCenter", "IT-200")]
+    [InlineData("What is left in the budget of it-200?", FakeIntentRules.Budget, "costCenter", "IT-200")]
+    [InlineData("Tell me about the supplier Contoso", FakeIntentRules.Supplier, "name", "Contoso")]
     [InlineData("Status of PR-0982 for IT-200 at R 5 000", FakeIntentRules.RequestStatus, "number", "PR-0982")]
+    [InlineData("Show me similar purchases of laptops for IT", FakeIntentRules.SimilarPurchases, "description", "laptops for IT")]
+    [InlineData("Please search the policy for gifts from suppliers", FakeIntentRules.SearchPolicy, "query", "gifts from suppliers")]
     public void Intent_rules_pick_the_tool_and_its_arguments(string question, string tool, string argument, object expected)
     {
         var all = new HashSet<string>(StringComparer.Ordinal)
         {
-            FakeIntentRules.RequestStatus, FakeIntentRules.ApprovalChain, FakeIntentRules.Budget, FakeIntentRules.SearchSuppliers,
+            FakeIntentRules.RequestStatus, FakeIntentRules.ApprovalChain, FakeIntentRules.Budget, FakeIntentRules.Supplier,
+            FakeIntentRules.SimilarPurchases, FakeIntentRules.SearchPolicy,
         };
 
         var call = FakeIntentRules.Match(question, all).ShouldNotBeNull();

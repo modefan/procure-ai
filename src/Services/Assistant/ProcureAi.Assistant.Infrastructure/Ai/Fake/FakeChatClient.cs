@@ -227,13 +227,18 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max].TrimEnd() + "…";
 
-    private static string ResultText(object? result) => result switch
+    /// <summary>A tool result's text, without the <c>&lt;data kind="tool"&gt;</c> wrapper the Assistant's tools put around it.</summary>
+    private static string ResultText(object? result)
     {
-        null => "",
-        string s => s,
-        JsonElement json => json.ValueKind == JsonValueKind.String ? json.GetString() ?? "" : json.GetRawText(),
-        _ => JsonSerializer.Serialize(result),
-    };
+        var text = result switch
+        {
+            null => "",
+            string s => s,
+            JsonElement json => json.ValueKind == JsonValueKind.String ? json.GetString() ?? "" : json.GetRawText(),
+            _ => JsonSerializer.Serialize(result),
+        };
+        return ToolBlock().Match(text) is { Success: true } block ? block.Groups["text"].Value : text;
+    }
 
     private static int LastIndex(IList<ChatMessage> messages, Func<ChatMessage, bool> predicate)
     {
@@ -250,6 +255,9 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
 
     [GeneratedRegex(@"<data\s+id=""S(?<n>\d+)""[^>]*>(?<text>.*?)</data>", RegexOptions.Singleline)]
     private static partial Regex DataBlock();
+
+    [GeneratedRegex(@"^\s*<data\s+kind=""tool""[^>]*>(?<text>.*)</data>\s*$", RegexOptions.Singleline)]
+    private static partial Regex ToolBlock();
 
     [GeneratedRegex(@"(?m)^\s*\[S(?<n>\d+)\]")]
     private static partial Regex SourceMarker();

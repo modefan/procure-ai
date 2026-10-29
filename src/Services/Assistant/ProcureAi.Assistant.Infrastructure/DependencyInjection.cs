@@ -12,6 +12,7 @@ using ProcureAi.Assistant.Infrastructure.Ingestion;
 using ProcureAi.Assistant.Infrastructure.Mongo;
 using ProcureAi.Assistant.Infrastructure.Persistence;
 using ProcureAi.Assistant.Infrastructure.Retrieval;
+using ProcureAi.Assistant.Infrastructure.Tools;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.Contracts;
@@ -39,7 +40,8 @@ public static class DependencyInjection
 
     /// <summary>
     /// Registers the DbContext (Wolverine-integrated, pgvector enabled, audited), the chat database on MongoDB and the model providers
-    /// and pipelines (<see cref="AiSetup.AddAssistantAi"/>). The caller registers <see cref="BuildingBlocks.Application.ICallerContext"/>.
+    /// and pipelines (<see cref="AiSetup.AddAssistantAi"/>), and the tools of the model (<see cref="ToolsSetup.AddAssistantTools"/>). The caller
+    /// registers <see cref="BuildingBlocks.Application.ICallerContext"/>.
     /// </summary>
     public static IServiceCollection AddAssistantInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
@@ -59,6 +61,7 @@ public static class DependencyInjection
         services.AddAssistantIngestion();
         services.AddAssistantRetrieval();
         services.AddAssistantChat();
+        services.AddAssistantTools(configuration);
         return services;
     }
 

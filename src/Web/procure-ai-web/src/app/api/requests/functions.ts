@@ -9,6 +9,8 @@ export type { GetRequest$Params as GetRequest$Params } from './fn/requests/get-r
 export { getRequest as getRequest } from './fn/requests/get-request';
 export type { UpdateRequest$Params as UpdateRequest$Params } from './fn/requests/update-request';
 export { updateRequest as updateRequest } from './fn/requests/update-request';
+export type { GetRequestByNumber$Params as GetRequestByNumber$Params } from './fn/requests/get-request-by-number';
+export { getRequestByNumber as getRequestByNumber } from './fn/requests/get-request-by-number';
 export type { SubmitRequest$Params as SubmitRequest$Params } from './fn/requests/submit-request';
 export { submitRequest as submitRequest } from './fn/requests/submit-request';
 export type { CancelRequest$Params as CancelRequest$Params } from './fn/requests/cancel-request';

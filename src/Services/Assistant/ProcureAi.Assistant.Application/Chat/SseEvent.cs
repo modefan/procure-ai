@@ -9,7 +9,8 @@ namespace ProcureAi.Assistant.Application.Chat;
 /// Angular client (plan 05 Task 7), which parses them exactly:
 /// <list type="bullet">
 /// <item><see cref="ToolCall"/> <c>{id, name, arguments}</c> and <see cref="ToolResult"/> <c>{id, ok, summary, durationMs}</c> (tools, Task 5b);</item>
-/// <item><see cref="Sources"/> <c>[{ref, title, sectionPath, reference?, type}]</c>, before any text;</item>
+/// <item><see cref="Sources"/> <c>[{ref, title, sectionPath, reference?, type}]</c>, before any text; again after a <c>search_policy</c>
+/// result that added sources, then with every source so far (the client replaces its list);</item>
 /// <item><see cref="Delta"/> <c>{text}</c>: the next piece of the answer;</item>
 /// <item><see cref="Replace"/> <c>{text}</c>: the whole answer is replaced (the grounding rule), just before <see cref="Done"/>;</item>
 /// <item><see cref="Done"/> <c>{messageId, usage {input, output}, model}</c>: the answer is complete and saved;</item>

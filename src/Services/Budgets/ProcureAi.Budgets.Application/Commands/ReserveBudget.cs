@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using ProcureAi.Budgets.Application.Abstractions;
 using ProcureAi.Budgets.Domain;
 using ProcureAi.BuildingBlocks.Application.Caching;
+using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts.Budgets;
 using Wolverine;
 

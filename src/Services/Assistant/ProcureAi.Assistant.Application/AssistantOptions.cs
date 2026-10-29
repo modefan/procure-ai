@@ -4,6 +4,7 @@ using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Ingestion;
 using ProcureAi.Assistant.Application.Retrieval;
 using ProcureAi.Assistant.Application.Retrieval.PastPurchases;
+using ProcureAi.Assistant.Application.Tools;
 
 namespace ProcureAi.Assistant.Application;
 
@@ -12,6 +13,7 @@ public sealed class AssistantOptions
 {
     public const string SectionName = "Assistant";
 
+    /// <summary>The model's read-only tools (<c>Assistant:Tools</c>, plan 05 Task 5b).</summary>
     [Required, ValidateObjectMembers]
     public ToolOptions Tools { get; set; } = new();
 
@@ -121,13 +123,6 @@ public sealed class UploadOptions
     /// <summary>The largest file accepted (10 MB); a larger one is answered 413.</summary>
     [Range(1, 100L * 1024 * 1024)]
     public long MaxBytes { get; set; } = 10L * 1024 * 1024;
-}
-
-public sealed class ToolOptions
-{
-    /// <summary>The most tool calls one question may make; then the model answers with what it has (ruling 8).</summary>
-    [Range(1, 20)]
-    public int MaxCallsPerQuestion { get; set; } = 5;
 }
 
 public sealed class QuotaOptions : IValidatableObject

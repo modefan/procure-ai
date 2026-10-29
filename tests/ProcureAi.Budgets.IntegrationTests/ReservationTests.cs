@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using ProcureAi.Budgets.Domain;
+using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts.Budgets;
 using Shouldly;
 

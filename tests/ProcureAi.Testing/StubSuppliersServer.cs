@@ -21,7 +21,8 @@ public sealed record StubCatalogCall(string? Tenant, string Code, IReadOnlyList<
 /// (<c>GET api/v1/suppliers/internal/{code}/items?skus=A,B</c>) for the Requests service. The catalog is in memory and set per
 /// test: for one tenant (<see cref="SetCatalog"/>) or, until a tenant has its own, the same for every tenant (<see cref="SetDefaultCatalog"/>).
 /// Like the real service it answers 404 for an unknown supplier and lists only the asked SKUs that exist, active or not.
-/// <see cref="Settings"/> points a service at it.
+/// <see cref="Settings"/> points a service at it. For the Assistant's <c>get_supplier</c> tool it also plays the supplier list
+/// (<c>GET api/v1/suppliers?search=</c>) as the user, recording those calls with their headers (<see cref="UserCalls"/>).
 /// </summary>
 public sealed class StubSuppliersServer : IAsyncDisposable
 {
@@ -30,10 +31,21 @@ public sealed class StubSuppliersServer : IAsyncDisposable
     private readonly ConcurrentDictionary<string, StubSupplier> _default = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, bool> _down = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<StubCatalogCall> _calls = new();
+    private readonly ConcurrentQueue<StubUserCall> _userCalls = new();
 
     private StubSuppliersServer(WebApplication app) => _app = app;
 
     private sealed record StubSupplier(string Name, bool Active, IReadOnlyDictionary<string, StubCatalogItem> Items);
+
+    /// <summary>The supplier list calls made as a user (<c>GET api/v1/suppliers</c>), with their headers.</summary>
+    public IReadOnlyList<StubUserCall> UserCalls => [.. _userCalls];
+
+    /// <summary>The user calls of one tenant.</summary>
+    public IReadOnlyList<StubUserCall> UserCallsOf(string tenantId) => [.. _userCalls.Where(c => c.Tenant == tenantId)];
+
+    /// <summary>Gives the tenant its own supplier <paramref name="code"/> named <paramref name="name"/> (replacing the default for that code).</summary>
+    public void SetSupplier(string tenantId, string code, string name, bool active, params StubCatalogItem[] items) =>
+        _byTenant[(tenantId, code)] = new StubSupplier(name, active, items.ToDictionary(i => i.Sku, StringComparer.Ordinal));
 
     /// <summary>The supplier every tenant has until a test says otherwise (the code of the demo hardware supplier).</summary>
     public const string DefaultSupplier = "contoso-hardware";
@@ -116,6 +128,31 @@ public sealed class StubSuppliersServer : IAsyncDisposable
                     })
                     .ToArray(),
             });
+        });
+
+        // The supplier list for the Assistant's get_supplier tool, called as the user: the tenant's suppliers (the default catalog's, then
+        // the tenant's own) whose code or name contains the search, a page at a time.
+        app.MapGet("/api/v1/suppliers", (HttpContext http, string? search, int? page, int? pageSize) =>
+        {
+            var call = StubCaller.Read(http);
+            stub._userCalls.Enqueue(call);
+            if (!StubCaller.HasCredential(call))
+            {
+                return Results.StatusCode(StatusCodes.Status401Unauthorized);
+            }
+
+            var suppliers = stub._default
+                .Where(d => call.Tenant is null || !stub._byTenant.ContainsKey((call.Tenant, d.Key)))
+                .Concat(stub._byTenant.Where(t => t.Key.Tenant == call.Tenant).Select(t => KeyValuePair.Create(t.Key.Code, t.Value)))
+                .Where(s => string.IsNullOrEmpty(search)
+                    || s.Key.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || s.Value.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(s => s.Key, StringComparer.Ordinal)
+                .Select(s => new { code = s.Key, name = s.Value.Name, active = s.Value.Active, itemCount = s.Value.Items.Count })
+                .ToList();
+            var size = Math.Clamp(pageSize ?? 20, 1, 100);
+            var number = Math.Max(page ?? 1, 1);
+            return Results.Json(new { items = suppliers.Skip((number - 1) * size).Take(size).ToArray(), page = number, pageSize = size, total = suppliers.Count });
         });
 
         await app.StartAsync();

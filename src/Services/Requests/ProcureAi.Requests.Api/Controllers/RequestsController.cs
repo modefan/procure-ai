@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -47,6 +48,23 @@ public sealed class RequestsController(
     public async Task<ActionResult<RequestDto>> Get(Guid id, CancellationToken cancellationToken)
     {
         var request = await bus.InvokeAsync<RequestDto>(new GetRequest(id), cancellationToken);
+        Response.Headers.ETag = VersionETag.Format(request.Version);
+        return request;
+    }
+
+    /// <summary>
+    /// One request by its number (<c>PR-1043</c>), with the same permission and scope as <c>GET {id}</c>; another tenant's request is
+    /// 404. Cached under the tenant's list tag, which every change of any of its requests evicts (the route has no ID to tag by).
+    /// </summary>
+    [HttpGet("by-number/{number}", Name = "GetRequestByNumber")]
+    [CachedGet(Tags = [RequestCacheTag.ListTemplate])]
+    [RequirePermission(Permissions.RequestsRead)]
+    [ProducesResponseType<RequestDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RequestDto>> GetByNumber(
+        [StringLength(RequestLimits.CodeLength)] string number, CancellationToken cancellationToken)
+    {
+        var request = await bus.InvokeAsync<RequestDto>(new GetRequestByNumber(number), cancellationToken);
         Response.Headers.ETag = VersionETag.Format(request.Version);
         return request;
     }

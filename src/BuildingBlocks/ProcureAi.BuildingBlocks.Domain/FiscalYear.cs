@@ -1,10 +1,11 @@
 using System.Globalization;
 
-namespace ProcureAi.Budgets.Domain;
+namespace ProcureAi.BuildingBlocks.Domain;
 
 /// <summary>
 /// A South African company fiscal year: 1 March to the end of February, in the tenant's local time. It is named after the
-/// calendar year it ends in, so 1 March 2026 to 28 February 2027 is <c>FY2027</c>.
+/// calendar year it ends in, so 1 March 2026 to 28 February 2027 is <c>FY2027</c>. Shared: Budgets keeps budgets per year, and the
+/// Assistant's <c>get_budget</c> tool asks Budgets for the current one.
 /// </summary>
 public readonly record struct FiscalYear(int EndYear)
 {

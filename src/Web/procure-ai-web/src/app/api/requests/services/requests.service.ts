@@ -15,6 +15,8 @@ import { createRequest } from '../fn/requests/create-request';
 import { CreateRequest$Params } from '../fn/requests/create-request';
 import { getRequest } from '../fn/requests/get-request';
 import { GetRequest$Params } from '../fn/requests/get-request';
+import { getRequestByNumber } from '../fn/requests/get-request-by-number';
+import { GetRequestByNumber$Params } from '../fn/requests/get-request-by-number';
 import { listRequests } from '../fn/requests/list-requests';
 import { ListRequests$Params } from '../fn/requests/list-requests';
 import { PagedResultOfRequestDto } from '../models/paged-result-of-request-dto';
@@ -127,6 +129,31 @@ export class RequestsService extends BaseService {
    */
   updateRequest(params: UpdateRequest$Params, context?: HttpContext): Promise<RequestDto> {
     const resp = this.updateRequest$Response(params, context);
+    return resp.then((r: StrictHttpResponse<RequestDto>): RequestDto => r.body);
+  }
+
+  /** Path part for operation `getRequestByNumber()` */
+  static readonly GetRequestByNumberPath = '/api/v1/requests/by-number/{number}';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `getRequestByNumber()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  getRequestByNumber$Response(params: GetRequestByNumber$Params, context?: HttpContext): Promise<StrictHttpResponse<RequestDto>> {
+    const obs = getRequestByNumber(this.http, this.rootUrl, params, context);
+    return firstValueFrom(obs);
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `getRequestByNumber$Response()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  getRequestByNumber(params: GetRequestByNumber$Params, context?: HttpContext): Promise<RequestDto> {
+    const resp = this.getRequestByNumber$Response(params, context);
     return resp.then((r: StrictHttpResponse<RequestDto>): RequestDto => r.body);
   }
 

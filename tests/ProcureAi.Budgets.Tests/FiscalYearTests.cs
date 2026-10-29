@@ -1,4 +1,5 @@
 using ProcureAi.Budgets.Domain;
+using ProcureAi.BuildingBlocks.Domain;
 using Shouldly;
 
 namespace ProcureAi.Budgets.Tests;
