@@ -1,3 +1,4 @@
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, input } from '@angular/core';
 import { ApprovalChainDto } from '../../api/approvals/models/approval-chain-dto';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
@@ -264,6 +265,7 @@ const STATE_WORD: Record<StepState, string> = { done: 'Done', active: 'In progre
 /** The workflow as a vertical list of steps. The state is also written out (screen readers, colour-blind users). */
 @Component({
   selector: 'app-workflow-timeline',
+  imports: [KeepRandPipe],
   template: `
     <ol class="m-0 list-none p-0" aria-label="Workflow">
       @for (step of steps(); track step.key) {
@@ -297,7 +299,7 @@ const STATE_WORD: Record<StepState, string> = { done: 'Done', active: 'In progre
             }
           </div>
           @if (step.detail) {
-            <p class="mt-0.5 text-sm break-words" [class]="step.state === 'warn' ? 'text-amber-800' : step.state === 'failed' ? 'text-rose-800' : 'text-slate-600'">{{ step.detail }}</p>
+            <p class="mt-0.5 text-sm break-words" [class]="step.state === 'warn' ? 'text-amber-800' : step.state === 'failed' ? 'text-rose-800' : 'text-slate-600'">{{ step.detail | keepRand }}</p>
           }
         </li>
       }

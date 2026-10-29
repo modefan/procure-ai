@@ -1,3 +1,4 @@
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, computed, effect, input, output, signal, untracked } from '@angular/core';
 import { applyEach, form, FormField, maxLength, submit, validate } from '@angular/forms/signals';
 import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto';
@@ -30,7 +31,7 @@ const emptyModel = (order: PurchaseOrderDto): Model => ({
  */
 @Component({
   selector: 'app-receipt-form',
-  imports: [FormField, BusyButton],
+  imports: [FormField, BusyButton, KeepRandPipe],
   template: `
     <form novalidate (submit)="$event.preventDefault()" class="space-y-4">
       <div class="hidden grid-cols-[minmax(0,1fr)_7rem_8rem] gap-3 border-b border-slate-200 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 sm:grid">
@@ -77,7 +78,7 @@ const emptyModel = (order: PurchaseOrderDto): Model => ({
       </div>
 
       @if (generalError(); as message) {
-        <div role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{{ message }}</div>
+        <div role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{{ message | keepRand }}</div>
       }
 
       <div class="flex justify-end">

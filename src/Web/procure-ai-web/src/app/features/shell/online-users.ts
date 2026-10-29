@@ -11,7 +11,7 @@ const SHOWN = 3;
       <span
         data-testid="online-users"
         role="img"
-        class="inline-flex items-center"
+        class="hidden items-center sm:inline-flex"
         [attr.aria-label]="label()"
         [attr.title]="label()"
       >

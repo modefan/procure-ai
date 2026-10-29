@@ -3,7 +3,7 @@ import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angula
 import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
 import { PresenceStore } from '../../core/live/presence.store';
-import { RandPipe } from '../../core/ui/money.pipe';
+import { KeepRandPipe, RandPipe } from '../../core/ui/money.pipe';
 import { escalatesIn } from '../approvals/inbox-time';
 import { DashboardStore } from './dashboard.store';
 
@@ -16,7 +16,7 @@ const NAMES_SHOWN = 3;
  */
 @Component({
   selector: 'app-dashboard-page',
-  imports: [RouterLink, DatePipe, RandPipe],
+  imports: [RouterLink, DatePipe, RandPipe, KeepRandPipe],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
       <h1 class="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
@@ -24,7 +24,7 @@ const NAMES_SHOWN = 3;
         <p class="mt-1 text-slate-600">Welcome back, {{ user.name }}.</p>
       }
 
-      <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(15rem,1fr))]">
         @if (store.tiles().approvals) {
           <div data-tile="approvals" class="card flex flex-col gap-1">
             <a routerLink="/app/approvals" class="text-sm text-slate-600 hover:underline">Waiting for my approval</a>
@@ -106,9 +106,9 @@ const NAMES_SHOWN = 3;
                 <time class="w-24 shrink-0 whitespace-nowrap text-slate-500" [attr.datetime]="item.occurredAt">{{ item.occurredAt | date: 'd MMM HH:mm' }}</time>
                 <span class="min-w-0 text-slate-800">
                   @if (item.requestId) {
-                    <a [routerLink]="['/app/requests', item.requestId]" class="break-words hover:underline">{{ item.summary }}</a>
+                    <a [routerLink]="['/app/requests', item.requestId]" class="break-words hover:underline">{{ item.summary | keepRand }}</a>
                   } @else {
-                    <span class="break-words">{{ item.summary }}</span>
+                    <span class="break-words">{{ item.summary | keepRand }}</span>
                   }
                 </span>
               </li>

@@ -1,3 +1,4 @@
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { DatePipe } from '@angular/common';
 import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField, submit, validate } from '@angular/forms/signals';
@@ -24,7 +25,7 @@ const MAX_REASON = 500;
  */
 @Component({
   selector: 'app-invoice-detail-page',
-  imports: [StatusBadge, BusyButton, PayLinesForm, RouterLink, DatePipe, FormField],
+  imports: [StatusBadge, BusyButton, PayLinesForm, RouterLink, DatePipe, FormField, KeepRandPipe],
   providers: [InvoiceDetailStore],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
@@ -54,7 +55,7 @@ const MAX_REASON = 500;
 
         @if (invoice.onHold) {
           <div class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-section="hold">
-            <span class="font-semibold">Held by finance.</span> {{ invoice.holdReason }}
+            <span class="font-semibold">Held by finance.</span> {{ invoice.holdReason | keepRand }}
           </div>
         }
         @if (invoice.mismatchReasons.length > 0) {
@@ -62,7 +63,7 @@ const MAX_REASON = 500;
             <p class="font-semibold">Why it does not match</p>
             <ul class="mt-1 list-disc space-y-0.5 pl-5">
               @for (reason of invoice.mismatchReasons; track reason) {
-                <li class="break-words">{{ reason }}</li>
+                <li class="break-words">{{ reason | keepRand }}</li>
               }
             </ul>
           </div>
@@ -136,7 +137,7 @@ const MAX_REASON = 500;
           <section class="card mt-6" aria-labelledby="actions-heading" data-section="actions">
             <h2 id="actions-heading" class="mb-3 text-base font-semibold text-slate-900">Payment</h2>
             @if (store.generalError(); as message) {
-              <div role="alert" class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm break-words text-red-900">{{ message }}</div>
+              <div role="alert" class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm break-words text-red-900">{{ message | keepRand }}</div>
             }
             @if (invoice.onHold) {
               <p class="mb-3 text-sm text-slate-700">Nothing is paid while the invoice is on hold. Releasing it matches the invoice again.</p>

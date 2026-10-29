@@ -1,3 +1,4 @@
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, computed, input } from '@angular/core';
 import { BusinessEventDto } from '../../api/audit/models/business-event-dto';
 import { formatWhen } from './workflow-timeline';
@@ -5,6 +6,7 @@ import { formatWhen } from './workflow-timeline';
 /** The business history of one request, newest first: when, what happened (the sentence Audit wrote), and the event type. */
 @Component({
   selector: 'app-audit-trail',
+  imports: [KeepRandPipe],
   template: `
     @if (rows().length === 0) {
       <p class="text-sm text-slate-600">Nothing has happened to this request yet.</p>
@@ -23,7 +25,7 @@ import { formatWhen } from './workflow-timeline';
                 <time [attr.datetime]="row.occurredAt">{{ when(row.occurredAt) }}</time>
               </td>
               <td class="py-2">
-                <span class="block break-words text-slate-800">{{ row.summary }}</span>
+                <span class="block break-words text-slate-800">{{ row.summary | keepRand }}</span>
                 <span class="block font-mono text-xs break-all text-slate-500">{{ row.type }}</span>
               </td>
             </tr>

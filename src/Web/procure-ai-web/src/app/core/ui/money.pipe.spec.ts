@@ -1,4 +1,4 @@
-import { formatRand, RandPipe } from './money.pipe';
+import { formatRand, keepRand, KeepRandPipe, RandPipe } from './money.pipe';
 
 const intl = (n: number) =>
   new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
@@ -32,5 +32,18 @@ describe('RandPipe', () => {
     expect(pipe.transform(86940)).toBe(formatRand(86940));
     expect(pipe.transform(null)).toBe('');
     expect(pipe.transform(undefined)).toBe('');
+  });
+});
+
+describe('keepRand', () => {
+  it('keeps the R of every amount in a server sentence with its number', () => {
+    const text = keepRand('R 86 940,00 reserved on IT-200, R 5,00 left (R is a letter)');
+    expect(text).toBe('R\u00a086 940,00 reserved on IT-200, R\u00a05,00 left (R is a letter)');
+  });
+
+  it('leaves a sentence without amounts alone, and copes with nothing', () => {
+    expect(keepRand('Approved by Maria')).toBe('Approved by Maria');
+    expect(keepRand(null)).toBe('');
+    expect(new KeepRandPipe().transform(undefined)).toBe('');
   });
 });

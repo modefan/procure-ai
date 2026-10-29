@@ -5,7 +5,7 @@ import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto
 import { HasUnsavedChanges } from '../../core/auth/unsaved-changes.guard';
 import { ReferenceDataStore } from '../../core/reference/reference-data.store';
 import { BusyButton } from '../../core/ui/busy-button';
-import { formatRand, RandPipe } from '../../core/ui/money.pipe';
+import { formatRand, KeepRandPipe, RandPipe } from '../../core/ui/money.pipe';
 import { VAT_RATE_PERCENT } from '../requests/request-lines';
 import { InvoiceFormStore } from './invoice-form.store';
 import { invoiceTotals } from './invoice-totals';
@@ -50,7 +50,7 @@ const statusWords = (status: string) => status.replace(/([a-z])([A-Z])/g, (_, a:
  */
 @Component({
   selector: 'app-invoice-form-page',
-  imports: [FormField, RouterLink, BusyButton, RandPipe],
+  imports: [FormField, RouterLink, BusyButton, RandPipe, KeepRandPipe],
   providers: [InvoiceFormStore],
   host: { '(window:beforeunload)': 'warnBeforeUnload($event)' },
   template: `
@@ -72,7 +72,7 @@ const statusWords = (status: string) => status.replace(/([a-z])([A-Z])/g, (_, a:
 
       <form class="mt-6 space-y-6" novalidate (submit)="$event.preventDefault()">
         @if (store.generalError(); as message) {
-          <div role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm break-words text-red-900">{{ message }}</div>
+          <div role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm break-words text-red-900">{{ message | keepRand }}</div>
         }
 
         <div class="card space-y-5">

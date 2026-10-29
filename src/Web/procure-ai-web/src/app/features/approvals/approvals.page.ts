@@ -1,3 +1,4 @@
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, effect, inject, OnInit, signal } from '@angular/core';
 import { form, FormField, maxLength, validate } from '@angular/forms/signals';
@@ -18,7 +19,7 @@ const MAX_REASON = 500;
  */
 @Component({
   selector: 'app-approvals-page',
-  imports: [RouterLink, FormField, BusyButton, Pager, NgTemplateOutlet],
+  imports: [RouterLink, FormField, BusyButton, Pager, NgTemplateOutlet, KeepRandPipe],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
       <h1 class="text-2xl font-bold tracking-tight text-slate-900">Approvals</h1>
@@ -142,7 +143,7 @@ const MAX_REASON = 500;
 
     <ng-template #extra let-step let-area="area">
       @if (store.errorOf(step.id); as message) {
-        <p role="alert" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{{ message }}</p>
+        <p role="alert" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{{ message | keepRand }}</p>
       }
       @if (rejecting() === step.id) {
         <div class="mt-3">

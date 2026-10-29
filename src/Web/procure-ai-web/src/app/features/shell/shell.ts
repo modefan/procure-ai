@@ -37,7 +37,7 @@ interface NavLink {
           <span aria-hidden="true" class="text-indigo-700">&#9670;</span> Procure<span class="text-indigo-700">AI</span>
         </a>
 
-        <nav aria-label="Main" class="order-3 flex w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto">
+        <nav aria-label="Main" class="order-3 -mx-4 flex w-[calc(100%+2rem)] items-center gap-1 overflow-x-auto px-4 py-1 lg:order-none lg:mx-0 lg:w-auto lg:flex-wrap lg:overflow-visible lg:px-0">
           @if (!auth.isLoggedIn()) {
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" class="nav-link">Welcome</a>
           }
@@ -59,7 +59,7 @@ interface NavLink {
           }
         </nav>
 
-        <div class="flex items-center gap-2">
+        <div class="ml-auto flex items-center gap-2">
           @if (auth.isLoggedIn()) {
             <app-online-users />
             <app-live-indicator />

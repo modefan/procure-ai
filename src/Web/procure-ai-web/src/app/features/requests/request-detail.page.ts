@@ -1,3 +1,4 @@
+import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Component, computed, effect, inject, input, untracked } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
@@ -17,7 +18,7 @@ import { WorkflowTimeline } from './workflow-timeline';
  */
 @Component({
   selector: 'app-request-detail-page',
-  imports: [StatusBadge, WorkflowTimeline, AuditTrail, BusyButton, RouterLink],
+  imports: [StatusBadge, WorkflowTimeline, AuditTrail, BusyButton, RouterLink, KeepRandPipe],
   providers: [RequestDetailStore],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
@@ -60,7 +61,7 @@ import { WorkflowTimeline } from './workflow-timeline';
         </header>
 
         @if (store.generalError(); as message) {
-          <div role="alert" class="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{{ message }}</div>
+          <div role="alert" class="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{{ message | keepRand }}</div>
         }
         @if (store.partialFailures().length > 0) {
           <div role="status" class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
