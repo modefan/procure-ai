@@ -220,7 +220,11 @@ public sealed class AnswerStreamer(
         var chatOptions = new ChatOptions
         {
             // Our conversation ID for the guard's log only; never ChatOptions.ConversationId (a provider-side conversation).
-            AdditionalProperties = new AdditionalPropertiesDictionary { [GuardrailChatClient.ConversationIdProperty] = conversation.Id.ToString() },
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                [GuardrailChatClient.ConversationIdProperty] = conversation.Id.ToString(),
+                [GuardrailChatClient.InputCheckProperty] = answer.InputCheck,
+            },
         };
         await using (var updates = answerClient.GetStreamingResponseAsync(prompt, chatOptions, cancellationToken).GetAsyncEnumerator(cancellationToken))
         {
@@ -345,7 +349,7 @@ public sealed class AnswerStreamer(
             conversation.Answer(
                 new Message(
                     answer.Id, MessageRole.Assistant, answer.Text.ToString(), status, time.GetUtcNow(), answer.Sources, answer.ToolSteps,
-                    answer.Usage, answer.Model, answer.GuardFlags, latency, firstToken),
+                    answer.Usage, answer.Model, answer.GuardFlags, latency, firstToken, answer.InputCheck.Passed),
                 time.GetUtcNow());
             saved = await store.SaveAsync(conversation, timeout.Token);
             if (!saved)
@@ -395,6 +399,9 @@ public sealed class AnswerStreamer(
         public long StartTicks { get; } = startTicks;
 
         public long? FirstTokenTicks { get; set; }
+
+        /// <summary>Marked by the guard once the question passed the input guard (<see cref="GuardrailChatClient.InputCheckProperty"/>).</summary>
+        public InputCheck InputCheck { get; } = new();
 
         public string Model { get; private set; } = model;
 

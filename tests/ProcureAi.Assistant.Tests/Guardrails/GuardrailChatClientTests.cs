@@ -44,6 +44,32 @@ public sealed class GuardrailChatClientTests
     }
 
     [Fact]
+    public async Task Input_check_is_marked_only_when_the_question_passed_and_is_not_passed_on()
+    {
+        var inner = new ScriptedChatClient("Approved.");
+        var guarded = Guarded(inner, out _, out _);
+        ChatOptions Options(InputCheck check) => new()
+        {
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                [GuardrailChatClient.ConversationIdProperty] = "c1",
+                [GuardrailChatClient.InputCheckProperty] = check,
+            },
+        };
+
+        var allowed = new InputCheck();
+        await StreamAsync(guarded, "What is the approval limit for laptops?", Options(allowed));
+        var blocked = new InputCheck();
+        await StreamAsync(guarded, Injection, Options(blocked));
+
+        allowed.Passed.ShouldBeTrue();
+        blocked.Passed.ShouldBeFalse();
+        inner.Calls.ShouldBe(1);
+        inner.LastOptions.ShouldNotBeNull().AdditionalProperties.ShouldNotBeNull().ContainsKey(GuardrailChatClient.InputCheckProperty).ShouldBeFalse();
+        inner.LastOptions!.AdditionalProperties![GuardrailChatClient.ConversationIdProperty].ShouldBe("c1");
+    }
+
+    [Fact]
     public async Task Blocked_question_never_reaches_inner_client()
     {
         var inner = new ScriptedChatClient("Approved.");

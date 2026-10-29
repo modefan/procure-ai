@@ -29,13 +29,16 @@ public sealed class GuardrailChatClient(IChatClient inner, IPromptShield shield,
     /// <summary>The key of <see cref="ChatOptions.AdditionalProperties"/> that carries our conversation ID, for the log.</summary>
     public const string ConversationIdProperty = "conversationId";
 
+    /// <summary>The key of <see cref="ChatOptions.AdditionalProperties"/> for an <see cref="InputCheck"/> the guard marks once the question passed.</summary>
+    public const string InputCheckProperty = "inputCheck";
+
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         var list = messages as IList<ChatMessage> ?? [.. messages];
         await CheckInputAsync(list, options, cancellationToken);
 
-        var response = await base.GetResponseAsync(list, options, cancellationToken);
+        var response = await base.GetResponseAsync(list, WithoutInputCheck(options), cancellationToken);
         if (SecretPatterns.Find(response.Text) is { } reason)
         {
             throw Blocked(GuardBlockedException.OutputStage, reason, options);
@@ -52,7 +55,7 @@ public sealed class GuardrailChatClient(IChatClient inner, IPromptShield shield,
 
         var output = new OutputGuard(guardOptions.OutputWindow);
         var held = new HoldBackBuffer(guardOptions.HoldBackChars);
-        await using (var updates = base.GetStreamingResponseAsync(list, options, cancellationToken).GetAsyncEnumerator(cancellationToken))
+        await using (var updates = base.GetStreamingResponseAsync(list, WithoutInputCheck(options), cancellationToken).GetAsyncEnumerator(cancellationToken))
         {
             while (await updates.MoveNextAsync())
             {
@@ -91,6 +94,24 @@ public sealed class GuardrailChatClient(IChatClient inner, IPromptShield shield,
         {
             throw Blocked(GuardBlockedException.InputStage, result.Reason ?? GuardReasons.Injection, options);
         }
+
+        if (options?.AdditionalProperties?.TryGetValue(InputCheckProperty, out var check) == true && check is InputCheck inputCheck)
+        {
+            inputCheck.Pass();
+        }
+    }
+
+    /// <summary>The options without the <see cref="InputCheck"/> (it is for the caller, never for the model or the telemetry below).</summary>
+    private static ChatOptions? WithoutInputCheck(ChatOptions? options)
+    {
+        if (options?.AdditionalProperties?.ContainsKey(InputCheckProperty) != true)
+        {
+            return options;
+        }
+
+        var copy = options.Clone();
+        copy.AdditionalProperties = new AdditionalPropertiesDictionary(options.AdditionalProperties.Where(p => p.Key != InputCheckProperty));
+        return copy;
     }
 
     private GuardBlockedException Blocked(string stage, string reason, ChatOptions? options)

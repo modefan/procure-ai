@@ -139,8 +139,9 @@ public sealed class Conversation : Entity<Guid>
 
     /// <summary>
     /// Up to <paramref name="count"/> messages before the last question that a follow-up builds on, as question and answer pairs: a
-    /// question is kept only with a <see cref="MessageStatus.Complete"/> or <see cref="MessageStatus.Stopped"/> answer (the answer too when it
-    /// has text). A question whose answer was blocked or failed, or that was never answered, is left out: a blocked question must never reach
+    /// question is kept only with a <see cref="MessageStatus.Complete"/> answer, or a <see cref="MessageStatus.Stopped"/> one whose question the
+    /// input guard had already passed (<see cref="Message.InputChecked"/>); the answer too when it has text. A question stopped before the guard
+    /// finished was never checked. A question whose answer was blocked or failed, or that was never answered, is left out: a blocked question must never reach
     /// the models again through the history, where the input guard does not look.
     /// </summary>
     public IReadOnlyList<Message> HistoryBeforeLastQuestion(int count)
@@ -156,7 +157,7 @@ public sealed class Conversation : Entity<Guid>
             }
 
             var answer = before[i + 1];
-            if (answer.Status is MessageStatus.Complete or MessageStatus.Stopped)
+            if (answer.Status == MessageStatus.Complete || (answer.Status == MessageStatus.Stopped && answer.InputChecked))
             {
                 kept.Add(before[i]);
                 if (answer.Text.Length > 0)

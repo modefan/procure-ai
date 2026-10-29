@@ -13,6 +13,9 @@ internal sealed class ScriptedChatClient(params string[] pieces) : IChatClient
 {
     public int Calls { get; private set; }
 
+    /// <summary>The options of the last call, as the inner client got them.</summary>
+    public ChatOptions? LastOptions { get; private set; }
+
     public int PiecesRead { get; private set; }
 
     public bool StreamDisposed { get; private set; }
@@ -21,6 +24,7 @@ internal sealed class ScriptedChatClient(params string[] pieces) : IChatClient
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         Calls++;
+        LastOptions = options;
         return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Concat(pieces))));
     }
 
@@ -28,6 +32,7 @@ internal sealed class ScriptedChatClient(params string[] pieces) : IChatClient
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Calls++;
+        LastOptions = options;
         try
         {
             foreach (var piece in pieces)

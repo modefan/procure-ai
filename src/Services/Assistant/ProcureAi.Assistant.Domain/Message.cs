@@ -17,7 +17,7 @@ public sealed class Message
     public Message(
         Guid id, MessageRole role, string text, MessageStatus status, DateTimeOffset createdAt, IReadOnlyList<SourceRef>? sources = null,
         IReadOnlyList<ToolStep>? toolSteps = null, TokenUsage? usage = null, string? model = null, IReadOnlyList<string>? guardFlags = null,
-        long? latencyMs = null, long? timeToFirstTokenMs = null)
+        long? latencyMs = null, long? timeToFirstTokenMs = null, bool inputChecked = false)
     {
         Id = id;
         Role = role;
@@ -31,6 +31,7 @@ public sealed class Message
         GuardFlags = guardFlags ?? [];
         LatencyMs = latencyMs;
         TimeToFirstTokenMs = timeToFirstTokenMs;
+        InputChecked = inputChecked;
     }
 
     public Guid Id { get; }
@@ -59,6 +60,12 @@ public sealed class Message
 
     /// <summary>From the question to the first streamed answer text; null when none came.</summary>
     public long? TimeToFirstTokenMs { get; }
+
+    /// <summary>
+    /// On an answer: whether the input guard checked its question and let it through. False when the answer stopped (or failed) before the
+    /// guard finished, and for answers stored before this was recorded; such a question is never replayed as history.
+    /// </summary>
+    public bool InputChecked { get; }
 
     public static Message Question(Guid id, string text, DateTimeOffset at) => new(id, MessageRole.User, text, MessageStatus.Complete, at);
 }

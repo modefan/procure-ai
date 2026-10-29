@@ -98,8 +98,20 @@ public sealed class MarkerPromptShield(IPromptShield real) : IPromptShield
     public const string Marker = "#test-poison-marker#";
     public const string Reason = "The test guard found instructions to the assistant.";
 
-    public Task<PromptShieldResult> CheckQuestionAsync(string text, CancellationToken cancellationToken) =>
-        real.CheckQuestionAsync(text, cancellationToken);
+    /// <summary>A question containing this waits <see cref="SlowDelay"/> before the real check (a slow guard classifier).</summary>
+    public const string SlowMarker = "zzslowguard";
+
+    public static readonly TimeSpan SlowDelay = TimeSpan.FromSeconds(5);
+
+    public async Task<PromptShieldResult> CheckQuestionAsync(string text, CancellationToken cancellationToken)
+    {
+        if (text.Contains(SlowMarker, StringComparison.Ordinal))
+        {
+            await Task.Delay(SlowDelay, cancellationToken);
+        }
+
+        return await real.CheckQuestionAsync(text, cancellationToken);
+    }
 
     public Task<PromptShieldResult> CheckDocumentAsync(string text, CancellationToken cancellationToken) =>
         text.Contains(Marker, StringComparison.Ordinal)

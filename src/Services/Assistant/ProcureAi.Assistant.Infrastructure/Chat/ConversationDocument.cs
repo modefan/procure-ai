@@ -76,6 +76,9 @@ internal sealed class MessageDocument
 
     public long? TimeToFirstTokenMs { get; set; }
 
+    /// <summary>Missing in documents stored before it was recorded: false (unchecked).</summary>
+    public bool InputChecked { get; set; }
+
     public static MessageDocument From(Message message) => new()
     {
         Id = message.Id.ToString("D"),
@@ -91,12 +94,14 @@ internal sealed class MessageDocument
         GuardFlags = [.. message.GuardFlags],
         LatencyMs = message.LatencyMs,
         TimeToFirstTokenMs = message.TimeToFirstTokenMs,
+        InputChecked = message.InputChecked,
     };
 
     public Message ToDomain() =>
         new(
             Guid.Parse(Id), Role, Text, Status, ConversationDocument.Utc(CreatedAt), [.. Sources.Select(s => s.ToDomain())],
-            [.. ToolSteps.Select(t => t.ToDomain())], new TokenUsage(InputTokens, OutputTokens), Model, GuardFlags, LatencyMs, TimeToFirstTokenMs);
+            [.. ToolSteps.Select(t => t.ToDomain())], new TokenUsage(InputTokens, OutputTokens), Model, GuardFlags, LatencyMs, TimeToFirstTokenMs,
+            InputChecked);
 }
 
 internal sealed class SourceDocument

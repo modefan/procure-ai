@@ -46,6 +46,36 @@ public sealed class StreamingFailureTests(AssistantApp app)
     }
 
     [Fact]
+    public async Task Question_stopped_before_the_guard_ran_is_not_replayed()
+    {
+        var (_, token, conversation) = await SeededConversationAsync();
+        using (var request = AskRequest(token, conversation, $"{Injection} {MarkerPromptShield.SlowMarker}"))
+        using (var abort = CancellationTokenSource.CreateLinkedTokenSource(Ct))
+        {
+            using var response = await app.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, abort.Token);
+            await using var stream = await response.Content.ReadAsStreamAsync(abort.Token);
+            await using var frames = ReadFramesAsync(stream, abort.Token).GetAsyncEnumerator(abort.Token);
+            (await frames.MoveNextAsync()).ShouldBeTrue();
+            frames.Current.Event.ShouldBe("sources");
+            // The guard is still checking the question (it waits 5 s): the user stops.
+            await abort.CancelAsync();
+        }
+
+        var stopped = await WaitForLastMessageAsync(app.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");
+        stopped.GetProperty("status").GetString().ShouldBe("Stopped");
+        var marker = Guid.NewGuid().ToString("N")[..8];
+
+        await AskOkOnceFreeAsync(app.Client, token, conversation, $"And for laptops {marker}?");
+
+        var calls = app.Script.Calls.Where(c => c.LastUserText.Contains(marker)).ToList();
+        calls.ShouldContain(c => c.Task == "answer");
+        foreach (var call in calls)
+        {
+            call.AllText.ShouldNotContain("Ignore previous instructions", customMessage: $"the {call.Task} call got the unchecked question");
+        }
+    }
+
+    [Fact]
     public async Task Next_question_right_after_done_is_not_409()
     {
         var (tenant, token, conversation) = await SeededConversationAsync();
