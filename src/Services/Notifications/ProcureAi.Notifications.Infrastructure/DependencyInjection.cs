@@ -23,7 +23,7 @@ public static class DependencyInjection
 {
     /// <summary>The exchanges whose events become live updates.</summary>
     public static IReadOnlyList<string> LiveExchanges { get; } =
-        [Exchanges.Requests, Exchanges.Approvals, Exchanges.Budgets, Exchanges.Purchasing, Exchanges.Invoicing];
+        [Exchanges.Requests, Exchanges.Approvals, Exchanges.Budgets, Exchanges.Purchasing, Exchanges.Invoicing, Exchanges.Assistant];
 
     /// <summary>The queue of <paramref name="serviceName"/> that receives the events of <see cref="LiveExchanges"/>.</summary>
     public static string LiveQueue(string serviceName) => $"{serviceName}-live";
@@ -69,7 +69,7 @@ public static class DependencyInjection
 
     /// <summary>
     /// Wolverine without a message store (the service has no database, plan 04 ruling 1): the shared <c>AccessChanged</c> eviction queue,
-    /// and one <b>buffered</b> queue <c>&lt;serviceName&gt;-live</c> bound to the five exchanges of <see cref="LiveExchanges"/>. No durable
+    /// and one <b>buffered</b> queue <c>&lt;serviceName&gt;-live</c> bound to the six exchanges of <see cref="LiveExchanges"/>. No durable
     /// inbox: a message redelivered after a crash only pushes twice, and clients just refetch. A push that failed on Redis is retried
     /// inline (<c>Notifications:PushRetry</c>, <see cref="RetryPushFailures"/>), then the message goes to the error queue (Wolverine 6.53 dead-letters on the first
     /// failure when no rule matches).

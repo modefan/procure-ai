@@ -1,5 +1,6 @@
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Approvals;
+using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Budgets;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Notifications;
@@ -26,6 +27,7 @@ public sealed class EventMapTests
     private static readonly Guid InvoiceId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid StepId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid PaymentId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid DocumentId = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly DateTimeOffset At = new(2026, 10, 28, 9, 30, 0, TimeSpan.Zero);
 
     private static readonly string R = RequestId.ToString();
@@ -96,6 +98,12 @@ public sealed class EventMapTests
         ["PaymentExported"] = (new PaymentExported(PaymentId, InvoiceId, RequestId, Tenant, "ERP-1", At),
             [Change(LiveEntities.Invoice, I, "PaymentExported"), Change(LiveEntities.Request, R, "PaymentExported")]),
         ["PurchaseOrderSettled"] = (new PurchaseOrderSettled(OrderId, RequestId, Tenant, 115m, At), OrderAndRequest("PurchaseOrderSettled")),
+
+        // assistant: the policy document only (no request)
+        ["PolicyDocumentProgressed"] = (new PolicyDocumentProgressed(DocumentId, Tenant, 2, 40, At),
+            [new EntityChanged(LiveEntities.PolicyDocument, DocumentId.ToString(), null, "PolicyDocumentProgressed", At)]),
+        ["PolicyDocumentStatusChanged"] = (new PolicyDocumentStatusChanged(DocumentId, Tenant, 2, "Ready", At),
+            [new EntityChanged(LiveEntities.PolicyDocument, DocumentId.ToString(), null, "PolicyDocumentStatusChanged", At)]),
     };
 
     public static TheoryData<string> CaseNames => [.. Cases.Keys];
@@ -115,7 +123,7 @@ public sealed class EventMapTests
         string[] namespaces =
         [
             "ProcureAi.Contracts.Requests", "ProcureAi.Contracts.Approvals", "ProcureAi.Contracts.Budgets",
-            "ProcureAi.Contracts.Purchasing", "ProcureAi.Contracts.Invoicing",
+            "ProcureAi.Contracts.Purchasing", "ProcureAi.Contracts.Invoicing", "ProcureAi.Contracts.Assistant",
         ];
         var events = typeof(IIntegrationEvent).Assembly.GetTypes()
             .Where(t => typeof(IIntegrationEvent).IsAssignableFrom(t) && t.IsClass && namespaces.Contains(t.Namespace))
@@ -148,6 +156,25 @@ public sealed class EventMapTests
         var sent = pushes.Sent.ShouldHaveSingleItem();
         sent.Tenant.ShouldBe(Tenant);
         sent.Changes.ShouldBe(Cases["RequestSubmitted"].Expected);
+    }
+
+    [Fact]
+    public async Task Policy_document_events_push_entity_changed()
+    {
+        var pushes = new RecordingPushes();
+        var progressed = (PolicyDocumentProgressed)Cases["PolicyDocumentProgressed"].Event;
+        var changed = (PolicyDocumentStatusChanged)Cases["PolicyDocumentStatusChanged"].Event;
+
+        await AssistantEventsHandler.Handle(progressed, pushes, TestContext.Current.CancellationToken);
+        await AssistantEventsHandler.Handle(changed, pushes, TestContext.Current.CancellationToken);
+
+        pushes.Sent.Select(s => s.Tenant).ShouldBe([Tenant, Tenant]);
+        pushes.Sent.SelectMany(s => s.Changes).ShouldBe(
+        [
+            .. Cases["PolicyDocumentProgressed"].Expected, .. Cases["PolicyDocumentStatusChanged"].Expected,
+        ]);
+        // A GUID is a plain identifier, so clients may also watch the document (presence).
+        PresenceTarget.TryCreate(LiveEntities.PolicyDocument, DocumentId.ToString(), out _).ShouldBeTrue();
     }
 
     private sealed class RecordingPushes : ILivePushes

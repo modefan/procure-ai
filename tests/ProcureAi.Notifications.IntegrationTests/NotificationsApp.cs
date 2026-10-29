@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Approvals;
+using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Budgets;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Purchasing;
@@ -92,6 +93,8 @@ public sealed class NotificationsApp : IAsyncLifetime
                 options.PublishMessage<BudgetReserved>().ToRabbitExchange(Exchanges.Budgets);
                 options.PublishMessage<PurchaseOrderCreated>().ToRabbitExchange(Exchanges.Purchasing);
                 options.PublishMessage<InvoiceMatched>().ToRabbitExchange(Exchanges.Invoicing);
+                options.PublishMessage<PolicyDocumentProgressed>().ToRabbitExchange(Exchanges.Assistant);
+                options.PublishMessage<PolicyDocumentStatusChanged>().ToRabbitExchange(Exchanges.Assistant);
             })
             .StartAsync();
     }

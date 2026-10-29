@@ -9,6 +9,7 @@ public static class Exchanges
     public const string Access = "access";
     public const string Purchasing = "purchasing";
     public const string Invoicing = "invoicing";
+    public const string Assistant = "assistant";
 }
 
 /// <summary>Queues that receive commands addressed to one service.</summary>

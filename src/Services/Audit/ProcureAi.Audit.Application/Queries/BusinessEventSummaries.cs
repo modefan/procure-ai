@@ -6,6 +6,7 @@ using ProcureAi.Contracts;
 using ProcureAi.Contracts.Access;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Budgets;
+using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Contracts.Requests;
@@ -93,6 +94,8 @@ public sealed class BusinessEventSummaries
             RequestCompleted c => $"Request completed ({Rand(c.SpentInclVat)} spent incl. VAT)",
             BudgetSpent b => $"{Rand(b.Amount)} spent on {b.CostCenterCode}",
             BudgetAmountSet b => $"Budget of {b.CostCenterCode} ({b.FiscalYear}) set to {Rand(b.Amount)}",
+            PolicyDocumentProgressed p => $"Policy document version {p.Version} embedded to {p.Percent} %",
+            PolicyDocumentStatusChanged c => $"Policy document version {c.Version} is now {c.Status}",
             AccessChanged a => $"Access changed ({a.Kind})" + (a.UserId is null ? "" : $" for {Name(a.UserId)}"),
             _ => e.Stored.Type,
         };

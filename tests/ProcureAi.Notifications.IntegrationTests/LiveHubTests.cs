@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Notifications;
 using ProcureAi.Contracts.Requests;
@@ -63,6 +64,25 @@ public sealed class LiveHubTests(NotificationsApp app)
             (LiveEntities.Order, orderId.ToString()),
             (LiveEntities.Request, requestId.ToString()),
         ]);
+    }
+
+    [Fact]
+    public async Task Policy_document_events_push_entity_changed()
+    {
+        var tenant = NewTenant();
+        var documentId = Guid.NewGuid();
+        await using var client = await LiveClient.ConnectAsync(app.A.Server, tenant, UserToken(tenant));
+
+        // The Assistant publishes both to its exchange "assistant", which the live queue is bound to.
+        await app.PublishAsync(new PolicyDocumentProgressed(documentId, tenant, 1, 50, DateTimeOffset.UtcNow));
+        await app.PublishAsync(new PolicyDocumentStatusChanged(documentId, tenant, 1, "Ready", DateTimeOffset.UtcNow));
+
+        bool IsDocument(JsonElement p, string eventType) =>
+            p.GetProperty("entity").GetString() == LiveEntities.PolicyDocument && p.GetProperty("id").GetString() == documentId.ToString()
+            && p.GetProperty("eventType").GetString() == eventType;
+        await client.WaitForAsync(p => IsDocument(p, nameof(PolicyDocumentProgressed)), Arrival);
+        var ready = await client.WaitForAsync(p => IsDocument(p, nameof(PolicyDocumentStatusChanged)), Arrival);
+        ready.GetProperty("requestId").ValueKind.ShouldBe(JsonValueKind.Null);
     }
 
     [Fact]

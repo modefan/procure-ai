@@ -1,5 +1,6 @@
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Approvals;
+using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Budgets;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Notifications;
@@ -60,6 +61,10 @@ public static class LiveEventMap
         PaymentExported e => Pushes(e, e.RequestId, Invoice(e.InvoiceId)),
         PurchaseOrderSettled e => Pushes(e, e.RequestId, Order(e.OrderId)),
 
+        // assistant: a policy document's ingestion (no request)
+        PolicyDocumentProgressed e => [PolicyDocument(e, e.DocumentId)],
+        PolicyDocumentStatusChanged e => [PolicyDocument(e, e.DocumentId)],
+
         _ => throw new NotSupportedException($"No live updates are defined for {integrationEvent.GetType().FullName}."),
     };
 
@@ -70,6 +75,9 @@ public static class LiveEventMap
     private static (string Entity, string Id) Order(Guid orderId) => (LiveEntities.Order, orderId.ToString());
 
     private static (string Entity, string Id) Invoice(Guid invoiceId) => (LiveEntities.Invoice, invoiceId.ToString());
+
+    private static EntityChanged PolicyDocument(IIntegrationEvent e, Guid documentId) =>
+        new(LiveEntities.PolicyDocument, documentId.ToString(), null, e.GetType().Name, e.OccurredAt);
 
     /// <summary>The given entities in order (null ones skipped), then the request.</summary>
     private static EntityChanged[] Pushes(IIntegrationEvent e, Guid requestId, params (string Entity, string Id)?[] entities)
