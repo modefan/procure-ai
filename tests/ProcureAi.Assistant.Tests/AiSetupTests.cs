@@ -97,7 +97,7 @@ public sealed class AiSetupTests
 
         answer.GetService<FunctionInvokingChatClient>().ShouldNotBeNull().MaximumIterationsPerRequest.ShouldBe(3);
         answer.GetService<OpenTelemetryChatClient>().ShouldNotBeNull().EnableSensitiveData.ShouldBeFalse();
-        answer.GetService<LoggingChatClient>().ShouldNotBeNull();
+        answer.GetService<LoggingChatClient>().ShouldBeNull("the message log only with AI:Telemetry:LogContent");
         answer.GetService<FakeChatClient>().ShouldNotBeNull();
         utility.GetService<FunctionInvokingChatClient>().ShouldBeNull("internal prompts never call tools");
         utility.GetService<OpenTelemetryChatClient>().ShouldNotBeNull();

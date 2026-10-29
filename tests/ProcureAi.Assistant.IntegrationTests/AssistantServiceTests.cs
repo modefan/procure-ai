@@ -6,6 +6,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
 using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Info;
 using ProcureAi.Assistant.Domain;
@@ -162,37 +164,26 @@ public sealed class AssistantServiceTests(AssistantApp app)
     [Fact]
     public async Task Model_calls_are_traced_on_the_assistant_source_without_content()
     {
-        var activities = new List<Activity>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == AiClients.TelemetrySource,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity =>
-            {
-                lock (activities)
-                {
-                    activities.Add(activity);
-                }
-            },
-        };
-        ActivitySource.AddActivityListener(listener);
         var answer = app.Services.GetRequiredKeyedService<IChatClient>(AiClients.Answer);
         var embeddings = app.Services.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>();
         var marker = Guid.NewGuid().ToString("N");
 
         await answer.GetResponseAsync(
-            [new(ChatRole.System, AiTasks.Line(AiTasks.Answer)), new(ChatRole.User, $"secret question {marker}")], cancellationToken: Ct);
+            [new(ChatRole.System, AiTasks.Line(AiTasks.Answer)), new(ChatRole.User, $"[S1] The {marker} rule.\nsecret question {marker}")],
+            cancellationToken: Ct);
         await embeddings.GenerateAsync([$"text {marker}"], cancellationToken: Ct);
+        app.Services.GetRequiredService<TracerProvider>().ForceFlush().ShouldBeTrue();
 
         Activity[] seen;
-        lock (activities)
+        lock (app.ExportedActivities)
         {
-            seen = [.. activities];
+            seen = [.. app.ExportedActivities.Where(a => a.Source.Name == AiClients.TelemetrySource)];
         }
 
+        // Exported by the service's own tracer provider: the service defaults trace every ProcureAi.* source (AiSetup registers none).
         seen.ShouldContain(a => a.OperationName.StartsWith("chat", StringComparison.Ordinal));
         seen.ShouldContain(a => a.OperationName.StartsWith("embeddings", StringComparison.Ordinal));
-        // LogContent is false outside Development: no prompt text in any tag or event.
+        // LogContent is false outside Development: no prompt or answer text in any tag or event.
         foreach (var activity in seen)
         {
             activity.TagObjects.ShouldNotContain(t => (t.Value as string ?? "").Contains(marker), activity.OperationName);

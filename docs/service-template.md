@@ -120,7 +120,9 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
   registered, then default limits, function invocation (at most `Assistant:Tools:MaxCallsPerQuestion` rounds), OpenTelemetry, logging,
   provider) and `utility` (default limits, OpenTelemetry, logging, provider), and one `IEmbeddingGenerator<string, Embedding<float>>`
   (OpenTelemetry, logging, provider). Spans go to the activity source `ProcureAi.Assistant.AI` (every `ProcureAi.*` source is traced by
-  the service defaults); prompt and answer text only with `LogContent`.
+  the service defaults; AiSetup registers none). The logging stage is `ModelCallLogging`: one content-free line per call (model,
+  tokens, duration, outcome). Prompt and answer text reach spans (`EnableSensitiveData`) and logs (Microsoft.Extensions.AI's
+  `LoggingChatClient` / `LoggingEmbeddingGenerator`, added only then) only with `LogContent`: the option is the gate, not the log level.
 - The first line of a system message names the task: `#task: answer|rewrite|context|classify|scan` (`AiTasks`). The Fake model routes on
   it (`FakeChatClient`, `FakeIntentRules`, `FakeEmbeddingGenerator`: hashed bag of words and bigrams, 1536 buckets, L2-normalised).
   The Fake provider reports its own model names (`fake-chat`, `fake-embedding-1536`), so its vectors are never taken for a real model's.

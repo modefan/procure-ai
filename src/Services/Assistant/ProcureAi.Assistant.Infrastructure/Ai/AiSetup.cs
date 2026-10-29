@@ -25,7 +25,8 @@ public static class AiSetup
     /// <list type="bullet">
     /// <item><c>answer</c>: <see cref="IAnswerGuardrail"/> (when registered, Task 4) → default limits (<c>AI:Chat:MaxOutputTokens</c>) →
     /// function invocation (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> rounds) → OpenTelemetry (<see cref="AiClients.TelemetrySource"/>;
-    /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → logging → provider;</item>
+    /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → logging (one content-free line per call; the
+    /// message log only with LogContent) → provider;</item>
     /// <item><c>utility</c>: default limits → OpenTelemetry → logging → provider;</item>
     /// <item>the embedding generator: OpenTelemetry → logging → provider, at <c>AI:Embedding:Dimensions</c> (1536).</item>
     /// </list>
@@ -59,11 +60,10 @@ public static class AiSetup
         services.AddEmbeddingGenerator(sp => sp.GetRequiredService<ProviderClients>().Embeddings)
             .Use((inner, sp) => new OpenTelemetryEmbeddingGenerator<string, Embedding<float>>(
                 inner, sp.GetService<ILoggerFactory>()?.CreateLogger(typeof(OpenTelemetryEmbeddingGenerator<string, Embedding<float>>)), AiClients.TelemetrySource))
-            .Use((inner, sp) => new LoggingEmbeddingGenerator<string, Embedding<float>>(
-                inner, LoggerFor<LoggingEmbeddingGenerator<string, Embedding<float>>>(sp)));
+            .Use(LoggedEmbeddings);
 
-        // The spans of every model call (its meter of the same name is exported with every ProcureAi.* meter).
-        services.AddOpenTelemetry().WithTracing(tracing => tracing.AddSource(AiClients.TelemetrySource));
+        // The spans go to the source AiClients.TelemetrySource, which the service defaults trace with every ProcureAi.* source (and its meter
+        // of the same name is exported with every ProcureAi.* meter).
         return services;
     }
 
@@ -79,9 +79,28 @@ public static class AiSetup
             EnableSensitiveData = Ai(services).Telemetry.LogContent,
         };
 
-    // LoggingChatClient writes message content only at Trace level, which no shipped Serilog configuration enables.
-    private static IChatClient Logged(IChatClient inner, IServiceProvider services) =>
-        new LoggingChatClient(inner, LoggerFor<LoggingChatClient>(services));
+    /// <summary>
+    /// The logging stage: one content-free line per call (<see cref="ModelCallLogging"/>). Microsoft.Extensions.AI's
+    /// <see cref="LoggingChatClient"/> writes prompts and answers (at Trace level), so it is added below it only when
+    /// <c>AI:Telemetry:LogContent</c> is true: the option is the gate, not the log level.
+    /// </summary>
+    private static IChatClient Logged(IChatClient inner, IServiceProvider services)
+    {
+        var content = Ai(services).Telemetry.LogContent ? new LoggingChatClient(inner, LoggerFor<LoggingChatClient>(services)) : inner;
+        return new ModelCallLoggingChatClient(content, CallLogger(services));
+    }
+
+    private static IEmbeddingGenerator<string, Embedding<float>> LoggedEmbeddings(
+        IEmbeddingGenerator<string, Embedding<float>> inner, IServiceProvider services)
+    {
+        var content = Ai(services).Telemetry.LogContent
+            ? new LoggingEmbeddingGenerator<string, Embedding<float>>(inner, LoggerFor<LoggingEmbeddingGenerator<string, Embedding<float>>>(services))
+            : inner;
+        return new ModelCallLoggingEmbeddingGenerator(content, CallLogger(services));
+    }
+
+    private static ILogger CallLogger(IServiceProvider services) =>
+        (ILogger?)services.GetService<ILoggerFactory>()?.CreateLogger(ModelCallLogging.Category) ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
     private static ILogger LoggerFor<T>(IServiceProvider services) =>
         (ILogger?)services.GetService<ILoggerFactory>()?.CreateLogger<T>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;

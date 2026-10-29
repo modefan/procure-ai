@@ -233,7 +233,7 @@ public sealed class LayerRulesTests
     }
 
     /// <summary>The model provider SDKs: only the Assistant's DI/config setup may name them (plan 05 Global Constraints).</summary>
-    private static readonly string[] ProviderSdks = ["OpenAI", "Microsoft.Extensions.AI.OpenAI"];
+    private static readonly string[] ProviderSdks = ["OpenAI", "Microsoft.Extensions.AI.OpenAI", "Azure.AI.OpenAI", "Azure.AI.Inference"];
 
     [Fact]
     public void Only_assistant_infrastructure_references_provider_sdks()

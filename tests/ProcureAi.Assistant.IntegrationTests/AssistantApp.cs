@@ -1,5 +1,9 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Trace;
 using Npgsql;
 
 namespace ProcureAi.Assistant.IntegrationTests;
@@ -25,7 +29,7 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 }
 
 /// <summary>The real Assistant API on a test server, against the shared infrastructure and the stub Access, on the Fake provider.</summary>
-public sealed class AssistantApiFactory(AssistantInfraFixture infra, StubAccessServer access)
+public sealed class AssistantApiFactory(AssistantInfraFixture infra, StubAccessServer access, List<Activity> exportedActivities)
     : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -39,6 +43,10 @@ public sealed class AssistantApiFactory(AssistantInfraFixture infra, StubAccessS
         builder.UseSetting($"ConnectionStrings:{AssistantInfraFixture.ChatDatabase}", infra.ChatConnectionString);
         builder.UseSetting("AI:Fake:StreamDelayMs", "0");
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
+        builder.ConfigureTestServices(services =>
+            // A second exporter on the service's own tracer provider: what reaches it is what the OTLP exporter gets, so a source
+            // the service defaults do not trace never shows up here.
+            services.AddOpenTelemetry().WithTracing(tracing => tracing.AddInMemoryExporter(exportedActivities)));
     }
 }
 
@@ -55,11 +63,14 @@ public sealed class AssistantApp : IAsyncLifetime
 
     public IServiceProvider Services => _factory.Services;
 
+    /// <summary>The spans the service's tracer provider exported (OpenTelemetry in-memory exporter; lock it to read).</summary>
+    public List<Activity> ExportedActivities { get; } = [];
+
     public async ValueTask InitializeAsync()
     {
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
-        _factory = new AssistantApiFactory(Infra, Access);
+        _factory = new AssistantApiFactory(Infra, Access, ExportedActivities);
         Client = _factory.CreateClient();
     }
 
