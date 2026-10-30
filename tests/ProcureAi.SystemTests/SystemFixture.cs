@@ -23,7 +23,7 @@ public sealed class SystemFixture : IAsyncLifetime
     public const string Dept = "00000000-0000-4000-8000-000000000003";
     public const string Thandi = "00000000-0000-4000-8000-000000000004";
 
-    public static readonly string[] Services = ["requests", "access", "budgets", "approvals", "audit", "suppliers", "purchasing", "invoicing", "notifications"];
+    public static readonly string[] Services = ["requests", "access", "budgets", "approvals", "audit", "suppliers", "purchasing", "invoicing", "notifications", "assistant"];
 
     /// <summary>What the receiver watches for: Purchasing's supplier circuit opened (Polly's metric, exported over OTLP).</summary>
     public const string SupplierCircuitOpened = "supplier-circuit-opened";

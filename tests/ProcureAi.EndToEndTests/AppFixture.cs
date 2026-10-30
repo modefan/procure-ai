@@ -20,6 +20,9 @@ public sealed class AppFixture : IAsyncLifetime
     public const string TomId = "00000000-0000-4000-8000-000000000001";
     public const string MariaId = "00000000-0000-4000-8000-000000000002";
 
+    /// <summary>The Fake model's pause between streamed words in these tests (AppHost <c>AI:Fake:StreamDelayMs</c>).</summary>
+    public const int FakeStreamDelayMs = 60;
+
     // The first start pulls images and runs npm install for the Angular app.
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(12);
 
@@ -40,9 +43,10 @@ public sealed class AppFixture : IAsyncLifetime
         _adminApiKey = Environment.GetEnvironmentVariable("DEMO_ADMIN_API_KEY")
                        ?? Environment.GetEnvironmentVariable("DEMO_ADMIN_API_KEY", EnvironmentVariableTarget.User);
 
-        // Tests never keep data: no volumes, so every run starts from empty databases.
+        // Tests never keep data: no volumes, so every run starts from empty databases. The Fake model streams one word every 60 ms
+        // (instead of 15), so Stop_keeps_partial_answer can stop an answer halfway.
         var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.ProcureAi_AppHost>(
-            ["Persistence:UseDataVolumes=false"]);
+            ["Persistence:UseDataVolumes=false", $"AI:Fake:StreamDelayMs={FakeStreamDelayMs}"]);
         _demoPassword = builder.Configuration["Parameters:keycloak-demo-password"];
 
         if (string.IsNullOrEmpty(_adminApiKey) || string.IsNullOrEmpty(_demoPassword))
@@ -199,6 +203,106 @@ public sealed class AppFixture : IAsyncLifetime
         (await SendAsync($"/api/v1/requests/{id}/submit", null, tag, System.Net.HttpStatusCode.Accepted)).Body.Dispose();
         created.Dispose();
         return (id, number);
+    }
+
+    /// <summary>
+    /// Calls an API through the gateway with the admin key in tenant acme, on behalf of <paramref name="onBehalfOf"/> when given (POSTs get
+    /// an Idempotency-Key); fails unless the status is <paramref name="expected"/>. Returns the JSON body (undefined when empty) and the ETag.
+    /// </summary>
+    public async Task<(System.Text.Json.JsonElement Body, string? ETag)> CallAsync(
+        HttpMethod method, string path, string? onBehalfOf, object? body = null, string? ifMatch = null,
+        System.Net.HttpStatusCode expected = System.Net.HttpStatusCode.OK)
+    {
+        using var http = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true })
+        {
+            BaseAddress = GatewayUrl,
+        };
+        using var message = new HttpRequestMessage(method, path);
+        message.Headers.Add("X-Api-Key", _adminApiKey);
+        message.Headers.Add("X-Tenant-Id", TenantId);
+        if (onBehalfOf is not null)
+        {
+            message.Headers.Add("X-On-Behalf-Of-User", onBehalfOf);
+        }
+        if (method == HttpMethod.Post)
+        {
+            message.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        }
+        if (ifMatch is not null)
+        {
+            message.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+        }
+        if (body is not null)
+        {
+            message.Content = JsonContent.Create(body);
+        }
+        using var response = await http.SendAsync(message);
+        var text = await response.Content.ReadAsStringAsync();
+        if (response.StatusCode != expected)
+        {
+            throw new InvalidOperationException($"{method} {path}: expected {(int)expected}, got {(int)response.StatusCode}: {text}");
+        }
+        var json = text.Length == 0 ? default : System.Text.Json.JsonDocument.Parse(text).RootElement.Clone();
+        return (json, response.Headers.ETag?.ToString());
+    }
+
+    /// <summary>
+    /// Polls <paramref name="read"/> every second until it returns a value (not null) or <paramref name="timeout"/> passes; a failed read
+    /// counts as "not yet" (a 404 before something exists, a 503 while a service starts).
+    /// </summary>
+    public static async Task<T> EventuallyAsync<T>(Func<Task<T?>> read, string what, TimeSpan timeout)
+        where T : struct
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        Exception? last = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                if (await read() is { } value)
+                {
+                    return value;
+                }
+            }
+            catch (InvalidOperationException e)
+            {
+                last = e;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+        throw new TimeoutException($"Timed out after {timeout.TotalSeconds:0} s waiting for {what}. {last?.Message}");
+    }
+
+    /// <summary>Waits until the seeded acme procurement policy is ingested (the assistant answers from it).</summary>
+    public Task WaitForSeededPolicyAsync() =>
+        EventuallyAsync<bool>(
+            async () => (await CallAsync(HttpMethod.Get, $"/api/v1/assistant/policy-documents/{AcmePolicyId}", null)).Body
+                .GetProperty("status").GetString() == "Ready" ? true : null,
+            "the seeded policy to be Ready", TimeSpan.FromMinutes(3));
+
+    /// <summary>The acme copy of the seeded procurement policy (the Assistant's DemoSeeder).</summary>
+    public static readonly Guid AcmePolicyId = Guid.Parse("5eed0000-0000-4000-8000-00000000a001");
+
+    /// <summary>Maria approves the open step of the request in her inbox (the admin key on behalf of Maria).</summary>
+    public async Task ApproveAsMariaAsync(Guid requestId)
+    {
+        var step = await EventuallyAsync<System.Text.Json.JsonElement>(
+            async () => (await CallAsync(HttpMethod.Get, "/api/v1/approvals/inbox?pageSize=100", MariaId)).Body.GetProperty("items")
+                .EnumerateArray().Where(s => s.GetProperty("requestId").GetGuid() == requestId).Select(s => (System.Text.Json.JsonElement?)s)
+                .FirstOrDefault(),
+            "the request in Maria's inbox", TimeSpan.FromSeconds(60));
+        await CallAsync(
+            HttpMethod.Post, $"/api/v1/approvals/{step.GetProperty("id").GetGuid()}/approve", MariaId,
+            ifMatch: $"\"{step.GetProperty("version").GetUInt32()}\"");
+    }
+
+    /// <summary>Waits until the request's purchase order exists (as Tom sees it) and returns its ID and number.</summary>
+    public async Task<(Guid Id, string Number)> WaitForOrderAsync(Guid requestId)
+    {
+        var order = await EventuallyAsync<System.Text.Json.JsonElement>(
+            async () => (await CallAsync(HttpMethod.Get, $"/api/v1/purchasing/requests/{requestId}/order", TomId)).Body,
+            "the request's purchase order", TimeSpan.FromSeconds(90));
+        return (order.GetProperty("id").GetGuid(), order.GetProperty("number").GetString()!);
     }
 
     /// <summary>Stops a resource the way the dashboard's Stop command does, and waits until it has ended.</summary>

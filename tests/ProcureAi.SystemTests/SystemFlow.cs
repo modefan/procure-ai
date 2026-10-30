@@ -35,6 +35,13 @@ public sealed class SystemFlow(SystemFixture system)
         return submitted;
     }
 
+    /// <summary>Waits until the order's one invoice (as <paramref name="invoicing"/>'s user sees it) satisfies <paramref name="done"/>.</summary>
+    public static async Task<InvoiceView> InvoiceWhenAsync(ServiceClient invoicing, Guid orderId, Func<InvoiceView, bool> done, string what) =>
+        (await EventuallyAsync(
+            () => invoicing.GetAsync<Paged<InvoiceView>>($"/api/v1/invoicing/invoices?orderId={orderId}"),
+            r => r.Body.Items.Count == 1 && done(r.Body.Items[0]),
+            what)).Body.Items[0];
+
     /// <summary>The approver finds the request's open step in their inbox and approves it.</summary>
     public async Task ApproveAsync(string approver, Guid requestId, int expectedStep, string expectedLevel, string expectedTotalDisplay)
     {

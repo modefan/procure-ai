@@ -204,9 +204,6 @@ public sealed class OrderToPaymentTests(SystemFixture system)
 
     private sealed record SupplierOrderView(string SupplierOrderId, string ExternalReference, bool Cancelled);
 
-    private static async Task<InvoiceView> InvoiceWhenAsync(ServiceClient invoicing, Guid orderId, Func<InvoiceView, bool> done, string what) =>
-        (await SystemFlow.EventuallyAsync(
-            () => invoicing.GetAsync<Paged<InvoiceView>>($"/api/v1/invoicing/invoices?orderId={orderId}"),
-            r => r.Body.Items.Count == 1 && done(r.Body.Items[0]),
-            what)).Body.Items[0];
+    private static Task<InvoiceView> InvoiceWhenAsync(ServiceClient invoicing, Guid orderId, Func<InvoiceView, bool> done, string what) =>
+        SystemFlow.InvoiceWhenAsync(invoicing, orderId, done, what);
 }
