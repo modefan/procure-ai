@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using ProcureAi.Approvals.Application.AuthorizationCheck;
 using ProcureAi.Approvals.Application.Sagas;
 using ProcureAi.Approvals.Domain;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Contracts;
 using Shouldly;
@@ -61,6 +62,7 @@ public sealed class AuthorizationCheckTests(ApprovalsApp app)
             ("not-requester", false, "Separation of duties: Maria Naidoo is the requester"),
             ("current-approver", false, "Maria Naidoo is not an approver of step 1"),
         ]);
+        check.Steps.Where(s => !s.Gating).Select(s => s.Code).ShouldBe(["cost-center", "limit"], "routing eligibility explains, it does not gate");
     }
 
     [Fact]
@@ -83,26 +85,59 @@ public sealed class AuthorizationCheckTests(ApprovalsApp app)
             ("not-requester", true, "Separation of duties: Maria Naidoo is not the requester"),
             ("current-approver", true, "Maria Naidoo is an approver of step 1"),
         ]);
+        check.Steps.Where(s => !s.Gating).Select(s => s.Code).ShouldBe(["cost-center", "limit"]);
         view.Allowed.ShouldBeTrue();
         view.Steps.Select(s => s.Code).ShouldBe(["permission", "tenant"]);
         view.Steps[0].Text.ShouldBe("Role Manager has requests.read");
     }
 
     [Fact]
-    public async Task Check_over_the_limit_is_denied_by_the_limit()
+    public async Task Check_after_access_lowered_the_limit_is_allowed_as_the_approve_action_is()
     {
         var tenant = Acme();
+        var (id, steps) = await OpenAsync(tenant, DemoUsers.Tom, 37_260m);
+        // Routed to Maria (R 200 000 in the organisation); her stored limit is lowered afterwards.
+        steps[0].ApproverIds.ShouldBe([DemoUsers.Maria]);
         app.Access.SetExplainedUser(tenant, DemoUsers.Maria, "Maria Naidoo", ["manager"], 20_000m, [CostCenter]);
-        var (id, _) = await OpenAsync(tenant, DemoUsers.Tom, 5_000m);
 
-        // The step was routed to Maria when her limit (in the organisation) covered the total; her stored limit is lower now.
         var check = await CheckAsync(tenant, DemoUsers.Maria, id, "approve");
-        var other = await OpenAsync(tenant, DemoUsers.Tom, 37_260m);
-        var over = await CheckAsync(tenant, DemoUsers.Maria, other.Id, "approve");
+        using var client = Main.CreateClient();
+        var approve = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/approvals/{steps[0].Id}/approve");
+        User(tenant, DemoUsers.Maria, "manager")(approve);
+        approve.Headers.TryAddWithoutValidation("If-Match", $"\"{steps[0].Version}\"");
+        approve.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        var approved = await client.SendAsync(approve, Ct);
 
+        // The approve action does not re-check routing eligibility, so neither does the outcome of the check.
+        approved.StatusCode.ShouldBe(HttpStatusCode.OK, await approved.Content.ReadAsStringAsync(Ct));
         check.Allowed.ShouldBeTrue();
-        over.Allowed.ShouldBeFalse();
-        over.Steps.Single(s => s.Code == "limit").ShouldBe(new CheckStepDto("limit", false, $"{Rand(37_260m)} is above the {Rand(20_000m)} limit"));
+        var limit = check.Steps.Single(s => s.Code == "limit");
+        (limit.Passed, limit.Gating, limit.Text).ShouldBe(
+            (false, false, $"Routing today would not pick Maria Naidoo: {Rand(37_260m)} is above the {Rand(20_000m)} limit"));
+        check.Steps.Single(s => s.Code == "current-approver").Passed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Check_when_routing_skipped_her_for_the_limit_is_denied_by_current_approver()
+    {
+        var tenant = Acme();
+        app.Access.SetApprovers(tenant, new CostCenterApprovers(
+            CostCenter, "IT",
+            new Approver(DemoUsers.Maria, "Maria", 20_000m, true),
+            new Approver(DemoUsers.Dept, "Dept", 500_000m, true),
+            [new Approver(DemoUsers.Thandi, "Thandi", 2_000_000m, true)]));
+        app.Access.SetExplainedUser(tenant, DemoUsers.Maria, "Maria Naidoo", ["manager"], 20_000m, [CostCenter]);
+        var (id, steps) = await OpenAsync(tenant, DemoUsers.Tom, 37_260m);
+        steps[0].ApproverIds.ShouldBe([DemoUsers.Dept]);
+
+        var check = await CheckAsync(tenant, DemoUsers.Maria, id, "approve");
+
+        check.Allowed.ShouldBeFalse();
+        var current = check.Steps.Single(s => s.Code == "current-approver");
+        (current.Passed, current.Gating).ShouldBe((false, true));
+        check.Steps.Where(s => s.Gating && !s.Passed).Select(s => s.Code).ShouldBe(["current-approver"], "denied by the step the action enforces");
+        var limit = check.Steps.Single(s => s.Code == "limit");
+        (limit.Passed, limit.Gating).ShouldBe((false, false));
     }
 
     [Fact]

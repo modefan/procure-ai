@@ -950,7 +950,8 @@
         "required": [
           "code",
           "passed",
-          "text"
+          "text",
+          "gating"
         ],
         "type": "object",
         "properties": {
@@ -962,6 +963,9 @@
           },
           "text": {
             "type": "string"
+          },
+          "gating": {
+            "type": "boolean"
           }
         }
       },

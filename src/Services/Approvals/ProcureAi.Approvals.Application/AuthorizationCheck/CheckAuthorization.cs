@@ -19,7 +19,8 @@ public sealed record CheckAuthorization(string UserId, Guid RequestId, string Ac
 /// (Access's explanation names the granting roles), the tenant, and for <c>approve</c> the open step, the
 /// <see cref="ApproverEligibility"/> reasons at that step's level (what routing decides with) and
 /// <see cref="ApprovalStep.MayBeActedOnBy"/> (what the approve action checks). A user or a request the caller's tenant does not
-/// have is 404, so another tenant's IDs reveal nothing.
+/// have is 404, so another tenant's IDs reveal nothing. Only the steps the API enforces gate the outcome; the routing-eligibility
+/// reasons are explanation (see <see cref="AuthorizationCheckDto"/>).
 /// </summary>
 public static class CheckAuthorizationHandler
 {
@@ -59,7 +60,7 @@ public static class CheckAuthorizationHandler
         var result = new List<CheckStepDto>
         {
             PermissionStep(permission, name, explanation),
-            new("tenant", true, $"Same tenant ({(string.IsNullOrWhiteSpace(tenantName) ? tenant : tenantName)})"),
+            Gate("tenant", true, $"Same tenant ({(string.IsNullOrWhiteSpace(tenantName) ? tenant : tenantName)})"),
         };
 
         if (query.Action == Approve)
@@ -67,7 +68,7 @@ public static class CheckAuthorizationHandler
             result.AddRange(await ApproveStepsAsync(saga?.CostCenterCode, steps, explanation, name, tenant, access, cancellationToken));
         }
 
-        return new AuthorizationCheckDto(result.All(s => s.Passed), query.Action, name, number, result);
+        return new AuthorizationCheckDto(result.Where(s => s.Gating).All(s => s.Passed), query.Action, name, number, result);
     }
 
     private static async Task<IEnumerable<CheckStepDto>> ApproveStepsAsync(
@@ -77,12 +78,12 @@ public static class CheckAuthorizationHandler
         var open = steps.FirstOrDefault(s => s.IsOpen);
         if (open is null)
         {
-            return [new("open-step", false, "The request has no open approval step")];
+            return [Gate("open-step", false, "The request has no open approval step")];
         }
 
         var result = new List<CheckStepDto>
         {
-            new("open-step", true, $"Step {open.StepNo} ({LevelName(open.Level)}) is open"),
+            Gate("open-step", true, $"Step {open.StepNo} ({LevelName(open.Level)}) is open"),
         };
 
         var org = await OrganisationAsync(costCenterCode, tenant, access, cancellationToken);
@@ -91,12 +92,16 @@ public static class CheckAuthorizationHandler
             explanation.PermissionSources.ContainsKey(Permissions.RequestsApprove), name);
         var facts = new RequestFacts(open.TotalInclVat, open.RequesterId, org);
         // The permission reason is already the first step (with the roles that grant it).
+        // Separation of duties is enforced by the approve action (MayBeActedOnBy), so it gates. The other reasons are what routing
+        // would decide with Access's data today; the action does not re-check them, so they explain but never decide.
         result.AddRange(ApproverEligibility.Check(LevelToExplain(open, candidate, facts), candidate, facts)
             .Where(r => r.Code != ApproverEligibility.Permission)
-            .Select(r => new CheckStepDto(r.Code, r.Passed, r.Text)));
+            .Select(r => r.Code == ApproverEligibility.NotRequester
+                ? Gate(r.Code, r.Passed, r.Text)
+                : new CheckStepDto(r.Code, r.Passed, r.Passed ? r.Text : $"Routing today would not pick {name}: {r.Text}", Gating: false)));
 
         var mayAct = open.MayBeActedOnBy(explanation.UserId);
-        result.Add(new("current-approver", mayAct, mayAct
+        result.Add(Gate("current-approver", mayAct, mayAct
             ? $"{name} is an approver of step {open.StepNo}"
             : $"{name} is not an approver of step {open.StepNo}"));
         return result;
@@ -138,16 +143,19 @@ public static class CheckAuthorizationHandler
         if (explanation.PermissionSources.TryGetValue(permission, out var granting) && granting.Count > 0)
         {
             var roles = string.Join(", ", granting.Select(RoleName));
-            return new("permission", true, granting.Count == 1 ? $"Role {roles} has {permission}" : $"Roles {roles} have {permission}");
+            return Gate("permission", true, granting.Count == 1 ? $"Role {roles} has {permission}" : $"Roles {roles} have {permission}");
         }
 
         return explanation.Roles.Count switch
         {
-            0 => new("permission", false, $"{name} has no role with {permission}"),
-            1 => new("permission", false, $"Role {RoleName(explanation.Roles[0])} does not have {permission}"),
-            _ => new("permission", false, $"Roles {string.Join(", ", explanation.Roles.Select(RoleName))} do not have {permission}"),
+            0 => Gate("permission", false, $"{name} has no role with {permission}"),
+            1 => Gate("permission", false, $"Role {RoleName(explanation.Roles[0])} does not have {permission}"),
+            _ => Gate("permission", false, $"Roles {string.Join(", ", explanation.Roles.Select(RoleName))} do not have {permission}"),
         };
     }
+
+    /// <summary>A step the API enforces: it decides <see cref="AuthorizationCheckDto.Allowed"/>.</summary>
+    private static CheckStepDto Gate(string code, bool passed, string text) => new(code, passed, text, Gating: true);
 
     /// <summary><c>department-head</c> → "Department head", <c>manager</c> → "Manager".</summary>
     private static string RoleName(string role)

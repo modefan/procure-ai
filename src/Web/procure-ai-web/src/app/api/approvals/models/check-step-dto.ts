@@ -3,6 +3,7 @@
 
 export interface CheckStepDto {
   code: string;
+  gating: boolean;
   passed: boolean;
   text: string;
 }
