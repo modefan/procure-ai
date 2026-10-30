@@ -11,7 +11,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 /// the system message (<c>#task: answer|rewrite|context|classify|scan</c>, <see cref="AiTasks"/>):
 /// <list type="bullet">
 /// <item><c>answer</c>: first <see cref="FakeIntentRules"/> (a <see cref="FunctionCallContent"/> when a matching tool is offered and has
-/// not been called for this question yet); then extractive text: the first sentence of each of the top two sources, or the table or list
+/// not been called for this question yet); then extractive text: the first sentence of each of the top two sources that say something different, or the table or list
 /// a source starts with (or that its first paragraph introduces) with its line breaks kept (<see cref="Quote"/>) (lines starting
 /// <c>&lt;data id="S1"&gt;</c> blocks, or lines starting <c>[S1]</c>, <c>[S2]</c>, in the prompt), cited, plus a summary of any tool results. Nothing to cite and no tool result: the
 /// "policy doesn't cover this" sentence.</item>
@@ -146,12 +146,19 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
         }
 
         var parts = new List<string>();
-        foreach (var (number, text) in Sources(messages).Take(2))
+        // The first two sources that say something different: two children of one section bring the same parent text.
+        var quoted = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (number, text) in Sources(messages))
         {
-            var quote = Quote(text, $"[S{number}]");
-            if (quote.Length > 0)
+            var quote = Quote(text, "");
+            if (quote.Length > 0 && quoted.Add(quote))
             {
-                parts.Add(quote);
+                parts.Add(Quote(text, $"[S{number}]"));
+            }
+
+            if (parts.Count == 2)
+            {
+                break;
             }
         }
 

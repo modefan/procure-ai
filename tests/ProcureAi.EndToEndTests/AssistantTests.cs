@@ -20,6 +20,10 @@ public sealed class AssistantTests(AppFixture fixture)
 
     private static ILocator LastAnswer(IPage page) => page.GetByTestId("answer").Last;
 
+    /// <summary>After a reload the page starts a new conversation; the newest one is first in the list.</summary>
+    private static Task OpenLatestConversationAsync(IPage page) =>
+        page.GetByTestId("conversations").Locator("li").First.Locator("button").First.ClickAsync(new() { Timeout = Pages.Timeout });
+
     private static async Task AskAsync(IPage page, string question)
     {
         await Question(page).FillAsync(question);
@@ -58,6 +62,7 @@ public sealed class AssistantTests(AppFixture fixture)
         await Assertions.Expect(step).ToHaveAttributeAsync("data-status", "ok");
         await Assertions.Expect(answer.GetByTestId("message-status")).ToHaveCountAsync(0);
         await page.ReloadAsync();
+        await OpenLatestConversationAsync(page);
         await Assertions.Expect(LastAnswer(page).Locator(".md-answer table")).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
         await Assertions.Expect(LastAnswer(page).Locator("[data-tool='explain_approval_chain']")).ToBeVisibleAsync();
     }
@@ -87,6 +92,7 @@ public sealed class AssistantTests(AppFixture fixture)
 
         // The partial answer was saved as stopped: it is still there after a reload.
         await page.ReloadAsync();
+        await OpenLatestConversationAsync(page);
         await Assertions.Expect(LastAnswer(page).GetByTestId("message-status")).ToHaveTextAsync("Stopped", new() { Timeout = Pages.Timeout });
         (await LastAnswer(page).Locator(".md-answer").InnerTextAsync()).Trim().ShouldStartWith(partial[..Math.Min(40, partial.Length)]);
     }

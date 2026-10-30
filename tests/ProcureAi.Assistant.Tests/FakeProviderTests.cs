@@ -143,6 +143,20 @@ public sealed class FakeProviderTests
             cancellationToken: Ct)).Text.ShouldBe("Limits: [S1]\n\n| A | B |\n| --- | --- |\n\nGifts above R 500 are declined. [S2]");
     }
 
+    /// <summary>Two children of one section bring the same parent text: the Fake quotes it once and takes the next source instead.</summary>
+    [Fact]
+    public async Task Fake_chat_quotes_a_repeated_source_once()
+    {
+        using var chat = new FakeChatClient();
+        const string system = "#task: answer\n<data id=\"S1\" title=\"P\">\nGifts above R 500 are declined.\n</data>\n"
+            + "<data id=\"S2\" title=\"P\">\nGifts above R 500 are declined.\n</data>\n"
+            + "<data id=\"S3\" title=\"P\">\nCash is never accepted.\n</data>";
+
+        var response = await chat.GetResponseAsync([new(ChatRole.System, system), new(ChatRole.User, "Gifts?")], cancellationToken: Ct);
+
+        response.Text.ShouldBe("Gifts above R 500 are declined. [S1] Cash is never accepted. [S3]");
+    }
+
     [Fact]
     public async Task Fake_chat_without_sources_or_tool_results_says_the_policy_does_not_cover_it()
     {
