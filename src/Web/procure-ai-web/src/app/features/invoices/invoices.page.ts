@@ -5,6 +5,7 @@ import { AuthStore } from '../../core/auth/auth.store';
 import { ReferenceDataStore } from '../../core/reference/reference-data.store';
 import { Pager } from '../../core/ui/pager';
 import { StatusBadge } from '../requests/status-badge';
+import { InvoiceScanPanel } from './invoice-scan';
 import { matchStatus, paymentStatus } from './invoice-match';
 import { InvoicesStore, InvoiceStatusFilter } from './invoices.store';
 
@@ -15,7 +16,7 @@ import { InvoicesStore, InvoiceStatusFilter } from './invoices.store';
  */
 @Component({
   selector: 'app-invoices-page',
-  imports: [StatusBadge, Pager, RouterLink],
+  imports: [StatusBadge, Pager, RouterLink, InvoiceScanPanel],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
       <div class="flex flex-wrap items-start justify-between gap-4">
@@ -37,6 +38,12 @@ import { InvoicesStore, InvoiceStatusFilter } from './invoices.store';
           }
         </div>
       </div>
+
+      @if (mayCreate()) {
+        <div class="mt-6 max-w-2xl">
+          <app-invoice-scan-panel />
+        </div>
+      }
 
       @if (store.error(); as message) {
         <div role="alert" class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">

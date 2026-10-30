@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { InvoiceDto } from '../../api/invoicing/models/invoice-dto';
+import { InvoiceScansService } from '../../api/assistant/services/invoice-scans.service';
 import { InvoicesService } from '../../api/invoicing/services/invoices.service';
 import { SuppliersService } from '../../api/suppliers/services/suppliers.service';
 import { AuthStore } from '../../core/auth/auth.store';
@@ -21,6 +22,7 @@ describe('InvoicesPage', () => {
       providers: [
         provideRouter([]),
         { provide: InvoicesService, useValue: { listInvoices } },
+        { provide: InvoiceScansService, useValue: { scanInvoice: vi.fn() } },
         { provide: SuppliersService, useValue: { listSuppliers: vi.fn().mockResolvedValue({ items: [{ code: 'CH', name: 'Contoso Hardware', active: true, itemCount: 4 }], page: 1, pageSize: 100, total: 1 }) } },
         { provide: AuthStore, useValue: { hasPermission: (p: string) => permissions.includes(p), user: signal({ userId: 'thandi', name: 'Thandi' }) } },
         { provide: LIVE_HUB_FACTORY, useValue: fakeHubFactory().factory },
@@ -94,5 +96,13 @@ describe('InvoicesPage', () => {
       fixture.detectChanges();
     }
     expect(text(fixture.nativeElement.querySelector('[role="alert"]'))).toContain('The invoices could not be loaded.');
+  });
+
+  it('scan_hidden_without_invoices_create', async () => {
+    const withRight = await setup();
+    expect(withRight.el.querySelector('app-invoice-scan-panel')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const without = await setup([mismatched()], ['invoices.read']);
+    expect(without.el.querySelector('app-invoice-scan-panel')).toBeNull();
   });
 });

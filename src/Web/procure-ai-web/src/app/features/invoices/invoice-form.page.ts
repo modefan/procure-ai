@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
 import { applyEach, form, FormField, maxLength, required, submit, validate } from '@angular/forms/signals';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { InvoiceScanDto } from '../../api/assistant/models/invoice-scan-dto';
 import { PurchaseOrderDto } from '../../api/purchasing/models/purchase-order-dto';
 import { HasUnsavedChanges } from '../../core/auth/unsaved-changes.guard';
 import { ReferenceDataStore } from '../../core/reference/reference-data.store';
@@ -8,6 +9,8 @@ import { BusyButton } from '../../core/ui/busy-button';
 import { formatRand, KeepRandPipe, RandPipe } from '../../core/ui/money.pipe';
 import { VAT_RATE_PERCENT } from '../requests/request-lines';
 import { InvoiceFormStore } from './invoice-form.store';
+import { matchScannedLines } from './invoice-scan-match';
+import { InvoiceScanStore } from './invoice-scan.store';
 import { invoiceTotals } from './invoice-totals';
 
 interface Row {
@@ -67,6 +70,27 @@ const statusWords = (status: string) => status.replace(/([a-z])([A-Z])/g, (_, a:
         <div role="alert" class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
           <span>{{ message }}</span>
           <button type="button" class="btn-secondary" (click)="store.loadOrders()">Try again</button>
+        </div>
+      }
+
+      @if (scanGone()) {
+        <p class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700" data-testid="scan-gone">
+          The scan is no longer available (the page was reloaded). Scan the PDF again on the invoices screen, or enter the invoice here by hand.
+        </p>
+      }
+      @if (scan(); as s) {
+        <div class="mt-4 space-y-3" data-testid="scan-prefill">
+          <p class="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm break-words text-indigo-950" data-testid="scan-note">
+            Prefilled from the scan of {{ s.invoiceNumber }} from {{ s.supplierName }} (confidence {{ s.confidence.toLowerCase() }}). Check every field before you save.
+            {{ orderNote() }}
+          </p>
+          @if (s.warnings.length > 0) {
+            <ul class="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="scan-warnings" aria-label="Warnings from the scan">
+              @for (warning of s.warnings; track $index) {
+                <li class="break-words">{{ warning.message | keepRand }}</li>
+              }
+            </ul>
+          }
         </div>
       }
 
@@ -236,6 +260,12 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
   protected readonly vatRate = VAT_RATE_PERCENT;
   protected readonly model = signal<Model>(emptyModel());
   protected readonly tried = signal(false);
+  private readonly scans = inject(InvoiceScanStore);
+  private readonly route = inject(ActivatedRoute);
+  /** The scan this form was opened from (`?scan=<id>`), taken from the scan store; null for a manual entry. */
+  protected readonly scan = signal<InvoiceScanDto | null>(null);
+  /** The URL names a scan the store no longer holds (page reload): the form starts empty. */
+  protected readonly scanGone = signal(false);
 
   protected readonly invoiceForm = form(this.model, (p) => {
     required(p.orderId, { message: 'Choose an order' });
@@ -288,14 +318,9 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
         const order = this.store.orders().find((o) => o.id === orderId);
         this.model.update((m) => ({
           ...m,
-          statedTotal: '', // the total printed on another invoice says nothing about this order
-          lines: (order?.lines ?? []).map((l) => ({
-            lineNo: l.lineNo,
-            description: l.description,
-            ordered: l.ordered,
-            quantity: l.received > 0 ? l.received : l.ordered,
-            unitPrice: l.unitPriceExclVat,
-          })),
+          // The total printed on another invoice says nothing about this order; only a scan's own total stays.
+          statedTotal: this.scanTotal(),
+          lines: this.rowsFor(order),
         }));
       });
     });
@@ -304,8 +329,78 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
   async ngOnInit(): Promise<void> {
     void this.reference.loadSuppliers();
     this.baseline.set(JSON.stringify(this.model()));
+    const id = this.route.snapshot.queryParamMap.get('scan');
+    const held = this.scans.current();
+    if (id && held?.id === id) {
+      this.scan.set(held);
+    } else if (id) {
+      this.scanGone.set(true);
+    }
     await this.store.loadOrders();
+    const s = this.scan();
+    if (s) {
+      this.applyScan(s);
+    }
   }
+
+  /** The total printed on the invoice, as the form's field wants it; empty without a scan. */
+  private scanTotal(): string {
+    const s = this.scan();
+    return s ? s.totalInclVat.toFixed(2) : '';
+  }
+
+  /**
+   * One row per order line. Without a scan: what was received (else ordered) at the order price. With a scan: the scanned line
+   * that matches the order line by description gives quantity and price; an order line the invoice does not mention gets 0.
+   */
+  private rowsFor(order: PurchaseOrderDto | undefined): Row[] {
+    const lines = order?.lines ?? [];
+    const s = this.scan();
+    const matches = s ? matchScannedLines(lines.map((l) => l.description), s.lines) : [];
+    return lines.map((l, i) => {
+      const hit = matches[i] ?? null;
+      return {
+        lineNo: l.lineNo,
+        description: l.description,
+        ordered: l.ordered,
+        quantity: s ? (hit?.quantity ?? 0) : l.received > 0 ? l.received : l.ordered,
+        unitPrice: hit ? hit.unitPriceExclVat : l.unitPriceExclVat,
+      };
+    });
+  }
+
+  /** Puts the scan into the form: number, date, the order it names (when the caller sees it), the printed total, the lines. */
+  private applyScan(s: InvoiceScanDto): void {
+    const wanted = s.orderNumber?.trim().toLowerCase();
+    const order = wanted ? this.store.orders().find((o) => o.number.toLowerCase() === wanted) : undefined;
+    this.previousOrder = order?.id ?? '';
+    this.model.update((m) => ({
+      orderId: order?.id ?? '',
+      number: s.invoiceNumber,
+      date: s.invoiceDate ?? m.date,
+      statedTotal: this.scanTotal(),
+      lines: this.rowsFor(order),
+    }));
+    // The prefilled form is the starting point: only the user's own edits count as unsaved.
+    this.baseline.set(JSON.stringify(this.model()));
+  }
+
+  /** Why the order is (not) chosen, and how many scanned lines found no line to go to. */
+  protected readonly orderNote = computed(() => {
+    const s = this.scan();
+    if (!s) {
+      return '';
+    }
+    const order = this.store.orders().find((o) => o.id === this.model().orderId);
+    if (!order) {
+      return s.orderNumber
+        ? `The invoice names ${s.orderNumber}, which is not among the orders you can see. Choose the order.`
+        : 'The invoice names no order. Choose the order.';
+    }
+    const matched = matchScannedLines(order.lines.map((l) => l.description), s.lines).filter((l) => l !== null).length;
+    const left = s.lines.length - matched;
+    return left > 0 ? `${left} scanned ${left === 1 ? 'line matches' : 'lines match'} no line of ${order.number} and ${left === 1 ? 'is' : 'are'} left out.` : '';
+  });
 
   hasUnsavedChanges(): boolean {
     return this.dirty();
@@ -357,9 +452,13 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
         supplierInvoiceNumber: m.number.trim(),
         invoiceDate: m.date,
         statedTotalInclVat: stated,
+        ...(this.scan() ? { scanId: this.scan()!.id } : {}),
         lines: m.lines.filter((l) => l.quantity > 0).map((l) => ({ lineNo: l.lineNo, quantity: l.quantity, unitPriceExclVat: l.unitPrice })),
       });
       if (created) {
+        if (this.scan()) {
+          this.scans.clear();
+        }
         this.baseline.set(JSON.stringify(this.model()));
         await this.router.navigate(['/app/invoices', created.id]);
       }

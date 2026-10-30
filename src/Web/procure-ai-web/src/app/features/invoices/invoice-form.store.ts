@@ -20,6 +20,8 @@ export interface InvoiceDraft {
   invoiceDate: string;
   lines: InvoiceLineBody[];
   statedTotalInclVat: number;
+  /** The scan this invoice was prefilled from; the server links it to the saved invoice. Left out for a manual entry. */
+  scanId?: string;
 }
 
 export type FieldErrors = Record<string, string[]>;
