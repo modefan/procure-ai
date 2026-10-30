@@ -157,19 +157,28 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
             await db.SaveChangesAsync(Ct);
         }
 
-        // No X-Tenant-Id: the lookup is across tenants. A service account and the admin API key may call it; a user may not.
-        var service = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants", ServiceToken()), Ct);
-        var apiKey = new HttpRequestMessage(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants");
-        apiKey.Headers.Add("X-Api-Key", TestAuth.ApiKey);
-        var key = await _client.SendAsync(apiKey, Ct);
-        var unknown = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/nobody-at-all/tenants", ServiceToken()), Ct);
-        var asUser = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants", AdminToken(Acme)), Ct);
+        // The user is in the shared seeded tenants: removed again, so the tests that list a tenant's users (in any order) do not see it.
+        try
+        {
+            // No X-Tenant-Id: the lookup is across tenants. A service account and the admin API key may call it; a user may not.
+            var service = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants", ServiceToken()), Ct);
+            var apiKey = new HttpRequestMessage(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants");
+            apiKey.Headers.Add("X-Api-Key", TestAuth.ApiKey);
+            var key = await _client.SendAsync(apiKey, Ct);
+            var unknown = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/nobody-at-all/tenants", ServiceToken()), Ct);
+            var asUser = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants", AdminToken(Acme)), Ct);
 
-        var tenants = await ReadAsync<List<TenantDto>>(service);
-        tenants.ShouldBe([new TenantDto(Acme, "Acme Corp"), new TenantDto(Globex, "Globex")]);
-        (await ReadAsync<List<TenantDto>>(key)).Count.ShouldBe(2);
-        (await ReadAsync<List<TenantDto>>(unknown)).ShouldBeEmpty();
-        asUser.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "the lookup is for services only");
+            var tenants = await ReadAsync<List<TenantDto>>(service);
+            tenants.ShouldBe([new TenantDto(Acme, "Acme Corp"), new TenantDto(Globex, "Globex")]);
+            (await ReadAsync<List<TenantDto>>(key)).Count.ShouldBe(2);
+            (await ReadAsync<List<TenantDto>>(unknown)).ShouldBeEmpty();
+            asUser.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "the lookup is for services only");
+        }
+        finally
+        {
+            await using var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options);
+            await db.TenantUsers.IgnoreQueryFilters().Where(u => u.UserId == userId).ExecuteDeleteAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
