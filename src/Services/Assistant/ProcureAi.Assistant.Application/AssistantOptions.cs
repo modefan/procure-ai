@@ -4,6 +4,7 @@ using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Ingestion;
 using ProcureAi.Assistant.Application.Retrieval;
 using ProcureAi.Assistant.Application.Retrieval.PastPurchases;
+using ProcureAi.Assistant.Application.Scanning;
 using ProcureAi.Assistant.Application.Tools;
 
 namespace ProcureAi.Assistant.Application;
@@ -47,6 +48,10 @@ public sealed class AssistantOptions
     /// <summary>How past purchases are kept and indexed (<c>Assistant:Purchases</c>).</summary>
     [Required, ValidateObjectMembers]
     public PastPurchasesOptions Purchases { get; set; } = new();
+
+    /// <summary>Invoice scanning (<c>Assistant:Scanning</c>, plan 05 Task 6).</summary>
+    [Required, ValidateObjectMembers]
+    public ScanOptions Scanning { get; set; } = new();
 }
 
 /// <summary>The ingestion job of a policy document version (<see cref="Ingestion.IngestPolicyDocument"/>).</summary>

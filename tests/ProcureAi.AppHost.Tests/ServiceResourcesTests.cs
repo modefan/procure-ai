@@ -712,7 +712,7 @@ public sealed class ServiceResourcesTests
     [InlineData("audit-api", new[] { "access-api" })]
     [InlineData("suppliers-api", new[] { "access-api" })]
     [InlineData("purchasing-api", new[] { "access-api" })]
-    [InlineData("invoicing-api", new[] { "access-api" })]
+    [InlineData("invoicing-api", new[] { "access-api", "assistant-api" })]
     [InlineData("notifications-api", new[] { "access-api" })]
     // The Assistant's tools read requests, approvals, budgets and suppliers as the user (plan 05 Task 5b).
     [InlineData("assistant-api", new[] { "access-api", "requests-api", "approvals-api", "budgets-api", "suppliers-api" })]

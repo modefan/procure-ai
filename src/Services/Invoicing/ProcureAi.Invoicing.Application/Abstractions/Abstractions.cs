@@ -63,3 +63,19 @@ public interface IInvoicingMetrics
     /// <summary>Handing a payment to the ERP failed (<c>unavailable</c>: retried later; <c>rejected</c>: refused for good).</summary>
     void ErpExportFailed(string reason);
 }
+
+/// <summary>
+/// The Assistant's stored invoice scans (plan 05 Task 6), read as Invoicing (its service account) for one tenant: the scan becomes the
+/// document of an invoice finance recorded from it. Implemented in Infrastructure.
+/// </summary>
+public interface IAssistantScans
+{
+    /// <summary>
+    /// The scan, as the Assistant stored it for <paramref name="tenantId"/>; null when the Assistant has none for that tenant (unknown,
+    /// expired or another tenant's). A failed call (unreachable, timeout, 5xx) throws, which the API answers with 503.
+    /// </summary>
+    Task<AssistantScan?> GetAsync(string tenantId, Guid scanId, CancellationToken cancellationToken);
+}
+
+/// <summary>A stored scan: its ID, the tenant the Assistant says it belongs to, and the scan itself as JSON (what the model read and the checks).</summary>
+public sealed record AssistantScan(Guid Id, string TenantId, string Json);

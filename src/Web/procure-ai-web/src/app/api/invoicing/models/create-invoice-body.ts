@@ -6,6 +6,7 @@ export interface CreateInvoiceBody {
   invoiceDate: (string | null);
   lines: Array<InvoiceLineBody>;
   orderId: (string | null);
+  scanId?: (string | null);
   statedTotalInclVat: number;
   supplierInvoiceNumber: string;
 }

@@ -959,6 +959,13 @@
           "statedTotalInclVat": {
             "type": "number",
             "format": "double"
+          },
+          "scanId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
           }
         }
       },

@@ -5,11 +5,13 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
 using ProcureAi.BuildingBlocks.Web.Http;
+using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Invoicing.Application;
 using ProcureAi.Invoicing.Application.Abstractions;
 using ProcureAi.Invoicing.Application.Commands;
+using ProcureAi.Invoicing.Infrastructure.Assistant;
 using ProcureAi.Invoicing.Infrastructure.Erp;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
@@ -62,6 +64,18 @@ public static class DependencyInjection
     }
 
     /// <summary>
+    /// The Assistant's stored invoice scans (<see cref="IAssistantScans"/>, plan 05 Task 6): a client of the Assistant service as Invoicing
+    /// (<c>Auth:Internal</c>), with retries and timeouts from the <c>AssistantClient</c> section.
+    /// </summary>
+    public static IServiceCollection AddAssistantScans(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddValidatedOptions<AssistantClientOptions>(configuration, AssistantClientOptions.SectionName);
+        services.AddProcureAiServiceClient<IAssistantScans, AssistantScansClient>(AssistantScansClient.AssistantServiceName)
+            .WithResilienceFrom<AssistantClientOptions>();
+        return services;
+    }
+
+    /// <summary>
     /// Wolverine setup (shared messaging building block) and the routes of Invoicing: Purchasing's events arrive on
     /// <c>invoicing-purchasing</c>; ERP exports and the adoption of waiting invoices go through the local durable queue
     /// <c>invoicing-work</c> (a retry scheduled with backoff survives a restart); every event goes to the <c>invoicing</c> exchange.
@@ -91,6 +105,7 @@ public static class DependencyInjection
         options.PublishMessage<PurchaseOrderSettled>().ToRabbitExchange(Exchanges.Invoicing);
         // A typed HttpClient (a factory registration Wolverine cannot inline): the export handler resolves it from the container.
         options.CodeGeneration.AlwaysUseServiceLocationFor<IErpGateway>();
+        options.CodeGeneration.AlwaysUseServiceLocationFor<IAssistantScans>();
 
         var invoicing = configuration.GetSection(InvoicingOptions.SectionName).Get<InvoicingOptions>()
             ?? throw new InvalidOperationException($"'{InvoicingOptions.SectionName}' is not configured.");

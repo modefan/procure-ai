@@ -4,4 +4,5 @@
 export { AdminConversationsService } from './services/admin-conversations.service';
 export { AssistantInfoService } from './services/assistant-info.service';
 export { ConversationsService } from './services/conversations.service';
+export { InvoiceScansService } from './services/invoice-scans.service';
 export { PolicyDocumentsService } from './services/policy-documents.service';

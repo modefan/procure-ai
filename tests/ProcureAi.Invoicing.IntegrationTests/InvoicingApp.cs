@@ -67,14 +67,18 @@ public sealed class ErpTraffic(Func<HttpMessageHandler> erp) : HttpMessageHandle
     }
 }
 
-/// <summary>The real Invoicing API on a test server, against the shared infrastructure, the stub Access and the simulator's ERP.</summary>
-public sealed class InvoicingApiFactory(InvoicingInfraFixture infra, StubAccessServer access, ErpTraffic erp, List<MetricSnapshot> metrics)
+/// <summary>
+/// The real Invoicing API on a test server, against the shared infrastructure, the stub Access, the stub Assistant (stored invoice scans)
+/// and the simulator's ERP.
+/// </summary>
+public sealed class InvoicingApiFactory(
+    InvoicingInfraFixture infra, StubAccessServer access, StubAssistantServer assistant, ErpTraffic erp, List<MetricSnapshot> metrics)
     : ServiceApiFactory<Program>("invoicingdb", infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
-        foreach (var (key, value) in access.Settings)
+        foreach (var (key, value) in access.Settings.Concat(assistant.Settings))
         {
             builder.UseSetting(key, value);
         }
@@ -126,6 +130,9 @@ public sealed class InvoicingApp : IAsyncLifetime
 
     public StubAccessServer Access { get; private set; } = null!;
 
+    /// <summary>The Assistant's stored invoice scans (plan 05 Task 6), set per test.</summary>
+    public StubAssistantServer Assistant { get; private set; } = null!;
+
     public SimulatorHost Simulator { get; private set; } = null!;
 
     public ErpTraffic Erp { get; private set; } = null!;
@@ -146,6 +153,7 @@ public sealed class InvoicingApp : IAsyncLifetime
     {
         await Infra.InitializeAsync();
         Access = await StubAccessServer.StartAsync();
+        Assistant = await StubAssistantServer.StartAsync();
         Webhooks = new WebhookTraffic(() => _factory.Server.CreateHandler());
         Simulator = new SimulatorHost(Webhooks, new Dictionary<string, string?>
         {
@@ -154,7 +162,7 @@ public sealed class InvoicingApp : IAsyncLifetime
             ["Simulators:Supplier:InvoiceDelay"] = "00:00:00.300",
         });
         Erp = new ErpTraffic(() => Simulator.Server.CreateHandler());
-        _factory = new InvoicingApiFactory(Infra, Access, Erp, ExportedMetrics);
+        _factory = new InvoicingApiFactory(Infra, Access, Assistant, Erp, ExportedMetrics);
         Client = _factory.CreateClient();
         Simulator.CreateClient().Dispose();
         Events = await RabbitRecorder.StartAsync(Infra.RabbitConnectionString, [Exchanges.Invoicing], []);
@@ -167,6 +175,7 @@ public sealed class InvoicingApp : IAsyncLifetime
         await _factory.DisposeAsync();
         await Simulator.DisposeAsync();
         await Access.DisposeAsync();
+        await Assistant.DisposeAsync();
         await Infra.DisposeAsync();
     }
 

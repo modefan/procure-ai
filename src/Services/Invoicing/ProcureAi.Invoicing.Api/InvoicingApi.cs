@@ -19,6 +19,8 @@ public static class InvoicingApi
             builder.Services.AddValidatedOptions<InvoicingOptions>(builder.Configuration, InvoicingOptions.SectionName);
             builder.Services.AddInvoicingInfrastructure(builder.Configuration);
             builder.Services.AddErpGateway(builder.Configuration);
+            // Stored invoice scans of the Assistant, kept as the document of an invoice recorded from one (plan 05 Task 6).
+            builder.Services.AddAssistantScans(builder.Configuration);
             // The supplier's signed invoice webhooks (Webhooks:Sources:supplier:Secret).
             builder.Services.AddProcureAiWebhooks(builder.Configuration);
             builder.Host.UseWolverine(options => options.ConfigureInvoicing(builder.Configuration, ServiceName));

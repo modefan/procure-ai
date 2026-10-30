@@ -47,9 +47,13 @@ public sealed class AssistantApiFactory(
     EmbeddingProbe embeddings, ChatScript script, ChatFaults faults)
     : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
+    /// <summary>The client of our own services' tokens (<c>azp</c>): Invoicing reads a stored scan with one.</summary>
+    public const string InternalClientId = "procure-internal-test";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
+        builder.UseSetting("Auth:InternalClientId", InternalClientId);
         foreach (var (key, value) in access.Settings.Concat(services))
         {
             builder.UseSetting(key, value);

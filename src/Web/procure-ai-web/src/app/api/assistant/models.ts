@@ -11,6 +11,8 @@ export type { ConversationDto } from './models/conversation-dto';
 export type { ConversationListItem } from './models/conversation-list-item';
 export type { CreatedConversation } from './models/created-conversation';
 export type { IFormFile } from './models/i-form-file';
+export type { InvoiceScanDto } from './models/invoice-scan-dto';
+export type { InvoiceScanRecordDto } from './models/invoice-scan-record-dto';
 export type { MessageDto } from './models/message-dto';
 export type { MessageRole } from './models/message-role';
 export type { MessageStatus } from './models/message-status';
@@ -19,6 +21,8 @@ export type { PagedResultOfPolicyDocumentDto } from './models/paged-result-of-po
 export type { PolicyDocumentDto } from './models/policy-document-dto';
 export type { ProblemDetails } from './models/problem-details';
 export type { QuotaDto } from './models/quota-dto';
+export type { ScannedLineDto } from './models/scanned-line-dto';
+export type { ScanWarningDto } from './models/scan-warning-dto';
 export type { SourceDto } from './models/source-dto';
 export type { SourceType } from './models/source-type';
 export type { ToolStepDto } from './models/tool-step-dto';

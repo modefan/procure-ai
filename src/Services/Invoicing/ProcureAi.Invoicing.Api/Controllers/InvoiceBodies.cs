@@ -11,18 +11,24 @@ public sealed record InvoiceLineBody(
     [Range(1, InvoiceLimits.MaxQuantity)] int Quantity,
     [Range(typeof(decimal), "0", InvoiceLimits.MaxAmount)] decimal UnitPriceExclVat);
 
-/// <summary>An invoice typed in by finance (source Manual) against an order the caller may see. Order and date are nullable only so a missing one is a 400 (a value type would bind as its default).</summary>
+/// <summary>
+/// An invoice typed in by finance against an order the caller may see: source Manual, or Scan with <c>ScanId</c>, the Assistant's scan
+/// of the supplier's PDF that finance reviewed (it must be a scan of the caller's tenant, else 422; the lines saved are always these, never
+/// the scan's). Order and date are nullable only so a missing one is a 400 (a value type would bind as its default).
+/// </summary>
 public sealed record CreateInvoiceBody(
     [Required] Guid? OrderId,
     [Required, StringLength(InvoiceLimits.InvoiceNumberLength, MinimumLength = 1)] string SupplierInvoiceNumber,
     [Required] DateOnly? InvoiceDate,
     [Required, MinLength(1), MaxLength(InvoiceLimits.MaxLines)] IReadOnlyList<InvoiceLineBody> Lines,
-    [Range(typeof(decimal), "0", InvoiceLimits.MaxAmount)] decimal StatedTotalInclVat)
+    [Range(typeof(decimal), "0", InvoiceLimits.MaxAmount)] decimal StatedTotalInclVat,
+    Guid? ScanId = null)
 {
     internal RecordInvoice ToCommand() => new(
         OrderId!.Value, SupplierInvoiceNumber.Trim(), InvoiceDate!.Value,
         [.. Lines.Select(l => new InvoiceLineInput(l.LineNo, l.Quantity, l.UnitPriceExclVat))],
-        StatedTotalInclVat, InvoiceSource.Manual, JsonSerializer.Serialize(this, InvoiceLimits.Json), SupplierId: null);
+        StatedTotalInclVat, ScanId is null ? InvoiceSource.Manual : InvoiceSource.Scan, JsonSerializer.Serialize(this, InvoiceLimits.Json),
+        SupplierId: null, ScanId: ScanId);
 }
 
 /// <summary>How many of one invoice line to pay.</summary>

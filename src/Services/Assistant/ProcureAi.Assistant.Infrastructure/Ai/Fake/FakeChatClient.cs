@@ -15,8 +15,8 @@ namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 /// <c>&lt;data id="S1"&gt;</c> blocks, or lines starting <c>[S1]</c>, <c>[S2]</c>, in the prompt), cited, plus a summary of any tool results. Nothing to cite and no tool result: the
 /// "policy doesn't cover this" sentence.</item>
 /// <item><c>rewrite</c>: the last user message as the standalone question; <c>context</c>: its first sentence;
-/// <c>classify</c>: <c>INJECTION</c>, <c>OFF_TOPIC</c> or <c>SAFE</c> from lists of known phrases (the guard classifier); <c>scan</c>: <c>{}</c> (the invoice reader
-/// comes with plan 05 Task 6); <c>rerank</c>: the candidates' numbers in the order given (the fusion order is kept).</item>
+/// <c>classify</c>: <c>INJECTION</c>, <c>OFF_TOPIC</c> or <c>SAFE</c> from lists of known phrases (the guard classifier); <c>scan</c>: the invoice of the
+/// <c>&lt;data kind="invoice"&gt;</c> block as <c>ScannedInvoice</c> JSON (<see cref="FakeInvoiceReader"/>); <c>rerank</c>: the candidates' numbers in the order given (the fusion order is kept).</item>
 /// </list>
 /// Streaming sends the text word by word with <c>AI:Fake:StreamDelayMs</c> between words. Usage counts words as tokens.
 /// </summary>
@@ -124,7 +124,7 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
             AiTasks.Rewrite => new FakeReply(lastUser.Trim(), null),
             AiTasks.Context => new FakeReply(FirstSentence(lastUser), null),
             AiTasks.Classify => new FakeReply(Classify(lastUser), null),
-            AiTasks.Scan => new FakeReply("{}", null),
+            AiTasks.Scan => new FakeReply(FakeInvoiceReader.Read(lastUser), null),
             AiTasks.Rerank => new FakeReply(KeepOrder(lastUser), null),
             _ => Answer(messages, lastUser, options),
         };

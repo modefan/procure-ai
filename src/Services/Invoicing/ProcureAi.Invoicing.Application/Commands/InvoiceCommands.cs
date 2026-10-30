@@ -19,7 +19,8 @@ public sealed record PayLineInput(int LineNo, int Quantity);
 
 /// <summary>
 /// Records an invoice from the supplier webhook, a manual entry or a scan. <c>SupplierId</c> null means the supplier of the order.
-/// <c>Document</c> is the raw body or entry as JSON. <c>WebhookEventId</c> (webhooks only) makes a replay of the same event do nothing.
+/// <c>Document</c> is the raw body or entry as JSON; for a scan (<c>ScanId</c>, source <c>Scan</c>) the handler replaces it with the scan
+/// the Assistant stored. <c>WebhookEventId</c> (webhooks only) makes a replay of the same event do nothing.
 /// </summary>
 public sealed record RecordInvoice(
     Guid OrderId,
@@ -30,7 +31,8 @@ public sealed record RecordInvoice(
     InvoiceSource Source,
     string Document,
     string? SupplierId,
-    string? WebhookEventId = null);
+    string? WebhookEventId = null,
+    Guid? ScanId = null);
 
 /// <summary>Finance pays the payable quantities of an invoice (<c>Lines</c> null: all of them, or chosen quantities per line).</summary>
 public sealed record ReleasePayment(Guid InvoiceId, uint ExpectedVersion, IReadOnlyList<PayLineInput>? Lines);
@@ -54,6 +56,9 @@ public static class RecordInvoiceHandler
 {
     public const string WebhookSource = "supplier";
 
+    /// <summary>The answer when a scan is unknown, expired or of another tenant (a 422 for the caller).</summary>
+    public const string ScanNotFound = "The scan was not found.";
+
     /// <summary>
     /// The order view decides the tenant, never the payload or the caller of a webhook. A webhook (signature checked by the Api) is
     /// recorded once per event ID (a replay changes nothing and returns null). A manual entry or scan needs an order the caller may
@@ -62,12 +67,15 @@ public static class RecordInvoiceHandler
     /// without a tenant (<see cref="InvoiceStatus.AwaitingOrder"/>, nothing published, invisible to every tenant) and adopted when
     /// the order arrives (<see cref="AttachWaitingInvoices"/>). Otherwise it is matched at once and <c>InvoiceReceived</c> and
     /// <c>InvoiceMatched</c> or <c>InvoiceMismatched</c> go out with the save. The order view is written too, so concurrent invoices
-    /// and payments of one order never overlap; a lost race is retried by the concurrency policy.
+    /// and payments of one order never overlap; a lost race is retried by the concurrency policy. An entry with a scan (<c>ScanId</c>) reads
+    /// it from the Assistant for the caller's tenant (<see cref="IAssistantScans"/>) and keeps it as the invoice's document (source
+    /// <c>Scan</c>); a scan the Assistant does not have for that tenant, or hands over as another tenant's, is a 422. The lines are always
+    /// the command's (finance's reviewed values), never the scan's.
     /// </summary>
     public static async Task<InvoiceDto?> Handle(
         RecordInvoice command, IInvoicingDbContext db, ICallerContext caller, ICallerScope scope, IWebhookInbox inbox,
         ITenantSequence sequence, IMessageBus bus, ICacheInvalidator cache, IInvoicingMetrics metrics, IOptions<InvoicingOptions> options,
-        TimeProvider time, CancellationToken cancellationToken)
+        IAssistantScans scans, TimeProvider time, CancellationToken cancellationToken)
     {
         var order = await db.Orders.IgnoreQueryFilters().Include(o => o.Lines)
             .FirstOrDefaultAsync(o => o.Id == command.OrderId, cancellationToken);
@@ -91,6 +99,11 @@ public static class RecordInvoiceHandler
                 || !(await scope.GetAsync(cancellationToken)).Allows(order.RequesterId, order.CostCenterCode))
             {
                 throw new NotFoundException($"Order {command.OrderId} was not found.");
+            }
+
+            if (command.ScanId is { } scanId)
+            {
+                command = await WithScanAsync(command, scanId, callerTenant, scans, cancellationToken);
             }
         }
 
@@ -142,6 +155,19 @@ public static class RecordInvoiceHandler
         await db.SaveChangesAsync(cancellationToken);
         await OrderEvents.PublishAsync(bus, metrics, [outcome with { WasAwaitingOrder = true }], now);
         return InvoicingMapper.ToDto(invoice, order);
+    }
+
+    /// <summary>The command as an entry from the scan: source Scan, the scan the Assistant stored for the tenant as its document.</summary>
+    private static async Task<RecordInvoice> WithScanAsync(
+        RecordInvoice command, Guid scanId, string tenant, IAssistantScans scans, CancellationToken cancellationToken)
+    {
+        var scan = await scans.GetAsync(tenant, scanId, cancellationToken);
+        if (scan is null || scan.Id != scanId || !string.Equals(scan.TenantId, tenant, StringComparison.Ordinal))
+        {
+            throw new DomainException(ScanNotFound);
+        }
+
+        return command with { Source = InvoiceSource.Scan, Document = scan.Json };
     }
 
     private static List<InvoiceLine> BuildLines(IReadOnlyList<InvoiceLineInput> inputs, OrderView? order) =>

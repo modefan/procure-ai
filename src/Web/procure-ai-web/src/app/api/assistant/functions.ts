@@ -19,6 +19,10 @@ export type { GetAssistantQuota$Params as GetAssistantQuota$Params } from './fn/
 export { getAssistantQuota as getAssistantQuota } from './fn/conversations/get-assistant-quota';
 export type { AskQuestion$Params as AskQuestion$Params } from './fn/conversations/ask-question';
 export { askQuestion as askQuestion } from './fn/conversations/ask-question';
+export type { ScanInvoice$Params as ScanInvoice$Params } from './fn/invoice-scans/scan-invoice';
+export { scanInvoice as scanInvoice } from './fn/invoice-scans/scan-invoice';
+export type { GetInvoiceScanInternal$Params as GetInvoiceScanInternal$Params } from './fn/invoice-scans/get-invoice-scan-internal';
+export { getInvoiceScanInternal as getInvoiceScanInternal } from './fn/invoice-scans/get-invoice-scan-internal';
 export type { ListPolicyDocuments$Params as ListPolicyDocuments$Params } from './fn/policy-documents/list-policy-documents';
 export { listPolicyDocuments as listPolicyDocuments } from './fn/policy-documents/list-policy-documents';
 export type { UploadPolicyDocument$Params as UploadPolicyDocument$Params } from './fn/policy-documents/upload-policy-document';

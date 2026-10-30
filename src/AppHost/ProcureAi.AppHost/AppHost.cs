@@ -184,13 +184,24 @@ var purchasingApi = builder.AddProcureAiService<Projects.ProcureAi_Purchasing_Ap
     .WithEnvironment("SupplierClient__BaseUrl", simulators.GetEndpoint("http"))
     .WithEnvironment("SupplierClient__ApiKey", simulatorApiKey)
     .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
+// The Assistant (plan 05): Postgres assistantdb (pgvector, outbox and inbox; Debezium captures the documents and audit rows) plus MongoDB
+// assistantchatdb (conversations, invoice scans). Its tools read requests, approvals, budgets and suppliers as the signed-in user (token
+// relay), so it references and waits for them. The model provider is configuration: without AI settings here it runs on the Fake provider
+// (no key, no account); with AppHost user secrets AI:Provider, AI:Endpoint, AI:ApiKey, AI:Chat:Model, AI:Embedding:Model, AI:Guard:Model
+// it uses that provider. Each is passed only when set, so nothing is required.
+var assistantApi = builder.AddProcureAiService<Projects.ProcureAi_Assistant_Api>(
+    new ServiceSpec("assistant", ResourceNames.AssistantDb, CapturedTables: ["policy_documents", "audit_entries"], GatewayCluster: "assistant", ApiRoutePrefix: "/api/assistant", SecondaryMongoDatabase: ResourceNames.AssistantChatDb),
+    shared)
+    .CallsServices(accessApi, requestsApi, approvalsApi, budgetsApi, suppliersApi)
+    .WithOptionalAiSettings(builder);
 // Invoicing: the supplier's invoices (signed webhooks, the same secret) and finance's, matched against its copy of Purchasing's
 // orders (order_views: a read copy, so not captured here), paid and exported to the ERP (the simulator) through its anti-corruption
-// layer with the simulator key. Like Purchasing it does not wait for the simulator.
+// layer with the simulator key. Like Purchasing it does not wait for the simulator. An invoice finance enters from a scan keeps the scan the
+// Assistant stored (read through its internal endpoint, plan 05 Task 6), so it references and waits for the Assistant.
 var invoicingApi = builder.AddProcureAiService<Projects.ProcureAi_Invoicing_Api>(
     new ServiceSpec("invoicing", ResourceNames.InvoicingDb, CapturedTables: ["invoices", "invoice_lines", "payments", "payment_lines", "audit_entries"], GatewayCluster: "invoicing", ApiRoutePrefix: "/api/invoicing"),
     shared)
-    .CallsServices(accessApi)
+    .CallsServices(accessApi, assistantApi)
     .WithEnvironment("ErpClient__BaseUrl", simulators.GetEndpoint("http"))
     .WithEnvironment("ErpClient__ApiKey", simulatorApiKey)
     .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
@@ -208,17 +219,6 @@ var notificationsApi = builder.AddProcureAiService<Projects.ProcureAi_Notificati
     .WithEnvironment("Notifications__Smtp__Port", mailpitSmtp.Property(EndpointProperty.Port))
     .WithEnvironment("Notifications__Smtp__From", "no-reply@procure-ai.local")
     .WaitFor(mailpit);
-
-// The Assistant (plan 05): Postgres assistantdb (pgvector, outbox and inbox; Debezium captures the documents and audit rows) plus MongoDB
-// assistantchatdb (conversations, invoice scans). Its tools read requests, approvals, budgets and suppliers as the signed-in user (token
-// relay), so it references and waits for them. The model provider is configuration: without AI settings here it runs on the Fake provider
-// (no key, no account); with AppHost user secrets AI:Provider, AI:Endpoint, AI:ApiKey, AI:Chat:Model, AI:Embedding:Model, AI:Guard:Model
-// it uses that provider. Each is passed only when set, so nothing is required.
-var assistantApi = builder.AddProcureAiService<Projects.ProcureAi_Assistant_Api>(
-    new ServiceSpec("assistant", ResourceNames.AssistantDb, CapturedTables: ["policy_documents", "audit_entries"], GatewayCluster: "assistant", ApiRoutePrefix: "/api/assistant", SecondaryMongoDatabase: ResourceNames.AssistantChatDb),
-    shared)
-    .CallsServices(accessApi, requestsApi, approvalsApi, budgetsApi, suppliersApi)
-    .WithOptionalAiSettings(builder);
 
 // The supplier calls the services directly, not through the gateway (exposing the webhooks publicly is plan 07/08): order webhooks to
 // Purchasing, invoice webhooks to Invoicing, both signed with the shared secret. Endpoint references only, no wait: the simulator's own

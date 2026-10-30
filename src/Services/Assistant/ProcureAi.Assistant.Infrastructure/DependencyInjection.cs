@@ -12,6 +12,7 @@ using ProcureAi.Assistant.Infrastructure.Ingestion;
 using ProcureAi.Assistant.Infrastructure.Mongo;
 using ProcureAi.Assistant.Infrastructure.Persistence;
 using ProcureAi.Assistant.Infrastructure.Retrieval;
+using ProcureAi.Assistant.Infrastructure.Scanning;
 using ProcureAi.Assistant.Infrastructure.Tools;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
@@ -62,6 +63,7 @@ public static class DependencyInjection
         services.AddAssistantRetrieval();
         services.AddAssistantChat();
         services.AddAssistantTools(configuration);
+        services.AddAssistantScanning();
         return services;
     }
 

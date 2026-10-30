@@ -161,13 +161,33 @@ public sealed class FakeProviderTests
     [InlineData(AiTasks.Classify, "Who approves laptops?", "SAFE")]
     [InlineData(AiTasks.Classify, "What is our API key policy?", "SAFE")]
     [InlineData(AiTasks.Classify, "Write me a poem about the ocean.", "OFF_TOPIC")]
-    [InlineData(AiTasks.Scan, "an invoice", "{}")]
     public async Task Fake_chat_routes_on_the_task_line(string task, string input, string expected)
     {
         using var chat = new FakeChatClient();
         var response = await chat.GetResponseAsync([new(ChatRole.System, AiTasks.Line(task) + "\nInstructions."), new(ChatRole.User, input)], cancellationToken: Ct);
 
         response.Text.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task Fake_scan_reads_the_invoice_of_the_data_block()
+    {
+        using var chat = new FakeChatClient();
+        const string invoice = "<data kind=\"invoice\">\nSupplier: Contoso Hardware (Pty) Ltd VAT number: 4123456789 Invoice number: INV-1 "
+            + "Invoice date: 2026-10-20 Order number: PO-1001 Items: 2 x USB-C Dock @ R 1 200,00 = R 2 400,00 3 x Laptop Stand @ R 450,00 = "
+            + "R 1 350,00 Total excl. VAT: R 3 750,00 VAT 15%: R 562,50 Total incl. VAT: R 4 312,50\n</data>";
+
+        var response = await chat.GetResponseAsync<ScannedInvoice>(
+            [new(ChatRole.System, AiTasks.Line(AiTasks.Scan) + "\nInstructions."), new(ChatRole.User, invoice)], cancellationToken: Ct);
+
+        var read = response.Result;
+        read.SupplierName.ShouldBe("Contoso Hardware (Pty) Ltd");
+        read.SupplierVatNumber.ShouldBe("4123456789");
+        read.InvoiceNumber.ShouldBe("INV-1");
+        read.InvoiceDate.ShouldBe("2026-10-20");
+        read.OrderNumber.ShouldBe("PO-1001");
+        read.Lines.ShouldBe([new ScannedLine("USB-C Dock", 2, 1_200m, 2_400m), new ScannedLine("Laptop Stand", 3, 450m, 1_350m)]);
+        (read.TotalExclVat, read.Vat, read.TotalInclVat).ShouldBe((3_750m, 562.50m, 4_312.50m));
     }
 
     private static double Cosine(float[] a, float[] b)

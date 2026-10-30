@@ -409,6 +409,203 @@
         }
       }
     },
+    "/api/v1/assistant/invoice-scans": {
+      "post": {
+        "tags": [
+          "InvoiceScans"
+        ],
+        "operationId": "ScanInvoice",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value per submission (e.g. a GUID). Repeating it replays the first result.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceScanDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assistant/internal/invoice-scans/{id}": {
+      "get": {
+        "tags": [
+          "InvoiceScans"
+        ],
+        "operationId": "GetInvoiceScanInternal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceScanRecordDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assistant/policy-documents": {
       "get": {
         "tags": [
@@ -1231,6 +1428,114 @@
         "type": "string",
         "format": "binary"
       },
+      "InvoiceScanDto": {
+        "required": [
+          "id",
+          "supplierName",
+          "supplierVatNumber",
+          "invoiceNumber",
+          "invoiceDate",
+          "orderNumber",
+          "lines",
+          "vat",
+          "totalExclVat",
+          "totalInclVat",
+          "confidence",
+          "warnings",
+          "model"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "supplierName": {
+            "type": "string"
+          },
+          "supplierVatNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "invoiceNumber": {
+            "type": "string"
+          },
+          "invoiceDate": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date"
+          },
+          "orderNumber": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScannedLineDto"
+            }
+          },
+          "vat": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalExclVat": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalInclVat": {
+            "type": "number",
+            "format": "double"
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanWarningDto"
+            }
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      },
+      "InvoiceScanRecordDto": {
+        "required": [
+          "id",
+          "tenantId",
+          "userId",
+          "createdAt",
+          "scan"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/InvoiceScanDto"
+          }
+        }
+      },
       "MessageDto": {
         "required": [
           "id",
@@ -1482,6 +1787,47 @@
           }
         }
       },
+      "ScannedLineDto": {
+        "required": [
+          "description",
+          "quantity",
+          "unitPriceExclVat",
+          "lineTotalExclVat"
+        ],
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "unitPriceExclVat": {
+            "type": "number",
+            "format": "double"
+          },
+          "lineTotalExclVat": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "ScanWarningDto": {
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "SourceDto": {
         "required": [
           "ref",
@@ -1666,6 +2012,9 @@
     },
     {
       "name": "Conversations"
+    },
+    {
+      "name": "InvoiceScans"
     },
     {
       "name": "PolicyDocuments"
