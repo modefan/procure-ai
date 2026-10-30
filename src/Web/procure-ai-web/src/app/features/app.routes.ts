@@ -109,6 +109,14 @@ export const APP_ROUTES: Routes = [
     loadComponent: () => import('./assistant/assistant.page').then((m) => m.AssistantPage),
   },
   {
+    path: 'admin/authorization',
+    title: 'Authorization matrix',
+    canActivate: [permissionGuard],
+    canDeactivate: [unsavedChangesGuard],
+    data: { permission: 'admin.authorization' },
+    loadComponent: () => import('./admin/matrix/matrix.page').then((m) => m.MatrixPage),
+  },
+  {
     path: 'admin/policies',
     title: 'Policy documents',
     canActivate: [permissionGuard],

@@ -9,7 +9,7 @@ namespace ProcureAi.Contracts.Notifications;
 /// <param name="Entity">What changed, one of <see cref="LiveEntities"/>.</param>
 /// <param name="Id">
 /// Its ID: the request ID for <c>request</c> and <c>approval</c> (the approval chain of that request), the cost center code for
-/// <c>budget</c>, the order ID for <c>order</c>, the invoice ID for <c>invoice</c>, the document ID for <c>policy-document</c>.
+/// <c>budget</c>, the order ID for <c>order</c>, the invoice ID for <c>invoice</c>, the document ID for <c>policy-document</c>, the tenant ID for <c>access-matrix</c>.
 /// </param>
 /// <param name="RequestId">The request the change belongs to, when there is one.</param>
 /// <param name="EventType">The integration event behind it, e.g. <c>RequestSubmitted</c>.</param>
@@ -28,7 +28,10 @@ public static class LiveEntities
     /// <summary>A policy document of the Assistant (its ingestion progress and status).</summary>
     public const string PolicyDocument = "policy-document";
 
-    public static IReadOnlyList<string> All { get; } = [Request, Approval, Budget, Order, Invoice, PolicyDocument];
+    /// <summary>The role-permission matrix of the tenant (ID: the tenant ID). Admin screens refetch it.</summary>
+    public const string AccessMatrix = "access-matrix";
+
+    public static IReadOnlyList<string> All { get; } = [Request, Approval, Budget, Order, Invoice, PolicyDocument, AccessMatrix];
 }
 
 /// <summary>The live-updates hub as clients see it (through the gateway: <c>/hubs/live</c>).</summary>

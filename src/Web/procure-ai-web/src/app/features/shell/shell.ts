@@ -19,13 +19,19 @@ interface NavLink {
   count?: number;
 }
 
+/** The admin pages, in menu order; each shows only for a user who has its permission. Later admin screens are added here. */
+const ADMIN_LINKS: NavLink[] = [
+  { path: 'admin/authorization', label: 'Authorization', permission: 'admin.authorization' },
+  { path: 'admin/policies', label: 'Policies', permission: 'admin.policies' },
+];
+
 /**
  * The frame around every page: skip link, header with the menu for what this user may open, and the page
  * outlet. Signed out, the header shows only Welcome, Log in and Register; the app links appear after sign-in.
  */
 @Component({
   selector: 'app-shell',
-  host: { '(window:resize)': 'onResize()' },
+  host: { '(window:resize)': 'onResize()', '(document:keydown.escape)': 'adminOpen.set(false)', '(document:click)': 'onDocumentClick($event)' },
   imports: [RouterLink, RouterLinkActive, RouterOutlet, Menu, MenuContent, MenuItem, MenuTrigger, BellMenu, LiveIndicator, OnlineUsers],
   template: `
     <a
@@ -81,6 +87,28 @@ interface NavLink {
 
         <div class="ml-auto flex items-center gap-2">
           @if (auth.isLoggedIn()) {
+            @if (adminLinks().length > 0) {
+              <div class="relative max-md:hidden" data-admin-menu>
+                <button
+                  type="button"
+                  data-testid="admin-menu"
+                  class="btn-ghost !px-3 !py-1"
+                  [class.active]="adminActive()"
+                  aria-controls="admin-links"
+                  [attr.aria-expanded]="adminOpen()"
+                  (click)="adminOpen.set(!adminOpen())"
+                >
+                  Admin <span aria-hidden="true" class="text-xs">&#9662;</span>
+                </button>
+                @if (adminOpen()) {
+                  <div id="admin-links" data-testid="admin-links" class="absolute right-0 z-40 mt-1 flex min-w-48 flex-col rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                    @for (link of adminLinks(); track link.path) {
+                      <a [routerLink]="'/app/' + link.path" routerLinkActive="active" class="px-4 py-2 text-sm whitespace-nowrap text-slate-700 hover:bg-indigo-50 focus-visible:outline-offset-[-2px] [&.active]:font-semibold [&.active]:text-indigo-800">{{ link.label }}</a>
+                    }
+                  </div>
+                }
+              </div>
+            }
             <app-online-users />
             <app-live-indicator />
             <app-bell-menu />
@@ -140,6 +168,14 @@ interface NavLink {
               }
             </a>
           }
+          @if (adminLinks().length > 0) {
+            <div data-testid="drawer-admin" class="mt-3 border-t border-slate-200 pt-3">
+              <h2 class="px-3 pb-1 text-xs font-semibold tracking-wide text-slate-600 uppercase">Admin</h2>
+              @for (link of adminLinks(); track link.path) {
+                <a [routerLink]="'/app/' + link.path" routerLinkActive="active" class="nav-link block !py-3">{{ link.label }}</a>
+              }
+            </div>
+          }
         </nav>
       }
     </dialog>
@@ -189,10 +225,15 @@ export class Shell {
       { path: 'invoices', label: 'Invoices', permission: 'invoices.read' },
       { path: 'budgets', label: 'Budgets', permission: 'budgets.read' },
       { path: 'assistant', label: 'Assistant', permission: 'assistant.use' },
-      { path: 'admin/policies', label: 'Policies', permission: 'admin.policies' },
     ];
     return all.filter((link) => this.auth.hasPermission(link.permission));
   });
+
+  /** The admin pages this user may open (the "Admin" menu; the group of the phone drawer). */
+  protected readonly adminLinks = computed(() => ADMIN_LINKS.filter((link) => this.auth.hasPermission(link.permission)));
+  protected readonly adminOpen = signal(false);
+  /** True while an admin page is open (the Admin button then looks active). */
+  protected readonly adminActive = signal(false);
 
   protected readonly roleAndTenant = computed(() => {
     const user = this.auth.user();
@@ -214,7 +255,11 @@ export class Shell {
         element.close();
       }
     });
-    this.router.events.pipe(filter((e) => e instanceof NavigationEnd), takeUntilDestroyed()).subscribe(() => this.menuOpen.set(false));
+    this.router.events.pipe(filter((e) => e instanceof NavigationEnd), takeUntilDestroyed()).subscribe((e) => {
+      this.menuOpen.set(false);
+      this.adminOpen.set(false);
+      this.adminActive.set(e.urlAfterRedirects.startsWith('/app/admin/'));
+    });
 
     // Fill the bell and the approvals count once somebody is signed in (the connection itself is started by the app initializer).
     effect(() => {
@@ -243,6 +288,13 @@ export class Shell {
     const target = event.target as HTMLElement;
     if (target === this.drawer().nativeElement || target.closest('nav a')) {
       this.menuOpen.set(false);
+    }
+  }
+
+  /** A click anywhere outside the Admin menu closes its list. */
+  protected onDocumentClick(event: Event): void {
+    if (this.adminOpen() && !(event.target as HTMLElement | null)?.closest?.('[data-admin-menu]')) {
+      this.adminOpen.set(false);
     }
   }
 

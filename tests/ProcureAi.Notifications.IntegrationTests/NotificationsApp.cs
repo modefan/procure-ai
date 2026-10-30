@@ -95,6 +95,7 @@ public sealed class NotificationsApp : IAsyncLifetime
                 options.PublishMessage<InvoiceMatched>().ToRabbitExchange(Exchanges.Invoicing);
                 options.PublishMessage<PolicyDocumentProgressed>().ToRabbitExchange(Exchanges.Assistant);
                 options.PublishMessage<PolicyDocumentStatusChanged>().ToRabbitExchange(Exchanges.Assistant);
+                options.PublishMessage<ProcureAi.Contracts.Access.AccessChanged>().ToRabbitExchange(Exchanges.Access);
             })
             .StartAsync();
     }

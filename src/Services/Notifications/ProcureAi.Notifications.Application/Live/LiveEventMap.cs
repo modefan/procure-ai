@@ -1,4 +1,5 @@
 using ProcureAi.Contracts;
+using ProcureAi.Contracts.Access;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Budgets;
@@ -64,6 +65,10 @@ public static class LiveEventMap
         // assistant: a policy document's ingestion (no request)
         PolicyDocumentProgressed e => [PolicyDocument(e, e.DocumentId)],
         PolicyDocumentStatusChanged e => [PolicyDocument(e, e.DocumentId)],
+
+        // access: only a changed matrix is shown on a screen (the admin matrix); other kinds change nothing a client displays
+        AccessChanged { Kind: "Matrix" } e => [new EntityChanged(LiveEntities.AccessMatrix, e.TenantId, null, nameof(AccessChanged), e.OccurredAt)],
+        AccessChanged => [],
 
         _ => throw new NotSupportedException($"No live updates are defined for {integrationEvent.GetType().FullName}."),
     };

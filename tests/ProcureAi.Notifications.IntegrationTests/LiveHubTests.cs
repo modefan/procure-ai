@@ -2,6 +2,8 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using ProcureAi.BuildingBlocks.Web.Access;
+using ProcureAi.Contracts.Access;
 using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Invoicing;
 using ProcureAi.Contracts.Notifications;
@@ -83,6 +85,58 @@ public sealed class LiveHubTests(NotificationsApp app)
         await client.WaitForAsync(p => IsDocument(p, nameof(PolicyDocumentProgressed)), Arrival);
         var ready = await client.WaitForAsync(p => IsDocument(p, nameof(PolicyDocumentStatusChanged)), Arrival);
         ready.GetProperty("requestId").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Access_matrix_change_pushes_entity_changed()
+    {
+        var tenant = NewTenant();
+        await using var client = await LiveClient.ConnectAsync(app.A.Server, tenant, UserToken(tenant));
+        var generation = app.A.Services.GetRequiredService<AccessCacheGeneration>();
+        var before = await generation.GetAsync(tenant, Ct);
+        before.ShouldBe(AccessCacheGeneration.Initial);
+
+        await app.PublishAsync(new AccessChanged(tenant, "Matrix", null, DateTimeOffset.UtcNow));
+
+        var push = await client.WaitForAsync(p => p.GetProperty("entity").GetString() == LiveEntities.AccessMatrix, Arrival);
+        push.GetProperty("id").GetString().ShouldBe(tenant);
+        push.GetProperty("eventType").GetString().ShouldBe(nameof(AccessChanged));
+        push.GetProperty("requestId").ValueKind.ShouldBe(JsonValueKind.Null);
+
+        // The shared eviction handler ran on the same delivery (Wolverine 6.53 must not hide it behind the push handler): the tenant's
+        // Access cache generation moved on, which every instance reads from Redis.
+        await EventuallyAsync(async () => await generation.GetAsync(tenant, Ct) != before);
+    }
+
+    [Fact]
+    public async Task Access_change_of_one_user_pushes_nothing_but_still_evicts()
+    {
+        var tenant = NewTenant();
+        await using var client = await LiveClient.ConnectAsync(app.A.Server, tenant, UserToken(tenant));
+        var generation = app.A.Services.GetRequiredService<AccessCacheGeneration>();
+        (await generation.GetAsync(tenant, Ct)).ShouldBe(AccessCacheGeneration.Initial);
+
+        await app.PublishAsync(new AccessChanged(tenant, "User", "tom", DateTimeOffset.UtcNow));
+
+        await EventuallyAsync(async () => await generation.GetAsync(tenant, Ct) != AccessCacheGeneration.Initial);
+        await Task.Delay(TimeSpan.FromSeconds(1), Ct);
+        client.Received.ShouldBeEmpty();
+    }
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private static async Task EventuallyAsync(Func<Task<bool>> condition)
+    {
+        var deadline = DateTime.UtcNow + Arrival;
+        while (!await condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("The condition was not met in time.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), Ct);
+        }
     }
 
     [Fact]

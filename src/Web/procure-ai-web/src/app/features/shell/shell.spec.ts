@@ -260,6 +260,49 @@ describe('Shell header', () => {
     expect(text((await render()).querySelector('[data-testid=user-menu]'))).toContain('Manager · Acme');
   });
 
+  describe('admin group', () => {
+    const adminTrigger = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-testid=admin-menu]');
+    const adminLinks = (el: HTMLElement) => [...el.querySelectorAll('[data-testid=admin-links] a')].map((a) => text(a));
+
+    it('page_hidden_without_admin_authorization: no Admin menu for a user without an admin permission', async () => {
+      signIn(['requests.read', 'budgets.manage']);
+      expect(adminTrigger(await render())).toBeNull();
+    });
+
+    it('lists only the admin pages the user may open', async () => {
+      signIn(['requests.read', 'admin.policies']);
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('[data-testid=admin-links]')).toBeNull();
+
+      adminTrigger(el)!.click();
+      fixture.detectChanges();
+
+      expect(adminTrigger(el)!.getAttribute('aria-expanded')).toBe('true');
+      expect(adminLinks(el)).toEqual(['Policies']);
+    });
+
+    it('an admin sees Authorization before Policies, and Escape closes the list', async () => {
+      signIn(['admin.authorization', 'admin.policies'], ['admin']);
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const el = fixture.nativeElement as HTMLElement;
+
+      adminTrigger(el)!.click();
+      fixture.detectChanges();
+      expect(adminLinks(el)).toEqual(['Authorization', 'Policies']);
+      expect(el.querySelector('[data-testid=admin-links] a[href="/app/admin/authorization"]')).not.toBeNull();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      fixture.detectChanges();
+      expect(el.querySelector('[data-testid=admin-links]')).toBeNull();
+      expect(adminTrigger(el)!.getAttribute('aria-expanded')).toBe('false');
+    });
+  });
+
   describe('phone menu', () => {
     beforeEach(() => {
       HTMLDialogElement.prototype.showModal = function () {
@@ -308,6 +351,22 @@ describe('Shell header', () => {
       expect(dialog().hasAttribute('open')).toBe(false);
       expect(el.querySelector('dialog[data-testid=phone-drawer] nav a')).toBeNull(); // the links are only built while it is open
       expect(button().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('the drawer lists the admin pages under an Admin heading', async () => {
+      signIn(['requests.read', 'admin.authorization', 'admin.policies'], ['admin']);
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const el = fixture.nativeElement as HTMLElement;
+      el.querySelector<HTMLButtonElement>('[data-testid=phone-menu]')!.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const group = el.querySelector('dialog[data-testid=phone-drawer] [data-testid=drawer-admin]')!;
+      expect(text(group.querySelector('h2'))).toBe('Admin');
+      expect([...group.querySelectorAll('a')].map((a) => text(a))).toEqual(['Authorization', 'Policies']);
     });
 
     it('closes with its close button and with Esc (the native close event)', async () => {

@@ -1,4 +1,5 @@
 using ProcureAi.Contracts;
+using ProcureAi.Contracts.Access;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Assistant;
 using ProcureAi.Contracts.Budgets;
@@ -156,6 +157,39 @@ public sealed class EventMapTests
         var sent = pushes.Sent.ShouldHaveSingleItem();
         sent.Tenant.ShouldBe(Tenant);
         sent.Changes.ShouldBe(Cases["RequestSubmitted"].Expected);
+    }
+
+    [Fact]
+    public void Access_matrix_change_maps_to_one_push_for_the_tenant()
+    {
+        var pushes = LiveEventMap.For(new AccessChanged(Tenant, "Matrix", null, At));
+
+        pushes.ShouldBe([new EntityChanged(LiveEntities.AccessMatrix, Tenant, null, nameof(AccessChanged), At)]);
+        LiveEntities.All.ShouldContain(LiveEntities.AccessMatrix);
+    }
+
+    [Theory]
+    [InlineData("Organisation")]
+    [InlineData("User")]
+    public async Task Other_access_changes_push_nothing(string kind)
+    {
+        var pushes = new RecordingPushes();
+
+        await AccessEventsHandler.Handle(new AccessChanged(Tenant, kind, "tom", At), pushes, TestContext.Current.CancellationToken);
+
+        pushes.Sent.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Access_matrix_handler_pushes_to_the_events_tenant()
+    {
+        var pushes = new RecordingPushes();
+
+        await AccessEventsHandler.Handle(new AccessChanged(Tenant, "Matrix", null, At), pushes, TestContext.Current.CancellationToken);
+
+        var sent = pushes.Sent.ShouldHaveSingleItem();
+        sent.Tenant.ShouldBe(Tenant);
+        sent.Changes.ShouldBe([new EntityChanged("access-matrix", Tenant, null, "AccessChanged", At)]);
     }
 
     [Fact]
