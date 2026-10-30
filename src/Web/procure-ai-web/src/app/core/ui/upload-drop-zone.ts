@@ -54,7 +54,7 @@ export function rejectionReason(file: File, accept: string, maxBytes: number): s
     </div>
     <input #picker type="file" class="sr-only" tabindex="-1" aria-hidden="true" [accept]="accept()" (change)="onPicked()" />
     @if (rejected(); as reason) {
-      <p role="alert" class="field-error">{{ reason }}</p>
+      <p role="alert" class="field-error mt-2">{{ reason }}</p>
     }
   `,
 })
