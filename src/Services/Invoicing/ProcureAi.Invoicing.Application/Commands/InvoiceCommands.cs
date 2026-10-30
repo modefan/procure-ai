@@ -212,15 +212,26 @@ public static class AttachWaitingInvoicesHandler
 /// <summary>Loading an invoice and its order for a caller: missing and out-of-scope are both "not found".</summary>
 internal static class InvoiceAccess
 {
-    /// <summary>The tenant filter applies; an invoice of the tenant always has its order view (only webhooks wait, without a tenant).</summary>
+    /// <summary>
+    /// The tenant filter applies; an invoice of the tenant always has its order view (only webhooks wait, without a tenant).
+    /// <para>
+    /// The order view is read first and the invoice last, on purpose. Each read is its own snapshot (READ COMMITTED), and a payment
+    /// commits both rows at once. Read the other way round, a command that lost the race could see the invoice from before the
+    /// winner's commit (its old version, so the <c>If-Match</c> check passes) and the order view from after it (the winner's paid
+    /// quantities), and refuse with a business rule ("Nothing can be paid", 422) instead of the conflict it is. With the invoice read
+    /// last, an invoice that still has the caller's version means nothing committed on it before the order view was read either, so
+    /// both are from before the winner: the save then loses on the version and the retry answers 412.
+    /// </para>
+    /// </summary>
     public static async Task<(Invoice Invoice, OrderView Order)> LoadAllowedAsync(
         IInvoicingDbContext db, ICallerScope scope, Guid invoiceId, CancellationToken cancellationToken)
     {
+        var order = await db.Orders.Include(o => o.Lines)
+            .FirstOrDefaultAsync(o => db.Invoices.Any(i => i.Id == invoiceId && i.OrderId == o.Id), cancellationToken);
         var invoice = await db.Invoices.Include(i => i.Lines).Include(i => i.Payments)
-            .FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken)
-            ?? throw new NotFoundException($"Invoice {invoiceId} was not found.");
-        var order = await db.Orders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == invoice.OrderId, cancellationToken);
-        if (order is null || !(await scope.GetAsync(cancellationToken)).Allows(order.RequesterId, order.CostCenterCode))
+            .FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
+        if (invoice is null || order is null || order.Id != invoice.OrderId
+            || !(await scope.GetAsync(cancellationToken)).Allows(order.RequesterId, order.CostCenterCode))
         {
             throw new NotFoundException($"Invoice {invoiceId} was not found.");
         }

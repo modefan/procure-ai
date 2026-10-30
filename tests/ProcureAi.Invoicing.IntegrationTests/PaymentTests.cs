@@ -118,6 +118,50 @@ public sealed class PaymentTests(InvoicingApp app, ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Task 0c: a losing payment that read the invoice before the winner committed, and its order view after (two statements, two
+    /// snapshots under READ COMMITTED), still holds the old version, so the If-Match check passes and the rules see the winner's
+    /// paid quantities: "Nothing can be paid" (422). The race must reach the caller as a conflict (412/409), never as a business rule.
+    /// The pause forces that interleaving: the loser stops before its second read while the winner pays.
+    /// </summary>
+    [Fact]
+    public async Task Losing_concurrent_release_gets_conflict_not_422()
+    {
+        var tenant = InvoicingApp.NewTenant();
+        var token = InvoicingApp.Token(tenant);
+        var (order, invoiceId) = await InvoicedOrderAsync(tenant, received: 3, invoiced: 3);
+        var (_, etag) = await app.GetInvoiceAsync(invoiceId, token);
+        app.ReadPause.Arm();
+        var paused = InvoicingApp.Request(HttpMethod.Post, $"/api/v1/invoicing/invoices/{invoiceId}/payments", token, etag);
+        paused.Headers.TryAddWithoutValidation(InvoiceReadPause.Header, "1");
+
+        HttpResponseMessage lost;
+        var losing = app.SendHttpAsync(paused);
+        try
+        {
+            await app.ReadPause.Reached.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            using var winning = await app.PayAsync(invoiceId, token, etag);
+            winning.StatusCode.ShouldBe(HttpStatusCode.OK, await winning.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            app.ReadPause.Release();
+            lost = await losing;
+        }
+
+        using (lost)
+        {
+            Lost.ShouldContain(lost.StatusCode, await lost.Content.ReadAsStringAsync());
+        }
+
+        (await PaymentsOfAsync(invoiceId)).ShouldBe(1);
+        (await PaidOnOrderAsync(order.OrderId)).ShouldBe(3);
+        (await app.ScalarAsync<int>("SELECT paid FROM invoice_lines WHERE invoice_id = @id AND line_no = 1", ("id", invoiceId))).ShouldBe(3);
+        (await app.ScalarAsync<string>("SELECT status FROM invoices WHERE id = @id", ("id", invoiceId))).ShouldBe(nameof(InvoiceStatus.Paid));
+        await InvoicingApp.SettleAsync();
+        app.Events.Of(order.RequestId).Count(m => m.Kind == "PaymentReleased").ShouldBe(1);
+    }
+
+    /// <summary>
     /// Review Focus 3: two invoices of 2 on a line with 3 received, both paid at the same moment, five times: never more than the 3
     /// received is paid. Whichever pays first takes 2, the other the 1 left (the order view's version serialises them).
     /// </summary>

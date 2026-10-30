@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using OpenTelemetry;
@@ -14,6 +15,7 @@ using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Invoicing.Application.Dtos;
+using ProcureAi.Invoicing.Infrastructure;
 using ProcureAi.Invoicing.Infrastructure.Erp;
 using Shouldly;
 using Wolverine;
@@ -72,7 +74,8 @@ public sealed class ErpTraffic(Func<HttpMessageHandler> erp) : HttpMessageHandle
 /// and the simulator's ERP.
 /// </summary>
 public sealed class InvoicingApiFactory(
-    InvoicingInfraFixture infra, StubAccessServer access, StubAssistantServer assistant, ErpTraffic erp, List<MetricSnapshot> metrics)
+    InvoicingInfraFixture infra, StubAccessServer access, StubAssistantServer assistant, ErpTraffic erp, List<MetricSnapshot> metrics,
+    InvoiceReadPause readPause)
     : ServiceApiFactory<Program>("invoicingdb", infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -99,6 +102,7 @@ public sealed class InvoicingApiFactory(
         builder.ConfigureTestServices(services =>
         {
             services.AddHttpClient(ErpSimulatorGateway.ClientName).ConfigurePrimaryHttpMessageHandler(() => erp);
+            services.ConfigureDbContext<InvoicingDbContext>(options => options.AddInterceptors(readPause));
             // Scheduled retries (ERP backoff, missing order views) are picked up by Wolverine's polling; poll often in the tests.
             services.ConfigureWolverine(options => options.Durability.ScheduledJobPollingTime = TimeSpan.FromMilliseconds(250));
             // A second exporter on the service's own meter provider: what reaches it is what the OTLP exporter gets.
@@ -141,6 +145,9 @@ public sealed class InvoicingApp : IAsyncLifetime
 
     public List<MetricSnapshot> ExportedMetrics { get; } = [];
 
+    /// <summary>Holds a payment request (sent with <see cref="InvoiceReadPause.Header"/>) between its reads, to force a race.</summary>
+    public InvoiceReadPause ReadPause { get; } = new();
+
     public HttpClient Client { get; private set; } = null!;
 
     public RabbitRecorder Events { get; private set; } = null!;
@@ -162,7 +169,7 @@ public sealed class InvoicingApp : IAsyncLifetime
             ["Simulators:Supplier:InvoiceDelay"] = "00:00:00.300",
         });
         Erp = new ErpTraffic(() => Simulator.Server.CreateHandler());
-        _factory = new InvoicingApiFactory(Infra, Access, Assistant, Erp, ExportedMetrics);
+        _factory = new InvoicingApiFactory(Infra, Access, Assistant, Erp, ExportedMetrics, ReadPause);
         Client = _factory.CreateClient();
         Simulator.CreateClient().Dispose();
         Events = await RabbitRecorder.StartAsync(Infra.RabbitConnectionString, [Exchanges.Invoicing], []);
