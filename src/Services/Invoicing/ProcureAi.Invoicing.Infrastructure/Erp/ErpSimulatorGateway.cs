@@ -31,6 +31,9 @@ public sealed class ErpSimulatorGateway(HttpClient http, ILogger<ErpSimulatorGat
     /// <summary>The name of the typed client and of its resilience pipeline (metrics tag <c>pipeline.name</c>).</summary>
     public const string ClientName = "erp";
 
+    /// <summary>The name of its circuit breaker on the system status screen.</summary>
+    public const string BreakerName = "ERP";
+
     public const string PaymentsPath = "erp/v1/payments";
     private const string Currency = "ZAR";
 

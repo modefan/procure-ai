@@ -7,6 +7,7 @@ using ProcureAi.Approvals.Application.Abstractions;
 using ProcureAi.Approvals.Application.Sagas;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
+using ProcureAi.BuildingBlocks.Web.Status;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Approvals;
 using ProcureAi.Contracts.Budgets;
@@ -48,6 +49,7 @@ public static class DependencyInjection
         // Forwards to the same scoped DbContext instance (a factory, not AddScoped<,>, which would create a second one).
         services.AddScoped<IApprovalsDbContext>(sp => sp.GetRequiredService<ApprovalsDbContext>());
         services.TryAddSingleton(TimeProvider.System);
+        services.AddStatusContributor<ApprovalsStatusContributor>();
         return services;
     }
 

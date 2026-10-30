@@ -4,12 +4,16 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Timeout;
+using ProcureAi.BuildingBlocks.Application.Status;
 using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.Status;
+using CircuitState = ProcureAi.BuildingBlocks.Application.Status.CircuitState;
 
 namespace ProcureAi.BuildingBlocks.Web.Http;
 
@@ -77,15 +81,20 @@ public static class ExternalSystemClient
     /// <paramref name="sectionName"/>, validated at startup): base address and <c>X-Api-Key</c> from the options, and one resilience
     /// pipeline named <paramref name="clientName"/> replacing the service defaults' standard one. From outside in: total timeout,
     /// retries with exponential backoff and jitter, circuit breaker, attempt timeout. The circuit is shared by every call of the process,
-    /// so an outage opens it for all callers. The client and its pipeline share the name (metrics tag <c>pipeline.name</c>).
+    /// so an outage opens it for all callers. The client and its pipeline share the name (metrics tag <c>pipeline.name</c>). The breaker
+    /// reports its state changes to <see cref="ICircuitBreakerStates"/> as <paramref name="breakerName"/> (the status screen's name, e.g.
+    /// <c>Supplier API</c>; default <paramref name="clientName"/>), with the time an open circuit lets the next trial call through.
     /// </summary>
     public static IHttpClientBuilder AddExternalSystemClient<TClient, TImplementation, TOptions>(
-        this IServiceCollection services, IConfiguration configuration, string sectionName, string clientName)
+        this IServiceCollection services, IConfiguration configuration, string sectionName, string clientName, string? breakerName = null)
         where TClient : class
         where TImplementation : class, TClient
         where TOptions : ExternalSystemClientOptions
     {
+        var reportedAs = breakerName ?? clientName;
         services.AddValidatedOptions<TOptions>(configuration, sectionName);
+        services.AddKnownCircuitBreaker(reportedAs);
+        services.TryAddSingleton(TimeProvider.System);
         var builder = services.AddHttpClient<TClient, TImplementation>(clientName, (sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<TOptions>>().Value;
@@ -100,6 +109,8 @@ public static class ExternalSystemClient
         {
             var options = context.ServiceProvider.GetRequiredService<IOptions<TOptions>>().Value;
             var breaker = options.CircuitBreaker;
+            var states = context.ServiceProvider.GetRequiredService<ICircuitBreakerStates>();
+            var time = context.ServiceProvider.GetRequiredService<TimeProvider>();
             pipeline
                 .AddTimeout(options.TotalTimeout)
                 .AddRetry(new HttpRetryStrategyOptions
@@ -115,6 +126,21 @@ public static class ExternalSystemClient
                     MinimumThroughput = breaker.MinimumThroughput,
                     SamplingDuration = breaker.SamplingDuration,
                     BreakDuration = breaker.BreakDuration,
+                    OnOpened = args =>
+                    {
+                        states.Report(reportedAs, CircuitState.Open, time.GetUtcNow() + args.BreakDuration);
+                        return ValueTask.CompletedTask;
+                    },
+                    OnHalfOpened = _ =>
+                    {
+                        states.Report(reportedAs, CircuitState.HalfOpen, null);
+                        return ValueTask.CompletedTask;
+                    },
+                    OnClosed = _ =>
+                    {
+                        states.Report(reportedAs, CircuitState.Closed, null);
+                        return ValueTask.CompletedTask;
+                    },
                 })
                 .AddTimeout(options.AttemptTimeout);
         });

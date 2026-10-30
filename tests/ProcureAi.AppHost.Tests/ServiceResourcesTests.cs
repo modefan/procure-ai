@@ -303,6 +303,24 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Notifications_gets_the_services_the_status_screen_expects()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var api = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "notifications-api");
+        var env = await EnvironmentOfAsync(api);
+
+        var expected = env.Where(e => e.Key.StartsWith("Status__ExpectedServices__", StringComparison.Ordinal))
+            .OrderBy(e => int.Parse(e.Key["Status__ExpectedServices__".Length..], System.Globalization.CultureInfo.InvariantCulture))
+            .Select(e => e.Value.ToString()!)
+            .ToList();
+        // Every service API (each writes a status snapshot through ServiceHost); not the gateway, the simulators or the migrate runs.
+        var apis = model.Resources.OfType<ProjectResource>().Select(r => r.Name).Where(n => n.EndsWith("-api", StringComparison.Ordinal)).Order().ToList();
+        expected.Order().ShouldBe(apis);
+        expected.Count.ShouldBe(10);
+    }
+
+    [Fact]
     public async Task Notifications_service_has_no_database_and_no_migrate_and_the_gateway_routes_to_it()
     {
         await using var scope = await ModelScope.BuildAsync();

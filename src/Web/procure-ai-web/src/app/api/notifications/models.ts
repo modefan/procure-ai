@@ -3,4 +3,13 @@
 
 export type { BellItem } from './models/bell-item';
 export type { BellList } from './models/bell-list';
+export type { BreakerDto } from './models/breaker-dto';
+export type { ChaosDto } from './models/chaos-dto';
+export type { ChaosMode } from './models/chaos-mode';
+export type { CircuitState } from './models/circuit-state';
 export type { ProblemDetails } from './models/problem-details';
+export type { ServiceHealth } from './models/service-health';
+export type { ServiceStatusDto } from './models/service-status-dto';
+export type { StatusItem } from './models/status-item';
+export type { SystemStatusDto } from './models/system-status-dto';
+export type { WolverineCountsDto } from './models/wolverine-counts-dto';

@@ -12,6 +12,8 @@ using ProcureAi.Notifications.Application.Presence;
 using ProcureAi.Notifications.Infrastructure.Email;
 using ProcureAi.Notifications.Infrastructure.Inbox;
 using ProcureAi.Notifications.Infrastructure.Presence;
+using ProcureAi.Notifications.Infrastructure.SystemStatus;
+using ProcureAi.Notifications.Application.SystemStatus;
 using StackExchange.Redis;
 using Wolverine;
 using Wolverine.ErrorHandling;
@@ -48,6 +50,10 @@ public static class DependencyInjection
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
         services.AddSingleton<IEmailOnce, RedisEmailOnce>();
         services.AddScoped<IPersonalNotifier, PersonalNotifier>();
+
+        // The system status screen: the snapshots every instance writes to Redis.
+        services.AddSingleton<ISystemStatusSource, RedisSystemStatusSource>();
+        services.AddSingleton<SystemStatusService>();
         return services;
     }
 

@@ -102,6 +102,46 @@
           }
         }
       }
+    },
+    "/api/v1/notifications/system-status": {
+      "get": {
+        "tags": [
+          "SystemStatus"
+        ],
+        "operationId": "GetSystemStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -161,6 +201,63 @@
           }
         }
       },
+      "BreakerDto": {
+        "required": [
+          "name",
+          "state",
+          "retryAt"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CircuitState"
+          },
+          "retryAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ChaosDto": {
+        "required": [
+          "mode",
+          "restoresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ChaosMode"
+          },
+          "restoresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ChaosMode": {
+        "enum": [
+          "Normal",
+          "Slow",
+          "Failing",
+          "Down"
+        ]
+      },
+      "CircuitState": {
+        "enum": [
+          "Closed",
+          "HalfOpen",
+          "Open"
+        ]
+      },
       "ProblemDetails": {
         "type": "object",
         "properties": {
@@ -194,6 +291,156 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "ServiceHealth": {
+        "enum": [
+          "Healthy",
+          "Degraded",
+          "Unhealthy",
+          "Down"
+        ]
+      },
+      "ServiceStatusDto": {
+        "required": [
+          "name",
+          "health",
+          "instances",
+          "breakers",
+          "messages"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "health": {
+            "$ref": "#/components/schemas/ServiceHealth"
+          },
+          "instances": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "breakers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakerDto"
+            }
+          },
+          "messages": {
+            "$ref": "#/components/schemas/WolverineCountsDto"
+          }
+        }
+      },
+      "StatusItem": {
+        "required": [
+          "kind",
+          "text",
+          "tenantId",
+          "at",
+          "link"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "link": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SystemStatusDto": {
+        "required": [
+          "at",
+          "services",
+          "counters",
+          "alerts",
+          "supplierChaos"
+        ],
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceStatusDto"
+            }
+          },
+          "counters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusItem"
+            }
+          },
+          "supplierChaos": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChaosDto"
+              }
+            ]
+          }
+        }
+      },
+      "WolverineCountsDto": {
+        "required": [
+          "incoming",
+          "outgoing",
+          "scheduled",
+          "deadLetters",
+          "brokerDeadLetters"
+        ],
+        "type": "object",
+        "properties": {
+          "incoming": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outgoing": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scheduled": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "deadLetters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "brokerDeadLetters": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       }
@@ -237,6 +484,9 @@
   "tags": [
     {
       "name": "Notifications"
+    },
+    {
+      "name": "SystemStatus"
     }
   ]
 }

@@ -59,7 +59,7 @@ public static class DependencyInjection
     public static IServiceCollection AddErpGateway(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddExternalSystemClient<IErpGateway, ErpSimulatorGateway, ErpClientOptions>(
-            configuration, ErpClientOptions.SectionName, ErpSimulatorGateway.ClientName);
+            configuration, ErpClientOptions.SectionName, ErpSimulatorGateway.ClientName, ErpSimulatorGateway.BreakerName);
         return services;
     }
 

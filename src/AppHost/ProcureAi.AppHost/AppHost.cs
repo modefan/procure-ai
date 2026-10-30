@@ -221,6 +221,17 @@ var notificationsApi = builder.AddProcureAiService<Projects.ProcureAi_Notificati
     .WithEnvironment("Notifications__Smtp__From", "no-reply@procure-ai.local")
     .WaitFor(mailpit);
 
+// The system status screen (plan 06 ruling 9) lists every service API; one that wrote no status snapshot within the TTL shows as Down.
+// The gateway and the simulators write none (the gateway is the door the screen comes through; the simulator shows as the supplier chaos
+// switch and the breakers).
+ProjectResource[] statusServices =
+    [accessApi.Resource, budgetsApi.Resource, approvalsApi.Resource, auditApi.Resource, suppliersApi.Resource, requestsApi.Resource,
+     purchasingApi.Resource, assistantApi.Resource, invoicingApi.Resource, notificationsApi.Resource];
+for (var i = 0; i < statusServices.Length; i++)
+{
+    notificationsApi.WithEnvironment($"Status__ExpectedServices__{i}", statusServices[i].Name);
+}
+
 // The supplier calls the services directly, not through the gateway (exposing the webhooks publicly is plan 07/08): order webhooks to
 // Purchasing, invoice webhooks to Invoicing, both signed with the shared secret. Endpoint references only, no wait: the simulator's own
 // delivery retries cover a receiver that is still starting.

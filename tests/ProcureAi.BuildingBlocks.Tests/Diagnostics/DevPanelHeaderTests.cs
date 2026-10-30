@@ -217,5 +217,7 @@ public sealed partial class DevPanelHeaderTests(RedisFixture redis)
         public Task IncrementAsync(string name) => throw new InvalidOperationException("redis is down");
 
         public Task<IReadOnlyDictionary<string, long>> GetAsync(DateOnly day) => throw new InvalidOperationException("redis is down");
+
+        public DateOnly Today => new(2026, 10, 30);
     }
 }

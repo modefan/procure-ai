@@ -17,6 +17,10 @@ builder.Services.AddOptions<SimulatorOptions>()
     .ValidateDataAnnotations()
     .Validate(options => !options.Chaos.Validate().Any(), "Simulators:Chaos is invalid (failure rate 0..1, latency min <= max <= 30 s).")
     .ValidateOnStart();
+builder.Services.AddOptions<ChaosRestoreOptions>()
+    .BindConfiguration(ChaosRestoreOptions.Section)
+    .Validate(options => options.AutoRestoreAfter > TimeSpan.Zero, "Simulators:Chaos:AutoRestoreAfter must be positive.")
+    .ValidateOnStart();
 builder.Services.AddOptions<AdminAuthOptions>()
     .BindConfiguration(AdminAuthOptions.Section)
     .ValidateDataAnnotations()

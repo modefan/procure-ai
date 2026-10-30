@@ -4,7 +4,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
+using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Http;
+using ProcureAi.BuildingBlocks.Web.Status;
 using ProcureAi.Contracts;
 using ProcureAi.Contracts.Purchasing;
 using ProcureAi.Purchasing.Application;
@@ -56,7 +58,15 @@ public static class DependencyInjection
     public static IServiceCollection AddSupplierGateway(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddExternalSystemClient<ISupplierGateway, SupplierSimulatorGateway, SupplierClientOptions>(
-            configuration, SupplierClientOptions.SectionName, SupplierSimulatorGateway.ClientName);
+            configuration, SupplierClientOptions.SectionName, SupplierSimulatorGateway.ClientName, SupplierSimulatorGateway.BreakerName);
+        // The simulator's chaos switch: the same address and key, the service defaults' standard pipeline (not the supplier's breaker).
+        services.AddHttpClient<ISupplierChaos, SupplierChaosClient>(SupplierChaosClient.ClientName, (sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<SupplierClientOptions>>().Value;
+            client.BaseAddress = options.BaseUrl;
+            client.DefaultRequestHeaders.Add(ExternalSystemClient.ApiKeyHeader, options.ApiKey);
+        });
+        services.AddStatusContributor<SupplierChaosStatusContributor>();
         return services;
     }
 

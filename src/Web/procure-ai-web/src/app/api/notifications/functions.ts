@@ -7,3 +7,5 @@ export type { MarkNotificationRead$Params as MarkNotificationRead$Params } from 
 export { markNotificationRead as markNotificationRead } from './fn/notifications/mark-notification-read';
 export type { MarkAllNotificationsRead$Params as MarkAllNotificationsRead$Params } from './fn/notifications/mark-all-notifications-read';
 export { markAllNotificationsRead as markAllNotificationsRead } from './fn/notifications/mark-all-notifications-read';
+export type { GetSystemStatus$Params as GetSystemStatus$Params } from './fn/system-status/get-system-status';
+export { getSystemStatus as getSystemStatus } from './fn/system-status/get-system-status';

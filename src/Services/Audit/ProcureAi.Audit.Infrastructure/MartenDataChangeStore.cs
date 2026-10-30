@@ -102,6 +102,23 @@ public sealed class MartenDataChangeStore(IDocumentStore store, TimeProvider clo
         + await PurgeBatchesAsync<AttributionMatch, string>(q => q.Where(m => m.LastSeenAt < cutoff).Select(m => m.Id), batchSize, cancellationToken)
         + await PurgeBatchesAsync<OutsideAppAlert, string>(q => q.Where(a => a.CommittedAt < cutoff).Select(a => a.Id), batchSize, cancellationToken);
 
+    public async Task<OpenOutsideAppAlerts> OpenOutsideAppAlertsAsync(int latestPerTenant, CancellationToken cancellationToken)
+    {
+        await using var session = store.QuerySession();
+        // Alerts are kept only for the data change retention period, so the open ones are few: their tenants are read and grouped here.
+        var tenants = await session.Query<OutsideAppAlert>().Where(a => a.WithdrawnAt == null).Select(a => a.TenantId!).ToListAsync(cancellationToken);
+        var counts = tenants.GroupBy(t => (string?)t).Select(g => (g.Key, (long)g.Count())).ToList();
+        var latest = new List<OutsideAppAlert>();
+        foreach (var (tenant, _) in counts)
+        {
+            var query = session.Query<OutsideAppAlert>().Where(a => a.WithdrawnAt == null);
+            query = tenant is null ? query.Where(a => a.TenantId == null) : query.Where(a => a.TenantId == tenant);
+            latest.AddRange(await query.OrderByDescending(a => a.CommittedAt).Take(latestPerTenant).ToListAsync(cancellationToken));
+        }
+
+        return new OpenOutsideAppAlerts(counts, [.. latest.OrderByDescending(a => a.CommittedAt)]);
+    }
+
     public async Task<PagedResult<DataChange>> ForSubjectAsync(
         string tenantId, Guid subjectId, int page, int pageSize, CancellationToken cancellationToken)
     {

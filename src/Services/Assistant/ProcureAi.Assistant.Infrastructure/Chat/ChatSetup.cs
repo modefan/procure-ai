@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ProcureAi.Assistant.Application.Abstractions;
 using ProcureAi.Assistant.Application.Chat;
 using ProcureAi.BuildingBlocks.Persistence.Mongo;
+using ProcureAi.BuildingBlocks.Web.Status;
 
 namespace ProcureAi.Assistant.Infrastructure.Chat;
 
@@ -24,6 +25,7 @@ public static class ChatSetup
         services.AddScoped<ICallerPermissions, CallerPermissions>();
         services.AddScoped<AnswerStreamer>();
         services.AddScoped<ConversationService>();
+        services.AddStatusContributor<AssistantStatusContributor>();
         return services;
     }
 }

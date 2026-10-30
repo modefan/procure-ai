@@ -50,3 +50,17 @@ public interface IPurchasingMetrics
     /// <summary>A send to the supplier failed; <paramref name="reason"/> is the cause (<c>rejected</c>, <c>timeout</c>, <c>circuit_open</c>, ...).</summary>
     void SupplierSendFailed(string reason);
 }
+
+/// <summary>
+/// The simulated supplier's chaos switch (plan 06 ruling 11): the "break the supplier API" button of the system status screen. Calls the
+/// simulator's <c>api/v1/simulators/chaos</c> with the simulators' key; the simulator restores Normal by itself after a few minutes. A
+/// simulator that does not answer is a passing failure (503 at the API).
+/// </summary>
+public interface ISupplierChaos
+{
+    Task<ProcureAi.BuildingBlocks.Application.Status.ChaosDto> GetAsync(CancellationToken cancellationToken);
+
+    /// <summary>Sets the supplier's mode (the ERP's settings and the supplier's latency and failure rate are kept) and returns the new state.</summary>
+    Task<ProcureAi.BuildingBlocks.Application.Status.ChaosDto> SetAsync(
+        ProcureAi.BuildingBlocks.Application.Status.ChaosMode mode, CancellationToken cancellationToken);
+}

@@ -12,6 +12,9 @@ public interface IDailyStats
 
     /// <summary>All counters of that day; empty when there are none or Redis is not reachable.</summary>
     Task<IReadOnlyDictionary<string, long>> GetAsync(DateOnly day);
+
+    /// <summary>The day the counters count now (South Africa).</summary>
+    DateOnly Today { get; }
 }
 
 public static class DailyStatNames
@@ -97,6 +100,8 @@ public sealed class RedisDailyStats(IConnectionMultiplexer redis, ILogger<RedisD
 /// <summary>Used by hosts without Redis; counts nothing.</summary>
 public sealed class NoOpDailyStats : IDailyStats
 {
+    public DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+
     public Task IncrementAsync(string name) => Task.CompletedTask;
 
     public Task<IReadOnlyDictionary<string, long>> GetAsync(DateOnly day) =>

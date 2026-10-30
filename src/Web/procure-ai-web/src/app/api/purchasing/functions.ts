@@ -11,5 +11,9 @@ export type { ReceiveGoods$Params as ReceiveGoods$Params } from './fn/orders/rec
 export { receiveGoods as receiveGoods } from './fn/orders/receive-goods';
 export type { CloseOrderShort$Params as CloseOrderShort$Params } from './fn/orders/close-order-short';
 export { closeOrderShort as closeOrderShort } from './fn/orders/close-order-short';
+export type { GetSupplierChaos$Params as GetSupplierChaos$Params } from './fn/supplier-chaos/get-supplier-chaos';
+export { getSupplierChaos as getSupplierChaos } from './fn/supplier-chaos/get-supplier-chaos';
+export type { SetSupplierChaos$Params as SetSupplierChaos$Params } from './fn/supplier-chaos/set-supplier-chaos';
+export { setSupplierChaos as setSupplierChaos } from './fn/supplier-chaos/set-supplier-chaos';
 export type { SupplierWebhook$Params as SupplierWebhook$Params } from './fn/supplier-webhooks/supplier-webhook';
 export { supplierWebhook as supplierWebhook } from './fn/supplier-webhooks/supplier-webhook';

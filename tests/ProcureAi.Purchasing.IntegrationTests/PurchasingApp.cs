@@ -68,6 +68,7 @@ public sealed class PurchasingApiFactory(
         builder.ConfigureTestServices(services =>
         {
             services.AddHttpClient(SupplierSimulatorGateway.ClientName).ConfigurePrimaryHttpMessageHandler(() => supplier);
+            services.AddHttpClient(SupplierChaosClient.ClientName).ConfigurePrimaryHttpMessageHandler(() => supplier);
             services.AddSingleton(hooks);
             // Registered by type (no factory lambdas), so Wolverine can still build the handlers' dependencies inline.
             services.Remove(services.Single(d => d.ServiceType == typeof(ITenantSequence)));
@@ -192,7 +193,7 @@ public sealed class PurchasingApp : IAsyncLifetime
             request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
         }
 
-        if (method == HttpMethod.Post)
+        if (method == HttpMethod.Post || idempotencyKey is not null)
         {
             request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString());
         }

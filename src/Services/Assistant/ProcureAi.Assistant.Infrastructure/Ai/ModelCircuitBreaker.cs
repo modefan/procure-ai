@@ -1,11 +1,15 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Registry;
 using ProcureAi.Assistant.Application.Ai;
+using ProcureAi.BuildingBlocks.Application.Status;
+using ProcureAi.BuildingBlocks.Web.Status;
+using CircuitState = ProcureAi.BuildingBlocks.Application.Status.CircuitState;
 
 namespace ProcureAi.Assistant.Infrastructure.Ai;
 
@@ -31,13 +35,27 @@ internal static class ModelCircuitBreaker
 
     private static readonly AiFailures Failures = new();
 
+    /// <summary>The name of each pipeline's breaker on the system status screen.</summary>
+    public static IReadOnlyDictionary<string, string> StatusNames { get; } = new Dictionary<string, string>
+    {
+        [Answer] = "AI model (answer)",
+        [Utility] = "AI model (utility)",
+        [Guard] = "AI model (guard)",
+        [Embeddings] = "AI model (embeddings)",
+    };
+
     public static void Register(IServiceCollection services)
     {
+        services.TryAddSingleton(TimeProvider.System);
         foreach (var name in new[] { Answer, Utility, Guard, Embeddings })
         {
+            var statusName = StatusNames[name];
+            services.AddKnownCircuitBreaker(statusName);
             services.AddResiliencePipeline(name, (builder, context) =>
             {
                 var settings = context.ServiceProvider.GetRequiredService<IOptions<AiOptions>>().Value.Resilience;
+                var states = context.ServiceProvider.GetRequiredService<ICircuitBreakerStates>();
+                var time = context.ServiceProvider.GetRequiredService<TimeProvider>();
                 builder.AddCircuitBreaker(new CircuitBreakerStrategyOptions
                 {
                     Name = name,
@@ -47,6 +65,22 @@ internal static class ModelCircuitBreaker
                     BreakDuration = settings.BreakDuration,
                     ShouldHandle = args => ValueTask.FromResult(
                         args.Outcome.Exception is { } failure && Counts(failure, args.Context.CancellationToken)),
+                    // The status screen's view of the breaker (ICircuitBreakerStates), with the time the next trial call is let through.
+                    OnOpened = args =>
+                    {
+                        states.Report(statusName, CircuitState.Open, time.GetUtcNow() + args.BreakDuration);
+                        return ValueTask.CompletedTask;
+                    },
+                    OnHalfOpened = _ =>
+                    {
+                        states.Report(statusName, CircuitState.HalfOpen, null);
+                        return ValueTask.CompletedTask;
+                    },
+                    OnClosed = _ =>
+                    {
+                        states.Report(statusName, CircuitState.Closed, null);
+                        return ValueTask.CompletedTask;
+                    },
                 });
             });
         }

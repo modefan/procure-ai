@@ -9,6 +9,8 @@ using ProcureAi.Audit.Application;
 using ProcureAi.Audit.Application.Abstractions;
 using ProcureAi.Audit.Application.Cdc;
 using ProcureAi.Audit.Application.Events;
+using ProcureAi.Audit.Application.Status;
+using ProcureAi.BuildingBlocks.Web.Status;
 using ProcureAi.Audit.Domain;
 using ProcureAi.Audit.Infrastructure.Retention;
 using ProcureAi.BuildingBlocks.Messaging;
@@ -89,6 +91,7 @@ public static class DependencyInjection
         services.AddSingleton<IDataChangeStore, MartenDataChangeStore>();
         services.AddSingleton<IAuditMetrics, AuditMetrics>();
         services.AddHostedService<DataChangeRetention>();
+        services.AddStatusContributor<AuditStatusContributor>();
         return services;
     }
 

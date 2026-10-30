@@ -25,6 +25,9 @@ public sealed class SupplierSimulatorGateway(HttpClient http, ILogger<SupplierSi
     /// <summary>The name of the typed client (and so of its resilience pipeline and primary handler).</summary>
     public const string ClientName = "supplier";
 
+    /// <summary>The name of its circuit breaker on the system status screen.</summary>
+    public const string BreakerName = "Supplier API";
+
     public const string OrdersPath = "supplier/v1/orders";
     private const string Currency = "ZAR";
 

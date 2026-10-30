@@ -16,6 +16,8 @@ using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Health;
 using ProcureAi.BuildingBlocks.Web.Options;
+using ProcureAi.BuildingBlocks.Web.Status;
+using ProcureAi.BuildingBlocks.Messaging.Status;
 using Wolverine;
 using Wolverine.Runtime;
 
@@ -84,6 +86,11 @@ public static class ServiceHost
 
             services.AddProcureAiAccessClient(builder.Configuration, serviceName);
         }
+
+        // The status snapshot every instance writes to Redis (health, breakers, message counts, the service's own contributors). Not while
+        // the OpenAPI document is written: that run has no Redis.
+        services.AddSingleton<IWolverineCounts, WolverineCounts>();
+        services.AddProcureAiStatus(builder.Configuration, publish: !IsWritingOpenApiDocument());
 
         configure(builder);
 

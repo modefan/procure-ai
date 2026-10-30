@@ -235,6 +235,32 @@ public sealed class AiSetupTests
     }
 
     [Fact]
+    public async Task Open_model_breaker_is_reported_to_the_status_with_retry_at()
+    {
+        await using var provider = WithFailingProvider(new FailingProvider(), new FailingEmbeddings());
+        var states = provider.GetRequiredService<ProcureAi.BuildingBlocks.Application.Status.ICircuitBreakerStates>();
+        states.Snapshot().Select(b => (b.Name, b.State)).ShouldBe(
+        [
+            ("AI model (answer)", ProcureAi.BuildingBlocks.Application.Status.CircuitState.Closed),
+            ("AI model (embeddings)", ProcureAi.BuildingBlocks.Application.Status.CircuitState.Closed),
+            ("AI model (guard)", ProcureAi.BuildingBlocks.Application.Status.CircuitState.Closed),
+            ("AI model (utility)", ProcureAi.BuildingBlocks.Application.Status.CircuitState.Closed),
+        ]);
+        var client = provider.GetRequiredKeyedService<IChatClient>(AiClients.Utility);
+        var before = DateTimeOffset.UtcNow;
+
+        for (var i = 0; i < 3; i++)
+        {
+            await Should.ThrowAsync<HttpRequestException>(() => client.GetResponseAsync([new(ChatRole.User, "hello")], cancellationToken: Ct));
+        }
+
+        var utility = states.Snapshot().Single(b => b.Name == "AI model (utility)");
+        utility.State.ShouldBe(ProcureAi.BuildingBlocks.Application.Status.CircuitState.Open);
+        utility.RetryAt!.Value.ShouldBeInRange(before.AddMinutes(5), DateTimeOffset.UtcNow.AddMinutes(5));
+        states.Snapshot().Single(b => b.Name == "AI model (answer)").State.ShouldBe(ProcureAi.BuildingBlocks.Application.Status.CircuitState.Closed);
+    }
+
+    [Fact]
     public async Task Circuit_opens_for_streamed_answers_too()
     {
         var chat = new FailingProvider();

@@ -308,12 +308,12 @@ public sealed class SimulatorTests
     }
 
     [Fact]
-    public async Task Chaos_needs_admin_key()
+    public async Task Simulator_chaos_rejects_no_key()
     {
         await using var factory = new SimulatorFactory();
         var chaos = Chaos("Down", 0.5, "Normal", 0.5);
 
-        foreach (var key in new string?[] { null, "wrong", SimulatorKey })
+        foreach (var key in new string?[] { null, "wrong" })
         {
             using var client = factory.ClientWithKey(key);
             (await client.GetAsync("api/v1/simulators/chaos")).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
@@ -332,6 +332,49 @@ public sealed class SimulatorTests
 
         (await admin.PutAsJsonAsync("api/v1/simulators/chaos", Chaos("Normal", 2.0, "Normal", 0.1))).StatusCode
             .ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Simulator_chaos_accepts_simulators_key()
+    {
+        await using var factory = new SimulatorFactory();
+        using var client = factory.SupplierClient();
+
+        (await client.PutAsJsonAsync("api/v1/simulators/chaos", Chaos("Down", 0.1, "Normal", 0.1))).StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var current = await ReadAsync(await client.GetAsync("api/v1/simulators/chaos"));
+        current.GetProperty("supplier").GetProperty("mode").GetString().ShouldBe("Down");
+        current.GetProperty("supplier").GetProperty("restoresAt").GetDateTimeOffset().ShouldBe(factory.Time.GetUtcNow() + TimeSpan.FromMinutes(5));
+        current.GetProperty("erp").GetProperty("restoresAt").ValueKind.ShouldBe(System.Text.Json.JsonValueKind.Null, "Normal does not restore");
+        // The other keys of the simulator stay apart: the simulators' key is still no admin key for the test hooks.
+        (await client.GetAsync("api/v1/simulators/supplier/orders?buyerReference=x")).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Chaos_restores_after_timeout()
+    {
+        await using var factory = new SimulatorFactory(new() { ["Simulators:Chaos:AutoRestoreAfter"] = "00:00:30" });
+        using var admin = factory.AdminClient();
+        using var client = factory.SupplierClient();
+        (await admin.PutAsJsonAsync("api/v1/simulators/chaos", Chaos("Down", 0.1, "Failing", 0.3))).StatusCode.ShouldBe(HttpStatusCode.OK);
+        var restoresAt = factory.Time.GetUtcNow() + TimeSpan.FromSeconds(30);
+
+        // Setting the same mode again keeps the countdown; it does not start over.
+        factory.Time.Advance(TimeSpan.FromSeconds(20));
+        var again = await ReadAsync(await admin.PutAsJsonAsync("api/v1/simulators/chaos", Chaos("Down", 0.1, "Failing", 0.3)));
+        again.GetProperty("supplier").GetProperty("restoresAt").GetDateTimeOffset().ShouldBe(restoresAt);
+        (await factory.WithClockAsync(client.PostAsJsonAsync("supplier/v1/orders", OrderBody("still-down", (1, "PEN-01", 1, 100)))))
+            .StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+
+        factory.Time.Advance(TimeSpan.FromSeconds(11));
+        var restored = await ReadAsync(await admin.GetAsync("api/v1/simulators/chaos"));
+        restored.GetProperty("supplier").GetProperty("mode").GetString().ShouldBe("Normal");
+        restored.GetProperty("supplier").GetProperty("restoresAt").ValueKind.ShouldBe(System.Text.Json.JsonValueKind.Null);
+        restored.GetProperty("erp").GetProperty("mode").GetString().ShouldBe("Normal");
+        restored.GetProperty("supplier").GetProperty("failureRate").GetDouble().ShouldBe(0.1, "only the mode is restored");
+
+        var order = await client.PostAsJsonAsync("supplier/v1/orders", OrderBody("after-restore", (1, "PEN-01", 1, 100)));
+        order.StatusCode.ShouldBe(HttpStatusCode.Accepted, "the supplier answers again");
     }
 
     [Fact]

@@ -13,6 +13,9 @@ public enum KeyKind
 
     /// <summary>The one admin API key (<c>Auth:AdminApiKeySha256</c>): Claude's key, for the chaos switch and test hooks.</summary>
     Admin,
+
+    /// <summary>Either key: the chaos switch, which Purchasing sets with the simulators' key (plan 06 ruling 11).</summary>
+    AdminOrSimulator,
 }
 
 /// <summary>The endpoints of this controller need the simulators' key (<c>supplier/</c> and <c>erp/</c>).</summary>
@@ -29,38 +32,64 @@ public sealed class RequireAdminKeyAttribute : TypeFilterAttribute
     public RequireAdminKeyAttribute() : base(typeof(ApiKeyFilter)) => Arguments = [KeyKind.Admin];
 }
 
+/// <summary>The endpoints of this controller take the admin API key or the simulators' key (the chaos switch).</summary>
+[AttributeUsage(AttributeTargets.Class)]
+public sealed class RequireAdminOrSimulatorKeyAttribute : TypeFilterAttribute
+{
+    public RequireAdminOrSimulatorKeyAttribute() : base(typeof(ApiKeyFilter)) => Arguments = [KeyKind.AdminOrSimulator];
+}
+
 /// <summary>Checks <c>X-Api-Key</c> in constant time (both sides hashed with SHA-256, compared with FixedTimeEquals). No key configured: nothing passes.</summary>
 internal sealed class ApiKeyFilter : IAuthorizationFilter
 {
     public const string HeaderName = "X-Api-Key";
 
     private readonly KeyKind _kind;
-    private readonly byte[]? _expectedHash;
+    private readonly byte[][] _expectedHashes;
 
     public ApiKeyFilter(KeyKind kind, IOptions<SimulatorOptions> simulator, IOptions<AdminAuthOptions> admin)
     {
         _kind = kind;
-        _expectedHash = kind switch
+        byte[]? simulatorHash = string.IsNullOrEmpty(simulator.Value.ApiKey) ? null : SHA256.HashData(Encoding.UTF8.GetBytes(simulator.Value.ApiKey));
+        byte[]? adminHash = string.IsNullOrEmpty(admin.Value.AdminApiKeySha256) ? null : Convert.FromHexString(admin.Value.AdminApiKeySha256);
+        byte[]?[] accepted = kind switch
         {
-            KeyKind.Simulator => string.IsNullOrEmpty(simulator.Value.ApiKey) ? null : SHA256.HashData(Encoding.UTF8.GetBytes(simulator.Value.ApiKey)),
-            _ => string.IsNullOrEmpty(admin.Value.AdminApiKeySha256) ? null : Convert.FromHexString(admin.Value.AdminApiKeySha256),
+            KeyKind.Simulator => [simulatorHash],
+            KeyKind.Admin => [adminHash],
+            _ => [adminHash, simulatorHash],
         };
+        _expectedHashes = [.. accepted.OfType<byte[]>()];
     }
 
     public void OnAuthorization(AuthorizationFilterContext context)
     {
         var presented = context.HttpContext.Request.Headers[HeaderName].ToString();
-        if (_expectedHash is not null && presented.Length > 0
-            && CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(presented)), _expectedHash))
+        if (presented.Length > 0)
         {
-            return;
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(presented));
+            // Every accepted key is compared (no early exit), each in constant time.
+            var match = false;
+            foreach (var expected in _expectedHashes)
+            {
+                match |= CryptographicOperations.FixedTimeEquals(hash, expected);
+            }
+
+            if (match)
+            {
+                return;
+            }
         }
 
         context.Result = new ObjectResult(new ProblemDetails
         {
             Status = StatusCodes.Status401Unauthorized,
             Title = "Unauthorized",
-            Detail = _kind == KeyKind.Admin ? "The admin API key is required in X-Api-Key." : "A valid simulator API key is required in X-Api-Key.",
+            Detail = _kind switch
+            {
+                KeyKind.Admin => "The admin API key is required in X-Api-Key.",
+                KeyKind.AdminOrSimulator => "The admin API key or the simulator API key is required in X-Api-Key.",
+                _ => "A valid simulator API key is required in X-Api-Key.",
+            },
         })
         { StatusCode = StatusCodes.Status401Unauthorized };
     }
