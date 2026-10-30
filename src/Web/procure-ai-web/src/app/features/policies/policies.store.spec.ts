@@ -95,6 +95,19 @@ describe('PoliciesStore', () => {
     expect(store().entities()).toHaveLength(0);
   });
 
+  it('remove_uses_the_row_version_current_after_the_dialog: progress that arrives while the dialog is open must not make the DELETE stale', async () => {
+    await store().load();
+    let answer!: (confirmed: boolean) => void;
+    confirm.ask.mockReturnValueOnce(new Promise<boolean>((resolve) => (answer = resolve)));
+    const removing = store().remove('doc-1');
+    api.listPolicyDocuments.mockResolvedValue(page([policyDto('doc-1', { rowVersion: 9, status: 'Embedding', progress: 55 })]));
+    store().invalidate('list');
+    await vi.waitFor(() => expect(store().entityMap()['doc-1'].rowVersion).toBe(9));
+    answer(true);
+    expect(await removing).toBe(true);
+    expect(api.removePolicyDocument).toHaveBeenCalledWith({ id: 'doc-1', 'If-Match': '"9"' });
+  });
+
   it('a refused upload leaves the server message in actionError', async () => {
     await store().load();
     api.uploadPolicyDocument.mockRejectedValue(new HttpErrorResponse({ status: 415, error: { title: 'Unsupported', detail: 'Only PDF or Markdown files are accepted.' } }));

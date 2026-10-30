@@ -133,11 +133,15 @@ export const PoliciesStore = signalStore(
 
       /** Replaces the file of a document with a new version. */
       replace(id: string, file: File): Promise<boolean> {
-        const match = ifMatch(id);
-        if (!match) {
+        if (!store.entityMap()[id]) {
           return Promise.resolve(false);
         }
         return write(id, 'Replacing the policy document', async () => {
+          // Read when sending: ingestion progress changes the rowVersion, so an earlier read can be stale.
+          const match = ifMatch(id);
+          if (!match) {
+            return;
+          }
           const updated = await api.replacePolicyDocumentFile({ id, 'If-Match': match, body: { file } });
           patchState(store, setEntity(updated));
         });
@@ -146,8 +150,7 @@ export const PoliciesStore = signalStore(
       /** Asks, then removes the document. Resolves true when it is gone. */
       async remove(id: string): Promise<boolean> {
         const document = store.entityMap()[id];
-        const match = ifMatch(id);
-        if (!document || !match || working) {
+        if (!document || working) {
           return false;
         }
         const confirmed = await confirm.ask({
@@ -160,6 +163,11 @@ export const PoliciesStore = signalStore(
           return false;
         }
         return write(id, 'Removing the policy document', async () => {
+          // After the dialog: progress pushes refresh the list while it is open, so the version read before it can be stale.
+          const match = ifMatch(id);
+          if (!match) {
+            return;
+          }
           await api.removePolicyDocument({ id, 'If-Match': match });
           patchState(store, removeEntity(id));
         });

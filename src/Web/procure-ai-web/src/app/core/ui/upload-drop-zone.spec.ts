@@ -68,7 +68,7 @@ describe('UploadDropZone', () => {
     expect(host.picked).toEqual([good]);
   });
 
-  it('while busy nothing opens or is accepted', () => {
+  it('while busy nothing opens (click) and a dropped file is ignored', () => {
     const { fixture, el, input, host } = setup();
     host.busy.set(true);
     fixture.detectChanges();
@@ -76,5 +76,10 @@ describe('UploadDropZone', () => {
     (el.querySelector('[data-testid="drop-zone"]') as HTMLElement).click();
     expect(open).not.toHaveBeenCalled();
     expect(el.querySelector('[aria-busy=true]')).not.toBeNull();
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as Event & { dataTransfer?: unknown };
+    drop.dataTransfer = { files: [file('policy.pdf', 10)] };
+    (el.querySelector('[data-testid="drop-zone"]') as HTMLElement).dispatchEvent(drop);
+    expect(host.picked).toEqual([]);
   });
 });
