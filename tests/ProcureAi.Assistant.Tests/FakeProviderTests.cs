@@ -91,6 +91,58 @@ public sealed class FakeProviderTests
         updates.ShouldAllBe(u => u.ModelId == AiOptions.FakeChatModel);
     }
 
+    /// <summary>
+    /// A quoted table or list keeps its line breaks (so the assistant screen renders a real Markdown table), with the citation on the
+    /// sentence that introduces it; a plain paragraph is still quoted as its first sentence on one line.
+    /// </summary>
+    [Fact]
+    public async Task Fake_chat_keeps_line_breaks_of_a_quoted_table_or_list()
+    {
+        using var chat = new FakeChatClient(streamDelayMs: 0);
+        const string system = """
+            #task: answer
+            Sources:
+            <data id="S1" title="Procurement policy" section="4 Approvals &gt; 4.2 Approval thresholds">
+            The approvals a request needs depend on its total amount including VAT:
+
+            | Total including VAT | Approvals needed |
+            | --- | --- |
+            | Up to R 20 000 | Line manager |
+            | Over R 200 000 | Line manager, department head and finance |
+
+            The line manager always approves.
+            </data>
+            <data id="S2" title="Procurement policy" section="6 VAT">
+            - VAT is 15 %.
+            - A supplier that is not registered for VAT charges none.
+            </data>
+            """;
+        ChatMessage[] messages = [new(ChatRole.System, system), new(ChatRole.User, "Who approves R 250 000?")];
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in chat.GetStreamingResponseAsync(messages, cancellationToken: Ct))
+        {
+            updates.Add(update);
+        }
+
+        var answer = string.Concat(updates.Select(u => u.Text));
+        answer.ShouldBe(
+            "The approvals a request needs depend on its total amount including VAT: [S1]\n\n"
+            + "| Total including VAT | Approvals needed |\n| --- | --- |\n| Up to R 20 000 | Line manager |\n"
+            + "| Over R 200 000 | Line manager, department head and finance |\n\n"
+            + "- VAT is 15 %.\n- A supplier that is not registered for VAT charges none.\n\n[S2]");
+        (await chat.GetResponseAsync(messages, cancellationToken: Ct)).Text.ShouldBe(answer, "streamed and whole answers are the same");
+
+        // A table under its introduction without a blank line, and prose that does not introduce one.
+        (await chat.GetResponseAsync(
+            [
+                new(ChatRole.System, "#task: answer\n<data id=\"S1\" title=\"P\">\nLimits:\n| A | B |\n| --- | --- |\n</data>\n"
+                    + "<data id=\"S2\" title=\"P\">\nGifts above R 500 are declined.\nCash is never accepted.\n\n| X |\n</data>"),
+                new(ChatRole.User, "Limits?"),
+            ],
+            cancellationToken: Ct)).Text.ShouldBe("Limits: [S1]\n\n| A | B |\n| --- | --- |\n\nGifts above R 500 are declined. [S2]");
+    }
+
     [Fact]
     public async Task Fake_chat_without_sources_or_tool_results_says_the_policy_does_not_cover_it()
     {

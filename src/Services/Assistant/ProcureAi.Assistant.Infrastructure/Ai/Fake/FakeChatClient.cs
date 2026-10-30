@@ -11,7 +11,8 @@ namespace ProcureAi.Assistant.Infrastructure.Ai.Fake;
 /// the system message (<c>#task: answer|rewrite|context|classify|scan</c>, <see cref="AiTasks"/>):
 /// <list type="bullet">
 /// <item><c>answer</c>: first <see cref="FakeIntentRules"/> (a <see cref="FunctionCallContent"/> when a matching tool is offered and has
-/// not been called for this question yet); then extractive text: the first sentence of each of the top two sources (lines starting
+/// not been called for this question yet); then extractive text: the first sentence of each of the top two sources, or the table or list
+/// a source starts with (or that its first paragraph introduces) with its line breaks kept (<see cref="Quote"/>) (lines starting
 /// <c>&lt;data id="S1"&gt;</c> blocks, or lines starting <c>[S1]</c>, <c>[S2]</c>, in the prompt), cited, plus a summary of any tool results. Nothing to cite and no tool result: the
 /// "policy doesn't cover this" sentence.</item>
 /// <item><c>rewrite</c>: the last user message as the standalone question; <c>context</c>: its first sentence;
@@ -26,6 +27,7 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
 
     private const int MaxSentenceLength = 300;
     private const int MaxToolSummaryLength = 200;
+    private const int MaxBlockLength = 1200;
 
     /// <summary>
     /// Phrases the Fake classifier flags as prompt injection. Narrow on purpose: "system prompt" or "api key" alone would flag harmless
@@ -146,10 +148,10 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
         var parts = new List<string>();
         foreach (var (number, text) in Sources(messages).Take(2))
         {
-            var sentence = FirstSentence(text);
-            if (sentence.Length > 0)
+            var quote = Quote(text, $"[S{number}]");
+            if (quote.Length > 0)
             {
-                parts.Add($"{sentence} [S{number}]");
+                parts.Add(quote);
             }
         }
 
@@ -159,7 +161,66 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
             parts.Add($"From {name}: {Truncate(Flatten(ResultText(result.Result)), MaxToolSummaryLength)}");
         }
 
-        return new FakeReply(parts.Count == 0 ? NotCovered : string.Join(' ', parts), null);
+        // A quoted table or list keeps its lines, so the parts are then separate Markdown paragraphs; plain sentences stay on one line.
+        var separator = parts.Any(p => p.Contains('\n', StringComparison.Ordinal)) ? "\n\n" : " ";
+        return new FakeReply(parts.Count == 0 ? NotCovered : string.Join(separator, parts), null);
+    }
+
+    /// <summary>
+    /// What the Fake quotes of one source, with its citation: the first sentence, flattened to one line; but when the source starts with a
+    /// table or a list, or its first paragraph introduces one (ends with a colon), that block is quoted with its line breaks, so the answer
+    /// renders as a real Markdown table or list. A long block is cut at a whole line (<see cref="MaxBlockLength"/>).
+    /// </summary>
+    internal static string Quote(string text, string citation)
+    {
+        var blocks = BlankLine().Split(text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim())
+            .Select(b => b.Trim()).Where(b => b.Length > 0).ToList();
+        if (blocks.Count == 0)
+        {
+            return "";
+        }
+
+        // The first block may be prose with a table or list right under it (no blank line between).
+        var lines = blocks[0].Split('\n');
+        var firstStructured = Array.FindIndex(lines, IsStructuredLine);
+        if (firstStructured == 0)
+        {
+            return $"{Block(lines)}\n\n{citation}";
+        }
+
+        var prose = Flatten(string.Join(' ', lines.Take(firstStructured < 0 ? lines.Length : firstStructured)));
+        string[]? structured = firstStructured > 0 ? lines[firstStructured..]
+            : blocks.Count > 1 && blocks[1].Split('\n') is var next && next.All(IsStructuredLine) ? next
+            : null;
+        if (structured is not null && prose.EndsWith(':') && prose.Length <= MaxSentenceLength)
+        {
+            return $"{prose} {citation}\n\n{Block(structured)}";
+        }
+
+        var sentence = FirstSentence(prose);
+        return sentence.Length == 0 ? "" : $"{sentence} {citation}";
+    }
+
+    /// <summary>A table row or list item: starts with <c>|</c>, <c>-</c>, <c>*</c>, <c>+</c> or <c>1.</c> / <c>1)</c>.</summary>
+    private static bool IsStructuredLine(string line) => StructuredLine().IsMatch(line);
+
+    /// <summary>The block's lines, each with its inner whitespace runs made single spaces, cut after the last whole line that fits.</summary>
+    private static string Block(IEnumerable<string> lines)
+    {
+        var kept = new List<string>();
+        var length = 0;
+        foreach (var line in lines.Select(l => SpaceRun().Replace(l.Trim(), " ")).Where(l => l.Length > 0))
+        {
+            if (kept.Count > 0 && length + line.Length + 1 > MaxBlockLength)
+            {
+                break;
+            }
+
+            kept.Add(line);
+            length += line.Length + 1;
+        }
+
+        return string.Join('\n', kept);
     }
 
     /// <summary>
@@ -273,4 +334,13 @@ public sealed partial class FakeChatClient(int streamDelayMs = 0) : IChatClient
 
     [GeneratedRegex(@"\S+")]
     private static partial Regex Word();
+
+    [GeneratedRegex(@"\n[ \t]*\n\s*")]
+    private static partial Regex BlankLine();
+
+    [GeneratedRegex(@"^\s*(\||[-*+]\s|\d{1,3}[.)]\s)")]
+    private static partial Regex StructuredLine();
+
+    [GeneratedRegex(@"[ \t]+")]
+    private static partial Regex SpaceRun();
 }
