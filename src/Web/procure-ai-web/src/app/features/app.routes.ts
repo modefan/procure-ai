@@ -117,6 +117,13 @@ export const APP_ROUTES: Routes = [
     loadComponent: () => import('./admin/matrix/matrix.page').then((m) => m.MatrixPage),
   },
   {
+    path: 'admin/access-check',
+    title: 'Access check',
+    canActivate: [permissionGuard],
+    data: { permission: 'admin.authorization' },
+    loadComponent: () => import('./admin/access-check/access-check.page').then((m) => m.AccessCheckPage),
+  },
+  {
     path: 'admin/users',
     title: 'Users and limits',
     canActivate: [permissionGuard],

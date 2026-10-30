@@ -231,3 +231,10 @@
     @apply max-lg:before:mb-0.5 max-lg:before:block max-lg:before:text-xs max-lg:before:font-semibold max-lg:before:tracking-wide max-lg:before:text-slate-600 max-lg:before:uppercase max-lg:before:content-[attr(data-label)];
   }
 }
+
+/* Options of the user combobox on the access check screen (Angular Aria combobox + listbox). */
+@layer components {
+  .user-option {
+    @apply flex cursor-pointer flex-wrap items-baseline gap-x-3 rounded-md px-3 py-1.5 hover:bg-slate-50 aria-selected:bg-indigo-50 data-[active=true]:outline-2 data-[active=true]:outline-indigo-700;
+  }
+}

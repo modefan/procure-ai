@@ -293,7 +293,7 @@ describe('Shell header', () => {
 
       adminTrigger(el)!.click();
       fixture.detectChanges();
-      expect(adminLinks(el)).toEqual(['Authorization', 'Policies']);
+      expect(adminLinks(el)).toEqual(['Authorization', 'Access check', 'Policies']);
       expect(el.querySelector('[data-testid=admin-links] a[href="/app/admin/authorization"]')).not.toBeNull();
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -366,7 +366,7 @@ describe('Shell header', () => {
 
       const group = el.querySelector('dialog[data-testid=phone-drawer] [data-testid=drawer-admin]')!;
       expect(text(group.querySelector('h2'))).toBe('Admin');
-      expect([...group.querySelectorAll('a')].map((a) => text(a))).toEqual(['Authorization', 'Policies']);
+      expect([...group.querySelectorAll('a')].map((a) => text(a))).toEqual(['Authorization', 'Access check', 'Policies']);
     });
 
     it('closes with its close button and with Esc (the native close event)', async () => {

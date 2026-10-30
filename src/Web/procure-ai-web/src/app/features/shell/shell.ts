@@ -22,6 +22,7 @@ interface NavLink {
 /** The admin pages, in menu order; each shows only for a user who has its permission. Later admin screens are added here. */
 const ADMIN_LINKS: NavLink[] = [
   { path: 'admin/authorization', label: 'Authorization', permission: 'admin.authorization' },
+  { path: 'admin/access-check', label: 'Access check', permission: 'admin.authorization' },
   { path: 'admin/users', label: 'Users', permission: 'admin.users' },
   { path: 'admin/policies', label: 'Policies', permission: 'admin.policies' },
 ];

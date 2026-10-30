@@ -1,3 +1,4 @@
+import { AuthorizationCheckDto } from '../../api/approvals/models/authorization-check-dto';
 import { MatrixDto } from '../../api/access/models/matrix-dto';
 import { CostCenterAdminDto } from '../../api/access/models/cost-center-admin-dto';
 import { UserDto } from '../../api/access/models/user-dto';
@@ -61,5 +62,19 @@ export const costCenterAdminDto = (code: string, o: Partial<CostCenterAdminDto> 
   managerName: 'Maria Manager',
   departmentHeadId: 'hendrik',
   departmentHeadName: 'Hendrik Head',
+  ...o,
+});
+
+/** An answer of the authorization check: a denied approval (separation of duties) with one routing explanation line. */
+export const checkDto = (o: Partial<AuthorizationCheckDto> = {}): AuthorizationCheckDto => ({
+  allowed: false,
+  action: 'approve',
+  userName: 'Maria Manager',
+  requestNumber: 'PR-1039',
+  steps: [
+    { code: 'permission', passed: true, text: 'Has permission requests.approve', gating: true },
+    { code: 'separation', passed: false, text: 'Is not the requester of this request', gating: true },
+    { code: 'cost-center', passed: false, text: 'Routing today would not pick this user for cost center IT-200', gating: false },
+  ],
   ...o,
 });
