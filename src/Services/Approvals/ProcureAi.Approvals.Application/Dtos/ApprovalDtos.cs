@@ -23,10 +23,12 @@ public sealed record ApprovalStepDto(
     string? CannotActReason,
     uint Version,
     string? RequesterName = null,
-    DateTimeOffset? OpenedAt = null);
+    DateTimeOffset? OpenedAt = null,
+    string? Comment = null);
 
 /// <summary>The approval chain of one request: the saga's state and every step, in order (an escalated step before its replacement).</summary>
-public sealed record ApprovalChainDto(Guid RequestId, string State, IReadOnlyList<ApprovalStepDto> Steps);
+/// <c>RequesterName</c> is the requester's display name (null when Access does not know them). <c>Comment</c> of a step is the note its approver left.
+public sealed record ApprovalChainDto(Guid RequestId, string State, IReadOnlyList<ApprovalStepDto> Steps, string? RequesterName = null);
 
 /// <summary>Who would approve a request of this amount on this cost center, or why nobody can.</summary>
 public sealed record ApprovalPreviewDto(bool Possible, string? Reason, IReadOnlyList<PreviewStepDto> Steps);

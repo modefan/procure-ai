@@ -44,6 +44,14 @@ public sealed class MeTests(AccessInfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Me_has_tenant_name()
+    {
+        (await MeAsync(DemoUsers.Maria, "acme", "manager")).TenantName.ShouldBe("Acme Corp");
+        (await MeAsync(DemoUsers.Ben, "globex", "manager")).TenantName.ShouldBe("Globex");
+        (await MeAsync(DemoUsers.DemoApprover, "demo", "manager")).TenantName.ShouldBe("Demo company");
+    }
+
+    [Fact]
     public async Task Me_returns_cost_centers_and_limit()
     {
         var maria = await MeAsync(DemoUsers.Maria, "acme", "manager");

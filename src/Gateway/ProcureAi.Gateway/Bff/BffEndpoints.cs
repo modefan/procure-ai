@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Web.Auth;
 
 namespace ProcureAi.Gateway.Bff;
@@ -40,8 +41,8 @@ public static class BffEndpoints
     }
 
     private static async Task<IResult> GetUserAsync(
-        HttpContext http, ICurrentUser user, IPermissionProvider permissions, IAntiforgery antiforgery, DemoRegistration registration,
-        CancellationToken cancellationToken)
+        HttpContext http, ICurrentUser user, IPermissionProvider permissions, IAccessDirectory directory, IAntiforgery antiforgery,
+        DemoRegistration registration, CancellationToken cancellationToken)
     {
         // A user without a tenant just registered: they join the demo company (and get their new claims) on this call.
         // When that fails they are answered as before: no tenant, no permissions.
@@ -61,15 +62,38 @@ public static class BffEndpoints
         var tokens = antiforgery.GetAndStoreTokens(http);
         http.Response.Cookies.Append(XsrfMiddleware.CookieName, tokens.RequestToken!, XsrfCookieOptions());
 
+        var tenantName = await TenantNameAsync(user, directory, cancellationToken);
         var principal = http.User;
         return Results.Json(new
         {
             userId = user.UserId,
             name = principal.FindFirst("name")?.Value ?? principal.FindFirst("preferred_username")?.Value ?? principal.FindFirst("email")?.Value,
             tenantId = user.TenantId,
+            tenantName,
             roles = user.Roles.Order(StringComparer.Ordinal),
             permissions = granted.Order(StringComparer.Ordinal),
         });
+    }
+
+    /// <summary>
+    /// The name of the caller's tenant, from Access (the same cached lookup as the user's display name). Null for a user without a
+    /// tenant and when Access cannot answer: who-am-I must not fail because of a name.
+    /// </summary>
+    private static async Task<string?> TenantNameAsync(ICurrentUser user, IAccessDirectory directory, CancellationToken cancellationToken)
+    {
+        if (user.TenantId is not { } tenant)
+        {
+            return null;
+        }
+
+        try
+        {
+            return (await directory.GetUserAsync(user.UserId, tenant, cancellationToken))?.TenantName;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     private static async Task<IResult> LogoutAsync(HttpContext http, TokenRefresher refresher)

@@ -16,6 +16,14 @@ public static class DemoSeeder
 {
     public static readonly string[] Tenants = ["acme", "globex", "demo"];
 
+    /// <summary>The names the tenants are shown under (plan 06 ruling 18).</summary>
+    public static readonly IReadOnlyDictionary<string, string> TenantNames = new Dictionary<string, string>
+    {
+        ["acme"] = "Acme Corp",
+        ["globex"] = "Globex",
+        ["demo"] = "Demo company",
+    };
+
     public static async Task SeedDemoDataAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -27,6 +35,9 @@ public static class DemoSeeder
     {
         var now = DateTimeOffset.UtcNow;
         // The seed has no caller, so the tenant filters match nothing: read everything and add only what is missing.
+        var tenants = await db.Tenants.Select(t => t.Id).ToListAsync(cancellationToken);
+        db.Tenants.AddRange(TenantNames.Where(t => !tenants.Contains(t.Key)).Select(t => Tenant.Create(t.Key, t.Value)));
+
         var matrices = await db.PermissionMatrices.IgnoreQueryFilters().Select(m => m.TenantId).ToListAsync(cancellationToken);
         db.PermissionMatrices.AddRange(Tenants.Except(matrices).Select(t => DefaultPermissionMatrix.CreateFor(t, now)));
 

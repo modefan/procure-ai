@@ -33,7 +33,7 @@ public sealed class PurchaseChunkTextTests
     [Fact]
     public void A_placeholder_or_unfinished_purchase_is_not_indexable()
     {
-        var placeholder = Purchase.Placeholder(Guid.NewGuid(), "acme", "PR-1");
+        var placeholder = Purchase.Placeholder(Guid.NewGuid(), "acme", "PR-1", DateTimeOffset.UtcNow);
         placeholder.RecordCompleted(DateTimeOffset.UtcNow);
         placeholder.HasSubmitData.ShouldBeFalse();
         placeholder.IsIndexable.ShouldBeFalse();
@@ -48,7 +48,7 @@ public sealed class PurchaseChunkTextTests
     [Fact]
     public void Events_in_any_order_end_completed_with_all_data()
     {
-        var purchase = Purchase.Placeholder(Guid.NewGuid(), "acme", "PR-3");
+        var purchase = Purchase.Placeholder(Guid.NewGuid(), "acme", "PR-3", DateTimeOffset.UtcNow);
         purchase.RecordCompleted(DateTimeOffset.UtcNow);
         purchase.RecordApproved(["thandi", "thandi", " "], DateTimeOffset.UtcNow);
         purchase.RecordSubmitted("PR-3", "Desks", "OPS-1", Money.Zar(5_000m), null, "2 x Desk", DateTimeOffset.UtcNow);

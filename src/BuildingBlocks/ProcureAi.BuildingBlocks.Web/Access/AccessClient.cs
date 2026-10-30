@@ -71,9 +71,9 @@ public sealed class AccessClient(
     {
         var url = $"api/v1/access/internal/users/{Uri.EscapeDataString(userId)}";
         var generation = await generations.GetAsync(tenantId, cancellationToken);
-        // "user", not the earlier "name": entries cached before the email was part of the answer are never read as having none.
+        // "user2", not the earlier "name" or "user": entries cached before the email and the tenant name were part of the answer are never read as having none.
         var found = await cache.GetOrSetAsync<UserEntry?>(
-            Key("user", tenantId, generation, userId),
+            Key("user2", tenantId, generation, userId),
             async (context, token) =>
             {
                 var name = await GetAsync<UserEntry>(url, tenantId, token, allowNotFound: true);
@@ -90,11 +90,11 @@ public sealed class AccessClient(
             options: EntryOptions(),
             tags: [AccessCacheTag.Tenant(tenantId)],
             token: cancellationToken);
-        return found is null ? null : new DirectoryUser(found.UserId, found.DisplayName, found.Email ?? "");
+        return found is null ? null : new DirectoryUser(found.UserId, found.DisplayName, found.Email ?? "", found.TenantName);
     }
 
-    /// <summary>Access's answer; <c>Email</c> is null from an Access that predates it.</summary>
-    private sealed record UserEntry(string UserId, string DisplayName, string? Email);
+    /// <summary>Access's answer; <c>Email</c> and <c>TenantName</c> are null from an Access that predates them.</summary>
+    private sealed record UserEntry(string UserId, string DisplayName, string? Email, string? TenantName = null);
 
     // Every part is escaped, so no value can contain the separator and make two different lookups share a key.
     private static string Key(string kind, string tenantId, string generation, params string[] parts) =>

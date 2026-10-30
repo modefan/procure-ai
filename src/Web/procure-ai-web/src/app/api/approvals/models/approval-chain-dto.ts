@@ -4,6 +4,7 @@
 import { ApprovalStepDto } from '../models/approval-step-dto';
 export interface ApprovalChainDto {
   requestId: string;
+  requesterName?: (string | null);
   state: string;
   steps: Array<ApprovalStepDto>;
 }

@@ -1,4 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using ProcureAi.Assistant.Application;
+using ProcureAi.Assistant.Application.Retrieval.PastPurchases;
+using ProcureAi.BuildingBlocks.Domain;
+using Wolverine;
 using ProcureAi.Assistant.Application.Retrieval;
 using ProcureAi.Assistant.Domain;
 using ProcureAi.Contracts;
@@ -242,6 +248,29 @@ public sealed class PastPurchasesTests(AssistantApp app)
 
             await Task.Delay(200, Ct);
         }
+    }
+
+    [Fact]
+    public async Task Placeholder_older_than_max_age_is_deleted_and_newer_kept()
+    {
+        var tenant = AssistantApp.NewTenant();
+        var maxAge = app.Services.GetRequiredService<IOptions<AssistantOptions>>().Value.Purchases.PlaceholderMaxAge;
+        var now = DateTimeOffset.UtcNow;
+        var stale = Purchase.Placeholder(Guid.NewGuid(), tenant, "PR-0001", now - maxAge - TimeSpan.FromHours(1));
+        var recent = Purchase.Placeholder(Guid.NewGuid(), tenant, "PR-0002", now - maxAge + TimeSpan.FromHours(1));
+        // Old, but its submit data arrived: a real purchase, never deleted.
+        var submittedOld = new Purchase(Guid.NewGuid(), tenant, "PR-0003", "Chairs", "IT-200", Money.Zar(1_000m), null, "1 x Chair", now - maxAge - TimeSpan.FromDays(30));
+        await using (var db = NewDb())
+        {
+            db.Purchases.AddRange(stale, recent, submittedOld);
+            await db.SaveChangesAsync(Ct);
+        }
+
+        await app.Bus.InvokeAsync(new PurgeStalePlaceholders(), Ct);
+
+        (await PurchaseAsync(stale.RequestId)).ShouldBeNull("a placeholder older than Assistant:Purchases:PlaceholderMaxAge is deleted");
+        (await PurchaseAsync(recent.RequestId)).ShouldNotBeNull("a newer placeholder may still get its submit data");
+        (await PurchaseAsync(submittedOld.RequestId)).ShouldNotBeNull("a purchase with its submit data is not a placeholder");
     }
 
     /// <summary>Waits until a <c>RequestCompleted</c> waits in the durable inbox for its scheduled retry (the tests of the collection run one at a time).</summary>

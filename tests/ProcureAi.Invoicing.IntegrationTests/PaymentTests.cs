@@ -74,6 +74,24 @@ public sealed class PaymentTests(InvoicingApp app, ITestOutputHelper output)
         after.Payments.Single().ErpReference.ShouldBe(document.DocumentNumber);
     }
 
+    [Fact]
+    public async Task Payment_has_released_by_name_for_other_releaser()
+    {
+        var tenant = InvoicingApp.NewTenant();
+        app.Access.SetDisplayName(tenant, InvoicingApp.Finance, "Fiona Finance");
+        var (_, invoiceId) = await InvoicedOrderAsync(tenant, received: 3, invoiced: 3);
+        var (_, etag) = await app.GetInvoiceAsync(invoiceId, InvoicingApp.Token(tenant));
+        using var pay = await app.PayAsync(invoiceId, InvoicingApp.Token(tenant), etag);
+        pay.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await pay.Content.ReadFromJsonAsync<InvoiceDto>(InvoicingApp.Json))!.Payments.Single().ReleasedByName.ShouldBe("Fiona Finance");
+
+        // Another user (another finance user) reads it: the releaser is Fiona, not the caller.
+        var (invoice, _) = await app.GetInvoiceAsync(invoiceId, InvoicingApp.Token(tenant, "finance", "fred"));
+
+        invoice.Payments.Single().ReleasedBy.ShouldBe(InvoicingApp.Finance);
+        invoice.Payments.Single().ReleasedByName.ShouldBe("Fiona Finance");
+    }
+
     /// <summary>Review Focus 3: ten payment POSTs on one invoice at once (different idempotency keys, the same If-Match): one payment.</summary>
     [Fact]
     public async Task Ten_parallel_payments_one_payment()

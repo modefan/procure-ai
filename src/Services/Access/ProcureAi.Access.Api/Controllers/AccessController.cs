@@ -37,7 +37,7 @@ public sealed class AccessController(
     [CachedGet(Tags = [UsersTagTemplate])]
     [ProducesResponseType<MeDto>(StatusCodes.Status200OK, "application/json")]
     public async Task<ActionResult<MeDto>> GetMe(CancellationToken cancellationToken) =>
-        await bus.InvokeAsync<MeDto>(new GetMe(user.OnBehalfOfUser ?? user.UserId, [.. user.Roles]), cancellationToken);
+        await bus.InvokeAsync<MeDto>(new GetMe(user.OnBehalfOfUser ?? user.UserId, [.. user.Roles], user.TenantId ?? ""), cancellationToken);
 
     [HttpGet("matrix", Name = "GetMatrix")]
     [CachedGet(Tags = [MatrixTagTemplate])]

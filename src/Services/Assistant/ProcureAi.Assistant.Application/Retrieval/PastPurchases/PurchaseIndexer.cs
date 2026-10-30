@@ -152,7 +152,7 @@ public sealed class PurchaseIndexer(
         var purchase = db.Purchases.Local.FirstOrDefault(p => p.RequestId == requestId) ?? await FindAsync(db, requestId, cancellationToken);
         if (purchase is null)
         {
-            purchase = Purchase.Placeholder(requestId, tenantId, number);
+            purchase = Purchase.Placeholder(requestId, tenantId, number, time.GetUtcNow());
             db.Purchases.Add(purchase);
             return purchase;
         }

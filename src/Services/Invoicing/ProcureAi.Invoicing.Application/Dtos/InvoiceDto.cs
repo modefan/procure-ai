@@ -68,6 +68,7 @@ public sealed record PaymentDto(
     ExportStatus ExportStatus,
     string? ErpReference,
     int ExportAttempts,
-    string? LastExportError);
+    string? LastExportError,
+    string? ReleasedByName = null);
 
 public sealed record PaymentLineDto(int LineNo, string Sku, int Quantity, decimal AmountExclVat, string AmountText);

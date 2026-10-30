@@ -4,6 +4,7 @@
 export interface ApprovalStepDto {
   canAct: boolean;
   cannotActReason: (string | null);
+  comment?: (string | null);
   dueAt: (string | null);
   id: string;
   level: string;

@@ -108,6 +108,7 @@ public sealed class StubAccessServer : IAsyncDisposable
     public void FailApprovers(string tenantId, TimeSpan duration) => _approversFailUntil[tenantId] = DateTimeOffset.UtcNow + duration;
 
     private readonly ConcurrentDictionary<(string Tenant, string UserId), (string Name, string? Email)> _displayNames = new();
+    private readonly ConcurrentDictionary<string, string> _tenantNames = new();
     private int _nameCalls;
 
     public int NameCalls => Volatile.Read(ref _nameCalls);
@@ -120,6 +121,9 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>The display name (and email address, when given) the stub gives one user of one tenant (users without one are 404).</summary>
     public void SetDisplayName(string tenantId, string userId, string displayName, string? email = null) =>
         _displayNames[(tenantId, userId)] = (displayName, email);
+
+    /// <summary>The name the stub gives the tenant (<c>tenantName</c> of its user lookups); a named tenant knows every user ID.</summary>
+    public void SetTenantName(string tenantId, string tenantName) => _tenantNames[tenantId] = tenantName;
 
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
@@ -193,11 +197,17 @@ public sealed class StubAccessServer : IAsyncDisposable
             }
 
             // Without an address the stub leaves "email" out, as an Access from before plan 04 did.
-            return stub._displayNames.TryGetValue((http.Request.Headers["X-Tenant-Id"].ToString(), userId), out var user)
-                ? user.Email is null
-                    ? Results.Json(new { userId, displayName = user.Name })
-                    : Results.Json(new { userId, displayName = user.Name, email = user.Email })
-                : Results.NotFound();
+            var tenant = http.Request.Headers["X-Tenant-Id"].ToString();
+            var tenantName = stub._tenantNames.GetValueOrDefault(tenant);
+            if (!stub._displayNames.TryGetValue((tenant, userId), out var user))
+            {
+                // A tenant with a name knows every user (the test does not know the user IDs of its login), under their ID.
+                return tenantName is null ? Results.NotFound() : Results.Json(new { userId, displayName = userId, tenantName });
+            }
+
+            return user.Email is null
+                ? Results.Json(new { userId, displayName = user.Name, tenantName })
+                : Results.Json(new { userId, displayName = user.Name, email = user.Email, tenantName });
         });
         app.MapGet("/api/v1/access/internal/cost-centers/{code}/approvers", (HttpContext http, string code) =>
         {

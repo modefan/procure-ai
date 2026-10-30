@@ -5,6 +5,17 @@ using ProcureAi.BuildingBlocks.Domain;
 
 namespace ProcureAi.Access.Infrastructure.Configurations;
 
+internal sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
+{
+    public void Configure(EntityTypeBuilder<Tenant> builder)
+    {
+        builder.ToTable("tenants");
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.Id).HasColumnName("id").HasMaxLength(100).ValueGeneratedNever();
+        builder.Property(t => t.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+    }
+}
+
 internal sealed class DepartmentConfiguration : IEntityTypeConfiguration<Department>
 {
     public void Configure(EntityTypeBuilder<Department> builder)

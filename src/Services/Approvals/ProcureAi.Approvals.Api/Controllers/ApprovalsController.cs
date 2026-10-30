@@ -64,12 +64,14 @@ public sealed class ApprovalsController(
     [RequirePermission(Permissions.RequestsApprove)]
     [RequireIfMatch]
     [ProducesResponseType<ApprovalStepDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
-    public async Task<ActionResult<ApprovalStepDto>> Approve(Guid stepId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApprovalStepDto>> Approve(
+        Guid stepId, [FromBody] ApproveStepBody? body = null, CancellationToken cancellationToken = default)
     {
         if (Request.ExpectedVersion() is not { } version)
         {
@@ -77,7 +79,7 @@ public sealed class ApprovalsController(
         }
 
         var step = await bus.InvokeAsync<ApprovalStepDto>(new GetApprovalStep(stepId), cancellationToken);
-        await bus.InvokeOrConflictAsync(new ApproveStep(step.RequestId, stepId, version), Approval, cancellationToken);
+        await bus.InvokeOrConflictAsync(new ApproveStep(step.RequestId, stepId, version, body?.Comment), Approval, cancellationToken);
         return await ActedAsync(step, ApprovalStepStatus.Approved);
     }
 

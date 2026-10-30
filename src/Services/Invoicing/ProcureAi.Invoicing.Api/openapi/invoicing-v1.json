@@ -1387,6 +1387,12 @@
               "null",
               "string"
             ]
+          },
+          "releasedByName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

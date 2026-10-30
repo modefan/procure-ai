@@ -113,6 +113,28 @@ public sealed class BusinessAuditTests(AuditApp app)
     }
 
     [Fact]
+    public async Task History_shows_the_approve_comment()
+    {
+        var tenant = AuditApp.NewTenant();
+        var requestId = Guid.NewGuid();
+        var stepId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        app.Access.SetDisplayName(tenant, Tom, "Tom Requester");
+        app.Access.SetDisplayName(tenant, Maria, "Maria Manager");
+        await app.PublishAsync(Submitted(requestId, tenant, now.AddMinutes(-3)), Exchanges.Requests, tenant, Tom);
+        await app.PublishAsync(
+            new ApprovalRequested(requestId, tenant, "PR-1", stepId, 1, "Manager", [Maria], now.AddDays(2), now.AddMinutes(-2)),
+            Exchanges.Approvals, tenant, Tom);
+        await app.PublishAsync(new ApprovalStepApproved(requestId, tenant, stepId, Maria, now.AddMinutes(-1), "Within budget"), Exchanges.Approvals, tenant, Maria);
+        await app.WaitForStoredAsync(tenant, s => s.Count == 3);
+
+        using var response = await app.Client.SendAsync(AuditApp.Get(History(requestId), TestAuth.CreateToken(Tom, tenant, "requester")), Ct);
+
+        var history = (await response.Content.ReadFromJsonAsync<List<BusinessEventDto>>(Ct)).ShouldNotBeNull();
+        history[2].Summary.ShouldBe("Approved by Maria Manager (step 1, Manager): Within budget");
+    }
+
+    [Fact]
     public async Task History_shows_user_from_header_not_actor()
     {
         var tenant = AuditApp.NewTenant();

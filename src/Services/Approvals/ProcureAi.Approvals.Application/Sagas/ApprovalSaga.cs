@@ -268,8 +268,8 @@ public sealed class ApprovalSaga : Saga
         var step = Actionable(steps, command.StepId, command.ExpectedVersion, caller);
         await EvictAsync(cache);
         var now = time.GetUtcNow();
-        step.Approve(caller.UserId, now);
-        await context.PublishAsync(new ApprovalStepApproved(Id, TenantId, step.Id, caller.UserId, now));
+        step.Approve(caller.UserId, now, command.Comment);
+        await context.PublishAsync(new ApprovalStepApproved(Id, TenantId, step.Id, caller.UserId, now, step.Comment));
 
         var next = steps.Where(s => s.IsPending && s.StepNo > step.StepNo).MinBy(s => s.StepNo);
         if (next is not null)

@@ -58,6 +58,9 @@ public sealed class ApprovalStep
 
     public DateTimeOffset? ActedAt { get; private set; }
 
+    /// <summary>The note the approver left with the approval (null when none; never set on a rejection, which has a reason).</summary>
+    public string? Comment { get; private set; }
+
     /// <summary>When the step escalates; set when it becomes the current step.</summary>
     public DateTimeOffset? DueAt { get; private set; }
 
@@ -114,7 +117,11 @@ public sealed class ApprovalStep
         OpenedAt = openedAt;
     }
 
-    public void Approve(string userId, DateTimeOffset at) => Act(ApprovalStepStatus.Approved, userId, at);
+    public void Approve(string userId, DateTimeOffset at, string? comment = null)
+    {
+        Act(ApprovalStepStatus.Approved, userId, at);
+        Comment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+    }
 
     public void Reject(string userId, DateTimeOffset at) => Act(ApprovalStepStatus.Rejected, userId, at);
 

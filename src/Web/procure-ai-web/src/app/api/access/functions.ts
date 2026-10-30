@@ -19,3 +19,5 @@ export type { GetUserName$Params as GetUserName$Params } from './fn/access/get-u
 export { getUserName as getUserName } from './fn/access/get-user-name';
 export type { RegisterDemoUser$Params as RegisterDemoUser$Params } from './fn/access/register-demo-user';
 export { registerDemoUser as registerDemoUser } from './fn/access/register-demo-user';
+export type { ListUserTenants$Params as ListUserTenants$Params } from './fn/user-tenants/list-user-tenants';
+export { listUserTenants as listUserTenants } from './fn/user-tenants/list-user-tenants';

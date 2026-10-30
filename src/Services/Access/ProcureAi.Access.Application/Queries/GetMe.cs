@@ -6,7 +6,7 @@ using ProcureAi.Access.Domain;
 namespace ProcureAi.Access.Application.Queries;
 
 /// <summary>Who the caller is in their tenant. <paramref name="Roles"/> are the roles of the caller's token.</summary>
-public sealed record GetMe(string UserId, IReadOnlyList<string> Roles);
+public sealed record GetMe(string UserId, IReadOnlyList<string> Roles, string TenantId = "");
 
 public static class GetMeHandler
 {
@@ -24,6 +24,9 @@ public static class GetMeHandler
             .Select(c => new CostCenterDto(c.Code, c.Name, c.DepartmentCode))
             .ToList();
         decimal? limit = access.ApprovalLimit.Amount > 0 ? access.ApprovalLimit.Amount : null;
-        return new MeDto(query.UserId, user?.DisplayName ?? query.UserId, [.. query.Roles.Order(StringComparer.Ordinal)], acting, limit);
+        var tenantName = await db.Tenants.AsNoTracking().Where(t => t.Id == query.TenantId).Select(t => t.Name).SingleOrDefaultAsync(cancellationToken);
+        return new MeDto(
+            query.UserId, user?.DisplayName ?? query.UserId, [.. query.Roles.Order(StringComparer.Ordinal)], acting, limit,
+            tenantName ?? query.TenantId);
     }
 }

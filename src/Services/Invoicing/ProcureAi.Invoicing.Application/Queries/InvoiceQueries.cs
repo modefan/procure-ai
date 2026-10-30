@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Invoicing.Application.Abstractions;
 using ProcureAi.Invoicing.Application.Dtos;
@@ -21,7 +22,8 @@ public static class ListInvoicesHandler
     /// the order view (finance and the admin key: all).
     /// </summary>
     public static async Task<PagedResult<InvoiceDto>> Handle(
-        ListInvoices query, IInvoicingDbContext db, ICallerScope scope, CancellationToken cancellationToken)
+        ListInvoices query, IInvoicingDbContext db, ICallerScope scope, IAccessDirectory access, ICallerContext caller,
+        CancellationToken cancellationToken)
     {
         var orders = db.Orders.AsNoTracking();
         var callerScope = await scope.GetAsync(cancellationToken);
@@ -56,15 +58,18 @@ public static class ListInvoicesHandler
             .ToListAsync(cancellationToken);
         var orderIds = page.Select(i => i.OrderId).Distinct().ToArray();
         var views = await db.Orders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, cancellationToken);
+        var names = await PaymentNames.LookupAsync(
+            access, page.SelectMany(i => i.Payments).Select(p => p.ReleasedBy), caller.TenantId ?? "", cancellationToken);
         return new PagedResult<InvoiceDto>(
-            [.. page.Select(i => InvoicingMapper.ToDto(i, views.GetValueOrDefault(i.OrderId)))], query.Page, query.PageSize, total);
+            [.. page.Select(i => InvoicingMapper.ToDto(i, views.GetValueOrDefault(i.OrderId)).WithNames(names))], query.Page, query.PageSize, total);
     }
 }
 
 public static class GetInvoiceHandler
 {
     /// <summary>Missing, another tenant's and out of the caller's scope are all 404.</summary>
-    public static async Task<InvoiceDto> Handle(GetInvoice query, IInvoicingDbContext db, ICallerScope scope, CancellationToken cancellationToken)
+    public static async Task<InvoiceDto> Handle(
+        GetInvoice query, IInvoicingDbContext db, ICallerScope scope, IAccessDirectory access, CancellationToken cancellationToken)
     {
         var invoice = await db.Invoices.AsNoTracking().Include(i => i.Lines).Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == query.Id, cancellationToken)
@@ -75,6 +80,6 @@ public static class GetInvoiceHandler
             throw new NotFoundException($"Invoice {query.Id} was not found.");
         }
 
-        return InvoicingMapper.ToDto(invoice, order);
+        return await InvoicingMapper.ToDto(invoice, order).WithNamesAsync(access, invoice.TenantId, cancellationToken);
     }
 }

@@ -23,8 +23,11 @@ public interface IAccessDirectory
     ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken);
 }
 
-/// <summary>A user of a tenant: the name they are shown under and their email address (empty when Access has none).</summary>
-public sealed record DirectoryUser(string UserId, string DisplayName, string Email);
+/// <summary>
+/// A user of a tenant: the name they are shown under, their email address (empty when Access has none) and the name of their
+/// tenant (null from an Access that does not give it).
+/// </summary>
+public sealed record DirectoryUser(string UserId, string DisplayName, string Email, string? TenantName = null);
 
 /// <summary>Permissions, the cost centers the user acts for, and the approval limit in Rand.</summary>
 public sealed record EffectiveAccess(IReadOnlyList<string> Permissions, IReadOnlyList<string> CostCenterCodes, decimal ApprovalLimit);

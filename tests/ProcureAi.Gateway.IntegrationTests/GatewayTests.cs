@@ -361,6 +361,31 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Bff_user_has_tenant_name()
+    {
+        _gateway.Access.SetTenantName("acme", "Acme Corp");
+        var browser = await SignedInAsync("maria@acme.test");
+
+        var user = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+
+        user.GetProperty("tenantId").GetString().ShouldBe("acme");
+        user.GetProperty("tenantName").GetString().ShouldBe("Acme Corp");
+    }
+
+    [Fact]
+    public async Task Bff_user_has_no_tenant_name_when_access_is_down()
+    {
+        _gateway.Access.SetTenantName("acme", "Acme Corp");
+        _gateway.Access.Down = true;
+        var browser = await SignedInAsync("maria@acme.test");
+
+        using var response = await browser.GetAsync("/bff/user", Ct);
+
+        await ExpectOkAsync(response);
+        (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("tenantName").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
     public async Task Bff_user_permissions_come_from_access_and_are_cached_for_a_short_time()
     {
         _gateway.Access.SetMatrix("acme", new() { ["manager"] = ["requests.read", "budgets.read"] });

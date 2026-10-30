@@ -147,6 +147,32 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task User_tenants_lists_each_membership()
+    {
+        var userId = $"traveller-{Guid.NewGuid():N}";
+        await using (var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options))
+        {
+            db.TenantUsers.Add(TenantUser.Create(Globex, userId, "Tess Traveller", "tess@globex.test", ["requester"], Money.Zero, false, []));
+            db.TenantUsers.Add(TenantUser.Create(Acme, userId, "Tess Traveller", "tess@acme.test", ["requester"], Money.Zero, false, []));
+            await db.SaveChangesAsync(Ct);
+        }
+
+        // No X-Tenant-Id: the lookup is across tenants. A service account and the admin API key may call it; a user may not.
+        var service = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants", ServiceToken()), Ct);
+        var apiKey = new HttpRequestMessage(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants");
+        apiKey.Headers.Add("X-Api-Key", TestAuth.ApiKey);
+        var key = await _client.SendAsync(apiKey, Ct);
+        var unknown = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/nobody-at-all/tenants", ServiceToken()), Ct);
+        var asUser = await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/internal/users/{userId}/tenants", AdminToken(Acme)), Ct);
+
+        var tenants = await ReadAsync<List<TenantDto>>(service);
+        tenants.ShouldBe([new TenantDto(Acme, "Acme Corp"), new TenantDto(Globex, "Globex")]);
+        (await ReadAsync<List<TenantDto>>(key)).Count.ShouldBe(2);
+        (await ReadAsync<List<TenantDto>>(unknown)).ShouldBeEmpty();
+        asUser.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "the lookup is for services only");
+    }
+
+    [Fact]
     public async Task Internal_user_lookup_gives_the_display_name_and_email_and_404_outside_the_tenant()
     {
         var maria = await _client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", Acme), Ct);
@@ -159,6 +185,7 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         name.DisplayName.ShouldBe("Maria Manager");
         // The address the Notifications service emails her at (plan 04 ruling 9).
         name.Email.ShouldBe("maria@acme.test");
+        name.TenantName.ShouldBe("Acme Corp");
         mariaAsGlobex.StatusCode.ShouldBe(HttpStatusCode.NotFound, "a user of another tenant looks like no user");
         unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         asUser.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "internal lookups are for services only");

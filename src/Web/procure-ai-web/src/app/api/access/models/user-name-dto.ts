@@ -4,5 +4,6 @@
 export interface UserNameDto {
   displayName: string;
   email: string;
+  tenantName?: (string | null);
   userId: string;
 }

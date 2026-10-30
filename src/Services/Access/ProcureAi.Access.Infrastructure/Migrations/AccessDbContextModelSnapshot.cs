@@ -106,6 +106,24 @@ namespace ProcureAi.Access.Infrastructure.Migrations
                     b.ToTable("permission_matrices", (string)null);
                 });
 
+            modelBuilder.Entity("ProcureAi.Access.Domain.Tenant", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("tenants", (string)null);
+                });
+
             modelBuilder.Entity("ProcureAi.Access.Domain.TenantUser", b =>
                 {
                     b.Property<string>("TenantId")

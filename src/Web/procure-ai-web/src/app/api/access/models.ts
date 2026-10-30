@@ -13,5 +13,6 @@ export type { RegistrationDto } from './models/registration-dto';
 export type { RoleDto } from './models/role-dto';
 export type { SetApprovalLimitBody } from './models/set-approval-limit-body';
 export type { SetRolePermissionsBody } from './models/set-role-permissions-body';
+export type { TenantDto } from './models/tenant-dto';
 export type { UserDto } from './models/user-dto';
 export type { UserNameDto } from './models/user-name-dto';

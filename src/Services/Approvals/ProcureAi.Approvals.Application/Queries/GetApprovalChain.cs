@@ -4,6 +4,7 @@ using ProcureAi.Approvals.Application.Dtos;
 using ProcureAi.Approvals.Application.Sagas;
 using ProcureAi.Approvals.Domain;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 
 namespace ProcureAi.Approvals.Application.Queries;
 
@@ -16,7 +17,8 @@ public sealed record GetApprovalStep(Guid StepId);
 public static class ApprovalQueriesHandler
 {
     public static async Task<ApprovalChainDto> Handle(
-        GetApprovalChain query, IApprovalsDbContext db, ICallerContext caller, CancellationToken cancellationToken)
+        GetApprovalChain query, IApprovalsDbContext db, IAccessDirectory access, ICallerContext caller,
+        CancellationToken cancellationToken)
     {
         var tenant = caller.TenantId;
         var saga = await db.Sagas.AsNoTracking()
@@ -32,10 +34,13 @@ public static class ApprovalQueriesHandler
             throw new NotFoundException($"No approval for request {query.RequestId}.");
         }
 
+        var requesterId = saga?.RequesterId ?? steps.FirstOrDefault()?.RequesterId;
+        var requesterName = requesterId is null ? null : await NameOfAsync(access, requesterId, tenant ?? "", cancellationToken);
         return new ApprovalChainDto(
             query.RequestId,
             StateOf(saga, steps).ToString(),
-            [.. steps.Select(s => ApprovalStepView.ToDto(s, caller.UserId))]);
+            [.. steps.Select(s => ApprovalStepView.ToDto(s, caller.UserId))],
+            requesterName);
     }
 
     public static async Task<ApprovalStepDto> Handle(
@@ -44,6 +49,19 @@ public static class ApprovalQueriesHandler
         var step = await db.Steps.AsNoTracking().SingleOrDefaultAsync(s => s.Id == query.StepId, cancellationToken)
             ?? throw new NotFoundException($"Approval step {query.StepId} was not found.");
         return ApprovalStepView.ToDto(step, caller.UserId);
+    }
+
+    /// <summary>The requester's display name; null when Access cannot give it (the chain must not fail because of a name).</summary>
+    private static async Task<string?> NameOfAsync(IAccessDirectory access, string userId, string tenant, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await access.GetDisplayNameAsync(userId, tenant, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

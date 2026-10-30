@@ -38,6 +38,7 @@ public static class ApprovalStepView
             reason,
             step.Version,
             requesterName,
-            step.OpenedAt);
+            step.OpenedAt,
+            step.Comment);
     }
 }

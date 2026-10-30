@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application;
+using ProcureAi.BuildingBlocks.Application.Access;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Invoicing.Application.Abstractions;
@@ -75,7 +76,7 @@ public static class RecordInvoiceHandler
     public static async Task<InvoiceDto?> Handle(
         RecordInvoice command, IInvoicingDbContext db, ICallerContext caller, ICallerScope scope, IWebhookInbox inbox,
         ITenantSequence sequence, IMessageBus bus, ICacheInvalidator cache, IInvoicingMetrics metrics, IOptions<InvoicingOptions> options,
-        IAssistantScans scans, TimeProvider time, CancellationToken cancellationToken)
+        IAssistantScans scans, IAccessDirectory access, TimeProvider time, CancellationToken cancellationToken)
     {
         var order = await db.Orders.IgnoreQueryFilters().Include(o => o.Lines)
             .FirstOrDefaultAsync(o => o.Id == command.OrderId, cancellationToken);
@@ -122,7 +123,7 @@ public static class RecordInvoiceHandler
         if (existing is not null)
         {
             return existing.HasSameContentAs(command.OrderId, command.InvoiceDate, lines, stated)
-                ? InvoicingMapper.ToDto(existing, order)
+                ? await InvoicingMapper.ToDto(existing, order).WithNamesAsync(access, existing.TenantId, cancellationToken)
                 : throw new ConflictException($"Invoice {number} of {supplier} is already recorded with other content.");
         }
 
@@ -238,7 +239,7 @@ public static class ReleasePaymentHandler
     /// </summary>
     public static async Task<InvoiceDto> Handle(
         ReleasePayment command, IInvoicingDbContext db, ICallerContext caller, ICallerScope scope, ITenantSequence sequence,
-        IMessageBus bus, ICacheInvalidator cache, TimeProvider time, CancellationToken cancellationToken)
+        IMessageBus bus, ICacheInvalidator cache, IAccessDirectory access, TimeProvider time, CancellationToken cancellationToken)
     {
         var (invoice, order) = await InvoiceAccess.LoadAllowedAsync(db, scope, command.InvoiceId, cancellationToken);
         if (string.Equals(order.RequesterId, caller.UserId, StringComparison.Ordinal))
@@ -247,6 +248,10 @@ public static class ReleasePaymentHandler
         }
 
         OptimisticConcurrency.EnsureVersion($"Invoice {command.InvoiceId}", invoice.Version, command.ExpectedVersion);
+        // Looked up before the save: the transaction commits after the handler returns, and a lookup in between would hold the
+        // invoice row locked for longer (a slow Access would make every competing payment wait for it).
+        var names = await PaymentNames.LookupAsync(
+            access, invoice.Payments.Select(p => p.ReleasedBy).Append(caller.UserId), invoice.TenantId, cancellationToken);
         var now = time.GetUtcNow();
         var plan = invoice.PlanPayment(order, command.Lines?.Select(l => (l.LineNo, l.Quantity)).ToList());
         var number = PaymentNumber.FromSequence(await sequence.NextAsync(invoice.TenantId, PaymentNumber.SequenceName, cancellationToken));
@@ -262,7 +267,7 @@ public static class ReleasePaymentHandler
         }
 
         await bus.SendAsync(new ExportPayment(payment.Id, 1));
-        return InvoicingMapper.ToDto(invoice, order);
+        return InvoicingMapper.ToDto(invoice, order).WithNames(names);
     }
 }
 
@@ -270,14 +275,16 @@ public static class HoldInvoiceHandler
 {
     /// <summary>Puts the invoice on hold (no payment until released). Same access and version rules as paying.</summary>
     public static async Task<InvoiceDto> Handle(
-        HoldInvoice command, IInvoicingDbContext db, ICallerScope scope, ICacheInvalidator cache, CancellationToken cancellationToken)
+        HoldInvoice command, IInvoicingDbContext db, ICallerScope scope, ICacheInvalidator cache, IAccessDirectory access,
+        CancellationToken cancellationToken)
     {
         var (invoice, order) = await InvoiceAccess.LoadAllowedAsync(db, scope, command.InvoiceId, cancellationToken);
         OptimisticConcurrency.EnsureVersion($"Invoice {command.InvoiceId}", invoice.Version, command.ExpectedVersion);
+        var names = await PaymentNames.LookupAsync(access, invoice.Payments.Select(p => p.ReleasedBy), invoice.TenantId, cancellationToken);
         invoice.Hold(command.Reason);
         await cache.RemoveAfterCommitAsync(InvoicingCacheTag.Of(invoice.TenantId, invoice.Id));
         await db.SaveChangesAsync(cancellationToken);
-        return InvoicingMapper.ToDto(invoice, order);
+        return InvoicingMapper.ToDto(invoice, order).WithNames(names);
     }
 }
 
@@ -289,10 +296,12 @@ public static class ReleaseHoldHandler
     /// </summary>
     public static async Task<InvoiceDto> Handle(
         ReleaseHold command, IInvoicingDbContext db, ICallerScope scope, IMessageBus bus, ICacheInvalidator cache,
-        IInvoicingMetrics metrics, IOptions<InvoicingOptions> options, TimeProvider time, CancellationToken cancellationToken)
+        IInvoicingMetrics metrics, IOptions<InvoicingOptions> options, IAccessDirectory access, TimeProvider time,
+        CancellationToken cancellationToken)
     {
         var (invoice, order) = await InvoiceAccess.LoadAllowedAsync(db, scope, command.InvoiceId, cancellationToken);
         OptimisticConcurrency.EnsureVersion($"Invoice {command.InvoiceId}", invoice.Version, command.ExpectedVersion);
+        var names = await PaymentNames.LookupAsync(access, invoice.Payments.Select(p => p.ReleasedBy), invoice.TenantId, cancellationToken);
         invoice.ReleaseHold();
         var now = time.GetUtcNow();
         MatchOutcome? outcome = null;
@@ -309,6 +318,6 @@ public static class ReleaseHoldHandler
             await OrderEvents.PublishAsync(bus, metrics, [outcome], now);
         }
 
-        return InvoicingMapper.ToDto(invoice, order);
+        return InvoicingMapper.ToDto(invoice, order).WithNames(names);
     }
 }

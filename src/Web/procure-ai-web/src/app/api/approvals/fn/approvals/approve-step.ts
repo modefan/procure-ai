@@ -8,6 +8,7 @@ import { StrictHttpResponse } from '../../strict-http-response';
 import { RequestBuilder } from '../../request-builder';
 
 import { ApprovalStepDto } from '../../models/approval-step-dto';
+import { ApproveStepBody } from '../../models/approve-step-body';
 
 export interface ApproveStep$Params {
   stepId: string;
@@ -21,6 +22,7 @@ export interface ApproveStep$Params {
  * The ETag of the version you last read, e.g. "3". Missing: 428; stale: 412.
  */
   'If-Match': string;
+      body?: (null | ApproveStepBody)
 }
 
 export function approveStep(http: HttpClient, rootUrl: string, params: ApproveStep$Params, context?: HttpContext): Observable<StrictHttpResponse<ApprovalStepDto>> {
@@ -29,6 +31,7 @@ export function approveStep(http: HttpClient, rootUrl: string, params: ApproveSt
     rb.path('stepId', params.stepId, {});
     rb.header('Idempotency-Key', params['Idempotency-Key'], {});
     rb.header('If-Match', params['If-Match'], {});
+    rb.body(params.body, 'application/*+json');
   }
 
   return http.request(

@@ -45,6 +45,17 @@ public sealed class PastPurchasesOptions : IValidatableObject
         MaxDelay = TimeSpan.FromMinutes(5),
     };
 
+    /// <summary>
+    /// How long a placeholder (a row whose RequestSubmitted never arrived, e.g. a lost message) is kept before the periodic cleanup
+    /// deletes it. A placeholder of a request still being processed is far younger.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:10:00", "365.00:00:00")]
+    public TimeSpan PlaceholderMaxAge { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>How often the cleanup of old placeholders runs.</summary>
+    [Range(typeof(TimeSpan), "00:00:30", "7.00:00:00")]
+    public TimeSpan PlaceholderCleanupInterval { get; set; } = TimeSpan.FromHours(1);
+
     /// <summary>The parsed <see cref="RetryDelays"/>; empty when they are not valid (startup validation reports that).</summary>
     public TimeSpan[] RetryDelaySchedule() =>
         IngestionOptions.TryParseDelays(RetryDelays, out var delays) ? delays : [];

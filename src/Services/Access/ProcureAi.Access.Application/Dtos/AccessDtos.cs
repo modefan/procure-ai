@@ -29,8 +29,8 @@ public sealed record UserDto(
 /// <summary>The answer to a registration: the tenant the user is in, and whether this call added them (false: they were already in).</summary>
 public sealed record RegistrationDto(string TenantId, bool Joined);
 
-/// <summary>The name a user is shown under (audit history, inboxes) and their email address (bell notifications by email).</summary>
-public sealed record UserNameDto(string UserId, string DisplayName, string Email);
+/// <summary>The name a user is shown under (audit history, inboxes), their email address (bell notifications by email) and the name of their tenant.</summary>
+public sealed record UserNameDto(string UserId, string DisplayName, string Email, string? TenantName = null);
 
 /// <summary>A cost center the caller acts for.</summary>
 public sealed record CostCenterDto(string Code, string Name, string DepartmentCode);
@@ -40,4 +40,8 @@ public sealed record CostCenterDto(string Code, string Name, string DepartmentCo
 /// cost centers they act for (finance: all of the tenant) and the approval limit in Rand (null when they have none).
 /// </summary>
 public sealed record MeDto(
-    string UserId, string Name, IReadOnlyList<string> Roles, IReadOnlyList<CostCenterDto> CostCenters, decimal? ApprovalLimit);
+    string UserId, string Name, IReadOnlyList<string> Roles, IReadOnlyList<CostCenterDto> CostCenters, decimal? ApprovalLimit,
+    string TenantName = "");
+
+/// <summary>A tenant a user belongs to: its ID (the token's tenant claim) and the name it is shown under.</summary>
+public sealed record TenantDto(string Id, string Name);

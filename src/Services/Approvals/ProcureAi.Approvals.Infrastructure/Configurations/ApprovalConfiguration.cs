@@ -35,6 +35,7 @@ internal sealed class ApprovalStepConfiguration : IEntityTypeConfiguration<Appro
         builder.Property(s => s.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20);
         builder.Property(s => s.ActedBy).HasColumnName("acted_by").HasMaxLength(100);
         builder.Property(s => s.ActedAt).HasColumnName("acted_at");
+        builder.Property(s => s.Comment).HasColumnName("comment").HasMaxLength(500);
         builder.Property(s => s.DueAt).HasColumnName("due_at");
         builder.Property(s => s.OpenedAt).HasColumnName("opened_at");
         builder.Ignore(s => s.IsPending);

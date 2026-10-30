@@ -299,6 +299,10 @@ namespace ProcureAi.Assistant.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("cost_center_code");
 
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
                     b.Property<string>("LinesSummary")
                         .IsRequired()
                         .HasColumnType("text")

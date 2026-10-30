@@ -255,6 +255,70 @@ public sealed class ApiTests(ApprovalsApp app)
     }
 
     [Fact]
+    public async Task Approve_with_comment_stores_and_returns_it()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (id, steps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
+        using var client = Main.CreateClient();
+        var maria = User(tenant, DemoUsers.Maria, "manager");
+
+        var approved = await client.SendAsync(Post($"{steps[0].Id}/approve", maria, Tag(steps[0].Version), body: new { comment = "  Within budget  " }), Ct);
+
+        (await ReadAsync<ApprovalStepDto>(approved)).Comment.ShouldBe("Within budget");
+        var published = (await Recorder.WaitForAsync(id, nameof(ApprovalStepApproved), EventTimeout)).Single(m => m.Kind == nameof(ApprovalStepApproved));
+        published.Text("comment").ShouldBe("Within budget");
+        var chain = await ReadAsync<ApprovalChainDto>(await client.SendAsync(Get($"requests/{id}", maria), Ct));
+        chain.Steps[0].Comment.ShouldBe("Within budget");
+        chain.Steps[1].Comment.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Approve_without_body_still_works()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (_, steps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
+        using var client = Main.CreateClient();
+
+        var approved = await client.SendAsync(Post($"{steps[0].Id}/approve", User(tenant, DemoUsers.Maria, "manager"), Tag(steps[0].Version)), Ct);
+
+        var step = await ReadAsync<ApprovalStepDto>(approved);
+        step.Status.ShouldBe("Approved");
+        step.Comment.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Comment_longer_than_500_is_400()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var (_, steps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
+        using var client = Main.CreateClient();
+        var maria = User(tenant, DemoUsers.Maria, "manager");
+
+        var tooLong = await client.SendAsync(Post($"{steps[0].Id}/approve", maria, Tag(steps[0].Version), body: new { comment = new string('x', 501) }), Ct);
+        var atLimit = await client.SendAsync(Post($"{steps[0].Id}/approve", maria, Tag(steps[0].Version), body: new { comment = new string('x', 500) }), Ct);
+
+        tooLong.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        atLimit.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Chain_has_requester_name()
+    {
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Requester");
+        var (id, _) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
+        using var client = Main.CreateClient();
+
+        var chain = await ReadAsync<ApprovalChainDto>(await client.SendAsync(Get($"requests/{id}", User(tenant, DemoUsers.Maria, "manager")), Ct));
+
+        chain.RequesterName.ShouldBe("Tom Requester");
+    }
+
+    [Fact]
     public async Task Reject_needs_a_reason_and_rejects_the_request()
     {
         var tenant = NewTenant();

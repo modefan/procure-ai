@@ -6,6 +6,9 @@ namespace ProcureAi.Approvals.Api.Controllers;
 public sealed record RejectStepBody(
     [Required, StringLength(ApprovalLimits.MaxReasonLength, MinimumLength = ApprovalLimits.MinReasonLength)] string Reason);
 
+/// <summary>An optional note the approver leaves with the approval (shown in the chain and the audit trail).</summary>
+public sealed record ApproveStepBody([StringLength(ApprovalLimits.MaxReasonLength)] string? Comment = null);
+
 /// <summary>Input size limits of the API (the domain enforces the business rules).</summary>
 public static class ApprovalLimits
 {

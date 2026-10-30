@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using ProcureAi.Assistant.Application;
 using ProcureAi.Assistant.Application.Abstractions;
 using ProcureAi.Assistant.Application.Ingestion;
@@ -64,6 +65,7 @@ public static class DependencyInjection
         services.AddAssistantChat();
         services.AddAssistantTools(configuration);
         services.AddAssistantScanning();
+        services.AddHostedService<PlaceholderCleanup>();
         return services;
     }
 

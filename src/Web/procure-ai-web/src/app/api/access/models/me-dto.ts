@@ -7,5 +7,6 @@ export interface MeDto {
   costCenters: Array<CostCenterDto>;
   name: string;
   roles: Array<string>;
+  tenantName?: string;
   userId: string;
 }

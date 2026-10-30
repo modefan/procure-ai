@@ -68,7 +68,8 @@ public sealed class BusinessEventSummaries
                 $"Budget refused on {f.CostCenterCode}: {f.Reason} (requested {Rand(f.Requested)}, available {Rand(f.Available)})",
             BudgetReleased r => $"{Rand(r.Amount)} released on {r.CostCenterCode}",
             ApprovalRequested r => $"Approval requested from {Names(r.ApproverIds)} (step {r.StepNo}, {Level(r.Level)})",
-            ApprovalStepApproved a => $"Approved by {Name(a.ApprovedBy)}{Step(a.StepId)}",
+            ApprovalStepApproved a => $"Approved by {Name(a.ApprovedBy)}{Step(a.StepId)}"
+                + (string.IsNullOrWhiteSpace(a.Comment) ? "" : $": {a.Comment}"),
             ApprovalReminderDue r => $"Reminder {r.ReminderNo} sent to {Names(r.ApproverIds)}{Step(r.StepId)}",
             ApprovalEscalated x => $"Escalated from {Level(x.FromLevel)} to {Level(x.ToLevel)}: {Names(x.ApproverIds)}",
             ApprovalAlertRaised a => $"Alert{Step(a.StepId)}: {a.Reason}",

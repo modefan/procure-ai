@@ -6,4 +6,5 @@ public sealed record ApprovalStepApproved(
     string TenantId,
     Guid StepId,
     string ApprovedBy,
-    DateTimeOffset OccurredAt) : IIntegrationEvent;
+    DateTimeOffset OccurredAt,
+    string? Comment = null) : IIntegrationEvent;

@@ -13,6 +13,7 @@ export interface PaymentDto {
   number: string;
   releasedAt: string;
   releasedBy: string;
+  releasedByName?: (string | null);
   totalExclVat: number;
   totalInclVat: number;
   totalInclVatText: string;

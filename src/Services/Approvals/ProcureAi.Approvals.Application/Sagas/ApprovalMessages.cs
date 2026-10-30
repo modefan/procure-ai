@@ -1,7 +1,7 @@
 namespace ProcureAi.Approvals.Application.Sagas;
 
 /// <summary>The current user approves a step (sent by the API). <c>ExpectedVersion</c> is the step's version the user saw (If-Match).</summary>
-public sealed record ApproveStep(Guid RequestId, Guid StepId, uint ExpectedVersion);
+public sealed record ApproveStep(Guid RequestId, Guid StepId, uint ExpectedVersion, string? Comment = null);
 
 /// <summary>The current user rejects a step, and with it the request (sent by the API).</summary>
 public sealed record RejectStep(Guid RequestId, Guid StepId, uint ExpectedVersion, string Reason);

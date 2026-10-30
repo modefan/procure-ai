@@ -572,6 +572,40 @@
           }
         }
       }
+    },
+    "/api/v1/access/internal/users/{userId}/tenants": {
+      "get": {
+        "tags": [
+          "UserTenants"
+        ],
+        "operationId": "ListUserTenants",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TenantDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -753,6 +787,10 @@
               "number"
             ],
             "format": "double"
+          },
+          "tenantName": {
+            "type": "string",
+            "default": ""
           }
         }
       },
@@ -862,6 +900,21 @@
           }
         }
       },
+      "TenantDto": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "UserDto": {
         "required": [
           "userId",
@@ -925,6 +978,12 @@
           },
           "email": {
             "type": "string"
+          },
+          "tenantName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       }
@@ -968,6 +1027,9 @@
   "tags": [
     {
       "name": "Access"
+    },
+    {
+      "name": "UserTenants"
     }
   ]
 }

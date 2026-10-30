@@ -142,6 +142,7 @@ internal sealed class PurchaseConfiguration : IEntityTypeConfiguration<Purchase>
         builder.Property(p => p.LinesSummary).HasColumnName("lines_summary").IsRequired();
         builder.Property(p => p.ApproverIds).HasColumnName("approver_ids").IsRequired();
         builder.Property(p => p.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20);
+        builder.Property(p => p.CreatedAt).HasColumnName("created_at");
         builder.Property(p => p.SubmittedAt).HasColumnName("submitted_at");
         builder.Property(p => p.ApprovedAt).HasColumnName("approved_at");
         builder.Property(p => p.CompletedAt).HasColumnName("completed_at");

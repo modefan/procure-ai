@@ -36,12 +36,12 @@ public sealed class Purchase
     public Purchase(
         Guid requestId, string tenantId, string number, string title, string costCenterCode, Money totalInclVat, string? supplierCode,
         string linesSummary, DateTimeOffset submittedAt)
-        : this(requestId, tenantId, number)
+        : this(requestId, tenantId, number, submittedAt)
     {
         RecordSubmitted(number, title, costCenterCode, totalInclVat, supplierCode, linesSummary, submittedAt);
     }
 
-    private Purchase(Guid requestId, string tenantId, string number)
+    private Purchase(Guid requestId, string tenantId, string number, DateTimeOffset createdAt)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
@@ -51,13 +51,18 @@ public sealed class Purchase
         RequestId = requestId;
         TenantId = tenantId;
         Number = number;
+        CreatedAt = createdAt;
         Status = PurchaseStatus.Submitted;
     }
 
     /// <summary>A row for a request whose submit data has not arrived yet (an approval or completion came first).</summary>
-    public static Purchase Placeholder(Guid requestId, string tenantId, string number) => new(requestId, tenantId, number);
+    public static Purchase Placeholder(Guid requestId, string tenantId, string number, DateTimeOffset createdAt) =>
+        new(requestId, tenantId, number, createdAt);
 
     public Guid RequestId { get; private set; }
+
+    /// <summary>When the row was created: the submit time, or the arrival of the first event for a placeholder (which expires, see Assistant:Purchases:PlaceholderMaxAge).</summary>
+    public DateTimeOffset CreatedAt { get; private set; }
 
     public string TenantId { get; private set; } = "";
 

@@ -15,6 +15,9 @@ public sealed class AccessDbContext(DbContextOptions<AccessDbContext> options, I
     /// <summary>The caller of this context scope, for the audit interceptor.</summary>
     public ICallerContext? Caller { get; } = callerContext;
 
+    /// <summary>The list of tenants: no tenant filter (it is not tenant data).</summary>
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+
     public DbSet<PermissionMatrix> PermissionMatrices => Set<PermissionMatrix>();
 
     public DbSet<Department> Departments => Set<Department>();

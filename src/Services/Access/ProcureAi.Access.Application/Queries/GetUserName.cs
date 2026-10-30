@@ -14,8 +14,10 @@ public static class GetUserNameHandler
     {
         var user = await db.TenantUsers.AsNoTracking()
             .Where(u => u.UserId == query.UserId)
-            .Select(u => new UserNameDto(u.UserId, u.DisplayName, u.Email))
-            .SingleOrDefaultAsync(cancellationToken);
-        return user ?? throw new NotFoundException($"User {query.UserId} was not found.");
+            .Select(u => new { u.UserId, u.DisplayName, u.Email, u.TenantId })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new NotFoundException($"User {query.UserId} was not found.");
+        var tenantName = await db.Tenants.AsNoTracking().Where(t => t.Id == user.TenantId).Select(t => t.Name).SingleOrDefaultAsync(cancellationToken);
+        return new UserNameDto(user.UserId, user.DisplayName, user.Email, tenantName);
     }
 }

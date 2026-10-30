@@ -64,7 +64,7 @@ export class ApprovalsService extends BaseService {
    * This method provides access to the full `HttpResponse`, allowing access to response headers.
    * To access only the response body, use `approveStep()` instead.
    *
-   * This method doesn't expect any request body.
+   * This method sends `application/*+json` and handles request body of type `application/*+json`.
    */
   approveStep$Response(params: ApproveStep$Params, context?: HttpContext): Promise<StrictHttpResponse<ApprovalStepDto>> {
     const obs = approveStep(this.http, this.rootUrl, params, context);
@@ -75,7 +75,7 @@ export class ApprovalsService extends BaseService {
    * This method provides access only to the response body.
    * To access the full response (for headers, for example), `approveStep$Response()` instead.
    *
-   * This method doesn't expect any request body.
+   * This method sends `application/*+json` and handles request body of type `application/*+json`.
    */
   approveStep(params: ApproveStep$Params, context?: HttpContext): Promise<ApprovalStepDto> {
     const resp = this.approveStep$Response(params, context);
