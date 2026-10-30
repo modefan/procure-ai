@@ -21,7 +21,7 @@ export const SCAN_MAX_BYTES = 10 * 1024 * 1024;
         <h2 class="text-base font-semibold text-slate-900">Scan an invoice</h2>
         <p class="mt-1 text-sm text-slate-600">The AI reads supplier, lines, VAT and totals. You check everything before it is saved.</p>
       </div>
-      <app-upload-drop-zone accept=".pdf" [maxBytes]="maxBytes" [busy]="store.scanning()" busyLabel="Reading the invoice…" (fileSelected)="store.scan($event)">
+      <app-upload-drop-zone class="block" accept=".pdf" [maxBytes]="maxBytes" [busy]="store.scanning()" busyLabel="Reading the invoice…" (fileSelected)="store.scan($event)">
         <span aria-hidden="true">📄</span> Drop an invoice PDF here
       </app-upload-drop-zone>
 
