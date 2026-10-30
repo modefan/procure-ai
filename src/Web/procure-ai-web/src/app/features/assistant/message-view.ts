@@ -79,7 +79,7 @@ const nextFrame = (fn: () => void): (() => void) => {
             </p>
           }
         }
-        @if (m.sources.length > 0) {
+        @if (m.sources.length > 0 && m.status !== 'Blocked') {
           <app-source-chips [sources]="m.sources" />
         }
         @if (actions() && !streaming()) {

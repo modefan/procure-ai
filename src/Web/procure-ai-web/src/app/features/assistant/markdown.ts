@@ -50,8 +50,16 @@ export function renderMarkdown(markdown: string): string {
   if (markdown.trim() === '') {
     return '';
   }
-  const html = marked.parse(markdown, { async: false });
+  const html = marked.parse(keepAmounts(markdown), { async: false });
   return getPurifier().sanitize(html, PURIFY_CONFIG);
+}
+
+const NBSP = String.fromCharCode(0xa0);
+const AMOUNT = new RegExp(String.raw`\bR[ ${NBSP}]?\d{1,3}(?:[ ${NBSP}]\d{3})+(?:,\d{2})?|\bR \d+(?:,\d{2})?`, 'g');
+
+/** "R 900 000,00" never wraps: the spaces after the R and between the digit groups become no-break spaces. */
+export function keepAmounts(text: string): string {
+  return text.replace(AMOUNT, (amount) => amount.replace(/ /g, NBSP));
 }
 
 function escapeHtml(text: string): string {

@@ -1,4 +1,6 @@
-import { renderMarkdown } from './markdown';
+import { keepAmounts, renderMarkdown } from './markdown';
+
+const NBSP = String.fromCharCode(0xa0);
 
 describe('renderMarkdown', () => {
   it('markdown_strips_script_and_event_handlers', () => {
@@ -42,12 +44,18 @@ describe('renderMarkdown', () => {
       'text/html',
     );
     expect(doc.querySelector('table th')?.textContent).toBe('Amount');
-    expect(doc.querySelector('td')?.textContent).toBe('R 150 000');
+    expect(doc.querySelector('td')?.textContent).toBe(`R${NBSP}150${NBSP}000`);
     expect(doc.querySelector('pre code')?.textContent).toContain('const x = 1;');
     expect(doc.querySelectorAll('li').length).toBe(2);
   });
 
   it('an empty text renders nothing', () => {
     expect(renderMarkdown('')).toBe('');
+  });
+
+  it('amounts_stay_on_one_line', () => {
+    expect(keepAmounts('Budget of IT-200: R 900 000,00; spent R 0,00. Over R 20 000 up to R200 000.')).toBe(
+      `Budget of IT-200: R${NBSP}900${NBSP}000,00; spent R${NBSP}0,00. Over R${NBSP}20${NBSP}000 up to R200${NBSP}000.`,
+    );
   });
 });

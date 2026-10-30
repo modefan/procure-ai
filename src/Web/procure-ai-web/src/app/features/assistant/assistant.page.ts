@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { afterNextRender, afterRenderEffect, Component, computed, effect, ElementRef, inject, Injector, OnInit, signal, viewChild } from '@angular/core';
+import { afterNextRender, afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, OnInit, signal, viewChild } from '@angular/core';
 import { disabled, form, FormField, maxLength } from '@angular/forms/signals';
 import { AssistantStore, ChatMessage } from './assistant.store';
 import { ConversationList } from './conversation-list';
@@ -36,7 +36,7 @@ const EXAMPLES = [
           <button type="button" class="btn-secondary !px-3 lg:hidden" aria-haspopup="dialog" (click)="openDrawer()" data-testid="open-drawer">
             <span aria-hidden="true">☰</span> Conversations
           </button>
-          <h1 class="min-w-0 truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{{ store.current()?.title || 'Policy assistant' }}</h1>
+          <h1 class="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Policy assistant</h1>
           @if (store.info()?.demoModel) {
             <span class="badge-warn" data-testid="demo-model" title="No AI account is connected: a built-in model answers from the policy text.">Demo model</span>
           }
@@ -73,7 +73,7 @@ const EXAMPLES = [
                 </ul>
               </div>
             } @else {
-              <ol class="flex flex-col gap-5" aria-label="Messages">
+              <ol #content class="flex flex-col gap-5" aria-label="Messages">
                 @for (m of store.messages(); track m.id; let i = $index) {
                   <li>
                     <app-message-view
@@ -120,14 +120,16 @@ const EXAMPLES = [
                 {{ ' ' + notice.detail }}
               }
             </p>
-            <div class="flex shrink-0 gap-2">
-              @if (notice.retry) {
-                <button type="button" class="btn-secondary !py-1" (click)="retry()" [disabled]="store.inputLocked()" data-testid="retry">Retry</button>
-              }
-              @if (notice.kind !== 'quota') {
-                <button type="button" class="btn-ghost !px-2 !py-1" (click)="store.dismissNotice()" aria-label="Dismiss">✕</button>
-              }
-            </div>
+            @if (notice.retry || notice.kind !== 'quota') {
+              <div class="flex shrink-0 gap-2">
+                @if (notice.retry) {
+                  <button type="button" class="btn-secondary !py-1" (click)="retry()" [disabled]="store.inputLocked()" data-testid="retry">Retry</button>
+                }
+                @if (notice.kind !== 'quota') {
+                  <button type="button" class="btn-ghost !px-2 !py-1" (click)="store.dismissNotice()" aria-label="Dismiss">✕</button>
+                }
+              </div>
+            }
           </div>
         }
 
@@ -221,6 +223,7 @@ export class AssistantPage implements OnInit {
 
   private readonly scroller = viewChild.required<ElementRef<HTMLElement>>('scroller');
   private readonly questionBox = viewChild.required<ElementRef<HTMLTextAreaElement>>('question');
+  private readonly content = viewChild<ElementRef<HTMLElement>>('content');
   private readonly stopButton = viewChild<ElementRef<HTMLButtonElement>>('stop');
   private readonly drawer = viewChild.required<ElementRef<HTMLDialogElement>>('drawer');
 
@@ -288,12 +291,33 @@ export class AssistantPage implements OnInit {
         live?.tools;
         live?.sources;
         if (this.following()) {
-          const el = this.scroller().nativeElement;
-          el.scrollTop = el.scrollHeight;
-          this.lastTop = el.scrollTop;
+          this.scrollToBottom();
         }
       },
     });
+
+    // Content also grows after the render that changed it (Markdown set on the next frame, a tool row opened): follow that too.
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(() => {
+        if (this.following()) {
+          this.scrollToBottom();
+        }
+      });
+      let observed: HTMLElement | null = null;
+      effect(() => {
+        const el = this.content()?.nativeElement ?? null;
+        if (el !== observed) {
+          if (observed) {
+            observer.unobserve(observed);
+          }
+          if (el) {
+            observer.observe(el);
+          }
+          observed = el;
+        }
+      });
+      inject(DestroyRef).onDestroy(() => observer.disconnect());
+    }
   }
 
   ngOnInit(): void {
@@ -313,6 +337,10 @@ export class AssistantPage implements OnInit {
 
   protected jumpToLatest(): void {
     this.following.set(true);
+    this.scrollToBottom();
+  }
+
+  private scrollToBottom(): void {
     const el = this.scroller().nativeElement;
     el.scrollTop = el.scrollHeight;
     this.lastTop = el.scrollTop;

@@ -6,7 +6,8 @@ export function sourceLabel(source: StreamSource): string {
   if (source.type === 'Purchase') {
     return source.reference ? `${source.reference} · ${source.title}` : source.title;
   }
-  const section = [...source.sectionPath].reverse().find((s) => s.trim() !== '' && s !== source.title);
+  const same = (s: string) => s.trim().toLowerCase() === source.title.trim().toLowerCase();
+  const section = [...source.sectionPath].reverse().find((s) => s.trim() !== '' && !same(s));
   if (!section) {
     return source.title;
   }
@@ -15,7 +16,8 @@ export function sourceLabel(source: StreamSource): string {
 
 /** The full place of a source, for the tooltip. */
 export function sourcePath(source: StreamSource): string {
-  return [source.title, ...source.sectionPath.filter((s) => s !== source.title)].join(' › ');
+  const title = source.title.trim().toLowerCase();
+  return [source.title, ...source.sectionPath.filter((s) => s.trim().toLowerCase() !== title)].join(' › ');
 }
 
 /** The sources an answer cites, as chips: 📘 a policy section, 🧾 a past purchase. The S1… marker matches the [S1] in the text. */
