@@ -11,7 +11,7 @@ public static class AuditDatabase
 {
     /// <summary>
     /// Creates or updates Marten's schema objects (the document tables and indexes) in <c>auditdb</c>, and the audit log reader with
-    /// its <c>file_fdw</c> table (<see cref="PgAuditLogSetup"/>; as the migration's own user, the server's superuser).
+    /// its <c>file_fdw</c> tables (<see cref="PgAuditLogSetup"/>; as the migration's own user, the server's superuser).
     /// </summary>
     public static async Task MigrateAuditDatabaseAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -22,6 +22,7 @@ public static class AuditDatabase
         var pgAudit = services.GetRequiredService<IOptions<PgAuditOptions>>().Value;
         var database = configuration.GetConnectionString(DependencyInjection.DatabaseConnectionName)
             ?? throw new InvalidOperationException($"Connection string {DependencyInjection.DatabaseConnectionName} is not configured.");
-        await PgAuditLogSetup.EnsureAsync(database, DependencyInjection.AuditLogConnectionString(configuration, pgAudit), cancellationToken);
+        await PgAuditLogSetup.EnsureAsync(
+            database, DependencyInjection.AuditLogConnectionString(configuration, pgAudit), pgAudit.Schema, pgAudit.LogFileTemplate, cancellationToken);
     }
 }

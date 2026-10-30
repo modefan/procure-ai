@@ -715,7 +715,7 @@ public sealed class ServiceResourcesTests
         foreach (var setting in new[]
                  {
                      "wal_level=logical", "shared_preload_libraries=pgaudit", "pgaudit.log=ddl,role", "logging_collector=on",
-                     "log_destination=csvlog", "log_filename=postgresql-%a.log", "log_truncate_on_rotation=on", "log_rotation_age=1d",
+                     "log_destination=stderr,csvlog", "log_filename=postgresql-%a.log", "log_truncate_on_rotation=on", "log_rotation_age=1d",
                  })
         {
             settings.ShouldContain(setting);

@@ -6,32 +6,23 @@ using ProcureAi.Audit.Application.Abstractions;
 namespace ProcureAi.Audit.Infrastructure.PgAudit;
 
 /// <summary>
-/// Reads today's pgaudit lines through the <c>file_fdw</c> table <c>pgaudit.log_today</c> (created by <see cref="PgAuditLogSetup"/>), as
-/// <c>audit_log_reader</c>. Postgres names the log file after the weekday (<c>log_filename=postgresql-%a.log</c>), so one read, in one
-/// transaction: compute today's file name on the server (its <c>log_timezone</c>, the zone it names files in), point the table at it
-/// when it still points at another day's file (DDL, so once a day; its exclusive lock keeps concurrent readers from seeing a half
-/// switch), then count the audit lines of the window per role and class and take the newest statements, in one scan of the file.
-/// A file that does not exist yet (after midnight until the first log line) gives an empty summary.
+/// Reads today's pgaudit lines as <c>audit_log_reader</c>, from the <c>file_fdw</c> table of today's weekday (<c>pgaudit.log_mon</c> ...
+/// <c>log_sun</c>, created by <see cref="PgAuditLogSetup"/>). Postgres names the log file after the weekday (<c>log_filename=postgresql-%a.log</c>),
+/// so a read asks the server for its weekday (its <c>log_timezone</c>, the zone it names files in), then counts the window's audit lines per
+/// role and class and takes the newest statements, in one scan of that one file. No DDL, nothing changes on the server. A file that does
+/// not exist yet (after midnight until the first log line) fails only that read and gives an empty summary.
 /// </summary>
 public sealed class PgAuditReader(string connectionString, PgAuditOptions options, TimeProvider time) : IPgAuditReader
 {
-    /// <summary>The table the setup creates.</summary>
-    public const string Table = "pgaudit.log_today";
-
-    // Today's weekday as strftime's %a names it (to_char's 'Dy' is English, like Postgres' own strftime), in the zone the server logs in,
-    // and the file the table reads now.
-    private const string FileSql = """
-        SELECT to_char(now() AT TIME ZONE current_setting('log_timezone'), 'Dy'),
-               (SELECT option_value FROM pg_foreign_table t, pg_options_to_table(t.ftoptions)
-                WHERE t.ftrelid = 'pgaudit.log_today'::regclass AND option_name = 'filename')
-        """;
+    // Today's weekday as strftime's %a names it (to_char's 'Dy' is English, like Postgres' own strftime), in the zone the server logs in.
+    private const string WeekdaySql = "SELECT to_char(now() AT TIME ZONE current_setting('log_timezone'), 'Dy')";
 
     // One scan: 'c' rows are the counts per role and class, 'l' rows the newest audit lines. The first five fields of a pgaudit message
     // (AUDIT: SESSION, statement ID, substatement ID, class, command) never hold a comma; the statement text is parsed in code.
     private const string SummarySql = """
         WITH audit AS MATERIALIZED (
             SELECT log_time, coalesce(user_name, '') AS role, coalesce(database_name, '') AS db, message
-            FROM pgaudit.log_today
+            FROM {0}
             WHERE message LIKE 'AUDIT: %' AND log_time >= @from)
         SELECT 'c', role, split_part(message, ',', 4), count(*), NULL::timestamptz, NULL, NULL FROM audit GROUP BY role, split_part(message, ',', 4)
         UNION ALL
@@ -43,51 +34,31 @@ public sealed class PgAuditReader(string connectionString, PgAuditOptions option
         var from = time.GetUtcNow() - options.Window;
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
-            await PointAtTodaysFileAsync(connection, transaction, cancellationToken);
-            var summary = await SummariseAsync(connection, transaction, from, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return summary;
+            return await SummariseAsync(connection, await TodaysTableAsync(connection, cancellationToken), from, cancellationToken);
         }
         catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.UndefinedFile)
         {
-            // No file for today yet. The transaction is rolled back (the table keeps its old file name until a read finds today's).
             return PgAuditSummary.Empty(from);
         }
     }
 
-    private async Task PointAtTodaysFileAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private async Task<string> TodaysTableAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        string weekday;
-        string? current;
-        await using (var command = new NpgsqlCommand(FileSql, connection, transaction))
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            await reader.ReadAsync(cancellationToken);
-            weekday = reader.GetString(0);
-            current = reader.IsDBNull(1) ? null : reader.GetString(1);
-        }
-
-        var today = string.Format(CultureInfo.InvariantCulture, options.LogFileTemplate, weekday);
-        if (today == current)
-        {
-            return;
-        }
-
-        // DDL takes no parameters; the template is validated to plain path characters (PgAuditOptions) and the weekday comes from to_char.
-        await using var alter = new NpgsqlCommand(
-            $"ALTER FOREIGN TABLE {Table} OPTIONS (SET filename '{today.Replace("'", "''", StringComparison.Ordinal)}')", connection, transaction);
-        await alter.ExecuteNonQueryAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(WeekdaySql, connection);
+        var weekday = (string)(await command.ExecuteScalarAsync(cancellationToken))!;
+        // Only the seven known names reach the SQL text (the schema is validated in PgAuditOptions).
+        var known = PgAuditLogSetup.Weekdays.FirstOrDefault(d => string.Equals(d, weekday, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"The server named an unknown weekday '{weekday}'.");
+        return $"{options.Schema}.{PgAuditLogSetup.TableName(known)}";
     }
 
-    private async Task<PgAuditSummary> SummariseAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, DateTimeOffset from, CancellationToken cancellationToken)
+    private async Task<PgAuditSummary> SummariseAsync(NpgsqlConnection connection, string table, DateTimeOffset from, CancellationToken cancellationToken)
     {
         var counts = new List<PgAuditCount>();
         var latest = new List<PgAuditStatement>();
-        await using var command = new NpgsqlCommand(SummarySql, connection, transaction);
+        await using var command = new NpgsqlCommand(string.Format(CultureInfo.InvariantCulture, SummarySql, table), connection);
         command.Parameters.AddWithValue("from", from);
         command.Parameters.AddWithValue("latest", options.LatestCount);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

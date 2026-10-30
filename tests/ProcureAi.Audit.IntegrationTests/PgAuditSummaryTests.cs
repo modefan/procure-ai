@@ -9,7 +9,7 @@ namespace ProcureAi.Audit.IntegrationTests;
 
 /// <summary>
 /// The pgaudit summary (plan 06 ruling 14): the Postgres server writes csvlog, the <c>--migrate</c> run creates the <c>file_fdw</c> table
-/// <c>pgaudit.log_today</c> in <c>auditdb</c> (readable by <c>audit_log_reader</c> only), and Audit summarises its pgaudit lines into the
+/// <c>pgaudit.log_mon</c> ... <c>log_sun</c> in <c>auditdb</c> (readable by <c>audit_log_reader</c> only), and Audit summarises its pgaudit lines into the
 /// <c>pgaudit</c> status section. The log is the whole server's, so each test looks for the statements it ran itself.
 /// </summary>
 [Collection(AuditCollection.Name)]
@@ -75,20 +75,74 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     [Fact]
     public async Task Missing_log_file_gives_empty_summary()
     {
+        // Seven tables over files that do not exist, in a schema of their own (the real tables stay as they are).
         var options = ReaderOptions();
+        options.Schema = "pgaudit_missing";
         options.LogFileTemplate = "log/no-such-file-{0}.csv";
-        var reader = new PgAuditReader(app.Infra.AuditLogConnectionString, options, TimeProvider.System);
+        await PgAuditLogSetup.EnsureAsync(
+            app.Infra.DbConnectionString, app.Infra.AuditLogConnectionString, options.Schema, options.LogFileTemplate, TestContext.Current.CancellationToken);
+        try
+        {
+            var summary = await new PgAuditReader(app.Infra.AuditLogConnectionString, options, TimeProvider.System)
+                .ReadAsync(TestContext.Current.CancellationToken);
 
-        var summary = await reader.ReadAsync(TestContext.Current.CancellationToken);
+            summary.Counts.ShouldBeEmpty();
+            summary.Latest.ShouldBeEmpty();
+            summary.From.ShouldBe(DateTimeOffset.UtcNow - options.Window, TimeSpan.FromMinutes(1));
+        }
+        finally
+        {
+            await ExecuteAsSuperuserAsync("DROP SCHEMA pgaudit_missing CASCADE");
+        }
 
-        summary.Counts.ShouldBeEmpty();
-        summary.Latest.ShouldBeEmpty();
-        summary.From.ShouldBe(DateTimeOffset.UtcNow - options.Window, TimeSpan.FromMinutes(1));
-
-        // The real file is still read afterwards (the failed read changed nothing).
+        // The real file is still read.
         var real = await new PgAuditReader(app.Infra.AuditLogConnectionString, ReaderOptions(), TimeProvider.System)
             .ReadAsync(TestContext.Current.CancellationToken);
         real.Counts.ShouldNotBeEmpty("the migration's own DDL is in today's log");
+    }
+
+    [Fact]
+    public async Task Setup_runs_again_with_an_existing_role_and_tables_and_a_new_password()
+    {
+        // A reader role and schema of its own, so the real reader keeps its password.
+        var role = $"audit_log_reader_{Guid.NewGuid():N}"[..28];
+        const string schema = "pgaudit_twice";
+        string Reader(string password) => new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString)
+        {
+            Username = role,
+            Password = password,
+            Pooling = false,
+        }.ConnectionString;
+
+        var options = ReaderOptions();
+        options.Schema = schema;
+        try
+        {
+            // An earlier version's leftovers: the role in pg_read_server_files, owning a log_today table.
+            await ExecuteAsSuperuserAsync($"""
+                CREATE ROLE {role} LOGIN PASSWORD 'first'; GRANT pg_read_server_files TO {role};
+                CREATE SCHEMA {schema};
+                CREATE FOREIGN TABLE {schema}.log_today (line text) SERVER pgaudit_log OPTIONS (filename 'log/postgresql-Mon.csv');
+                ALTER FOREIGN TABLE {schema}.log_today OWNER TO {role};
+                """);
+
+            await PgAuditLogSetup.EnsureAsync(app.Infra.DbConnectionString, Reader("first"), schema, options.LogFileTemplate, TestContext.Current.CancellationToken);
+            await PgAuditLogSetup.EnsureAsync(app.Infra.DbConnectionString, Reader("second"), schema, options.LogFileTemplate, TestContext.Current.CancellationToken);
+
+            var summary = await new PgAuditReader(Reader("second"), options, TimeProvider.System).ReadAsync(TestContext.Current.CancellationToken);
+            summary.Counts.ShouldNotBeEmpty();
+            var old = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(Reader("first"), "SELECT 1"));
+            old.SqlState.ShouldBe(PostgresErrorCodes.InvalidPassword);
+            (await ScalarAsync(app.Infra.DbConnectionString, $"SELECT pg_has_role('{role}', 'pg_read_server_files', 'MEMBER')")).ShouldBe(false);
+            (await ScalarAsync(app.Infra.DbConnectionString, $"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relkind = 'f'"))
+                .ShouldBe(7L, "log_mon ... log_sun, the old log_today is gone");
+            (await ScalarAsync(app.Infra.DbConnectionString, $"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = '{role}')"))
+                .ShouldBe(0L);
+        }
+        finally
+        {
+            await ExecuteAsSuperuserAsync($"DROP SCHEMA IF EXISTS {schema} CASCADE; REVOKE CONNECT ON DATABASE auditdb FROM {role}; DROP ROLE IF EXISTS {role}");
+        }
     }
 
     [Fact]
@@ -110,7 +164,7 @@ public sealed class PgAuditSummaryTests(AuditApp app)
 
             foreach (var sql in new[]
                      {
-                         "SELECT count(*) FROM pgaudit.log_today",
+                         "SELECT count(*) FROM pgaudit.log_mon",
                          "SELECT pg_read_file('postmaster.pid')",
                          "CREATE TEMP TABLE leak (line text); COPY leak FROM '/etc/passwd'",
                      })
@@ -120,13 +174,66 @@ public sealed class PgAuditSummaryTests(AuditApp app)
             }
 
             // audit_log_reader can.
-            await Should.NotThrowAsync(() => ExecuteAsync(app.Infra.AuditLogConnectionString, "SELECT count(*) FROM pgaudit.log_today"));
+            var today = await TodaysTableAsync();
+            await Should.NotThrowAsync(() => ExecuteAsync(app.Infra.AuditLogConnectionString, $"SELECT count(*) FROM {today}"));
             new NpgsqlConnectionStringBuilder(app.Infra.AuditLogConnectionString).Username.ShouldBe("audit_log_reader");
         }
         finally
         {
             await ExecuteAsSuperuserAsync($"REVOKE ALL ON SCHEMA pgaudit FROM {appRole}; REVOKE CONNECT ON DATABASE auditdb FROM {appRole}; DROP ROLE {appRole}");
         }
+    }
+
+    [Fact]
+    public async Task Reader_can_read_only_the_log_tables()
+    {
+        // audit_log_reader may SELECT the weekday tables, nothing more: no server files of its own choosing (no pg_read_server_files),
+        // no repointing a table (not the owner), no new foreign table.
+        foreach (var sql in new[]
+                 {
+                     "CREATE TEMP TABLE leak (line text); COPY leak FROM '/etc/passwd'",
+                     "SELECT pg_read_file('pg_hba.conf')",
+                     "ALTER FOREIGN TABLE pgaudit.log_mon OPTIONS (SET filename 'pg_hba.conf')",
+                     "ALTER FOREIGN TABLE pgaudit.log_today OPTIONS (SET filename 'pg_hba.conf')",
+                     "CREATE FOREIGN TABLE pgaudit.leak (line text) SERVER pgaudit_log OPTIONS (filename 'pg_hba.conf')",
+                 })
+        {
+            var denied = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(app.Infra.AuditLogConnectionString, sql), sql);
+            denied.SqlState.ShouldBeOneOf([PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.UndefinedTable], sql);
+        }
+
+        (await ScalarAsync(app.Infra.AuditLogConnectionString,
+                "SELECT pg_has_role(current_user, 'pg_read_server_files', 'USAGE') OR EXISTS (SELECT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'pgaudit' AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user))"))
+            .ShouldBe(false, "the reader neither has pg_read_server_files nor owns a log table");
+
+        // Today's table still reads.
+        var today = await TodaysTableAsync();
+        await Should.NotThrowAsync(() => ExecuteAsync(app.Infra.AuditLogConnectionString, $"SELECT count(*) FROM {today}"));
+    }
+
+    [Fact]
+    public async Task Server_log_still_reaches_the_container_console()
+    {
+        // logging_collector takes stderr into files; the image's entrypoint streams the current stderr file to the console, so the
+        // server log still reaches docker logs and the Aspire dashboard.
+        var marker = $"procureai-log-probe-{Guid.NewGuid():N}";
+        await ExecuteAsSuperuserAsync($"DO $$ BEGIN RAISE LOG '{marker}'; END $$");
+
+        var deadline = DateTime.UtcNow + LogTimeout;
+        string console;
+        do
+        {
+            console = await app.Infra.PostgresConsoleAsync();
+            if (console.Contains(marker, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+        }
+        while (DateTime.UtcNow < deadline);
+
+        throw new TimeoutException($"The server log line did not reach the console. Last console lines: {string.Join('\n', console.Split('\n').TakeLast(10))}");
     }
 
     [Fact]
@@ -149,6 +256,7 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     private PgAuditOptions ReaderOptions() => new()
     {
         ConnectionName = "auditlog",
+        Schema = "pgaudit",
         LogFileTemplate = "log/postgresql-{0}.csv",
         Window = TimeSpan.FromDays(1),
         LatestCount = 10,
@@ -178,6 +286,19 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     }
 
     private Task ExecuteAsSuperuserAsync(string sql) => ExecuteAsync(app.Infra.DbConnectionString, sql);
+
+    /// <summary>The table over today's file (the weekday in the server's log_timezone, as Postgres names its files).</summary>
+    private async Task<string> TodaysTableAsync() =>
+        "pgaudit.log_" + (string)(await ScalarAsync(app.Infra.AuditLogConnectionString,
+            "SELECT lower(to_char(now() AT TIME ZONE current_setting('log_timezone'), 'Dy'))"))!;
+
+    private static async Task<object?> ScalarAsync(string connectionString, string sql)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection);
+        return await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+    }
 
     private static async Task ExecuteAsync(string connectionString, string sql)
     {

@@ -46,9 +46,10 @@ var postgres = builder.AddPostgres(ResourceNames.Postgres)
         "-c", "shared_preload_libraries=pgaudit",
         "-c", "pgaudit.log=ddl,role",
         // csvlog, one file per weekday (log/postgresql-Mon.csv ... in the data directory), overwritten a week later: Audit reads
-        // today's file through file_fdw for the pgaudit summary (plan 06 ruling 14).
+        // today's file through file_fdw for the pgaudit summary (plan 06 ruling 14). stderr goes to log/postgresql-<Dy>.log, which the image's
+        // entrypoint streams to the console, so the server log still reaches the dashboard.
         "-c", "logging_collector=on",
-        "-c", "log_destination=csvlog",
+        "-c", "log_destination=stderr,csvlog",
         "-c", "log_filename=postgresql-%a.log",
         "-c", "log_truncate_on_rotation=on",
         "-c", "log_rotation_age=1d",

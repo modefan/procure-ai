@@ -59,7 +59,7 @@ public sealed class PostgresFixture : IAsyncLifetime
                 "-c", "pgaudit.log=ddl,role",
                 // csvlog, one file per weekday, as the AppHost runs it: the pgaudit summary reads today's file (plan 06 ruling 14).
                 "-c", "logging_collector=on",
-                "-c", "log_destination=csvlog",
+                "-c", "log_destination=stderr,csvlog",
                 "-c", "log_filename=postgresql-%a.log",
                 "-c", "log_truncate_on_rotation=on",
                 "-c", "log_rotation_age=1d",
@@ -79,6 +79,13 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>Connection string for a database on this server.</summary>
     public string ConnectionString(string database) =>
         new NpgsqlConnectionStringBuilder(_container!.GetConnectionString()) { Database = database }.ConnectionString;
+
+    /// <summary>What the container wrote to its console (stdout and stderr) so far.</summary>
+    public async Task<string> ConsoleAsync()
+    {
+        var (stdout, stderr) = await _container!.GetLogsAsync();
+        return stdout + stderr;
+    }
 
     /// <summary>Creates an empty database (dropping a leftover of the same name) and returns its connection string.</summary>
     public async Task<string> CreateDatabaseAsync(string name)

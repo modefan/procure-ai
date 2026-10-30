@@ -118,6 +118,9 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
     /// <summary>An empty database (no migrations), for tests that migrate it themselves.</summary>
     public Task<string> CreateEmptyDatabaseAsync(string name) => _postgres!.CreateDatabaseAsync(name);
 
+    /// <summary>What the Postgres container wrote to its console (stdout and stderr) so far.</summary>
+    public Task<string> PostgresConsoleAsync() => _postgres!.ConsoleAsync();
+
     // Debezium only publishes to an existing exchange (the AppHost declares it the same way).
     private async Task DeclareCdcExchangeAsync()
     {
