@@ -52,7 +52,7 @@ public sealed class AssistantTests(AppFixture fixture)
         await Assertions.Expect(step).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
         await Assertions.Expect(step).ToContainTextAsync("IT-200");
         await Assertions.Expect(answer.Locator(".md-answer table")).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
-        await Assertions.Expect(answer.Locator(".md-answer table")).ToContainTextAsync("Line manager, department head and finance");
+        await Assertions.Expect(answer.Locator(".md-answer table")).ToContainTextAsync("Department head and finance, and the line manager when the total is within their approval limit");
         await Assertions.Expect(answer.GetByTestId("sources").Locator("li").First).ToBeVisibleAsync();
         await Assertions.Expect(answer.GetByTestId("sources")).ToContainTextAsync("4.2 Approval thresholds");
 

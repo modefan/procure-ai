@@ -215,4 +215,31 @@ public sealed class HybridSearchTests(AssistantApp app)
         // 0 takes Assistant:Retrieval:TopK (6).
         (await search.SearchAsync(Policy(m, 0), Ct)).Count.ShouldBe(6);
     }
+
+    /// <summary>
+    /// Several children of one section all match, but the section is one source: the best-ranked child stands for it, and the freed slots
+    /// are filled with other sections up to top K (no two hits share a parent, so the prompt and the source chips never repeat a section).
+    /// </summary>
+    [Fact]
+    public async Task One_hit_per_section_and_freed_slots_refilled()
+    {
+        var tenant = AssistantApp.NewTenant();
+        var m = Marker("dedupe");
+        await SearchSeed.AddDocumentAsync(
+            app, tenant, "Procurement policy", 1,
+            [
+                (1, new SeedSection(["4 Approvals", "4.2 Thresholds"], $"Thresholds {m} parent.", $"{m} {m} {m} thresholds first part.", $"{m} {m} {m} thresholds second part.", $"{m} {m} {m} thresholds third part.")),
+                (1, new SeedSection(["5 Quotes"], $"Quotes {m} parent.", $"{m} quotes.")),
+                (1, new SeedSection(["6 VAT"], $"VAT {m} parent.", $"{m} VAT.")),
+                (1, new SeedSection(["7 Gifts"], "Gifts parent.", "Gifts above R 500 are declared.")),
+            ]);
+
+        await using var db = TenantDb(app, tenant);
+        var hits = await SearchSeed.Search(app, db).SearchAsync(Policy(m, 3), Ct);
+
+        hits.Count.ShouldBe(3, "the slots of the repeated section are refilled");
+        hits.Select(h => h.ParentText).ShouldBeUnique();
+        hits.Select(h => h.SectionPath[^1]).ShouldBe(["4.2 Thresholds", "5 Quotes", "6 VAT"], ignoreOrder: true);
+        hits.Count(h => h.ParentText == $"Thresholds {m} parent.").ShouldBe(1);
+    }
 }

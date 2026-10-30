@@ -63,12 +63,15 @@ public sealed class ToolSession(IReadOnlyList<SourceRef> sources, int maxCalls)
         }
     }
 
-    /// <summary>The marker of <paramref name="hit"/>: the one it already has, or the next free one (<c>S7</c> after six sources).</summary>
+    /// <summary>
+    /// The marker of <paramref name="hit"/>: the one it already has, or the one of its section when another child of that section is
+    /// already a source (one source per section, like the search), or the next free one (<c>S7</c> after six sources).
+    /// </summary>
     public (string Ref, bool Added) AddSource(SearchHit hit)
     {
         lock (_gate)
         {
-            if (_sources.FirstOrDefault(s => s.ChunkId == hit.ChunkId) is { } known)
+            if (_sources.FirstOrDefault(s => s.ChunkId == hit.ChunkId || SameSection(s, hit)) is { } known)
             {
                 return (known.Ref, false);
             }
@@ -78,6 +81,17 @@ public sealed class ToolSession(IReadOnlyList<SourceRef> sources, int maxCalls)
             return (reference, true);
         }
     }
+
+    /// <summary>
+    /// The same section: a policy chunk with the same document title and heading path (a chunk without headings is only itself), or the
+    /// same past purchase (request number).
+    /// </summary>
+    private static bool SameSection(SourceRef source, SearchHit hit) =>
+        source.Type == hit.Type
+        && (hit.Type == SourceType.Purchase
+            ? hit.Reference is not null && string.Equals(source.Reference, hit.Reference, StringComparison.Ordinal)
+            : hit.SectionPath.Count > 0 && string.Equals(source.Title, hit.Title, StringComparison.Ordinal)
+              && source.SectionPath.SequenceEqual(hit.SectionPath, StringComparer.Ordinal));
 
     public void Record(string callId, ToolOutcome outcome)
     {

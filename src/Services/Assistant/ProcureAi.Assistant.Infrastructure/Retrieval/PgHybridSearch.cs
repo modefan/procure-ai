@@ -29,7 +29,7 @@ namespace ProcureAi.Assistant.Infrastructure.Retrieval;
 /// version of a document that was not removed) explicitly. The document check is an <c>EXISTS</c>, so the vector arm stays a scan of one
 /// table in distance order, and the kind and source type literals are written into the SQL (not parameters), so the planner can match the
 /// partial index (<c>kind = 'Child' AND embedding IS NOT NULL</c>). The arms are fused (<see cref="RrfMerger"/>, <c>RrfK</c>), reranked
-/// (<see cref="IReranker"/>) and cut to the top K; the hits' texts, titles and parents are then read through EF Core, where the tenant
+/// (<see cref="IReranker"/>) and cut to the top K, keeping one hit per section (the best-ranked child of each parent); the hits' texts, titles and parents are then read through EF Core, where the tenant
 /// query filter applies once more.
 /// </summary>
 public sealed class PgHybridSearch(
@@ -84,15 +84,25 @@ public sealed class PgHybridSearch(
                 await RunAsync(KeywordSql, Parameters(request.Types, perArm, query: query), cancellationToken)),
             cancellationToken);
         var fused = RrfMerger.Merge([nearest, keyword], retrieval.RrfK);
-        // The reranker reads the fused candidates (up to one arm's worth); without it only the top K are loaded.
-        var candidates = fused.Take(retrieval.Rerank ? Math.Max(topK, perArm) : topK).ToList();
-        var hits = await LoadAsync(candidates, cancellationToken);
+        // Every fused candidate is loaded (at most two arms' worth), so that after keeping one hit per section the slots of a repeated
+        // section are refilled with the next distinct sections. The reranker reads up to one arm's worth of them.
+        var hits = OnePerSection(await LoadAsync(fused, cancellationToken));
         if (retrieval.Rerank)
         {
-            hits = await reranker.RerankAsync(query, hits, cancellationToken);
+            hits = await reranker.RerankAsync(query, [.. hits.Take(Math.Max(topK, perArm))], cancellationToken);
         }
 
         return [.. hits.Take(topK)];
+    }
+
+    /// <summary>
+    /// One hit per section: children of the same parent bring the same parent text into the prompt and would show as the same source
+    /// twice, so only the best-ranked child of each parent is kept (a purchase chunk has no parent and is its own section).
+    /// </summary>
+    private static IReadOnlyList<SearchHit> OnePerSection(IReadOnlyList<(SearchHit Hit, Guid Section)> hits)
+    {
+        var seen = new HashSet<Guid>();
+        return [.. hits.Where(h => seen.Add(h.Section)).Select(h => h.Hit)];
     }
 
     /// <summary>The vector arm alone, nearest first (tests and diagnostics).</summary>
@@ -185,7 +195,8 @@ public sealed class PgHybridSearch(
     }
 
     /// <summary>The hits of <paramref name="candidates"/>, in their order, read through the tenant query filter.</summary>
-    private async Task<IReadOnlyList<SearchHit>> LoadAsync(IReadOnlyList<RrfResult<Guid>> candidates, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<(SearchHit Hit, Guid Section)>> LoadAsync(
+        IReadOnlyList<RrfResult<Guid>> candidates, CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
         {
@@ -198,6 +209,7 @@ public sealed class PgHybridSearch(
             .Select(c => new
             {
                 c.Id,
+                c.ParentId,
                 c.SourceType,
                 c.SectionPath,
                 c.Text,
@@ -207,7 +219,7 @@ public sealed class PgHybridSearch(
             })
             .ToDictionaryAsync(r => r.Id, cancellationToken);
 
-        var hits = new List<SearchHit>(candidates.Count);
+        var hits = new List<(SearchHit Hit, Guid Section)>(candidates.Count);
         foreach (var candidate in candidates)
         {
             if (!rows.TryGetValue(candidate.Item, out var row))
@@ -216,7 +228,7 @@ public sealed class PgHybridSearch(
             }
 
             var isPurchase = row.SourceType == SourceType.Purchase;
-            hits.Add(new SearchHit(
+            hits.Add((new SearchHit(
                 row.Id,
                 row.SourceType,
                 (isPurchase ? row.Purchase?.Title : row.DocumentTitle) ?? "",
@@ -224,7 +236,7 @@ public sealed class PgHybridSearch(
                 row.Text,
                 row.ParentText ?? row.Text,
                 isPurchase ? row.Purchase?.Number : null,
-                candidate.Score));
+                candidate.Score), row.ParentId ?? row.Id));
         }
 
         return hits;

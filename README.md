@@ -275,7 +275,7 @@ invoice (supplier, VAT number, number, date, order number, lines, totals). The m
 and VAT are recalculated, differences become warnings and lower the confidence. The scan prefills the invoice form (the
 order it names is chosen when the user can see it), and nothing is saved until the user checks and saves it.
 
-**Evaluation.** `tests/ProcureAi.Assistant.Evaluation/eval/questions.json` holds 33 questions with the policy sections
+**Evaluation.** `tests/ProcureAi.Assistant.Evaluation/eval/questions.json` holds 34 questions with the policy sections
 that answer them. Retrieval is tested on every run: hit@6 (an expected section among the six sources) is **1.00** on the
 seeded policy with the Fake provider (the test requires 0.8). Groundedness and relevance are judged by a model with
 Microsoft.Extensions.AI.Evaluation.Quality in the evaluation project; it spends tokens, so it is outside the CI loop and
@@ -358,7 +358,7 @@ Sign in through Keycloak; the demo password is the `keycloak-demo-password` para
 Playwright end-to-end tests (live approval without reload, presence, conflict dialog, forbidden pages, logout isolation, reconnect,
 the assistant's streamed answer and Stop, policy upload to Ready, invoice scan to a saved invoice), about 490 Vitest specs for the Angular app, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
 whole AppHost and drives a request through approval, purchasing, invoicing and audit, and asks the assistant through the
-gateway. The assistant's retrieval is measured on every run (hit@6 on 33 questions); its model-judged evaluation
+gateway. The assistant's retrieval is measured on every run (hit@6 on 34 questions); its model-judged evaluation
 (`tests/ProcureAi.Assistant.Evaluation`, groundedness and relevance) needs a real provider and is run by hand. GitHub Actions builds with warnings as errors and fails
 the build if any of the services' OpenAPI documents (found by convention, so a new service is covered
 automatically) or the generated Angular clients differ from what is committed. The test suites

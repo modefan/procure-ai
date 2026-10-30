@@ -3,6 +3,7 @@
   { "question": "Does a R 15 000 purchase need the department head?", "expectedSources": ["4.2 Approval thresholds"], "tenant": "acme" },
   { "question": "Are the approval thresholds compared with the amount including or excluding VAT?", "expectedSources": ["4.2 Approval thresholds", "6.1 VAT rate and amounts"], "tenant": "acme" },
   { "question": "When does finance need to approve a purchase request?", "expectedSources": ["4.2 Approval thresholds", "4.3 Escalation and reminders"], "tenant": "acme" },
+  { "question": "Who approves when the total is above my manager's approval limit?", "expectedSources": ["4.1 Approval chain", "4.2 Approval thresholds"], "tenant": "acme" },
   { "question": "Can I approve my own purchase request?", "expectedSources": ["4.1 Approval chain"], "tenant": "acme" },
   { "question": "Who approves every submitted request first?", "expectedSources": ["4.1 Approval chain", "4.2 Approval thresholds"], "tenant": "acme" },
   { "question": "What happens when an approver does not decide within two working days?", "expectedSources": ["4.3 Escalation and reminders"], "tenant": "acme" },

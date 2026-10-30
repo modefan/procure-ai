@@ -494,4 +494,4 @@ dist/
 *.secrets.json
 
 # Assistant evaluation reports (tests/ProcureAi.Assistant.Evaluation/reports)
-reports/
+tests/ProcureAi.Assistant.Evaluation/reports/

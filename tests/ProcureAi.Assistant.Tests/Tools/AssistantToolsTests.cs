@@ -179,6 +179,33 @@ public sealed class AssistantToolsTests : IDisposable
         tools.Session.TakeOutcome(tools.Session.LastCallId())!.AddedSources.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// Another child of a section the answer already cites is the same source: it keeps that section's marker and adds no source chip
+    /// (and a purchase found again keeps its marker too).
+    /// </summary>
+    [Fact]
+    public async Task Search_policy_reuses_the_marker_of_a_section_already_cited()
+    {
+        IReadOnlyList<SourceRef> sources =
+        [
+            new SourceRef("S1", Guid.NewGuid(), SourceType.Policy, "Procurement policy", ["4 Approvals", "4.2 Approval thresholds"], null),
+            new SourceRef("S2", Guid.NewGuid(), SourceType.Purchase, "Laptops", [], "PR-0982"),
+        ];
+        _search.Hits =
+        [
+            new SearchHit(Guid.NewGuid(), SourceType.Policy, "Procurement policy", ["4 Approvals", "4.2 Approval thresholds"], "Over R 200 000: finance.", "Over R 200 000: finance.", null, 1),
+            new SearchHit(Guid.NewGuid(), SourceType.Purchase, "Laptops", [], "PR-0982 · Laptops", "PR-0982 · Laptops", "PR-0982", 1),
+            Hit("Procurement policy", "Quotes are needed above R 100 000.", "5.1 Quotes"),
+        ];
+        var tools = Tools(sources: sources);
+
+        var text = Inner(await tools.SearchPolicyAsync("approval thresholds", Ct), AssistantTools.SearchPolicy);
+
+        text.ShouldStartWith("[S1] Procurement policy › 4 Approvals › 4.2 Approval thresholds: Over R 200 000: finance.\n[S2] ");
+        text.ShouldEndWith("[S3] Procurement policy › 5.1 Quotes: Quotes are needed above R 100 000.");
+        tools.Session.Sources.Select(s => s.Ref).ShouldBe(["S1", "S2", "S3"]);
+    }
+
     [Fact]
     public async Task Find_similar_purchases_searches_purchases_only_top_three()
     {

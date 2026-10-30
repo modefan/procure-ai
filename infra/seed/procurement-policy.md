@@ -36,19 +36,19 @@ A purchase may not be split into several smaller requests to stay below an appro
 
 ### 4.1 Approval chain
 
-Every submitted request is approved by the line manager of the requester. Larger requests need further approvals on top of the manager's, as set out in 4.2. Nobody may approve their own request, even when their approval limit would allow it, and the system enforces this. An approver can approve, reject with a reason, or let the request escalate when they are away.
+Every submitted request is approved by the line manager of the requester, within the manager's approval limit. When the total is above that limit, the next level up (the department head, then finance) approves in the manager's place. Larger requests need further approvals, as set out in 4.2. Nobody may approve their own request, even when their approval limit would allow it, and the system enforces this. An approver can approve, reject with a reason, or let the request escalate when they are away.
 
 ### 4.2 Approval thresholds
 
-The approvals a request needs depend on its total amount including VAT:
+The approvals a request needs depend on its total amount including VAT. Every approver approves only within their approval limit; when the total is above it, the next level up approves instead:
 
 | Total including VAT | Approvals needed |
 | --- | --- |
 | Up to R 20 000 | Line manager |
 | Over R 20 000 up to R 200 000 | Line manager and department head |
-| Over R 200 000 | Line manager, department head and finance |
+| Over R 200 000 | Department head and finance, and the line manager when the total is within their approval limit |
 
-The line manager always approves. The department head approves every request over R 20 000, and finance approves every request over R 200 000. The thresholds are compared with the amount including VAT, never with the amount excluding VAT.
+The line manager approves every request within their approval limit; above it, the department head approves in their place. The department head approves every request over R 20 000, and finance approves every request over R 200 000. The thresholds are compared with the amount including VAT, never with the amount excluding VAT.
 
 ### 4.3 Escalation and reminders
 
