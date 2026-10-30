@@ -13,3 +13,5 @@ export type { PreviewApproval$Params as PreviewApproval$Params } from './fn/appr
 export { previewApproval as previewApproval } from './fn/approvals/preview-approval';
 export type { PreviewApprovalInternal$Params as PreviewApprovalInternal$Params } from './fn/approvals/preview-approval-internal';
 export { previewApprovalInternal as previewApprovalInternal } from './fn/approvals/preview-approval-internal';
+export type { CheckAuthorization$Params as CheckAuthorization$Params } from './fn/approvals/check-authorization';
+export { checkAuthorization as checkAuthorization } from './fn/approvals/check-authorization';

@@ -125,6 +125,21 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>The name the stub gives the tenant (<c>tenantName</c> of its user lookups); a named tenant knows every user ID.</summary>
     public void SetTenantName(string tenantId, string tenantName) => _tenantNames[tenantId] = tenantName;
 
+    private readonly ConcurrentDictionary<(string Tenant, string UserId), StubExplainedUser> _explained = new();
+
+    /// <summary>
+    /// A stored user of one tenant for <c>internal/explain</c> (users without one are 404): their roles (the permission sources come
+    /// from the tenant's matrix), cost centers, headed departments, approval limit and whether they approve for finance.
+    /// </summary>
+    public void SetExplainedUser(
+        string tenantId, string userId, string displayName, string[] roles, decimal approvalLimit,
+        string[]? costCenters = null, string[]? departments = null, bool isFinanceApprover = false) =>
+        _explained[(tenantId, userId)] = new StubExplainedUser(
+            displayName, roles, costCenters ?? [], departments ?? [], approvalLimit, isFinanceApprover);
+
+    private sealed record StubExplainedUser(
+        string DisplayName, string[] Roles, string[] CostCenters, string[] Departments, decimal ApprovalLimit, bool IsFinanceApprover);
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -208,6 +223,38 @@ public sealed class StubAccessServer : IAsyncDisposable
             return user.Email is null
                 ? Results.Json(new { userId, displayName = user.Name, tenantName })
                 : Results.Json(new { userId, displayName = user.Name, email = user.Email, tenantName });
+        });
+        app.MapGet("/api/v1/access/internal/explain", (HttpContext http, string userId) =>
+        {
+            stub.Record(http);
+            if (stub.Down)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var tenant = http.Request.Headers["X-Tenant-Id"].ToString();
+            if (!stub._explained.TryGetValue((tenant, userId), out var user))
+            {
+                return Results.NotFound();
+            }
+
+            var matrix = stub._matrices.GetValueOrDefault(tenant) ?? DefaultMatrix;
+            var sources = matrix.Where(r => user.Roles.Contains(r.Key, StringComparer.Ordinal))
+                .SelectMany(r => r.Value.Select(permission => (Permission: permission, Role: r.Key)))
+                .GroupBy(p => p.Permission, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Select(p => p.Role).Order(StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
+            return Results.Json(new
+            {
+                userId,
+                displayName = user.DisplayName,
+                tenantId = tenant,
+                roles = user.Roles.Order(StringComparer.Ordinal).ToArray(),
+                permissionSources = sources,
+                costCenterCodes = user.CostCenters,
+                departmentCodes = user.Departments,
+                approvalLimit = user.ApprovalLimit,
+                isFinanceApprover = user.IsFinanceApprover,
+            });
         });
         app.MapGet("/api/v1/access/internal/cost-centers/{code}/approvers", (HttpContext http, string code) =>
         {

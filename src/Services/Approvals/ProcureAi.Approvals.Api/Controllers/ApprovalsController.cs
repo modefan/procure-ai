@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.Approvals.Application;
+using ProcureAi.Approvals.Application.AuthorizationCheck;
 using ProcureAi.Approvals.Application.Dtos;
 using ProcureAi.Approvals.Application.Queries;
 using ProcureAi.Approvals.Application.Sagas;
@@ -20,6 +21,7 @@ using ProcureAi.BuildingBlocks.Web.Paging;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Concurrency;
 using Wolverine;
+using CheckAuthorizationQuery = ProcureAi.Approvals.Application.AuthorizationCheck.CheckAuthorization;
 
 namespace ProcureAi.Approvals.Api.Controllers;
 
@@ -144,6 +146,23 @@ public sealed class ApprovalsController(
         CancellationToken cancellationToken) =>
         await bus.InvokeAsync<ApprovalPreviewDto>(new PreviewApproval(costCenter, amount, requesterId), cancellationToken);
 
+    /// <summary>
+    /// Admin: why <c>userId</c> may or may not <c>action</c> (<c>view</c> or <c>approve</c>) request <c>requestId</c> of the tenant, step
+    /// by step, by the same rules the APIs and the approval routing use. 404 when the tenant has no such user or request.
+    /// </summary>
+    [HttpGet("authorization-check", Name = "CheckAuthorization")]
+    [CachedGet(Tags = [AccessCacheTag.Template])]
+    [RequirePermission(Permissions.AdminAuthorization)]
+    [ProducesResponseType<AuthorizationCheckDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AuthorizationCheckDto>> CheckAuthorization(
+        [FromQuery, Required, MaxLength(ApprovalLimits.MaxUserIdLength)] string userId,
+        [FromQuery, Required] Guid requestId,
+        [FromQuery, Required, RegularExpression("^(view|approve)$")] string action,
+        CancellationToken cancellationToken) =>
+        await bus.InvokeAsync<AuthorizationCheckDto>(new CheckAuthorizationQuery(userId, requestId, action), cancellationToken);
 
     /// <summary>
     /// After the saga committed: evicts the cached inbox and chain at once (the saga's own eviction follows through its outbox),

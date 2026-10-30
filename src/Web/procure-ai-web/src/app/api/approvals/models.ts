@@ -5,6 +5,8 @@ export type { ApprovalChainDto } from './models/approval-chain-dto';
 export type { ApprovalPreviewDto } from './models/approval-preview-dto';
 export type { ApprovalStepDto } from './models/approval-step-dto';
 export type { ApproveStepBody } from './models/approve-step-body';
+export type { AuthorizationCheckDto } from './models/authorization-check-dto';
+export type { CheckStepDto } from './models/check-step-dto';
 export type { PagedResultOfApprovalStepDto } from './models/paged-result-of-approval-step-dto';
 export type { PreviewStepDto } from './models/preview-step-dto';
 export type { ProblemDetails } from './models/problem-details';

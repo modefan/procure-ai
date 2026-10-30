@@ -97,22 +97,23 @@ public static class ApprovalRouting
     private static bool Merges(ApprovalLevel a, IReadOnlyList<string> aApprovers, ApprovalLevel b, IReadOnlyList<string> bApprovers) =>
         a == b || (aApprovers.Count == 1 && bApprovers.Count == 1 && aApprovers[0] == bApprovers[0]);
 
-    private static IReadOnlyList<string> ApproversAt(ApprovalLevel level, Money total, string requesterId, OrganisationSnapshot org) =>
-        level switch
+    // Who is eligible is decided by ApproverEligibility alone (the authorization check explains the same rules).
+    private static IReadOnlyList<string> ApproversAt(ApprovalLevel level, Money total, string requesterId, OrganisationSnapshot org)
+    {
+        var facts = new RequestFacts(total, requesterId, org);
+        return level switch
         {
-            ApprovalLevel.Manager => Single(org.Manager, total, requesterId),
-            ApprovalLevel.DepartmentHead => Single(org.DepartmentHead, total, requesterId),
+            ApprovalLevel.Manager => Single(level, org.Manager, facts),
+            ApprovalLevel.DepartmentHead => Single(level, org.DepartmentHead, facts),
             _ => org.Finance
-                .Where(c => Eligible(c, total, requesterId))
+                .Where(c => ApproverEligibility.IsEligible(level, c, facts))
                 .OrderBy(c => c.ApprovalLimit.Amount)
                 .ThenBy(c => c.UserId, StringComparer.Ordinal)
                 .Select(c => c.UserId)
                 .ToList(),
         };
+    }
 
-    private static IReadOnlyList<string> Single(Candidate? candidate, Money total, string requesterId) =>
-        candidate is not null && Eligible(candidate, total, requesterId) ? [candidate.UserId] : [];
-
-    private static bool Eligible(Candidate c, Money total, string requesterId) =>
-        c.CanApprove && c.ApprovalLimit.Amount >= total.Amount && c.UserId != requesterId;
+    private static IReadOnlyList<string> Single(ApprovalLevel level, Candidate? candidate, RequestFacts facts) =>
+        candidate is not null && ApproverEligibility.IsEligible(level, candidate, facts) ? [candidate.UserId] : [];
 }

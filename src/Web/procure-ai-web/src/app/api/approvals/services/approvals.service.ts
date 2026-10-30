@@ -14,6 +14,9 @@ import { ApprovalPreviewDto } from '../models/approval-preview-dto';
 import { ApprovalStepDto } from '../models/approval-step-dto';
 import { approveStep } from '../fn/approvals/approve-step';
 import { ApproveStep$Params } from '../fn/approvals/approve-step';
+import { AuthorizationCheckDto } from '../models/authorization-check-dto';
+import { checkAuthorization } from '../fn/approvals/check-authorization';
+import { CheckAuthorization$Params } from '../fn/approvals/check-authorization';
 import { getApprovalChain } from '../fn/approvals/get-approval-chain';
 import { GetApprovalChain$Params } from '../fn/approvals/get-approval-chain';
 import { getApprovalInbox } from '../fn/approvals/get-approval-inbox';
@@ -180,6 +183,31 @@ export class ApprovalsService extends BaseService {
   previewApprovalInternal(params: PreviewApprovalInternal$Params, context?: HttpContext): Promise<ApprovalPreviewDto> {
     const resp = this.previewApprovalInternal$Response(params, context);
     return resp.then((r: StrictHttpResponse<ApprovalPreviewDto>): ApprovalPreviewDto => r.body);
+  }
+
+  /** Path part for operation `checkAuthorization()` */
+  static readonly CheckAuthorizationPath = '/api/v1/approvals/authorization-check';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `checkAuthorization()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  checkAuthorization$Response(params: CheckAuthorization$Params, context?: HttpContext): Promise<StrictHttpResponse<AuthorizationCheckDto>> {
+    const obs = checkAuthorization(this.http, this.rootUrl, params, context);
+    return firstValueFrom(obs);
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `checkAuthorization$Response()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  checkAuthorization(params: CheckAuthorization$Params, context?: HttpContext): Promise<AuthorizationCheckDto> {
+    const resp = this.checkAuthorization$Response(params, context);
+    return resp.then((r: StrictHttpResponse<AuthorizationCheckDto>): AuthorizationCheckDto => r.body);
   }
 
 }
