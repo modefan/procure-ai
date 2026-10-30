@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ProcureAi.Assistant.Application.Abstractions;
 using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Retrieval;
@@ -14,6 +15,7 @@ using ProcureAi.Assistant.Application.Tools;
 using ProcureAi.Assistant.Domain;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Caching;
+using ProcureAi.BuildingBlocks.Domain;
 
 namespace ProcureAi.Assistant.Application.Chat;
 
@@ -23,7 +25,7 @@ namespace ProcureAi.Assistant.Application.Chat;
 /// tenant's), the mode (422), the per-conversation lock (409), the daily quota (429, counted here), then the question is stored. The stream
 /// then rewrites a follow-up with the history (<see cref="QueryRewriter"/>), searches (<see cref="IHybridSearch"/>, top
 /// <c>Assistant:Retrieval:TopK</c>) and sends <c>sources</c>, streams the <c>answer</c> client's text as <c>delta</c>s with the six read-only
-/// tools offered (<see cref="AssistantTools"/>, Task 5b: each call is a <c>tool_call</c> and a <c>tool_result</c> event and a saved
+/// tools offered (past purchases are searched, and <c>find_similar_purchases</c> offered, only when the caller has <c>requests.read</c>) (<see cref="AssistantTools"/>, Task 5b: each call is a <c>tool_call</c> and a <c>tool_result</c> event and a saved
 /// <see cref="ToolStep"/>; a <c>search_policy</c> result that adds sources is followed by a further <c>sources</c> event with every source
 /// so far), runs the grounding rule
 /// (an answer that cites nothing is replaced: <c>replace</c>), saves the answer and sends <c>done</c>. Failures after the response started
@@ -43,6 +45,7 @@ public sealed class AnswerStreamer(
     AssistantToolsFactory toolsFactory,
     [FromKeyedServices(AiClients.Answer)] IChatClient answerClient,
     ICallerContext caller,
+    ICallerPermissions permissions,
     ICacheInvalidator cache,
     IAiFailures failures,
     AssistantMetrics metrics,
@@ -78,6 +81,9 @@ public sealed class AnswerStreamer(
         {
             return early;
         }
+
+        // Past purchases are request data: searched, and their tool offered, only with requests.read in the runtime matrix.
+        var purchasesAllowed = await permissions.HasAsync(Permissions.RequestsRead, cancellationToken);
 
         var held = await locks.TryAcquireAsync(tenant, command.ConversationId, cancellationToken);
         if (held is null)
@@ -126,7 +132,7 @@ public sealed class AnswerStreamer(
             }
 
             await InvalidateAsync(conversation.Id);
-            return new AnswerStart.Streaming(StreamAsync(conversation, question, held, cancellationToken), held);
+            return new AnswerStart.Streaming(StreamAsync(conversation, question, purchasesAllowed, held, cancellationToken), held);
         }
         catch
         {
@@ -149,12 +155,12 @@ public sealed class AnswerStreamer(
     /// saved as <see cref="MessageStatus.Stopped"/>. The lock is released here at the latest (the answer releases it before its last event).
     /// </summary>
     private async IAsyncEnumerable<SseEvent> StreamAsync(
-        Conversation conversation, Message question, IAsyncDisposable held, [EnumeratorCancellation] CancellationToken cancellationToken)
+        Conversation conversation, Message question, bool purchasesAllowed, IAsyncDisposable held, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var answer = new AnswerState(Guid.CreateVersion7(), Stopwatch.GetTimestamp(), ai.Value.EffectiveChatModel);
         try
         {
-            await using var events = AnswerAsync(conversation, question, answer, held, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            await using var events = AnswerAsync(conversation, question, purchasesAllowed, answer, held, cancellationToken).GetAsyncEnumerator(cancellationToken);
             while (true)
             {
                 var (more, failure) = await TryAsync(async () => await events.MoveNextAsync());
@@ -191,7 +197,7 @@ public sealed class AnswerStreamer(
     }
 
     private async IAsyncEnumerable<SseEvent> AnswerAsync(
-        Conversation conversation, Message question, AnswerState answer, IAsyncDisposable held,
+        Conversation conversation, Message question, bool purchasesAllowed, AnswerState answer, IAsyncDisposable held,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var history = conversation.HistoryBeforeLastQuestion(options.Value.Answer.HistoryMessages);
@@ -207,7 +213,8 @@ public sealed class AnswerStreamer(
                     ai.Value.EffectivePrices);
             }
 
-            return await search.SearchAsync(new SearchRequest(rewrite.Query, SearchRequest.AllTypes, options.Value.Retrieval.TopK), cancellationToken);
+            var types = purchasesAllowed ? SearchRequest.AllTypes : SearchRequest.PolicyOnly;
+            return await search.SearchAsync(new SearchRequest(rewrite.Query, types, options.Value.Retrieval.TopK), cancellationToken);
         });
         if (failure is not null)
         {
@@ -225,7 +232,7 @@ public sealed class AnswerStreamer(
 
         // 2. The answer, streamed, with the tools of this question (they act as the caller and number new sources on from these).
         var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
-        var tools = toolsFactory.Create(answer.Sources);
+        var tools = toolsFactory.Create(answer.Sources, purchasesAllowed);
         answer.Tools = tools.Session;
         var chatOptions = new ChatOptions
         {

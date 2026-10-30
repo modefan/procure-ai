@@ -10,4 +10,8 @@ public sealed record SearchRequest(string Query, IReadOnlySet<SourceType> Types,
 {
     /// <summary>Both source types.</summary>
     public static readonly IReadOnlySet<SourceType> AllTypes = new HashSet<SourceType> { SourceType.Policy, SourceType.Purchase };
+
+    public static readonly IReadOnlySet<SourceType> PolicyOnly = new HashSet<SourceType> { SourceType.Policy };
+
+    public static readonly IReadOnlySet<SourceType> PurchasesOnly = new HashSet<SourceType> { SourceType.Purchase };
 }

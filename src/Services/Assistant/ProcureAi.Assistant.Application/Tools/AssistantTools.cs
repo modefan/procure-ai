@@ -52,8 +52,8 @@ public sealed partial class AssistantTools
 
     private const int MaxSummaryLength = 120;
 
-    private static readonly IReadOnlySet<SourceType> PolicyOnly = new HashSet<SourceType> { SourceType.Policy };
-    private static readonly IReadOnlySet<SourceType> PurchasesOnly = new HashSet<SourceType> { SourceType.Purchase };
+    private static readonly IReadOnlySet<SourceType> PolicyOnly = SearchRequest.PolicyOnly;
+    private static readonly IReadOnlySet<SourceType> PurchasesOnly = SearchRequest.PurchasesOnly;
 
     private readonly ToolSession _session;
     private readonly IRequestsLookup _requests;
@@ -65,25 +65,35 @@ public sealed partial class AssistantTools
     private readonly TimeProvider _time;
     private readonly AssistantMetrics _metrics;
     private readonly ILogger _logger;
+    private readonly bool _purchasesAllowed;
 
+    /// <param name="purchasesAllowed">
+    /// Whether the caller has <c>requests.read</c> (runtime matrix): past purchases are request data that this service reads from its own
+    /// table, so no callee checks it. Without it <c>find_similar_purchases</c> is not offered, and a call to it is refused without a search.
+    /// </param>
     public AssistantTools(
         ToolSession session, IRequestsLookup requests, IApprovalsLookup approvals, IBudgetsLookup budgets, ISuppliersLookup suppliers,
-        IHybridSearch search, ToolOptions options, TimeProvider time, AssistantMetrics metrics, ILogger logger)
+        IHybridSearch search, ToolOptions options, TimeProvider time, AssistantMetrics metrics, ILogger logger, bool purchasesAllowed)
     {
         (_session, _requests, _approvals, _budgets, _suppliers, _search) = (session, requests, approvals, budgets, suppliers, search);
-        (_options, _time, _metrics, _logger) = (options, time, metrics, logger);
-        Functions =
+        (_options, _time, _metrics, _logger, _purchasesAllowed) = (options, time, metrics, logger, purchasesAllowed);
+        List<AIFunction> functions =
         [
             AIFunctionFactory.Create(SearchPolicyAsync, SearchPolicy),
             AIFunctionFactory.Create(ExplainApprovalChainAsync, ExplainApprovalChain),
             AIFunctionFactory.Create(GetRequestStatusAsync, GetRequestStatus),
             AIFunctionFactory.Create(GetBudgetAsync, GetBudget),
-            AIFunctionFactory.Create(FindSimilarPurchasesAsync, FindSimilarPurchases),
-            AIFunctionFactory.Create(GetSupplierAsync, GetSupplier),
         ];
+        if (purchasesAllowed)
+        {
+            functions.Add(AIFunctionFactory.Create(FindSimilarPurchasesAsync, FindSimilarPurchases));
+        }
+
+        functions.Add(AIFunctionFactory.Create(GetSupplierAsync, GetSupplier));
+        Functions = functions;
     }
 
-    /// <summary>The six tools, for <see cref="ChatOptions.Tools"/>.</summary>
+    /// <summary>The tools, for <see cref="ChatOptions.Tools"/>: six, or five without <c>requests.read</c>.</summary>
     public IReadOnlyList<AIFunction> Functions { get; }
 
     public ToolSession Session => _session;
@@ -187,6 +197,11 @@ public sealed partial class AssistantTools
         CancellationToken cancellationToken) =>
         RunAsync(FindSimilarPurchases, "search past purchases", "past purchases", async ct =>
         {
+            if (!_purchasesAllowed)
+            {
+                throw new ToolLookupException(ToolFailure.Forbidden, "The caller has no requests.read.");
+            }
+
             var text = Text(description, "description");
             var hits = await _search.SearchAsync(new SearchRequest(text, PurchasesOnly, PurchaseHits), ct);
             if (hits.Count == 0)
@@ -371,8 +386,11 @@ public sealed class AssistantToolsFactory(
     IRequestsLookup requests, IApprovalsLookup approvals, IBudgetsLookup budgets, ISuppliersLookup suppliers, IHybridSearch search,
     IOptions<AssistantOptions> options, TimeProvider time, AssistantMetrics metrics, ILogger<AssistantTools> logger)
 {
-    /// <summary>The tools of a question whose answer already has <paramref name="sources"/> (S1…), with a fresh call budget.</summary>
-    public AssistantTools Create(IReadOnlyList<SourceRef> sources) =>
+    /// <summary>
+    /// The tools of a question whose answer already has <paramref name="sources"/> (S1…), with a fresh call budget; past purchases only when
+    /// <paramref name="purchasesAllowed"/> (the caller has <c>requests.read</c>).
+    /// </summary>
+    public AssistantTools Create(IReadOnlyList<SourceRef> sources, bool purchasesAllowed) =>
         new(new ToolSession(sources, options.Value.Tools.MaxCallsPerQuestion), requests, approvals, budgets, suppliers, search, options.Value.Tools,
-            time, metrics, logger);
+            time, metrics, logger, purchasesAllowed);
 }

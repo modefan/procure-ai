@@ -23,12 +23,12 @@ public sealed class AssistantToolsTests : IDisposable
 
     public void Dispose() => _metrics.Provider.Dispose();
 
-    private AssistantTools Tools(ToolOptions? options = null, IReadOnlyList<SourceRef>? sources = null)
+    private AssistantTools Tools(ToolOptions? options = null, IReadOnlyList<SourceRef>? sources = null, bool purchasesAllowed = true)
     {
         options ??= new ToolOptions();
         return new AssistantTools(
             new ToolSession(sources ?? [], options.MaxCallsPerQuestion), _lookups, _lookups, _lookups, _lookups, _search, options,
-            TimeProvider.System, _metrics.Metrics, NullLogger.Instance);
+            TimeProvider.System, _metrics.Metrics, NullLogger.Instance, purchasesAllowed);
     }
 
     /// <summary>The text inside the tool's <c>&lt;data kind="tool"&gt;</c> block (and the block must be exactly one).</summary>
@@ -216,6 +216,21 @@ public sealed class AssistantToolsTests : IDisposable
         text.ShouldBe("- PR-0982 · Laptops for IT · IT-200 · R 140 000,00 incl. VAT");
         var request = _search.Requests.Single();
         (request.TopK, request.Types.Single()).ShouldBe((AssistantTools.PurchaseHits, SourceType.Purchase));
+    }
+
+    [Fact]
+    public async Task Without_requests_read_find_similar_purchases_is_not_offered_and_a_call_is_refused_without_a_search()
+    {
+        _search.Hits = [Hit("Laptops", "PR-0982 · Laptops for IT", reference: "PR-0982")];
+        var tools = Tools(purchasesAllowed: false);
+
+        tools.Functions.Select(f => f.Name).ShouldNotContain(AssistantTools.FindSimilarPurchases);
+        tools.Functions.Count.ShouldBe(5);
+        var text = Inner(await tools.FindSimilarPurchasesAsync("laptops", Ct), AssistantTools.FindSimilarPurchases);
+
+        text.ShouldBe("I couldn't search past purchases: you don't have access to past purchases.");
+        _search.Requests.ShouldBeEmpty();
+        tools.Session.TakeOutcome(tools.Session.LastCallId()).ShouldNotBeNull().Outcome.ShouldBe("forbidden");
     }
 
     [Fact]

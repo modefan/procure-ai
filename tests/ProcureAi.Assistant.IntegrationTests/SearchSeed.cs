@@ -8,6 +8,7 @@ using ProcureAi.Assistant.Application;
 using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Retrieval;
 using ProcureAi.Assistant.Domain;
+using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.Assistant.Infrastructure.Ai.Fake;
 using ProcureAi.Assistant.Infrastructure.Persistence;
 using ProcureAi.Assistant.Infrastructure.Retrieval;
@@ -92,6 +93,21 @@ internal static class SearchSeed
         AddDocumentAsync(
             app, tenant, "Procurement policy", 1,
             [.. texts.Select((text, i) => (1, new SeedSection([$"{i + 1} Rule"], $"Rule {i + 1}. {text}", text)))]);
+
+    /// <summary>A completed past purchase of <paramref name="tenant"/> and its searchable purchase chunk (as the indexer writes them).</summary>
+    public static async Task<Guid> AddPurchaseAsync(AssistantApp app, string tenant, string number, string title, string text)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var requestId = Guid.NewGuid();
+        await using var db = NewDbContext(app);
+        db.Purchases.Add(new Purchase(requestId, tenant, number, title, "IT-200", Money.Zar(140_000m), null, title, now));
+        var chunk = new Chunk(
+            Guid.CreateVersion7(), tenant, SourceType.Purchase, ChunkKind.Child, null, 0, "", text, Hash(text), now, purchaseRequestId: requestId);
+        chunk.SetEmbedding(AiOptions.FakeEmbeddingModel, FakeEmbeddingGenerator.Embed(text), null);
+        db.Chunks.Add(chunk);
+        await db.SaveChangesAsync(Ct);
+        return requestId;
+    }
 
     /// <summary>
     /// The service's hybrid search as a user of the tenant of <paramref name="tenantDb"/>; <paramref name="candidatesPerArm"/> narrows the
