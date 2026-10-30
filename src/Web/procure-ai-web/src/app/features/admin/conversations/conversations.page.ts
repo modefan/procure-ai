@@ -45,7 +45,7 @@ import { ConversationsStore } from './conversations.store';
         <ul class="mt-6 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="conversations">
           @for (item of store.items(); track item.id) {
             <li [attr.data-conversation]="item.id" class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3">
-              <a [routerLink]="['/app/admin/conversations', item.id]" class="min-w-0 flex-1 font-medium break-words text-indigo-700 hover:underline">{{ item.title }}</a>
+              <a [routerLink]="['/app/admin/conversations', item.id]" class="min-w-0 basis-full font-medium break-words text-indigo-700 hover:underline sm:flex-1 sm:basis-0">{{ item.title }}</a>
               <span class="text-sm text-slate-700">{{ store.names().get(item.userId) ?? item.userId }}</span>
               <span class="text-xs whitespace-nowrap text-slate-600">{{ item.messageCount }} {{ item.messageCount === 1 ? 'message' : 'messages' }}</span>
               @if (item.blockedCount > 0) {
