@@ -18,6 +18,7 @@
   <PropertyGroup>
     <OpenApiDocumentName>audit-v1</OpenApiDocumentName>
     <OpenApiDatabaseConnectionName>auditdb</OpenApiDatabaseConnectionName>
+    <OpenApiExtraSettings>ConnectionStrings__auditlog=Host=openapi.invalid</OpenApiExtraSettings>
   </PropertyGroup>
 
   <ItemGroup>

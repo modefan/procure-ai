@@ -57,6 +57,12 @@ public sealed class PostgresFixture : IAsyncLifetime
                 "-c", "wal_level=logical",
                 "-c", "shared_preload_libraries=pgaudit",
                 "-c", "pgaudit.log=ddl,role",
+                // csvlog, one file per weekday, as the AppHost runs it: the pgaudit summary reads today's file (plan 06 ruling 14).
+                "-c", "logging_collector=on",
+                "-c", "log_destination=csvlog",
+                "-c", "log_filename=postgresql-%a.log",
+                "-c", "log_truncate_on_rotation=on",
+                "-c", "log_rotation_age=1d",
                 "-c", $"shared_buffers={pg["SharedBuffers"]}",
                 "-c", $"work_mem={pg["WorkMem"]}")
             .WithCreateParameterModifier(p => TestLimits.Apply(p, "Postgres"));

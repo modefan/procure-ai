@@ -28,6 +28,10 @@ var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: tru
 // The simulated supplier and ERP: the key the services call them with, and the secret the supplier signs its webhooks with.
 var simulatorApiKey = builder.AddParameter("simulator-api-key", secret: true);
 var supplierWebhookSecret = builder.AddParameter("supplier-webhook-secret", secret: true);
+// The password of `audit_log_reader`, the Postgres role Audit reads the server's audit log with (plan 06 ruling 14). Generated on the first
+// run and kept in the AppHost user secrets; Audit's --migrate sets it on the role every run, so changing it needs nothing else.
+var auditLogReaderPassword = builder.AddParameter(
+    "audit-log-reader-password", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 
 // Postgres: custom image (pgvector + pgaudit), logical WAL for Debezium CDC.
 // The image's VOLUME: a named volume mounted exactly there replaces the anonymous one. Moving to pg18 (VOLUME /var/lib/postgresql,
@@ -41,6 +45,13 @@ var postgres = builder.AddPostgres(ResourceNames.Postgres)
         "-c", "wal_level=logical",
         "-c", "shared_preload_libraries=pgaudit",
         "-c", "pgaudit.log=ddl,role",
+        // csvlog, one file per weekday (log/postgresql-Mon.csv ... in the data directory), overwritten a week later: Audit reads
+        // today's file through file_fdw for the pgaudit summary (plan 06 ruling 14).
+        "-c", "logging_collector=on",
+        "-c", "log_destination=csvlog",
+        "-c", "log_filename=postgresql-%a.log",
+        "-c", "log_truncate_on_rotation=on",
+        "-c", "log_rotation_age=1d",
         "-c", $"shared_buffers={limits.Postgres.SharedBuffers}",
         "-c", $"work_mem={limits.Postgres.WorkMem}")
     // PGDATA in a subfolder of the mount (as the image docs advise for mounted volumes): initdb needs an empty folder,
@@ -144,11 +155,13 @@ var approvalsApi = builder.AddProcureAiService<Projects.ProcureAi_Approvals_Api>
     new ServiceSpec("approvals", ResourceNames.ApprovalsDb, CapturedTables: ["approval_steps", "audit_entries"], GatewayCluster: "approvals", ApiRoutePrefix: "/api/approvals"),
     shared)
     .CallsServices(accessApi);
-// Audit (Marten): stores every integration event. Nothing of its own is captured (no Debezium for auditdb).
+// Audit (Marten): stores every integration event. Nothing of its own is captured (no Debezium for auditdb). It also summarises the
+// server's pgaudit log as `audit_log_reader` (its --migrate creates the role and the file_fdw table).
 var auditApi = builder.AddProcureAiService<Projects.ProcureAi_Audit_Api>(
     new ServiceSpec("audit", ResourceNames.AuditDb, CapturedTables: [], GatewayCluster: "audit", ApiRoutePrefix: "/api/audit"),
     shared)
-    .CallsServices(accessApi);
+    .CallsServices(accessApi)
+    .WithAuditLogReader(builder, postgres, ResourceNames.AuditDb, auditLogReaderPassword);
 // Suppliers (MongoDB): the catalog of suppliers and items per tenant. It publishes no events, so it has no message store and no Debezium.
 var suppliersApi = builder.AddProcureAiService<Projects.ProcureAi_Suppliers_Api>(
     new ServiceSpec("suppliers", ResourceNames.SuppliersDb, CapturedTables: [], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),

@@ -228,6 +228,33 @@ public static class ServiceResources
         return debezium;
     }
 
+    /// <summary>The Postgres role that reads the server's audit log (plan 06 ruling 14); Audit's <c>--migrate</c> creates it.</summary>
+    public const string AuditLogReaderRole = "audit_log_reader";
+
+    /// <summary>The connection-string name Audit reads the audit log with (<c>PgAudit:ConnectionName</c>).</summary>
+    public const string AuditLogConnectionName = "auditlog";
+
+    /// <summary>
+    /// Gives a service's migrate and api resources <c>ConnectionStrings__auditlog</c>: <paramref name="database"/> on the Postgres server as
+    /// <see cref="AuditLogReaderRole"/> with the password parameter. The migrate run (as the superuser of the database's own connection
+    /// string) creates the role with this password; the api reads the log with it.
+    /// </summary>
+    public static IResourceBuilder<ProjectResource> WithAuditLogReader(
+        this IResourceBuilder<ProjectResource> api,
+        IDistributedApplicationBuilder builder,
+        IResourceBuilder<PostgresServerResource> postgres,
+        string database,
+        IResourceBuilder<ParameterResource> password)
+    {
+        var endpoint = postgres.Resource.PrimaryEndpoint;
+        var connectionString = ReferenceExpression.Create(
+            $"Host={endpoint.Property(EndpointProperty.Host)};Port={endpoint.Property(EndpointProperty.Port)};Username={AuditLogReaderRole};Password={password.Resource};Database={database}");
+        var migrateName = api.Resource.Name[..^ApiSuffix.Length] + MigrateSuffix;
+        var migrate = builder.Resources.OfType<ProjectResource>().Single(r => r.Name == migrateName);
+        builder.CreateResourceBuilder(migrate).WithEnvironment("ConnectionStrings__" + AuditLogConnectionName, connectionString);
+        return api.WithEnvironment("ConnectionStrings__" + AuditLogConnectionName, connectionString);
+    }
+
     /// <summary>The Serilog OpenTelemetry sink has no environment-variable fallback, so it is pointed at the dashboard here.</summary>
     public static IResourceBuilder<T> WithOtlpEndpoint<T>(this IResourceBuilder<T> builder, string? otlpEndpoint)
         where T : IResourceWithEnvironment =>

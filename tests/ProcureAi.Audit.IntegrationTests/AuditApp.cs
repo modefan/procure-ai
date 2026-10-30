@@ -22,9 +22,20 @@ public sealed class AuditInfraFixture() : ServiceInfraFixture("auditdb")
     /// <summary>Where the Audit Api's appsettings live (the test output folder also gets the Requests Api's).</summary>
     public const string ContentRoot = "src/Services/Audit/ProcureAi.Audit.Api";
 
+    /// <summary>A throwaway test value for the <c>audit_log_reader</c> role the migration creates. Not a secret.</summary>
+    public const string AuditLogReaderTestPassword = "test-only-audit-log-reader";
+
+    /// <summary><c>auditdb</c> as <c>audit_log_reader</c>, the role that reads the server's audit log (<c>ConnectionStrings:auditlog</c>).</summary>
+    public string AuditLogConnectionString => new Npgsql.NpgsqlConnectionStringBuilder(DbConnectionString)
+    {
+        Username = "audit_log_reader",
+        Password = AuditLogReaderTestPassword,
+    }.ConnectionString;
+
     protected override Task MigrateAsync(string connectionString) =>
         ApiMigrateProcess.RunAsync(
-            ApiAssembly, "auditdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false, ContentRoot);
+            ApiAssembly, "auditdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false, ContentRoot,
+            new Dictionary<string, string> { ["ConnectionStrings__auditlog"] = AuditLogConnectionString });
 }
 
 /// <summary>Captures Serilog events in memory (registered in DI, so <c>ReadFrom.Services</c> picks it up): what the service logged.</summary>
@@ -73,6 +84,7 @@ public sealed class AuditApiFactory(
         }
 
         builder.UseSetting("Audit:Matching:Grace", Grace.ToString("c"));
+        builder.UseSetting("ConnectionStrings:auditlog", infra.AuditLogConnectionString);
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
         {
             builder.UseSetting(key, value);

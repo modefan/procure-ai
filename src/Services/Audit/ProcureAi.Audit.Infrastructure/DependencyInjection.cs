@@ -12,7 +12,9 @@ using ProcureAi.Audit.Application.Events;
 using ProcureAi.Audit.Application.Status;
 using ProcureAi.BuildingBlocks.Web.Status;
 using ProcureAi.Audit.Domain;
+using ProcureAi.Audit.Infrastructure.PgAudit;
 using ProcureAi.Audit.Infrastructure.Retention;
+using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.Contracts;
 using Wolverine;
@@ -92,6 +94,7 @@ public static class DependencyInjection
         services.AddSingleton<IAuditMetrics, AuditMetrics>();
         services.AddHostedService<DataChangeRetention>();
         services.AddStatusContributor<AuditStatusContributor>();
+        services.AddPgAuditSummary(configuration);
         return services;
     }
 
@@ -146,6 +149,29 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException($"'{section}' is not configured.");
         options.RetryConcurrencyConflicts(retry, section);
     }
+
+    /// <summary>
+    /// The pgaudit summary (plan 06 ruling 14): <see cref="PgAuditOptions"/> (section <c>PgAudit</c>, validated at startup), the reader on
+    /// <c>ConnectionStrings:&lt;PgAudit:ConnectionName&gt;</c> (required: the service does not start without it) and the <c>pgaudit</c> status section.
+    /// </summary>
+    private static void AddPgAuditSummary(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddValidatedOptions<PgAuditOptions>(configuration, PgAuditOptions.SectionName);
+        services.AddOptions<PgAuditOptions>().Validate(
+            options => !string.IsNullOrWhiteSpace(configuration.GetConnectionString(options.ConnectionName)),
+            "PgAudit: the connection string named by PgAudit:ConnectionName (audit_log_reader) is not configured.");
+        services.AddSingleton<IPgAuditReader>(provider =>
+        {
+            var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<PgAuditOptions>>().Value;
+            return new PgAuditReader(AuditLogConnectionString(configuration, options), options, provider.GetRequiredService<TimeProvider>());
+        });
+        services.AddStatusContributor<PgAuditContributor>();
+    }
+
+    /// <summary>The connection string of <c>audit_log_reader</c>; the <c>--migrate</c> run creates the role from it.</summary>
+    public static string AuditLogConnectionString(IConfiguration configuration, PgAuditOptions options) =>
+        configuration.GetConnectionString(options.ConnectionName)
+        ?? throw new InvalidOperationException($"Connection string {options.ConnectionName} (the audit log reader) is not configured.");
 
     private static IReadOnlyCollection<Expression<Func<T, object>>> Columns<T>(params Expression<Func<T, object>>[] columns) => columns;
 }

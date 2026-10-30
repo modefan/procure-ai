@@ -7,7 +7,7 @@ namespace ProcureAi.Audit.Application.Status;
 /// Audit's part of the status snapshot (plan 06 ruling 10): the open alerts of changes made outside the app (manual SQL, scripts), counted per
 /// tenant (<c>outside_app_alerts_open</c>; a change without a tenant counts system-wide), and the newest <see cref="LatestPerTenant"/> of each
 /// tenant as alert items that link to the data change log filtered to that table. An alert is withdrawn when the app's own row of the change
-/// arrives late; then it is no longer open. (The pgaudit summary joins this section in Task 5.)
+/// arrives late; then it is no longer open. The pgaudit summary is a section of its own (<see cref="PgAuditContributor"/>).
 /// </summary>
 public sealed class AuditStatusContributor(IDataChangeStore changes) : IStatusContributor
 {

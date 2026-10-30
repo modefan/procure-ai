@@ -78,6 +78,12 @@ public sealed class InfrastructureStartsTests(AppHostFixture fixture)
         {
             ((long?)await cmd.ExecuteScalarAsync(TestContext.Current.CancellationToken)).ShouldBe(1);
         }
+
+        // The pgaudit summary reads today's csvlog file (plan 06 ruling 14).
+        await using (var cmd = new NpgsqlCommand("SELECT current_setting('logging_collector') || ',' || current_setting('log_destination')", connection))
+        {
+            ((string?)await cmd.ExecuteScalarAsync(TestContext.Current.CancellationToken)).ShouldBe("on,csvlog");
+        }
     }
 
     [Fact]

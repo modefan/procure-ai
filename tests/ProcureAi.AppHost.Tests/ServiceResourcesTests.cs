@@ -695,6 +695,52 @@ public sealed class ServiceResourcesTests
     }
 
     /// <summary>
+    /// The pgaudit summary (plan 06 ruling 14): Postgres writes csvlog, one file per weekday, next to every earlier server argument, and
+    /// Audit's migrate and api get <c>ConnectionStrings__auditlog</c> as <c>audit_log_reader</c> with the generated password parameter.
+    /// </summary>
+    [Fact]
+    public async Task Postgres_writes_csvlog_and_audit_reads_it_as_audit_log_reader()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var postgres = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "postgres");
+        var args = new List<object>();
+        var context = new CommandLineArgsCallbackContext(args, postgres, CancellationToken.None);
+        foreach (var annotation in postgres.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(context);
+        }
+
+        var settings = args.Select(a => a.ToString()!).ToList();
+        foreach (var setting in new[]
+                 {
+                     "wal_level=logical", "shared_preload_libraries=pgaudit", "pgaudit.log=ddl,role", "logging_collector=on",
+                     "log_destination=csvlog", "log_filename=postgresql-%a.log", "log_truncate_on_rotation=on", "log_rotation_age=1d",
+                 })
+        {
+            settings.ShouldContain(setting);
+            settings[settings.IndexOf(setting) - 1].ShouldBe("-c", setting);
+        }
+
+        var password = model.Resources.OfType<ParameterResource>().Single(p => p.Name == "audit-log-reader-password");
+        password.Secret.ShouldBeTrue();
+        foreach (var name in new[] { "audit-migrate", "audit-api" })
+        {
+            var env = await EnvironmentOfAsync(model.Resources.OfType<ProjectResource>().Single(r => r.Name == name));
+            var connection = env["ConnectionStrings__auditlog"].ShouldBeOfType<ReferenceExpression>();
+            connection.ValueExpression.ShouldContain("Username=audit_log_reader;", Case.Sensitive, name);
+            connection.ValueExpression.ShouldContain("Password={audit-log-reader-password.value};", Case.Sensitive, name);
+            connection.ValueExpression.ShouldEndWith("Database=auditdb", Case.Sensitive, name);
+        }
+
+        // No other service gets the reader's connection string.
+        foreach (var project in model.Resources.OfType<ProjectResource>().Where(r => !r.Name.StartsWith("audit-", StringComparison.Ordinal)))
+        {
+            (await EnvironmentOfAsync(project)).ShouldNotContainKey("ConnectionStrings__auditlog", project.Name);
+        }
+    }
+
+    /// <summary>
     /// Debezium's offsets (the last WAL position read) must live exactly as long as the Postgres data they point into.
     /// The Postgres volume is scoped per AppHost (<c>{app}-{sha of the AppHost path}-postgres-data</c>), so every clone or
     /// worktree gets its own database. A fixed offset volume name (<c>debezium-requestsdb-data</c>) was shared by all of
