@@ -61,3 +61,13 @@ describe('APP_ROUTES assistant', () => {
     expect(await (route!.loadComponent as () => Promise<unknown>)()).toBeTruthy();
   });
 });
+
+describe('APP_ROUTES policies', () => {
+  it('admin/policies needs admin.policies and loads its page', async () => {
+    const route = APP_ROUTES.find((r) => r.path === 'admin/policies');
+    expect(route).toBeDefined();
+    expect(route?.data?.['permission']).toBe('admin.policies');
+    expect(route?.canActivate?.length).toBe(1);
+    expect(await (route!.loadComponent as () => Promise<unknown>)()).toBeTruthy();
+  });
+});
