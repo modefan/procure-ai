@@ -5,7 +5,8 @@
 # then execs the image's normal entrypoint with the same arguments.
 #
 # After the exec the follower is a child of the postmaster, which treats a child that ends with an error or a signal as a crashed backend
-# and restarts every session. So it ignores the usual signals and never ends (it dies with the container), and errors inside are swallowed.
+# and restarts every session. So the follower ignores the usual signals, never ends (it dies with the container) and swallows errors.
+# It cannot ignore SIGKILL: anything that SIGKILLs it (an OOM kill, a stray `kill -9`) makes the postmaster crash-restart. Keep it tiny.
 set -euo pipefail
 
 follow_server_log() {
@@ -19,14 +20,17 @@ follow_server_log() {
         fi
         if [ -n "$file" ] && [ "$file" != "$current" ]; then
             if [ -n "$tail_pid" ]; then
-                kill "$tail_pid" 2>/dev/null || true
+                # SIGKILL: tail must stop whatever it inherited (it would ignore TERM if it kept the follower's ignores), and it is the
+                # follower's own child, reaped here, so the postmaster never sees it end.
+                kill -KILL "$tail_pid" 2>/dev/null || true
                 wait "$tail_pid" 2>/dev/null || true
             fi
             case "$file" in
                 /*) path="$file" ;;
                 *) path="$PGDATA/$file" ;;
             esac
-            tail -n +1 -F "$path" 2>/dev/null &
+            # tail gets the default signal handling back (ignored signals are inherited across exec).
+            ( trap - HUP INT TERM QUIT USR1 USR2 PIPE; exec tail -n +1 -F "$path" 2>/dev/null ) &
             tail_pid=$!
             current="$file"
         fi

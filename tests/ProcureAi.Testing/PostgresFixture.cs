@@ -28,6 +28,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public string NetworkAlias { get; init; } = "postgres";
 
+    /// <summary>The server's <c>log_filename</c> (as the AppHost sets it); a test of log rotation sets a per-second name instead.</summary>
+    public string LogFilename { get; init; } = "postgresql-%a.log";
+
     private string AdminConnectionString => ConnectionString("postgres");
 
     public async ValueTask InitializeAsync()
@@ -60,7 +63,7 @@ public sealed class PostgresFixture : IAsyncLifetime
                 // csvlog, one file per weekday, as the AppHost runs it: the pgaudit summary reads today's file (plan 06 ruling 14).
                 "-c", "logging_collector=on",
                 "-c", "log_destination=stderr,csvlog",
-                "-c", "log_filename=postgresql-%a.log",
+                "-c", $"log_filename={LogFilename}",
                 "-c", "log_truncate_on_rotation=on",
                 "-c", "log_rotation_age=1d",
                 "-c", $"shared_buffers={pg["SharedBuffers"]}",

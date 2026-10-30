@@ -194,12 +194,11 @@ public sealed class PgAuditSummaryTests(AuditApp app)
                      "CREATE TEMP TABLE leak (line text); COPY leak FROM '/etc/passwd'",
                      "SELECT pg_read_file('pg_hba.conf')",
                      "ALTER FOREIGN TABLE pgaudit.log_mon OPTIONS (SET filename 'pg_hba.conf')",
-                     "ALTER FOREIGN TABLE pgaudit.log_today OPTIONS (SET filename 'pg_hba.conf')",
                      "CREATE FOREIGN TABLE pgaudit.leak (line text) SERVER pgaudit_log OPTIONS (filename 'pg_hba.conf')",
                  })
         {
             var denied = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(app.Infra.AuditLogConnectionString, sql), sql);
-            denied.SqlState.ShouldBeOneOf([PostgresErrorCodes.InsufficientPrivilege, PostgresErrorCodes.UndefinedTable], sql);
+            denied.SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege, sql);
         }
 
         (await ScalarAsync(app.Infra.AuditLogConnectionString,
@@ -216,14 +215,45 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     {
         // logging_collector takes stderr into files; the image's entrypoint streams the current stderr file to the console, so the
         // server log still reaches docker logs and the Aspire dashboard.
+        await LogMarkerAndWaitForConsoleAsync(app.Infra.DbConnectionString, app.Infra.PostgresConsoleAsync);
+    }
+
+    [Fact]
+    public async Task Server_log_follows_a_rotation_to_a_new_file()
+    {
+        // At midnight Postgres starts a file with a new name (postgresql-%a.log), and the follower must move on to it. A server of its
+        // own (same image) with a per-second file name, so pg_rotate_logfile() really starts a new file; then a line logged after the
+        // rotation must still reach the console. (log_filename comes from the command line, which ALTER SYSTEM cannot override.)
+        await using var postgres = new PostgresFixture { LogFilename = "rotation-%H%M%S.log" };
+        await postgres.InitializeAsync();
+        var superuser = postgres.ConnectionString("postgres");
+
+        await LogMarkerAndWaitForConsoleAsync(superuser, postgres.ConsoleAsync);
+        var before = (string?)await ScalarAsync(superuser, "SELECT pg_current_logfile('stderr')");
+        await Task.Delay(TimeSpan.FromSeconds(1.2)); // the next file gets another name
+        await ExecuteAsync(superuser, "SELECT pg_rotate_logfile()");
+        var deadline = DateTime.UtcNow + LogTimeout;
+        string? after;
+        while ((after = (string?)await ScalarAsync(superuser, "SELECT pg_current_logfile('stderr')")) == before && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+        }
+
+        after.ShouldNotBe(before, "the server started a new log file");
+        await LogMarkerAndWaitForConsoleAsync(superuser, postgres.ConsoleAsync);
+    }
+
+    /// <summary>Logs a unique line as the superuser and waits until it appears on the Postgres container's console.</summary>
+    private static async Task LogMarkerAndWaitForConsoleAsync(string superuser, Func<Task<string>> consoleOf)
+    {
         var marker = $"procureai-log-probe-{Guid.NewGuid():N}";
-        await ExecuteAsSuperuserAsync($"DO $$ BEGIN RAISE LOG '{marker}'; END $$");
+        await ExecuteAsync(superuser, $"DO $$ BEGIN RAISE LOG '{marker}'; END $$");
 
         var deadline = DateTime.UtcNow + LogTimeout;
         string console;
         do
         {
-            console = await app.Infra.PostgresConsoleAsync();
+            console = await consoleOf();
             if (console.Contains(marker, StringComparison.Ordinal))
             {
                 return;
@@ -233,7 +263,8 @@ public sealed class PgAuditSummaryTests(AuditApp app)
         }
         while (DateTime.UtcNow < deadline);
 
-        throw new TimeoutException($"The server log line did not reach the console. Last console lines: {string.Join('\n', console.Split('\n').TakeLast(10))}");
+        var last = string.Join(" | ", console.Split('\n', StringSplitOptions.RemoveEmptyEntries).TakeLast(10));
+        throw new TimeoutException($"The server log line did not reach the console. Last console lines: {last}");
     }
 
     [Fact]
