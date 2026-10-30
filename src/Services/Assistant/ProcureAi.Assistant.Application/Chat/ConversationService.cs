@@ -8,7 +8,8 @@ namespace ProcureAi.Assistant.Application.Chat;
 public sealed record ConversationListItem(Guid Id, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 /// <summary>A conversation in the admin list: whose it is, too.</summary>
-public sealed record AdminConversationListItem(Guid Id, string UserId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+public sealed record AdminConversationListItem(
+    Guid Id, string UserId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int MessageCount, int BlockedCount);
 
 public sealed record CreatedConversation(Guid Id);
 
@@ -88,7 +89,7 @@ public sealed class ConversationService(IConversationStore store, IQuestionQuota
         var (items, total) = await store.ListInTenantAsync(
             string.IsNullOrWhiteSpace(userId) ? null : userId.Trim(), (page - 1) * size, size, cancellationToken);
         return new PagedResult<AdminConversationListItem>(
-            [.. items.Select(c => new AdminConversationListItem(c.Id, c.UserId, c.Title, c.CreatedAt, c.UpdatedAt))], page, size, total);
+            [.. items.Select(c => new AdminConversationListItem(c.Id, c.UserId, c.Title, c.CreatedAt, c.UpdatedAt, c.MessageCount, c.BlockedCount))], page, size, total);
     }
 
     public async Task<AdminConversationDto> AdminGetAsync(Guid id, CancellationToken cancellationToken)

@@ -1196,7 +1196,9 @@
           "userId",
           "title",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "messageCount",
+          "blockedCount"
         ],
         "type": "object",
         "properties": {
@@ -1217,6 +1219,14 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "messageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "blockedCount": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

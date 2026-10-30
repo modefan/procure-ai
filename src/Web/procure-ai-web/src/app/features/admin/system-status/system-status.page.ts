@@ -22,6 +22,12 @@ const HEALTH_BADGE: Record<ServiceHealth, string> = {
   Down: 'badge-error',
 };
 
+/** What each alert kind (a slug from the services) is called on screen. */
+const ALERT_LABELS: Record<string, string> = {
+  'finance-overdue': 'Finance step overdue',
+  'outside-app-change': 'Changed outside the app',
+};
+
 /**
  * Screen 18: system status for reviewers (needs `admin.system`). Services with health and circuit breakers, the saga and outbox
  * numbers, alerts, the pgaudit summary, a link to the Aspire dashboard, and the supplier chaos switch. It reads every 5 s while
@@ -116,6 +122,8 @@ const HEALTH_BADGE: Record<ServiceHealth, string> = {
           <span class="mr-5 inline-block whitespace-nowrap">Dead letters: <b>{{ store.deadLetters() }}</b> (broker {{ store.brokerDeadLetters() }})</span>
           <span class="mr-5 inline-block whitespace-nowrap">Duplicate requests coalesced today: <b>{{ store.counter('coalesced_today') }}</b></span>
           <span class="mr-5 inline-block whitespace-nowrap">Guard blocks today: <b>{{ store.counter('guard_blocks_today') }}</b></span>
+          <span class="mr-5 inline-block whitespace-nowrap">Open finance alerts: <b>{{ store.counter('finance_alerts_open') }}</b></span>
+          <span class="mr-5 inline-block whitespace-nowrap">Changed outside the app: <b>{{ store.counter('outside_app_alerts_open') }}</b></span>
         </p>
 
         <div class="mt-6 grid gap-6 lg:grid-cols-2">
@@ -126,7 +134,7 @@ const HEALTH_BADGE: Record<ServiceHealth, string> = {
                 @for (alert of store.alerts(); track $index) {
                   <li class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2">
                     <span class="min-w-0 break-words text-slate-800">
-                      <span class="badge-warn mr-2">{{ alert.kind }}</span>
+                      <span class="badge-warn mr-2">{{ kindLabel(alert.kind) }}</span>
                       @if (alert.link) {
                         <a [routerLink]="urlTree(alert.link)" class="text-indigo-700 hover:underline">{{ alert.text }}</a>
                       } @else {
@@ -219,6 +227,10 @@ export class SystemStatusPage implements OnInit {
 
   ngOnInit(): void {
     void this.store.load();
+  }
+
+  protected kindLabel(kind: string): string {
+    return ALERT_LABELS[kind] ?? kind;
   }
 
   protected badge(health: ServiceHealth): string {

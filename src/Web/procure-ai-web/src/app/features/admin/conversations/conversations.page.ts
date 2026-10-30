@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Pager } from '../../../core/ui/pager';
 import { ConversationsStore } from './conversations.store';
@@ -14,15 +14,17 @@ import { ConversationsStore } from './conversations.store';
       <div class="mt-2 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 class="text-2xl font-bold tracking-tight text-slate-900">Assistant conversations</h1>
-          <p class="mt-1 text-slate-600">Read-only. Open one to see the tool steps, sources, tokens and guard flags.</p>
+          <p class="mt-1 text-slate-600">Read-only. Pick a user to filter. Open one to see the tool steps, sources, tokens and guard flags.</p>
         </div>
-        <form class="flex items-end gap-2" (submit)="$event.preventDefault(); apply()">
-          <div>
-            <label for="conversation-user" class="field-label">User</label>
-            <input id="conversation-user" class="field-input" type="text" autocomplete="off" placeholder="User id" [value]="filter()" (input)="filter.set($any($event.target).value)" />
-          </div>
-          <button type="submit" class="btn-secondary">Filter</button>
-        </form>
+        <div>
+          <label for="conversation-user" class="field-label">User</label>
+          <select id="conversation-user" class="field-input w-auto min-w-48" [value]="store.userId()" (change)="pick($event)">
+            <option value="">Everyone</option>
+            @for (user of pickList(); track user.id) {
+              <option [value]="user.id">{{ user.name }}</option>
+            }
+          </select>
+        </div>
       </div>
 
       @if (store.error(); as message) {
@@ -44,7 +46,11 @@ import { ConversationsStore } from './conversations.store';
           @for (item of store.items(); track item.id) {
             <li [attr.data-conversation]="item.id" class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3">
               <a [routerLink]="['/app/admin/conversations', item.id]" class="min-w-0 flex-1 font-medium break-words text-indigo-700 hover:underline">{{ item.title }}</a>
-              <span class="text-sm text-slate-700">{{ item.userId }}</span>
+              <span class="text-sm text-slate-700">{{ store.names().get(item.userId) ?? item.userId }}</span>
+              <span class="text-xs whitespace-nowrap text-slate-600">{{ item.messageCount }} {{ item.messageCount === 1 ? 'message' : 'messages' }}</span>
+              @if (item.blockedCount > 0) {
+                <span class="badge-error">{{ item.blockedCount }} blocked</span>
+              }
               <span class="text-xs whitespace-nowrap text-slate-500">{{ item.updatedAt | date: 'd MMM y, HH:mm' }}</span>
             </li>
           } @empty {
@@ -58,15 +64,24 @@ import { ConversationsStore } from './conversations.store';
 })
 export class ConversationsPage implements OnInit {
   protected readonly store = inject(ConversationsStore);
-  protected readonly filter = signal('');
+  /** The picker: every user Access knows, plus the filtered id when it is not among them. */
+  protected readonly pickList = computed(() => {
+    const names = this.store.names();
+    const list = [...names].map(([id, name]) => ({ id, name }));
+    const current = this.store.userId();
+    if (current && !names.has(current)) {
+      list.push({ id: current, name: current });
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  });
   protected readonly skeletonRows = [1, 2, 3, 4];
 
   ngOnInit(): void {
-    this.filter.set(this.store.userId());
     void this.store.load();
+    void this.store.loadUsers();
   }
 
-  protected apply(): void {
-    void this.store.setUser(this.filter());
+  protected pick(event: Event): void {
+    void this.store.setUser((event.target as HTMLSelectElement).value);
   }
 }

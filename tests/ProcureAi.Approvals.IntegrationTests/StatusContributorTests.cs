@@ -59,6 +59,11 @@ public sealed class StatusContributorTests(ApprovalsApp app)
         section.Counters[StatusCounters.Key(tenant, StatusCounters.SagasRunning)].ShouldBe(3);
         section.Counters[StatusCounters.Key(tenant, StatusCounters.TimeoutsNextHour)].ShouldBe(2, "the two reminders; escalations and finance reminders come later");
         section.Counters[StatusCounters.Key(tenant, StatusCounters.FinanceAlertsOpen)].ShouldBe(1);
+        var alert = section.Items.ShouldHaveSingleItem("one open finance alert, in this tenant only");
+        alert.Kind.ShouldBe("finance-overdue");
+        alert.TenantId.ShouldBe(tenant);
+        alert.Link.ShouldBe("/app/requests/" + overdue.RequestId);
+        alert.Text.ShouldStartWith(overdue.Number + ": finance step overdue since ");
         section.Counters[StatusCounters.Key(other, StatusCounters.SagasRunning)].ShouldBe(1);
         section.Counters[StatusCounters.Key(other, StatusCounters.TimeoutsNextHour)].ShouldBe(1);
         section.Counters.ShouldNotContainKey(StatusCounters.Key(other, StatusCounters.FinanceAlertsOpen));
@@ -67,5 +72,6 @@ public sealed class StatusContributorTests(ApprovalsApp app)
         await instance.InvokeAsync(new ApproveStep(overdue.RequestId, step.Id, (await instance.StepsAsync(overdue.RequestId)).Single(s => s.Id == step.Id).Version), tenant, DemoUsers.Thandi);
         var after = await contributor.CollectAsync(TestContext.Current.CancellationToken);
         after.Counters.ShouldNotContainKey(StatusCounters.Key(tenant, StatusCounters.FinanceAlertsOpen));
+        after.Items.ShouldBeEmpty();
     }
 }

@@ -16,6 +16,12 @@ internal sealed class MongoConversationStore(TenantCollection<ConversationDocume
     private static readonly ProjectionDefinition<ConversationDocument, ConversationDocument> WithoutMessages =
         Builders<ConversationDocument>.Projection.Exclude(c => c.Messages);
 
+    /// <summary>The admin list: the messages are cut down to their status field, enough to count them and the blocked ones.</summary>
+    private static readonly ProjectionDefinition<ConversationDocument, ConversationDocument> WithMessageStatusOnly =
+        Builders<ConversationDocument>.Projection
+            .Include(c => c.TenantId).Include(c => c.UserId).Include(c => c.Title).Include(c => c.CreatedAt).Include(c => c.UpdatedAt)
+            .Include("Messages.Status");
+
     public Task InsertAsync(Conversation conversation, CancellationToken cancellationToken) =>
         conversations.InsertOneAsync(ConversationDocument.From(conversation), cancellationToken);
 
@@ -64,8 +70,8 @@ internal sealed class MongoConversationStore(TenantCollection<ConversationDocume
             : Builders<ConversationDocument>.Filter.Eq(c => c.UserId, userId);
         var total = await conversations.CountAsync(filter, cancellationToken);
         var page = await conversations.Find(filter)
-            .Project(WithoutMessages).SortByDescending(c => c.UpdatedAt).Skip(skip).Limit(take).ToListAsync(cancellationToken);
-        return ([.. page.Select(Summary)], (int)total);
+            .Project(WithMessageStatusOnly).SortByDescending(c => c.UpdatedAt).Skip(skip).Limit(take).ToListAsync(cancellationToken);
+        return ([.. page.Select(c => Summary(c) with { MessageCount = c.Messages?.Count ?? 0, BlockedCount = c.Messages?.Count(m => m.Status == MessageStatus.Blocked) ?? 0 })], (int)total);
     }
 
     private static string Key(Guid id) => id.ToString("D");

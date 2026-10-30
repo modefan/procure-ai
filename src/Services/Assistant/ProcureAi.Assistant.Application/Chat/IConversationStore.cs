@@ -3,7 +3,9 @@ using ProcureAi.Assistant.Domain;
 namespace ProcureAi.Assistant.Application.Chat;
 
 /// <summary>A conversation without its messages, for lists.</summary>
-public sealed record ConversationSummary(Guid Id, string UserId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+/// <summary>A conversation without its messages. The counts are filled only where the list asks for them (the admin list).</summary>
+public sealed record ConversationSummary(
+    Guid Id, string UserId, string Title, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int MessageCount = 0, int BlockedCount = 0);
 
 /// <summary>
 /// The conversations of the caller's tenant (MongoDB <c>assistantchatdb</c>, collection <c>conversations</c>). Every call is limited to the

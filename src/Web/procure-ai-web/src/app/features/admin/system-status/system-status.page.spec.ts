@@ -108,13 +108,32 @@ describe('SystemStatusPage', () => {
       statusDto({
         alerts: [
           { kind: 'outside-app-change', text: 'orders (purchasing) changed outside the app, row 7', tenantId: 'acme', at: '2026-10-30T09:59:00Z', link: '/app/admin/data-changes?outside=true&table=orders' },
-          { kind: 'finance-overdue', text: 'PR-1043 payment overdue', tenantId: 'acme', at: '2026-10-30T09:50:00Z', link: '/app/requests/1043' },
+          { kind: 'finance-overdue', text: 'PR-1043: finance step overdue since 2026-10-29 14:00', tenantId: 'acme', at: '2026-10-29T14:00:00Z', link: '/app/requests/1043' },
         ],
       }),
     );
     const link = el.querySelector<HTMLAnchorElement>('[data-testid="alerts"] a[href*="data-changes"]')!;
     expect(link.getAttribute('href')).toBe('/app/admin/data-changes?outside=true&table=orders');
     expect(el.querySelector('[data-testid="alerts"] a[href="/app/requests/1043"]')).not.toBeNull();
+  });
+
+  it('shows the open alert counters and readable kind labels', async () => {
+    const { el } = await setup(
+      statusDto({
+        counters: { finance_alerts_open: 1, outside_app_alerts_open: 2 },
+        alerts: [
+          { kind: 'finance-overdue', text: 'PR-1043: finance step overdue since 2026-10-29 14:00', tenantId: 'acme', at: '2026-10-29T14:00:00Z', link: '/app/requests/1043' },
+          { kind: 'outside-app-change', text: 'orders changed', tenantId: 'acme', at: '2026-10-30T09:00:00Z', link: null },
+        ],
+      }),
+    );
+    const stats = text(el.querySelector('[data-testid="stats"]'));
+    expect(stats).toContain('Open finance alerts: 1');
+    expect(stats).toContain('Changed outside the app: 2');
+    const alerts = text(el.querySelector('[data-testid="alerts"]'));
+    expect(alerts).toContain('Finance step overdue');
+    expect(alerts).toContain('Changed outside the app');
+    expect(alerts).not.toContain('finance-overdue');
   });
 
   it('shows the pgaudit block and the Aspire dashboard link', async () => {

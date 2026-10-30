@@ -8,6 +8,8 @@ export const conversationItem = (id: string, o: Partial<AdminConversationListIte
   title: 'Who approves a R 80 000 laptop order?',
   createdAt: '2026-10-30T08:00:00Z',
   updatedAt: '2026-10-30T08:05:00Z',
+  messageCount: 4,
+  blockedCount: 1,
   ...o,
 });
 

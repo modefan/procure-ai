@@ -40,6 +40,22 @@ public sealed class ApprovalsStatusContributor(IConfiguration configuration, Tim
           GROUP BY s.tenant_id
         """;
 
+    /// <summary>The kind of the alert items (the status screen maps it to a label).</summary>
+    public const string FinanceOverdueKind = "finance-overdue";
+
+    /// <summary>At most this many open finance alerts per tenant are listed (the counter holds the full number).</summary>
+    public const int LatestPerTenant = 20;
+
+    private const string AlertsSql = """
+        SELECT tenant_id, id, request_number, due_at FROM (
+          SELECT s.tenant_id, s.id, s.request_number, st.due_at,
+                 row_number() OVER (PARTITION BY s.tenant_id ORDER BY st.due_at DESC) AS rn
+          FROM approval_sagas s
+          JOIN approval_steps st ON st.id = s.overdue_alert_step_id AND st.status = 'Pending'
+          WHERE s.state = 'AwaitingApproval') x
+        WHERE rn <= @limit ORDER BY due_at DESC
+        """;
+
     public string Name => SectionName;
 
     public async Task<StatusSection> CollectAsync(CancellationToken ct)
@@ -66,7 +82,23 @@ public sealed class ApprovalsStatusContributor(IConfiguration configuration, Tim
             counters[StatusCounters.Key(reader.GetString(0), name)] = reader.GetInt64(2);
         }
 
-        return new StatusSection(SectionName, counters, []);
+        await reader.CloseAsync();
+
+        // One item per open finance alert: the step nobody is left to escalate has been waiting since its due time.
+        var items = new List<StatusItem>();
+        await using var alerts = new NpgsqlCommand(AlertsSql, connection);
+        alerts.Parameters.AddWithValue("limit", LatestPerTenant);
+        await using var alertReader = await alerts.ExecuteReaderAsync(ct);
+        while (await alertReader.ReadAsync(ct))
+        {
+            var due = alertReader.GetFieldValue<DateTimeOffset>(3);
+            items.Add(new StatusItem(
+                FinanceOverdueKind,
+                $"{alertReader.GetString(2)}: finance step overdue since {due.UtcDateTime:yyyy-MM-dd HH:mm}",
+                alertReader.GetString(0), due, "/app/requests/" + alertReader.GetGuid(1)));
+        }
+
+        return new StatusSection(SectionName, counters, items);
     }
 
     /// <summary>How Wolverine names <see cref="StepTimeout"/> in its envelopes (the full type name, no alias is set).</summary>

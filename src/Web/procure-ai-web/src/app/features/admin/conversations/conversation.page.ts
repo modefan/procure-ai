@@ -41,7 +41,7 @@ export function toolStepsOf(message: AdminMessageDto): ToolStep[] {
       } @else if (store.detail(); as conversation) {
         <h1 class="mt-2 text-2xl font-bold tracking-tight break-words text-slate-900">{{ conversation.title }}</h1>
         <p class="mt-1 text-sm text-slate-600">
-          User <span class="font-medium text-slate-800">{{ conversation.userId }}</span> · started {{ conversation.createdAt | date: 'd MMM y, HH:mm' }} ·
+          User <span class="font-medium text-slate-800">{{ store.names().get(conversation.userId) ?? conversation.userId }}</span> · started {{ conversation.createdAt | date: 'd MMM y, HH:mm' }} ·
           {{ conversation.messages.length }} messages
           @if (store.blockedCount() > 0) {
             · <span class="badge-error">{{ store.blockedCount() }} blocked</span>
@@ -102,6 +102,7 @@ export class ConversationPage implements OnInit {
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
+    void this.store.loadUsers();
     if (id) {
       void this.store.loadDetail(id);
     }
