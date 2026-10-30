@@ -60,14 +60,14 @@ public sealed class InvoiceScanTests(AssistantApp app)
         scan.GetProperty("orderNumber").GetString().ShouldBe("PO-1001");
         var lines = scan.GetProperty("lines").EnumerateArray().ToList();
         lines.Count.ShouldBe(2);
-        lines[0].GetProperty("description").GetString().ShouldBe("USB-C Dock");
+        lines[0].GetProperty("description").GetString().ShouldBe("USB-C dock");
         lines[0].GetProperty("quantity").GetDecimal().ShouldBe(2m);
-        lines[0].GetProperty("unitPriceExclVat").GetDecimal().ShouldBe(1_200m);
-        lines[0].GetProperty("lineTotalExclVat").GetDecimal().ShouldBe(2_400m);
-        lines[1].GetProperty("description").GetString().ShouldBe("Laptop Stand");
-        scan.GetProperty("totalExclVat").GetDecimal().ShouldBe(3_750m);
-        scan.GetProperty("vat").GetDecimal().ShouldBe(562.50m);
-        scan.GetProperty("totalInclVat").GetDecimal().ShouldBe(4_312.50m);
+        lines[0].GetProperty("unitPriceExclVat").GetDecimal().ShouldBe(2_100m);
+        lines[0].GetProperty("lineTotalExclVat").GetDecimal().ShouldBe(4_200m);
+        lines[1].GetProperty("description").GetString().ShouldBe("Wireless keyboard");
+        scan.GetProperty("totalExclVat").GetDecimal().ShouldBe(6_150m);
+        scan.GetProperty("vat").GetDecimal().ShouldBe(922.50m);
+        scan.GetProperty("totalInclVat").GetDecimal().ShouldBe(7_072.50m);
         scan.GetProperty("confidence").GetString().ShouldBe("high");
         scan.GetProperty("warnings").GetArrayLength().ShouldBe(0);
         scan.GetProperty("model").GetString().ShouldBe(AiOptions.FakeChatModel);
@@ -94,13 +94,13 @@ public sealed class InvoiceScanTests(AssistantApp app)
 
         var scan = await ScanOkAsync(Finance(tenant), "Files/invoice-wrong-total.pdf");
 
-        scan.GetProperty("totalInclVat").GetDecimal().ShouldBe(4_912.50m, "the model's number is shown as read");
+        scan.GetProperty("totalInclVat").GetDecimal().ShouldBe(7_672.50m, "the model's number is shown as read");
         scan.GetProperty("confidence").GetString().ShouldBe("medium");
         var warning = scan.GetProperty("warnings").EnumerateArray().ShouldHaveSingleItem();
         warning.GetProperty("code").GetString().ShouldBe("total");
         var message = warning.GetProperty("message").GetString()!;
-        message.ShouldContain("R 4 312,50", customMessage: "the recalculated total");
-        message.ShouldContain("R 4 912,50", customMessage: "the total on the invoice");
+        message.ShouldContain("R 7 072,50", customMessage: "the recalculated total");
+        message.ShouldContain("R 7 672,50", customMessage: "the total on the invoice");
     }
 
     [Fact]

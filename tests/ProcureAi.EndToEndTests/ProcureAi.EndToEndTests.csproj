@@ -9,6 +9,8 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Testing" />
     <PackageReference Include="Microsoft.Playwright" />
+    <!-- Writes the invoice PDF of the scan test for an order the flow made (InvoicePdf). -->
+    <PackageReference Include="PdfPig" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
