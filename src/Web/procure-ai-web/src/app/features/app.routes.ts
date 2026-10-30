@@ -117,6 +117,13 @@ export const APP_ROUTES: Routes = [
     loadComponent: () => import('./admin/matrix/matrix.page').then((m) => m.MatrixPage),
   },
   {
+    path: 'admin/users',
+    title: 'Users and limits',
+    canActivate: [permissionGuard],
+    data: { permission: 'admin.users' },
+    loadComponent: () => import('./admin/users/users.page').then((m) => m.UsersPage),
+  },
+  {
     path: 'admin/policies',
     title: 'Policy documents',
     canActivate: [permissionGuard],

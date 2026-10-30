@@ -25,6 +25,7 @@ import * as m15 from '../../features/assistant/assistant.store';
 import * as m16 from '../../features/policies/policies.store';
 import * as m17 from '../../features/invoices/invoice-scan.store';
 import * as m18 from '../../features/admin/matrix/matrix.store';
+import * as m19 from '../../features/admin/users/users.store';
 
 /**
  * Every store that can forget its data (`clearCache`) must be registered with `CacheRegistry`, or logout leaves the
@@ -51,6 +52,7 @@ const STORE_MODULES: Record<string, Record<string, unknown>> = {
   '../../features/policies/policies.store.ts': m16,
   '../../features/invoices/invoice-scan.store.ts': m17,
   '../../features/admin/matrix/matrix.store.ts': m18,
+  '../../features/admin/users/users.store.ts': m19,
 };
 
 type Store = { clearCache?: unknown };

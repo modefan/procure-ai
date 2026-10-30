@@ -1,4 +1,6 @@
 import { MatrixDto } from '../../api/access/models/matrix-dto';
+import { CostCenterAdminDto } from '../../api/access/models/cost-center-admin-dto';
+import { UserDto } from '../../api/access/models/user-dto';
 
 /** The 15 permissions of the system, in the order the Access service lists them. */
 export const ALL_PERMISSIONS = [
@@ -34,5 +36,30 @@ export const matrixDto = (o: Partial<MatrixDto> = {}): MatrixDto => ({
     },
     { role: 'admin', permissions: ['requests.read', 'budgets.read', 'assistant.use', 'admin.authorization', 'admin.users', 'admin.policies', 'admin.system'] },
   ],
+  ...o,
+});
+
+/** A user of the Users screen as the Access service lists them. */
+export const userDto = (userId: string, o: Partial<UserDto> = {}): UserDto => ({
+  userId,
+  displayName: 'Maria Manager',
+  email: 'maria@acme.test',
+  roles: ['manager'],
+  costCenterCodes: ['IT-200'],
+  approvalLimit: 200000,
+  isFinanceApprover: false,
+  version: 3,
+  ...o,
+});
+
+export const costCenterAdminDto = (code: string, o: Partial<CostCenterAdminDto> = {}): CostCenterAdminDto => ({
+  code,
+  name: 'IT Operations',
+  departmentCode: 'IT',
+  departmentName: 'Information Technology',
+  managerId: 'maria',
+  managerName: 'Maria Manager',
+  departmentHeadId: 'hendrik',
+  departmentHeadName: 'Hendrik Head',
   ...o,
 });

@@ -209,3 +209,25 @@
     visibility: hidden;
   }
 }
+
+/* Multi-select list of the user edit dialog (Angular Aria listbox): a tick shows on the chosen options. */
+@layer components {
+  .cost-option {
+    @apply flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-slate-50 aria-selected:bg-indigo-50 data-[active=true]:outline-2 data-[active=true]:outline-indigo-700;
+  }
+
+  .cost-check {
+    @apply invisible w-4 text-indigo-700;
+  }
+
+  .cost-option[aria-selected='true'] .cost-check {
+    @apply visible;
+  }
+}
+
+/* A table cell that shows its column title above its value when the table is stacked on a phone (data-label). */
+@layer components {
+  .cell-label {
+    @apply max-md:before:mb-0.5 max-md:before:block max-md:before:text-xs max-md:before:font-semibold max-md:before:tracking-wide max-md:before:text-slate-600 max-md:before:uppercase max-md:before:content-[attr(data-label)];
+  }
+}
