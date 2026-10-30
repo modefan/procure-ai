@@ -32,9 +32,9 @@ import { UsersStore } from './users.store';
         </div>
       } @else if (!store.error() || store.users().length > 0) {
         <div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="users">
-          <table class="w-full text-left text-sm md:min-w-[52rem] max-md:block">
+          <table class="w-full text-left text-sm lg:min-w-[52rem] max-lg:block">
             <caption class="sr-only">Users with their roles, cost centers and approval limit</caption>
-            <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide text-slate-600 uppercase max-md:sr-only">
+            <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide text-slate-600 uppercase max-lg:sr-only">
               <tr>
                 <th scope="col" class="px-4 py-3">User</th>
                 <th scope="col" class="px-4 py-3">Roles <span class="font-normal tracking-normal text-slate-500 normal-case">(managed in Keycloak)</span></th>
@@ -43,14 +43,14 @@ import { UsersStore } from './users.store';
                 <th scope="col" class="px-4 py-3"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100 max-md:block">
+            <tbody class="divide-y divide-slate-100 max-lg:block">
               @for (user of store.users(); track user.userId) {
-                <tr [attr.data-user]="user.userId" class="max-md:relative max-md:block max-md:space-y-2 max-md:px-4 max-md:py-4">
-                  <td class="px-4 py-3 max-md:p-0 max-md:pr-16">
+                <tr [attr.data-user]="user.userId" class="max-lg:relative max-lg:block max-lg:space-y-2 max-lg:px-4 max-lg:py-4">
+                  <td class="px-4 py-3 max-lg:p-0 max-lg:pr-16">
                     <div class="font-medium text-slate-900">{{ user.displayName }}</div>
                     <div class="text-xs break-all text-slate-600">{{ user.email }}</div>
                   </td>
-                  <td class="px-4 py-3 max-md:block max-md:p-0">
+                  <td class="px-4 py-3 max-lg:block max-lg:p-0">
                     <div class="flex flex-wrap gap-1">
                       @for (role of user.roles; track role) {
                         <span class="badge-muted">{{ label(role) }}</span>
@@ -60,7 +60,7 @@ import { UsersStore } from './users.store';
                       }
                     </div>
                   </td>
-                  <td class="cell-label px-4 py-3 max-md:block max-md:p-0" data-label="Cost centers">
+                  <td class="cell-label px-4 py-3 max-lg:block max-lg:p-0" data-label="Cost centers">
                     @if (user.costCenterCodes.length > 0) {
                       <div class="flex flex-wrap gap-x-2 gap-y-1">
                         @for (code of user.costCenterCodes; track code) {
@@ -71,8 +71,8 @@ import { UsersStore } from './users.store';
                       <span class="text-slate-500">None</span>
                     }
                   </td>
-                  <td class="cell-label px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900 max-md:block max-md:p-0 max-md:text-left" data-label="Approval limit">{{ user.approvalLimit | rand }}</td>
-                  <td class="px-4 py-3 text-right max-md:absolute max-md:top-4 max-md:right-4 max-md:p-0">
+                  <td class="cell-label px-4 py-3 text-right whitespace-nowrap tabular-nums text-slate-900 max-lg:block max-lg:p-0 max-lg:text-left" data-label="Approval limit">{{ user.approvalLimit | rand }}</td>
+                  <td class="px-4 py-3 text-right max-lg:absolute max-lg:top-4 max-lg:right-4 max-lg:p-0">
                     <button type="button" class="btn-secondary px-3 py-1" [attr.aria-label]="'Edit ' + user.displayName" (click)="editing.set(user.userId)">Edit</button>
                   </td>
                 </tr>

@@ -225,9 +225,9 @@
   }
 }
 
-/* A table cell that shows its column title above its value when the table is stacked on a phone (data-label). */
+/* A table cell that shows its column title above its value when the table is stacked on a phone or tablet (data-label). */
 @layer components {
   .cell-label {
-    @apply max-md:before:mb-0.5 max-md:before:block max-md:before:text-xs max-md:before:font-semibold max-md:before:tracking-wide max-md:before:text-slate-600 max-md:before:uppercase max-md:before:content-[attr(data-label)];
+    @apply max-lg:before:mb-0.5 max-lg:before:block max-lg:before:text-xs max-lg:before:font-semibold max-lg:before:tracking-wide max-lg:before:text-slate-600 max-lg:before:uppercase max-lg:before:content-[attr(data-label)];
   }
 }
