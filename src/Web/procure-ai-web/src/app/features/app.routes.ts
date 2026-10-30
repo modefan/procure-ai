@@ -137,4 +137,25 @@ export const APP_ROUTES: Routes = [
     data: { permission: 'admin.policies' },
     loadComponent: () => import('./policies/policies.page').then((m) => m.PoliciesPage),
   },
+  {
+    path: 'admin/system',
+    title: 'System status',
+    canActivate: [permissionGuard],
+    data: { permission: 'admin.system' },
+    loadComponent: () => import('./admin/system-status/system-status.page').then((m) => m.SystemStatusPage),
+  },
+  {
+    path: 'admin/conversations',
+    title: 'Assistant conversations',
+    canActivate: [permissionGuard],
+    data: { permission: 'admin.system' },
+    loadComponent: () => import('./admin/conversations/conversations.page').then((m) => m.ConversationsPage),
+  },
+  {
+    path: 'admin/conversations/:id',
+    title: 'Assistant conversation',
+    canActivate: [permissionGuard],
+    data: { permission: 'admin.system' },
+    loadComponent: () => import('./admin/conversations/conversation.page').then((m) => m.ConversationPage),
+  },
 ];

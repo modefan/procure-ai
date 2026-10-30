@@ -25,6 +25,8 @@ const ADMIN_LINKS: NavLink[] = [
   { path: 'admin/access-check', label: 'Access check', permission: 'admin.authorization' },
   { path: 'admin/users', label: 'Users', permission: 'admin.users' },
   { path: 'admin/policies', label: 'Policies', permission: 'admin.policies' },
+  { path: 'admin/system', label: 'System status', permission: 'admin.system' },
+  { path: 'admin/conversations', label: 'Conversations', permission: 'admin.system' },
 ];
 
 /**

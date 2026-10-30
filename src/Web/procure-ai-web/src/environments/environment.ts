@@ -27,4 +27,6 @@ export const environment: AppConfig = {
     staleMs: 30_000,
     trailingReloadMs: 2000,
   },
+  // The local Aspire dashboard (AppHost launchSettings `https` profile). Deployments set their own in config.json.
+  observability: { dashboardUrl: 'https://localhost:17100' },
 };

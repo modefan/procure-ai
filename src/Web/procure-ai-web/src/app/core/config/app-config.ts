@@ -39,6 +39,12 @@ export interface CacheConfig {
   trailingReloadMs: number;
 }
 
+/** Where the observability tools live. */
+export interface ObservabilityConfig {
+  /** The Aspire dashboard (traces, logs, metrics) the system status page links to; empty = no link. */
+  dashboardUrl: string;
+}
+
 export interface AppConfig {
   /** Absolute origin of the gateway when the app is not served by it (development only); empty = same origin. */
   apiBaseUrl: string;
@@ -46,6 +52,7 @@ export interface AppConfig {
   paging: { pageSize: number };
   live: LiveConfig;
   cache: CacheConfig;
+  observability: ObservabilityConfig;
 }
 
 /**
@@ -77,6 +84,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const paging = (isRecord(source['paging']) ? source['paging'] : {}) as Record<string, unknown>;
   const live = (isRecord(source['live']) ? source['live'] : {}) as Record<string, unknown>;
   const cache = (isRecord(source['cache']) ? source['cache'] : {}) as Record<string, unknown>;
+  const observability = (isRecord(source['observability']) ? source['observability'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
@@ -97,6 +105,9 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
     cache: {
       staleMs: positive(cache['staleMs'], defaults.cache.staleMs),
       trailingReloadMs: positive(cache['trailingReloadMs'], defaults.cache.trailingReloadMs),
+    },
+    observability: {
+      dashboardUrl: typeof observability['dashboardUrl'] === 'string' ? observability['dashboardUrl'] : defaults.observability.dashboardUrl,
     },
   };
 }

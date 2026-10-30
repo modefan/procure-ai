@@ -19,5 +19,8 @@
   "cache": {
     "staleMs": 30000,
     "trailingReloadMs": 2000
+  },
+  "observability": {
+    "dashboardUrl": "https://localhost:17100"
   }
 }
