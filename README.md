@@ -351,6 +351,23 @@ Sign in through Keycloak; the demo password is the `keycloak-demo-password` para
 | ben@globex.test | Globex | manager |
 | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
 
+### Try the invoice scan
+
+No order is seeded: orders only come from the flow, and the first order of a fresh tenant is numbered PO-1001. The sample
+invoice [`docs/samples/invoice-PO-1001.pdf`](docs/samples/invoice-PO-1001.pdf) (Contoso Hardware, 2 × USB-C dock at
+R 2 100,00, R 4 830,00 incl. VAT) names that order, so on fresh data volumes:
+
+1. Sign in as tom@acme.test, open **Requests → New request**: cost center IT-200, supplier Contoso Hardware, 2 × USB-C dock.
+   Submit it.
+2. Sign in as maria@acme.test and approve it in **Approvals** (R 4 830,00 needs only the manager). The order PO-1001 is
+   created and sent to the simulated supplier within seconds.
+3. As Tom, open **Invoices** and drop the sample PDF on **Scan an invoice**, then **Review and save**: PO-1001 is chosen,
+   the invoice number, date, quantity and total are filled in, and nothing is saved until you press **Save invoice**.
+
+If your order has another number (other orders were made first), the scan still fills in everything else and says the
+order it names is not among yours; choose the order yourself. The end-to-end test `Tom_scans_invoice_reviews_and_saves`
+writes its PDF for whatever order the flow made (`tests/ProcureAi.EndToEndTests/InvoicePdf.cs`).
+
 ## Tests and CI
 
 `dotnet test --project tests/<project>` per project (xUnit v3 on Microsoft.Testing.Platform). Unit, architecture
