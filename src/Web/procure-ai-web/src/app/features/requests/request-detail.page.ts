@@ -1,4 +1,5 @@
-import { Component, computed, effect, inject, input, untracked } from '@angular/core';
+import { Tab, TabContent, TabList, TabPanel, Tabs } from '@angular/aria/tabs';
+import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import { RequestDto } from '../../api/requests/models/request-dto';
@@ -7,6 +8,8 @@ import { BusyButton } from '../../core/ui/busy-button';
 import { ConfirmDialog } from '../../core/ui/confirm-dialog';
 import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { AuditTrail } from './audit-trail';
+import { DataChangesTab } from './data-changes-tab';
+import { DataChangesTabStore } from './data-changes-tab.store';
 import { RequestDetailStore } from './request-detail.store';
 import { StatusBadge } from './status-badge';
 import { WorkflowTimeline } from './workflow-timeline';
@@ -15,14 +18,14 @@ import { WorkflowTimeline } from './workflow-timeline';
 const CANCEL_REASON_MAX = 500;
 
 /**
- * Screen 7: one request with its workflow, audit trail and who else is looking at it (needs `requests.read`).
+ * Screen 7: one request with its workflow, items, order, a History / Data changes tab and who else is looking at it (needs `requests.read`).
  * The route resolver passes the request it already loaded (`request`); everything else loads in parallel here and
  * refreshes by itself when the server says something about this request changed.
  */
 @Component({
   selector: 'app-request-detail-page',
-  imports: [StatusBadge, WorkflowTimeline, AuditTrail, BusyButton, RouterLink, KeepRandPipe],
-  providers: [RequestDetailStore],
+  imports: [StatusBadge, WorkflowTimeline, AuditTrail, BusyButton, RouterLink, KeepRandPipe, Tabs, TabList, Tab, TabPanel, TabContent, DataChangesTab],
+  providers: [RequestDetailStore, DataChangesTabStore],
   template: `
     <section class="mx-auto max-w-6xl px-4 py-8">
       <a routerLink="/app/requests" class="text-sm font-medium text-indigo-700 hover:underline">&larr; All requests</a>
@@ -73,16 +76,10 @@ const CANCEL_REASON_MAX = 500;
           </div>
         }
 
-        <div class="mt-6 grid gap-6 lg:grid-cols-2">
-          <section class="card" aria-labelledby="workflow-heading">
-            <h2 id="workflow-heading" class="mb-4 text-base font-semibold text-slate-900">Workflow</h2>
-            <app-workflow-timeline [steps]="store.timeline()" />
-          </section>
-          <section class="card" aria-labelledby="audit-heading">
-            <h2 id="audit-heading" class="mb-3 text-base font-semibold text-slate-900">Audit trail</h2>
-            <app-audit-trail [events]="store.history()" />
-          </section>
-        </div>
+        <section class="card mt-6" aria-labelledby="workflow-heading">
+          <h2 id="workflow-heading" class="mb-4 text-base font-semibold text-slate-900">Workflow</h2>
+          <app-workflow-timeline [steps]="store.timeline()" />
+        </section>
 
         <section class="card mt-6" aria-labelledby="items-heading">
           <h2 id="items-heading" class="mb-3 text-base font-semibold text-slate-900">Items</h2>
@@ -161,6 +158,27 @@ const CANCEL_REASON_MAX = 500;
             </table>
           </section>
         }
+
+        <section class="card mt-6" aria-label="History and data changes">
+          <div ngTabs>
+            <div ngTabList selectionMode="follow" [(selectedTab)]="tab" class="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200" aria-label="History and data changes">
+              <button ngTab value="history" type="button" class="tab-trigger">History</button>
+              <button ngTab value="data-changes" type="button" class="tab-trigger">Data changes</button>
+            </div>
+            <div ngTabPanel value="history" [preserveContent]="true">
+              <ng-template ngTabContent>
+                <h2 id="audit-heading" class="sr-only">Audit trail</h2>
+                <app-audit-trail [events]="store.history()" />
+              </ng-template>
+            </div>
+            <div ngTabPanel value="data-changes" [preserveContent]="true">
+              <ng-template ngTabContent>
+                <h2 class="sr-only">Data changes</h2>
+                <app-data-changes-tab [requestId]="id()" />
+              </ng-template>
+            </div>
+          </div>
+        </section>
       } @else if (store.error(); as message) {
         <div role="alert" class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
           <span>{{ message }}</span>
@@ -188,6 +206,8 @@ export class RequestDetailPage {
   private readonly confirm = inject(ConfirmDialog);
   private readonly title = inject(Title);
   protected readonly skeletonRows = [1, 2, 3, 4, 5];
+  /** The open tab below the details: the business history, or the field-level data changes (loaded when first opened). */
+  protected readonly tab = signal<string | undefined>('history');
 
   protected readonly activeStep = computed(() => this.store.timeline().find((s) => s.state === 'active' && s.key !== 'cancelling') ?? null);
   private readonly viewers = computed(() => this.presence.viewersOf('request', this.id())());

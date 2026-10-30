@@ -2,8 +2,11 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { AccessService } from '../../api/access/services/access.service';
 import { ApprovalsService } from '../../api/approvals/services/approvals.service';
+import { DataChangesService } from '../../api/audit/services/data-changes.service';
 import { AuditService } from '../../api/audit/services/audit.service';
+import { dataChangeDto } from '../admin/data-changes/data-changes.testing';
 import { InvoicesService } from '../../api/invoicing/services/invoices.service';
 import { OrdersService } from '../../api/purchasing/services/orders.service';
 import { RequestsService } from '../../api/requests/services/requests.service';
@@ -33,6 +36,10 @@ describe('RequestDetailPage', () => {
         eventDto('BudgetReserved', 'R 86 940,00 reserved on IT-200 (2026)', '2026-10-28T09:03:00Z', 'system'),
       ]),
     };
+    api['getRequestDataChanges'] = vi.fn().mockResolvedValue({
+      items: [dataChangeDto('c1'), dataChangeDto('c2', { table: 'request_lines', operation: 'Insert', fields: [{ column: 'quantity', old: null, new: '3' }] })],
+      page: 1, pageSize: 25, total: 2,
+    });
     ask = vi.fn().mockResolvedValue({ confirmed: true, value: '' });
     fake = fakeHubFactory();
     TestBed.configureTestingModule({
@@ -43,6 +50,8 @@ describe('RequestDetailPage', () => {
         { provide: OrdersService, useValue: { getOrderForRequest: api['getOrderForRequest'] } },
         { provide: InvoicesService, useValue: { listInvoices: api['listInvoices'] } },
         { provide: AuditService, useValue: { getRequestHistory: api['getRequestHistory'] } },
+        { provide: DataChangesService, useValue: { getRequestDataChanges: api['getRequestDataChanges'] } },
+        { provide: AccessService, useValue: { listUsers: vi.fn().mockResolvedValue([]) } },
         { provide: AuthStore, useValue: { hasPermission: (p: string) => permissions.includes(p), user: signal({ userId, name: 'Tom Mokoena' }) } },
         { provide: ConflictDialog, useValue: { show: vi.fn().mockResolvedValue(undefined) } },
         { provide: ConfirmDialog, useValue: { askWithInput: ask } },
@@ -191,5 +200,26 @@ describe('RequestDetailPage', () => {
     (Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Try again') as HTMLButtonElement).click();
     await settle(fixture);
     expect(text(el.querySelector('header'))).toContain('PR-1043');
+  });
+
+  it('tab_switch_loads_data_changes_once', async () => {
+    const { fixture, el } = await setup();
+    const tab = (name: string) => Array.from(el.querySelectorAll<HTMLElement>('[role="tab"]')).find((t) => text(t) === name)!;
+    expect(api['getRequestDataChanges']).not.toHaveBeenCalled();
+    expect(tab('History').getAttribute('aria-selected')).toBe('true');
+
+    tab('Data changes').click();
+    await settle(fixture);
+    expect(api['getRequestDataChanges']).toHaveBeenCalledTimes(1);
+    expect(api['getRequestDataChanges']).toHaveBeenCalledWith({ requestId: 'r1', page: 1, pageSize: 25 }, expect.anything());
+    expect(text(el.querySelector('[data-change="c1"]'))).toContain('3 laptops → 4 laptops');
+    expect(text(el.querySelector('[data-change="c2"]'))).toContain('new');
+
+    tab('History').click();
+    await settle(fixture);
+    tab('Data changes').click();
+    await settle(fixture);
+    expect(api['getRequestDataChanges']).toHaveBeenCalledTimes(1);
+    expect(text(el.querySelector('[data-change="c1"]'))).toContain('Requests');
   });
 });

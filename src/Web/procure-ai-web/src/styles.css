@@ -243,3 +243,10 @@
     @apply flex cursor-pointer flex-wrap items-baseline gap-x-3 rounded-md px-3 py-1.5 hover:bg-slate-50 aria-selected:bg-indigo-50 data-[active=true]:outline-2 data-[active=true]:outline-indigo-700;
   }
 }
+
+/* Tabs (Angular Aria ngTab): the selected one is underlined. */
+@layer components {
+  .tab-trigger {
+    @apply -mb-px cursor-pointer border-b-2 border-transparent px-3 py-2 text-sm font-medium whitespace-nowrap text-slate-600 hover:text-slate-900 aria-selected:border-indigo-700 aria-selected:text-indigo-800;
+  }
+}

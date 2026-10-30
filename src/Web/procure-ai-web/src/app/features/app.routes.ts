@@ -145,6 +145,13 @@ export const APP_ROUTES: Routes = [
     loadComponent: () => import('./admin/system-status/system-status.page').then((m) => m.SystemStatusPage),
   },
   {
+    path: 'admin/data-changes',
+    title: 'Data changes',
+    canActivate: [permissionGuard],
+    data: { permission: 'admin.system' },
+    loadComponent: () => import('./admin/data-changes/data-changes.page').then((m) => m.DataChangesPage),
+  },
+  {
     path: 'admin/conversations',
     title: 'Assistant conversations',
     canActivate: [permissionGuard],
