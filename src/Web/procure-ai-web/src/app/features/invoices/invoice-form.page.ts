@@ -42,6 +42,12 @@ function parseAmount(text: string): number | null {
   return /^\d+(\.\d{1,2})?$/.test(cleaned) ? Number(cleaned) : null;
 }
 
+/** An amount as the user would type it, South African style: 86940 becomes "86 940,00" (the hint's format). */
+function amountInput(amount: number): string {
+  const [whole, cents] = amount.toFixed(2).split('.');
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${cents}`;
+}
+
 /** `PartiallyReceived` becomes `Partially received`. */
 const statusWords = (status: string) => status.replace(/([a-z])([A-Z])/g, (_, a: string, b: string) => `${a} ${b.toLowerCase()}`);
 
@@ -346,7 +352,7 @@ export class InvoiceFormPage implements OnInit, HasUnsavedChanges {
   /** The total printed on the invoice, as the form's field wants it; empty without a scan. */
   private scanTotal(): string {
     const s = this.scan();
-    return s ? s.totalInclVat.toFixed(2) : '';
+    return s ? amountInput(s.totalInclVat) : '';
   }
 
   /**

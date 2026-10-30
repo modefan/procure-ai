@@ -322,7 +322,20 @@ volume keeps old rows (for example the sandbox cost center DEMO-100 without its 
 
 Memory and CPU caps for every container come from the `Resources` section of the AppHost `appsettings.json`.
 
-**Resource needs (measured, idle after warm-up):** all containers together use about 3.4 GB (Keycloak 0.7 GB, six small Debezium Servers about 0.3 GB each, MongoDB 0.4 GB, Postgres 0.3 GB), and the nine services plus gateway, simulators and AppHost use about 3.8 GB of .NET working set (250 to 480 MB each). Add about 0.8 GB for the Angular dev server when developing. In total roughly 8 GB of RAM for the whole system, so a 16 GB VM has comfortable room.
+**Resource needs (measured 2026-10-30 with the Assistant, after a few questions, a policy upload and an invoice scan):**
+
+| Part | Memory |
+|---|---|
+| Containers: seven Debezium Servers (about 0.29 GB each, one per captured database incl. assistantdb) | 2.0 GB |
+| Containers: Keycloak 0.69, Postgres with pgvector 0.29, MongoDB 0.25, RabbitMQ 0.13, Redis and Mailpit 0.02 | 1.4 GB |
+| **All containers** | **3.4 GB** |
+| Ten services (Approvals 0.70, Notifications 0.55, Assistant 0.51, Invoicing 0.45, Requests 0.45, Access 0.43, Suppliers 0.37, Audit 0.34, Purchasing 0.33, Budgets 0.29) | 4.4 GB |
+| Gateway 0.15, simulators 0.10, AppHost 0.19 | 0.4 GB |
+| **All .NET processes of the system** | **4.9 GB** |
+| Local development only: Aspire's DCP and its proxies (1.7), the `dotnet run` launchers (1.2), the Angular dev server (0.9) | 3.8 GB |
+
+So the system itself needs about 8.3 GB (about 1 GB more than before the Assistant, mostly its API and its Debezium Server); a
+deployment without the local tooling fits a 16 GB VM with room to spare. Running it locally under Aspire takes about 12 GB.
 
 ## Demo users
 

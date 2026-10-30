@@ -202,7 +202,7 @@ describe('InvoiceFormPage', () => {
       expect(price(ctx.el, 1).value).toBe('25200');
       expect(qty(ctx.el, 2).value).toBe('1'); // "Wireless mouse" matched "Mouse"
       expect(price(ctx.el, 2).value).toBe('100');
-      expect(field(ctx.el, 'invoice-stated-total').value).toBe('86940.00');
+      expect(field(ctx.el, 'invoice-stated-total').value).toBe('86 940,00');
       expect(text(ctx.el.querySelector('[data-testid="scan-note"]'))).toContain('INV-5530');
       // every field can still be changed
       set(field(ctx.el, 'invoice-number'), 'INV-5531');
@@ -221,7 +221,7 @@ describe('InvoiceFormPage', () => {
       expect(text(ctx.el.querySelector('[data-testid="scan-note"]'))).toContain('PO-999');
       await choose(ctx, 'o1');
       expect(qty(ctx.el, 1).value).toBe('3'); // the scan is matched to the order's lines once it is chosen
-      expect(field(ctx.el, 'invoice-stated-total').value).toBe('86940.00');
+      expect(field(ctx.el, 'invoice-stated-total').value).toBe('86 940,00');
     });
 
     it('warning_shows_recalculated_total: warnings sit above the form as the server worded them', async () => {
