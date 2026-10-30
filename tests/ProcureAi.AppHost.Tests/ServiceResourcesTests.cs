@@ -405,7 +405,7 @@ public sealed class ServiceResourcesTests
         await using var scope = await ModelScope.BuildAsync(
         [
             "AI:Provider=OpenAI", "AI:Endpoint=https://example.openai.azure.com/openai/v1/", "AI:ApiKey=test-only-key",
-            "AI:Chat:Model=gpt-4.1-mini", "AI:Embedding:Model=text-embedding-3-small", "AI:Guard:Model=gpt-4.1-nano",
+            "AI:Chat:Model=gpt-4.1-mini", "AI:Embedding:Model=text-embedding-3-small", "AI:Guard:Model=gpt-4.1-nano", "AI:Fake:StreamDelayMs=120",
         ]);
         var api = scope.Model.Resources.OfType<ProjectResource>().Single(r => r.Name == "assistant-api");
 
@@ -416,6 +416,7 @@ public sealed class ServiceResourcesTests
         env.ShouldContainKeyAndValue("AI__Chat__Model", "gpt-4.1-mini");
         env.ShouldContainKeyAndValue("AI__Embedding__Model", "text-embedding-3-small");
         env.ShouldContainKeyAndValue("AI__Guard__Model", "gpt-4.1-nano");
+        env.ShouldContainKeyAndValue("AI__Fake__StreamDelayMs", "120");
         var key = env["AI__ApiKey"].ShouldBeOfType<ParameterResource>();
         key.Secret.ShouldBeTrue("the key is shown masked in the dashboard");
         // Only the Assistant gets the key.
