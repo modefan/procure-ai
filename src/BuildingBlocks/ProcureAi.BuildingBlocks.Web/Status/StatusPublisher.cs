@@ -23,7 +23,9 @@ public sealed class NoWolverineCounts : IWolverineCounts
 
 /// <summary>
 /// Builds this instance's <see cref="StatusSnapshot"/>: its readiness checks (the <c>ready</c> tag), its breakers, Wolverine's counts and
-/// every <see cref="IStatusContributor"/>'s section. A part that fails is left out (and logged); the snapshot is still written.
+/// every <see cref="IStatusContributor"/>'s section. Each part gets <see cref="StatusOptions.PartTimeout"/>: a part that fails or takes
+/// longer is left out (and logged), so one slow dependency (an unreachable simulator) never delays the snapshot past its TTL and turns the
+/// whole service Down.
 /// </summary>
 public sealed class StatusSnapshotBuilder(
     ServiceIdentity identity,
@@ -31,51 +33,55 @@ public sealed class StatusSnapshotBuilder(
     ICircuitBreakerStates breakers,
     IWolverineCounts wolverine,
     IServiceScopeFactory scopes,
+    IOptions<StatusOptions> options,
     TimeProvider time,
     ILogger<StatusSnapshotBuilder> logger)
 {
     public async Task<StatusSnapshot> BuildAsync(CancellationToken cancellationToken)
     {
-        var healthText = await HealthAsync(cancellationToken);
-        WolverineCountsDto messages;
-        try
-        {
-            messages = await wolverine.FetchAsync(cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning(exception, "Could not read Wolverine's message counts for the status snapshot");
-            messages = WolverineCountsDto.None;
-        }
+        var healthReport = await PartAsync("the readiness checks",
+            async token => (await health.CheckHealthAsync(r => r.Tags.Contains(Extensions.ReadyTag), token)).Status.ToString(), cancellationToken);
+        var messages = await PartAsync("Wolverine's message counts", wolverine.FetchAsync, cancellationToken);
 
         var sections = new List<StatusSection>();
         await using var scope = scopes.CreateAsyncScope();
         foreach (var contributor in scope.ServiceProvider.GetServices<IStatusContributor>())
         {
-            try
+            if (await PartAsync($"status contributor {contributor.Name}", contributor.CollectAsync, cancellationToken) is { } section)
             {
-                sections.Add(await contributor.CollectAsync(cancellationToken));
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                logger.LogWarning(exception, "Status contributor {Contributor} failed; its section is left out of this snapshot", contributor.Name);
+                sections.Add(section);
             }
         }
 
-        return new StatusSnapshot(identity.Name, identity.InstanceId, time.GetUtcNow(), healthText, breakers.Snapshot(), messages, sections);
+        return new StatusSnapshot(
+            identity.Name, identity.InstanceId, time.GetUtcNow(), healthReport ?? nameof(HealthStatus.Unhealthy), breakers.Snapshot(),
+            messages ?? WolverineCountsDto.None, sections);
     }
 
-    private async Task<string> HealthAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs one part with its own time limit (a linked token, and a wait that gives up even if the part ignores the token). Null when it
+    /// failed or timed out; the host's own stop is passed on.
+    /// </summary>
+    private async Task<T?> PartAsync<T>(string what, Func<CancellationToken, Task<T>> part, CancellationToken cancellationToken)
+        where T : class
     {
+        var limit = options.Value.PartTimeout;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(limit);
         try
         {
-            var report = await health.CheckHealthAsync(r => r.Tags.Contains(Extensions.ReadyTag), cancellationToken);
-            return report.Status.ToString();
+            return await part(timeout.Token).WaitAsync(limit, time, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+            && (exception is TimeoutException || (exception is OperationCanceledException && timeout.IsCancellationRequested)))
         {
-            logger.LogWarning(exception, "The readiness checks failed for the status snapshot");
-            return nameof(HealthStatus.Unhealthy);
+            logger.LogWarning("{Part} took longer than {Timeout}; left out of this status snapshot", what, limit);
+            return null;
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "{Part} failed; left out of this status snapshot", what);
+            return null;
         }
     }
 }

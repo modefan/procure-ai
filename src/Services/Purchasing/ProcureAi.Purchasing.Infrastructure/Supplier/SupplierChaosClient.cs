@@ -2,14 +2,25 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ProcureAi.BuildingBlocks.Application.Status;
+using ProcureAi.BuildingBlocks.Web.Http;
 using ProcureAi.Purchasing.Application.Abstractions;
 
 namespace ProcureAi.Purchasing.Infrastructure.Supplier;
 
 /// <summary>
+/// The <c>SupplierChaosClient</c> section: retries and timeouts of the chaos switch calls. Short, because the status snapshot reads the
+/// switch every few seconds and must not wait long for a simulator that is down (its part is cut off after <c>Status:PartTimeout</c>).
+/// </summary>
+public sealed class SupplierChaosClientOptions : ServiceClientResilienceOptions
+{
+    public const string SectionName = "SupplierChaosClient";
+}
+
+/// <summary>
 /// The simulator's chaos switch through its own endpoint (<c>api/v1/simulators/chaos</c>), with the supplier client's base address and
 /// key (<c>SupplierClient</c>). Not through the supplier's resilience pipeline: switching chaos on must not count against the supplier's
-/// circuit breaker, and the switch is not slowed by the chaos it sets. The simulator takes the whole configuration (supplier and ERP), so a
+/// circuit breaker, and the switch is not slowed by the chaos it sets. Its own retries and timeouts come from
+/// <see cref="SupplierChaosClientOptions"/>. The simulator takes the whole configuration (supplier and ERP), so a
 /// change reads it first and changes only the supplier's mode; everything else (the ERP, latencies, failure rate) goes back as it was.
 /// </summary>
 public sealed class SupplierChaosClient(HttpClient http) : ISupplierChaos

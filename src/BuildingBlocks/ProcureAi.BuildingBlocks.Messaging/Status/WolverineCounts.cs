@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application.Status;
 using ProcureAi.BuildingBlocks.Web.Status;
 using RabbitMQ.Client;
@@ -12,9 +13,11 @@ namespace ProcureAi.BuildingBlocks.Messaging.Status;
 /// The status snapshot's message counts: Wolverine's message store (<c>IMessageStore.Admin.FetchCountsAsync()</c>: incoming, outgoing,
 /// scheduled, dead letters; zero for a service without a store) plus the depth of the broker queue <see cref="BrokerDeadLetterQueue"/>.
 /// With the RabbitMQ transport a message moved to the error queue lands there, not in the dead-letter table (CLAUDE.md learning
-/// 2026-10-28), so a table-only count would always show 0. One broker connection is kept open and replaced when it fails.
+/// 2026-10-28), so a table-only count would always show 0. One broker connection is kept open and replaced when it fails; opening it
+/// times out after <see cref="StatusOptions.PartTimeout"/> (not the client's 30 s default), like the snapshot part it belongs to.
 /// </summary>
-public sealed class WolverineCounts(IWolverineRuntime runtime, IConfiguration configuration, ILogger<WolverineCounts> logger)
+public sealed class WolverineCounts(
+    IWolverineRuntime runtime, IConfiguration configuration, IOptions<StatusOptions> options, ILogger<WolverineCounts> logger)
     : IWolverineCounts, IAsyncDisposable
 {
     /// <summary>Wolverine's native dead-letter queue on RabbitMQ (one per broker, shared by every service).</summary>
@@ -58,8 +61,17 @@ public sealed class WolverineCounts(IWolverineRuntime runtime, IConfiguration co
                     await _connection.DisposeAsync();
                 }
 
-                _connection = await new ConnectionFactory { Uri = new Uri(connectionString), ClientProvidedName = "status-dead-letters" }
-                    .CreateConnectionAsync(cancellationToken);
+                var timeout = options.Value.PartTimeout;
+                var factory = new ConnectionFactory
+                {
+                    Uri = new Uri(connectionString),
+                    ClientProvidedName = "status-dead-letters",
+                    RequestedConnectionTimeout = timeout,
+                    SocketReadTimeout = timeout,
+                    SocketWriteTimeout = timeout,
+                    ContinuationTimeout = timeout,
+                };
+                _connection = await factory.CreateConnectionAsync(cancellationToken);
             }
 
             await using var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);

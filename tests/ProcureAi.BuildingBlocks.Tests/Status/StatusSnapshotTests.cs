@@ -41,12 +41,26 @@ public sealed class StatusSnapshotTests(RedisFixture redis)
         public Task<StatusSection> CollectAsync(CancellationToken ct) => throw new InvalidOperationException("broken contributor");
     }
 
-    private IHost BuildHost(string service, IConnectionMultiplexer multiplexer, TimeSpan interval, TimeSpan ttl) =>
+    /// <summary>Never answers (a dependency that hangs): only the part timeout ends it.</summary>
+    private sealed class HangingContributor : IStatusContributor
+    {
+        public string Name => "hanging";
+
+        public async Task<StatusSection> CollectAsync(CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("unreachable");
+        }
+    }
+
+    private IHost BuildHost(
+        string service, IConnectionMultiplexer multiplexer, TimeSpan interval, TimeSpan ttl, bool hanging = false, TimeSpan? partTimeout = null) =>
         Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration(c => c.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Status:PublishInterval"] = interval.ToString(),
                 ["Status:Ttl"] = ttl.ToString(),
+                ["Status:PartTimeout"] = (partTimeout ?? TimeSpan.FromMilliseconds(200)).ToString(),
             }))
             .ConfigureServices((context, services) =>
             {
@@ -56,6 +70,10 @@ public sealed class StatusSnapshotTests(RedisFixture redis)
                 services.AddProcureAiStatus(context.Configuration);
                 services.AddStatusContributor<CountingContributor>();
                 services.AddStatusContributor<FailingContributor>();
+                if (hanging)
+                {
+                    services.AddStatusContributor<HangingContributor>();
+                }
             })
             .Build();
 
@@ -89,6 +107,35 @@ public sealed class StatusSnapshotTests(RedisFixture redis)
         (await db.KeyTimeToLiveAsync(key))!.Value.ShouldBeGreaterThan(TimeSpan.FromSeconds(3), "each write renews the TTL");
 
         await host.StopAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Hanging_contributor_is_cut_off_and_the_snapshot_is_still_written_within_the_interval()
+    {
+        await using var multiplexer = await ConnectionMultiplexer.ConnectAsync(redis.ConnectionString);
+        var service = $"hang-{Guid.NewGuid():N}"[..13];
+        var interval = TimeSpan.FromSeconds(1);
+        using var host = BuildHost(service, multiplexer, interval, TimeSpan.FromSeconds(5), hanging: true, partTimeout: TimeSpan.FromMilliseconds(300));
+        var key = StatusKeys.Snapshot(service, new ServiceIdentity(service).InstanceId);
+        var started = DateTime.UtcNow;
+
+        await host.StartAsync(Ct);
+        var snapshot = await WaitForAsync(multiplexer.GetDatabase(), key, _ => true);
+
+        (DateTime.UtcNow - started).ShouldBeLessThan(interval, "the hanging part is given up after Status:PartTimeout");
+        snapshot.Sections.Select(s => s.Name).ShouldBe(["counting"], "the hanging section (and the failing one) are left out");
+        await host.StopAsync(Ct);
+    }
+
+    [Theory]
+    [InlineData("00:00:10", "00:00:30", "00:00:02", true)]
+    [InlineData("00:00:10", "00:00:10", "00:00:01", false)]
+    [InlineData("00:00:10", "00:00:30", "00:00:20", false)]
+    public void Status_options_need_a_ttl_longer_than_the_interval_plus_the_part_timeout(string interval, string ttl, string part, bool valid)
+    {
+        var options = new StatusOptions { PublishInterval = TimeSpan.Parse(interval), Ttl = TimeSpan.Parse(ttl), PartTimeout = TimeSpan.Parse(part) };
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+        System.ComponentModel.DataAnnotations.Validator.TryValidateObject(options, new(options), results, validateAllProperties: true).ShouldBe(valid);
     }
 
     [Fact]
@@ -237,7 +284,7 @@ public sealed class WolverineCountsTests(RabbitFixture rabbit) : IClassFixture<R
                 options.PublishMessage<Doomed>().ToRabbitQueue(queue);
             })
             .StartAsync(Ct);
-        await using var counts = new WolverineCounts(host.Services.GetRequiredService<Wolverine.Runtime.IWolverineRuntime>(), configuration, NullLogger<WolverineCounts>.Instance);
+        await using var counts = new WolverineCounts(host.Services.GetRequiredService<Wolverine.Runtime.IWolverineRuntime>(), configuration, Microsoft.Extensions.Options.Options.Create(new StatusOptions()), NullLogger<WolverineCounts>.Instance);
         var before = (await counts.FetchAsync(Ct)).BrokerDeadLetters;
 
         await host.MessageBus().PublishAsync(new Doomed(Guid.NewGuid()));
