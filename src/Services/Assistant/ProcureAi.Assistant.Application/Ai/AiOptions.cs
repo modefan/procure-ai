@@ -54,6 +54,9 @@ public sealed class AiOptions : IValidatableObject
     [Required, ValidateObjectMembers]
     public FakeProviderOptions Fake { get; set; } = new();
 
+    [Required, ValidateObjectMembers]
+    public AiResilienceOptions Resilience { get; set; } = new();
+
     public bool IsFake => Provider == AiProvider.Fake;
 
     /// <summary>The chat model that really answers: the configured one, or <see cref="FakeChatModel"/> under the Fake provider.</summary>
@@ -155,4 +158,35 @@ public sealed class FakeProviderOptions
     /// <summary>The pause between streamed words of the Fake chat model, so streaming is visible.</summary>
     [Range(0, 1_000)]
     public int StreamDelayMs { get; set; } = 15;
+}
+
+/// <summary>
+/// The <c>AI:Resilience</c> section: the circuit breaker in front of every model call (one per pipeline: <c>answer</c>, <c>utility</c>,
+/// <c>guard</c> and the embedding generator) and the provider SDK's own retries. When at least <see cref="FailureRatio"/> of at least
+/// <see cref="MinimumThroughput"/> calls in <see cref="SamplingDuration"/> fail for a passing reason (timeout, 408, 429, 5xx, no answer),
+/// the breaker opens for <see cref="BreakDuration"/>: calls then fail at once, without reaching the provider, through the same
+/// "unavailable" paths as a provider failure.
+/// </summary>
+public sealed class AiResilienceOptions
+{
+    [Range(0.01, 1.0)]
+    public double FailureRatio { get; set; } = 0.5;
+
+    /// <summary>The fewest calls in <see cref="SamplingDuration"/> before the breaker may open (Polly needs at least 2).</summary>
+    [Range(2, 1_000)]
+    public int MinimumThroughput { get; set; } = 4;
+
+    [Range(typeof(TimeSpan), "00:00:00.500", "00:10:00")]
+    public TimeSpan SamplingDuration { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long an open breaker refuses calls before it lets one through to test the provider.</summary>
+    [Range(typeof(TimeSpan), "00:00:00.500", "00:10:00")]
+    public TimeSpan BreakDuration { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Retries of the provider SDK itself (429 and 5xx, with its own backoff), inside one breaker call. Low, so a provider that is down
+    /// is found out quickly; the breaker counts the call once, whatever the retries.
+    /// </summary>
+    [Range(0, 5)]
+    public int ProviderMaxRetries { get; set; } = 1;
 }

@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,11 +30,12 @@ public static class AiSetup
     /// <see cref="IAnswerGuardrail"/>) → default limits (<c>AI:Chat:MaxOutputTokens</c>) →
     /// function invocation (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> tool calls, then an answer without tools) → OpenTelemetry (<see cref="AiClients.TelemetrySource"/>;
     /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → logging (one content-free line per call; the
-    /// message log only with LogContent) → provider timeout (<c>AI:Chat:Timeout</c>, <see cref="ProviderTimeoutChatClient"/>) → provider;</item>
-    /// <item><c>utility</c>: default limits → OpenTelemetry → logging → provider timeout → provider;</item>
+    /// message log only with LogContent) → circuit breaker (<c>AI:Resilience</c>, <see cref="ModelCircuitBreaker"/>) → provider timeout (<c>AI:Chat:Timeout</c>,
+    /// <see cref="ProviderTimeoutChatClient"/>) → provider;</item>
+    /// <item><c>utility</c>: default limits → OpenTelemetry → logging → circuit breaker → provider timeout → provider;</item>
     /// <item><c>guard</c>: the same stages as <c>utility</c> on the classifier model (<c>AI:Guard:Model</c>; by default the chat model, and
     /// then the same provider client);</item>
-    /// <item>the embedding generator: OpenTelemetry → logging → provider, at <c>AI:Embedding:Dimensions</c> (1536).</item>
+    /// <item>the embedding generator: OpenTelemetry → logging → circuit breaker → provider, at <c>AI:Embedding:Dimensions</c> (1536).</item>
     /// </list>
     /// The pipelines are built when first resolved, from the options (validated at startup). The prompt guard (<see cref="IPromptShield"/>,
     /// used by the answer guardrail, ingestion and invoice scanning) is <see cref="PromptShieldChain"/>: <see cref="PatternPromptShield"/>,
@@ -46,6 +48,7 @@ public static class AiSetup
         services.AddLogging();
         services.AddMetrics();
         services.AddSingleton<AssistantMetrics>();
+        ModelCircuitBreaker.Register(services);
 
         // One provider client per process (the OpenAI client is thread-safe and pools its connections).
         services.AddSingleton(sp => ProviderClients.Create(Ai(sp)));
@@ -62,18 +65,21 @@ public static class AiSetup
             })
             .Use(Traced)
             .Use(Logged)
+            .Use(Breaker(ModelCircuitBreaker.Answer))
             .Use(Timed);
 
         services.AddKeyedChatClient(AiClients.Utility, sp => sp.GetRequiredService<ProviderClients>().Chat)
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use(Traced)
             .Use(Logged)
+            .Use(Breaker(ModelCircuitBreaker.Utility))
             .Use(Timed);
 
         services.AddKeyedChatClient(AiClients.Guard, sp => sp.GetRequiredService<ProviderClients>().Guard)
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use(Traced)
             .Use(Logged)
+            .Use(Breaker(ModelCircuitBreaker.Guard))
             .Use(Timed);
 
         AddGuards(services);
@@ -81,7 +87,8 @@ public static class AiSetup
         services.AddEmbeddingGenerator(sp => sp.GetRequiredService<ProviderClients>().Embeddings)
             .Use((inner, sp) => new OpenTelemetryEmbeddingGenerator<string, Embedding<float>>(
                 inner, sp.GetService<ILoggerFactory>()?.CreateLogger(typeof(OpenTelemetryEmbeddingGenerator<string, Embedding<float>>)), AiClients.TelemetrySource))
-            .Use(LoggedEmbeddings);
+            .Use(LoggedEmbeddings)
+            .Use((inner, sp) => new CircuitBreakerEmbeddingGenerator(inner, ModelCircuitBreaker.Pipeline(sp, ModelCircuitBreaker.Embeddings)));
 
         // The spans go to the source AiClients.TelemetrySource, which the service defaults trace with every ProcureAi.* source (and its meter
         // of the same name is exported with every ProcureAi.* meter).
@@ -108,6 +115,13 @@ public static class AiSetup
 
     private static IChatClient WithDefaultLimits(IChatClient inner, AiOptions ai) =>
         new ConfigureOptionsChatClient(inner, options => options.MaxOutputTokens ??= ai.Chat.MaxOutputTokens);
+
+    /// <summary>
+    /// The circuit breaker of one pipeline (<c>AI:Resilience</c>, <see cref="ModelCircuitBreaker"/>), just above the timeout, so a
+    /// provider that stops answering counts as a failure too, and below the logging stage, so a refused call is logged like a failed one.
+    /// </summary>
+    private static Func<IChatClient, IServiceProvider, IChatClient> Breaker(string name) =>
+        (inner, services) => new CircuitBreakerChatClient(inner, ModelCircuitBreaker.Pipeline(services, name));
 
     /// <summary>The innermost stage: a provider that stops answering fails after <c>AI:Chat:Timeout</c> (<see cref="ProviderTimeoutChatClient"/>).</summary>
     private static IChatClient Timed(IChatClient inner, IServiceProvider services) => new ProviderTimeoutChatClient(inner, Ai(services).Chat.Timeout);
@@ -167,7 +181,13 @@ internal sealed class ProviderClients(IChatClient chat, IEmbeddingGenerator<stri
                 // Any OpenAI-compatible endpoint: Azure Foundry's /openai/v1 or OpenAI. The key never leaves this object.
                 var client = new OpenAIClient(
                     new ApiKeyCredential(ai.ApiKey!),
-                    new OpenAIClientOptions { Endpoint = new Uri(ai.Endpoint!), NetworkTimeout = ai.Chat.Timeout });
+                    new OpenAIClientOptions
+                    {
+                        Endpoint = new Uri(ai.Endpoint!),
+                        NetworkTimeout = ai.Chat.Timeout,
+                        // Few SDK retries (AI:Resilience:ProviderMaxRetries), so the circuit breaker above sees a provider that is down quickly.
+                        RetryPolicy = new ClientRetryPolicy(ai.Resilience.ProviderMaxRetries),
+                    });
                 var chat = client.GetChatClient(ai.Chat.Model).AsIChatClient();
                 return new ProviderClients(
                     chat,

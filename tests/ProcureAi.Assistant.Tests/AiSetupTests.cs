@@ -198,6 +198,136 @@ public sealed class AiSetupTests
         providerSaw.ShouldBe([800, 50]);
     }
 
+    private static ServiceProvider WithFailingProvider(FailingProvider chat, FailingEmbeddings embeddings)
+    {
+        var settings = new Dictionary<string, string?>(Shipped)
+        {
+            ["AI:Resilience:MinimumThroughput"] = "3",
+            ["AI:Resilience:FailureRatio"] = "0.5",
+            ["AI:Resilience:BreakDuration"] = "00:05:00",
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAssistantAi(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        services.AddSingleton(new ProviderClients(chat, embeddings));
+        return services.BuildServiceProvider();
+    }
+
+    [Theory]
+    [InlineData(AiClients.Utility)]
+    [InlineData(AiClients.Guard)]
+    public async Task Circuit_opens_after_repeated_provider_failures_and_the_next_call_fails_fast(string pipeline)
+    {
+        var chat = new FailingProvider();
+        await using var provider = WithFailingProvider(chat, new FailingEmbeddings());
+        var client = provider.GetRequiredKeyedService<IChatClient>(pipeline);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await Should.ThrowAsync<HttpRequestException>(() => client.GetResponseAsync([new(ChatRole.User, "hello")], cancellationToken: Ct));
+        }
+
+        var refused = await Should.ThrowAsync<Exception>(() => client.GetResponseAsync([new(ChatRole.User, "hello")], cancellationToken: Ct));
+
+        refused.ShouldBeOfType<Polly.CircuitBreaker.BrokenCircuitException>();
+        chat.Calls.ShouldBe(3, "an open breaker refuses the call without reaching the provider");
+        new AiFailures().IsTransient(refused).ShouldBeTrue("an open breaker is a passing provider failure: the SSE error event, 503 or a retry");
+    }
+
+    [Fact]
+    public async Task Circuit_opens_for_streamed_answers_too()
+    {
+        var chat = new FailingProvider();
+        await using var provider = WithFailingProvider(chat, new FailingEmbeddings());
+        var client = provider.GetRequiredKeyedService<IChatClient>(AiClients.Utility);
+
+        async Task Stream()
+        {
+            await foreach (var _ in client.GetStreamingResponseAsync([new(ChatRole.User, "hello")], cancellationToken: Ct))
+            {
+            }
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            await Should.ThrowAsync<HttpRequestException>(Stream);
+        }
+
+        await Should.ThrowAsync<Polly.CircuitBreaker.BrokenCircuitException>(Stream);
+        chat.Calls.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Circuit_opens_for_embeddings_and_a_cancelled_call_is_not_a_failure()
+    {
+        var embeddings = new FailingEmbeddings();
+        await using var provider = WithFailingProvider(new FailingProvider(), embeddings);
+        var generator = provider.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>();
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        // The caller's own cancellation is not the provider's fault: it never counts towards opening the breaker.
+        for (var i = 0; i < 5; i++)
+        {
+            await Should.ThrowAsync<OperationCanceledException>(() => generator.GenerateAsync(["x"], cancellationToken: cancelled.Token));
+        }
+
+        var before = embeddings.Calls;
+        for (var i = 0; i < 3; i++)
+        {
+            await Should.ThrowAsync<HttpRequestException>(() => generator.GenerateAsync(["x"], cancellationToken: Ct));
+        }
+
+        await Should.ThrowAsync<Polly.CircuitBreaker.BrokenCircuitException>(() => generator.GenerateAsync(["x"], cancellationToken: Ct));
+        embeddings.Calls.ShouldBe(before + 3, "three failures open it; the fourth call never reaches the provider");
+    }
+
+    [Fact]
+    public void Resilience_settings_out_of_range_fail_start()
+    {
+        using var provider = Build(("AI:Resilience:MinimumThroughput", "1"));
+
+        Should.Throw<OptionsValidationException>(() => Start(provider)).Message.ShouldContain("MinimumThroughput");
+    }
+
+    /// <summary>A provider that is down: every call fails with a 503 (or the caller's cancellation, when it cancelled).</summary>
+    private sealed class FailingProvider() : DelegatingChatClient(new FakeChatClient())
+    {
+        public int Calls;
+
+        public override Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Calls);
+            throw new HttpRequestException("down", null, System.Net.HttpStatusCode.ServiceUnavailable);
+        }
+
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Calls);
+            await Task.Yield();
+            throw new HttpRequestException("down", null, System.Net.HttpStatusCode.ServiceUnavailable);
+#pragma warning disable CS0162 // an iterator needs a yield
+            yield break;
+#pragma warning restore CS0162
+        }
+    }
+
+    private sealed class FailingEmbeddings() : DelegatingEmbeddingGenerator<string, Embedding<float>>(new FakeEmbeddingGenerator())
+    {
+        public int Calls;
+
+        public override Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values, EmbeddingGenerationOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Calls);
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new HttpRequestException("down", null, System.Net.HttpStatusCode.TooManyRequests);
+        }
+    }
+
     private sealed class RecordingProvider(List<int?> seen) : DelegatingChatClient(new FakeChatClient())
     {
         public override Task<ChatResponse> GetResponseAsync(

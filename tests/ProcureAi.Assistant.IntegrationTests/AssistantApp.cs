@@ -63,6 +63,9 @@ public sealed class AssistantApiFactory(
         builder.UseSetting("AI:Fake:StreamDelayMs", "0");
         // A provider that stops answering fails the call after 2 s without an update (the scripted "hangs" question).
         builder.UseSetting("AI:Chat:Timeout", "00:00:02");
+        // The tests fail the provider on purpose (ChatScript.Down/Hangs) across one shared app: the model circuit breakers must not open
+        // between them and fail unrelated tests. The breaker itself is covered by AiSetupTests.
+        builder.UseSetting("AI:Resilience:MinimumThroughput", "1000");
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
         builder.UseSetting("Assistant:Ingestion:BatchSize", "4");
         builder.UseSetting("Assistant:Ingestion:RetryDelays", "00:00:00.200, 00:00:00.200, 00:00:00.200");
