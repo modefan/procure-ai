@@ -38,7 +38,8 @@ public sealed record InvoiceScanDto(
 /// <summary>One line as the model read it. The quantity is a decimal: a fractional one is what was read (and is warned about).</summary>
 public sealed record ScannedLineDto(string Description, decimal Quantity, decimal UnitPriceExclVat, decimal LineTotalExclVat);
 
-/// <summary>A failed check: <c>code</c> (<c>line_total</c>, <c>lines_sum</c>, <c>vat</c>, <c>total</c>, <c>quantity</c>, <c>future_date</c>, <c>date</c>, <c>no_lines</c>) and a sentence for people.</summary>
+/// <summary>A failed check: <c>code</c> (<c>line_total</c>, <c>lines_sum</c>, <c>vat</c>, <c>total</c>, <c>quantity</c>, <c>future_date</c>, <c>date</c>, <c>no_lines</c>,
+/// <c>negative_amount</c>, <c>amount_out_of_range</c>) and a sentence for people.</summary>
 public sealed record ScanWarningDto(string Code, string Message);
 
 /// <summary>

@@ -19,6 +19,13 @@ public sealed class ScanOptions : IValidatableObject
     [Range(typeof(decimal), "0", "100")]
     public decimal VatTolerance { get; set; } = 0.50m;
 
+    /// <summary>
+    /// The largest believable amount on an invoice (a unit price, line total, VAT or total; R 1 000 000 000 by default). A larger figure
+    /// from the model is a warning, and is not recalculated (the model's numbers can be as big as a decimal goes).
+    /// </summary>
+    [Range(typeof(decimal), "1", "1000000000000")]
+    public decimal MaxAmount { get; set; } = 1_000_000_000m;
+
     /// <summary>The largest believable quantity of one line.</summary>
     [Range(1, 1_000_000)]
     public int MaxQuantity { get; set; } = 10_000;

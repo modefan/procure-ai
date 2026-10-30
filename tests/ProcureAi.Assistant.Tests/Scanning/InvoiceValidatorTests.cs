@@ -105,4 +105,60 @@ public sealed class InvoiceValidatorTests
         none.Confidence.ShouldBe(ScanConfidence.Low);
         none.Warnings.ShouldContain(w => w.Code == ScanWarningCodes.NoLines);
     }
+
+    [Theory]
+    [InlineData("unit price")]
+    [InlineData("line total")]
+    [InlineData("totals")]
+    [InlineData("quantity")]
+    public void Huge_model_numbers_are_a_warning_never_an_overflow(string where)
+    {
+        var max = decimal.MaxValue;
+        var invoice = where switch
+        {
+            "unit price" => Invoice(lines: [new ScannedLine("A", 10, max, 10m)], exclVat: 10m, vat: 1.5m, inclVat: 11.5m),
+            "line total" => Invoice(lines: [new ScannedLine("A", 1, 1m, max), new ScannedLine("B", 1, 1m, max)], exclVat: 2m, vat: 0.3m, inclVat: 2.3m),
+            "totals" => Invoice(exclVat: max, vat: max, inclVat: max),
+            _ => Invoice(lines: [new ScannedLine("A", max, max, max)], exclVat: max, vat: max, inclVat: max),
+        };
+
+        var result = Should.NotThrow(() => Check(invoice));
+
+        result.Warnings.ShouldContain(w => w.Code == ScanWarningCodes.AmountOutOfRange || w.Code == ScanWarningCodes.Quantity);
+        result.Confidence.ShouldNotBe(ScanConfidence.High);
+    }
+
+    [Fact]
+    public void Amount_above_the_believable_maximum_is_out_of_range()
+    {
+        var big = Options.MaxAmount + 1m;
+
+        var warning = Check(Invoice(lines: [new ScannedLine("A", 1, big, 1m)], exclVat: 3_750m)).Warnings
+            .Where(w => w.Code == ScanWarningCodes.AmountOutOfRange).ShouldHaveSingleItem();
+
+        warning.Message.ShouldContain("Line 1");
+    }
+
+    [Theory]
+    [InlineData("unit price")]
+    [InlineData("line total")]
+    [InlineData("vat")]
+    [InlineData("totals")]
+    public void Negative_amounts_are_warned_even_when_they_add_up(string where)
+    {
+        var invoice = where switch
+        {
+            // Every figure agrees with the others: only the sign is wrong.
+            "unit price" or "line total" => Invoice(
+                lines: [new ScannedLine("USB-C Dock", 2, -1_200m, -2_400m), new ScannedLine("Laptop Stand", 3, 450m, 1_350m)],
+                exclVat: -1_050m, vat: -157.50m, inclVat: -1_207.50m),
+            "vat" => Invoice(vat: -562.50m, inclVat: 3_187.50m),
+            _ => Invoice(lines: [new ScannedLine("A", 1, 0m, 0m)], exclVat: -100m, vat: -15m, inclVat: -115m),
+        };
+
+        var result = Check(invoice);
+
+        result.Warnings.ShouldContain(w => w.Code == ScanWarningCodes.NegativeAmount);
+        result.Confidence.ShouldNotBe(ScanConfidence.High);
+    }
 }

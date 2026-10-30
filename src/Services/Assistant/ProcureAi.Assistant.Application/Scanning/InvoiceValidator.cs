@@ -16,9 +16,14 @@ public sealed record ScanCheck(IReadOnlyList<ScanWarning> Warnings, string Confi
 /// <item>the VAT is 15 % of the total excl. VAT (±<see cref="ScanOptions.VatTolerance"/>);</item>
 /// <item>the total incl. VAT is the total excl. VAT plus the VAT (±<see cref="ScanOptions.AmountTolerance"/>);</item>
 /// <item>every quantity is a whole number from 1 to <see cref="ScanOptions.MaxQuantity"/>;</item>
+/// <item>no unit price, line total, VAT or total is negative (<see cref="ScanWarningCodes.NegativeAmount"/>) or above
+/// <see cref="ScanOptions.MaxAmount"/> (<see cref="ScanWarningCodes.AmountOutOfRange"/>);</item>
 /// <item>the invoice date (when there is one) reads as <c>yyyy-MM-dd</c> and is not after today.</item>
 /// </list>
-/// Each check compares the invoice's own figures, so one wrong number gives one warning. Confidence: <c>high</c> without warnings,
+/// Each check compares the invoice's own figures, so one wrong number gives one warning. The checks are total: whatever numbers the model
+/// gives (up to <see cref="decimal.MaxValue"/>), the result is warnings, never an exception. A sum or product is only recalculated from figures
+/// within range (a quantity up to <see cref="ScanOptions.MaxQuantity"/>, an amount up to <see cref="ScanOptions.MaxAmount"/>), so it cannot
+/// overflow; a figure out of range already has its own warning. Confidence: <c>high</c> without warnings,
 /// <c>medium</c> with one or two, <c>low</c> with more or when no line was read.
 /// </summary>
 public static class InvoiceValidator
@@ -40,15 +45,42 @@ public static class InvoiceValidator
             warnings.Add(new ScanWarning(ScanWarningCodes.NoLines, "No invoice lines could be read. Enter them by hand."));
         }
 
+        var amountsInRange = true;
+        void CheckAmount(decimal amount, string what)
+        {
+            if (amount < 0)
+            {
+                warnings.Add(new ScanWarning(ScanWarningCodes.NegativeAmount, $"{Capitalized(what)} is negative ({Rand(amount)})."));
+            }
+
+            if (Math.Abs(amount) > options.MaxAmount)
+            {
+                amountsInRange = false;
+                warnings.Add(new ScanWarning(
+                    ScanWarningCodes.AmountOutOfRange,
+                    $"{Capitalized(what)} of {Rand(amount)} is more than {Rand(options.MaxAmount)}: not a believable amount. Check the invoice."));
+            }
+        }
+
         for (var i = 0; i < lines.Count; i++)
         {
             var (line, number) = (lines[i], i + 1);
+            var quantityInRange = Math.Abs(line.Quantity) <= options.MaxQuantity;
             if (line.Quantity != decimal.Truncate(line.Quantity) || line.Quantity < 1 || line.Quantity > options.MaxQuantity)
             {
                 warnings.Add(new ScanWarning(
                     ScanWarningCodes.Quantity,
                     $"Line {number}: the quantity {line.Quantity.ToString("0.####", SouthAfrica)} is not a whole number from 1 to "
                     + $"{options.MaxQuantity.ToString("N0", SouthAfrica)}."));
+            }
+
+            CheckAmount(line.UnitPriceExclVat, $"line {number}: the unit price");
+            CheckAmount(line.LineTotalExclVat, $"line {number}: the line total");
+            var lineInRange = quantityInRange && Math.Abs(line.UnitPriceExclVat) <= options.MaxAmount
+                && Math.Abs(line.LineTotalExclVat) <= options.MaxAmount;
+            if (!lineInRange)
+            {
+                continue;
             }
 
             var recalculated = Cents(line.Quantity * line.UnitPriceExclVat);
@@ -59,6 +91,15 @@ public static class InvoiceValidator
                     $"Line {number}: {line.Quantity.ToString("0.####", SouthAfrica)} × {Rand(line.UnitPriceExclVat)} is {Rand(recalculated)}, "
                     + $"but the invoice says {Rand(line.LineTotalExclVat)}."));
             }
+        }
+
+        CheckAmount(invoice.TotalExclVat, "the total excl. VAT");
+        CheckAmount(invoice.Vat, "the VAT");
+        CheckAmount(invoice.TotalInclVat, "the total incl. VAT");
+        if (!amountsInRange)
+        {
+            // An amount the model gave is beyond belief (and maybe beyond decimal arithmetic): its own warning says so, nothing is recalculated.
+            return Result(invoice, lines, today, warnings);
         }
 
         var sum = lines.Sum(l => l.LineTotalExclVat);
@@ -86,6 +127,12 @@ public static class InvoiceValidator
                 + $"{Rand(invoice.TotalInclVat)}."));
         }
 
+        return Result(invoice, lines, today, warnings);
+    }
+
+    /// <summary>The date checks, then the confidence from all warnings.</summary>
+    private static ScanCheck Result(ScannedInvoice invoice, IReadOnlyList<ScannedLine> lines, DateOnly today, List<ScanWarning> warnings)
+    {
         if (!string.IsNullOrWhiteSpace(invoice.InvoiceDate))
         {
             if (ParseDate(invoice.InvoiceDate) is not { } date)
@@ -117,6 +164,8 @@ public static class InvoiceValidator
     private static decimal Cents(decimal amount) => Math.Round(amount, 2, MidpointRounding.AwayFromZero);
 
     private static string Rand(decimal amount) => Money.Zar(amount).ToDisplayString();
+
+    private static string Capitalized(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     private static string Quote(string text)
     {

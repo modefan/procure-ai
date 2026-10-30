@@ -14,6 +14,12 @@ public static class ScanWarningCodes
     public const string FutureDate = "future_date";
     public const string Date = "date";
     public const string NoLines = "no_lines";
+
+    /// <summary>A unit price, line total, VAT or total below zero.</summary>
+    public const string NegativeAmount = "negative_amount";
+
+    /// <summary>An amount above <c>Assistant:Scanning:MaxAmount</c>: not a believable invoice figure (and too big to recalculate safely).</summary>
+    public const string AmountOutOfRange = "amount_out_of_range";
 }
 
 /// <summary>How far the scan can be trusted: <c>high</c> without warnings, <c>medium</c> with one or two, <c>low</c> with more or without lines.</summary>
