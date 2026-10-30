@@ -16,6 +16,11 @@ namespace ProcureAi.Assistant.Infrastructure.Ai;
 /// caller's own cancellation and a refusal (400, 401) do not. An open breaker throws <see cref="BrokenCircuitException"/>, which is an
 /// <see cref="ExecutionRejectedException"/> and so already a transient failure everywhere: the SSE <c>error</c> event of an answer, the
 /// 503 with <c>Retry-After</c> of a scan, and the durable retry rules of ingestion and the purchase index.
+/// <para>
+/// The calls run through the pipeline as <b>void</b> callbacks that hand their result back through a <see cref="Box{T}"/>: Polly's telemetry
+/// logs a callback's result (at Debug), and a <see cref="ChatResponse"/> prints its text, which may only be logged with
+/// <c>AI:Telemetry:LogContent</c> (AiContentLoggingTests).
+/// </para>
 /// </summary>
 internal static class ModelCircuitBreaker
 {
@@ -56,6 +61,15 @@ internal static class ModelCircuitBreaker
         && failure is not BrokenCircuitException
         && Failures.IsTransient(failure);
 
+    /// <summary>Runs <paramref name="call"/> through <paramref name="pipeline"/> without handing its result to the pipeline (so never to its logs).</summary>
+    public static async Task<T> RunAsync<T>(ResiliencePipeline pipeline, Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)
+    {
+        var box = new Box<T>();
+        await pipeline.ExecuteAsync(
+            static async (state, token) => { state.Box.Value = await state.Call(token); }, (Box: box, Call: call), cancellationToken);
+        return box.Value!;
+    }
+
     /// <summary>Records a failure that happened outside a breaker call (mid-stream), so it still counts. An open breaker is ignored here.</summary>
     public static async Task ReportAsync(ResiliencePipeline pipeline, Exception failure, CancellationToken cancellationToken)
     {
@@ -79,10 +93,7 @@ internal sealed class CircuitBreakerChatClient(IChatClient inner, ResiliencePipe
 {
     public override Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-        pipeline.ExecuteAsync(
-            async (state, token) => await state.Client.InnerResponseAsync(state.Messages, state.Options, token),
-            (Client: this, Messages: messages, Options: options),
-            cancellationToken).AsTask();
+        ModelCircuitBreaker.RunAsync(pipeline, token => base.GetResponseAsync(messages, options, token), cancellationToken);
 
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -90,7 +101,7 @@ internal sealed class CircuitBreakerChatClient(IChatClient inner, ResiliencePipe
         await using var updates = base.GetStreamingResponseAsync(messages, options, cancellationToken).GetAsyncEnumerator(cancellationToken);
 
         // The first update through the breaker: an open breaker refuses here, before the provider is asked.
-        var more = await pipeline.ExecuteAsync(static async (enumerator, _) => await enumerator.MoveNextAsync(), updates, cancellationToken);
+        var more = await ModelCircuitBreaker.RunAsync(pipeline, async _ => await updates.MoveNextAsync(), cancellationToken);
         while (more)
         {
             yield return updates.Current;
@@ -105,9 +116,6 @@ internal sealed class CircuitBreakerChatClient(IChatClient inner, ResiliencePipe
             }
         }
     }
-
-    private Task<ChatResponse> InnerResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken) =>
-        base.GetResponseAsync(messages, options, cancellationToken);
 }
 
 /// <summary>The embedding generator's stage that runs every call through its circuit breaker (<see cref="ModelCircuitBreaker"/>).</summary>
@@ -116,12 +124,11 @@ internal sealed class CircuitBreakerEmbeddingGenerator(IEmbeddingGenerator<strin
 {
     public override Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
         IEnumerable<string> values, EmbeddingGenerationOptions? options = null, CancellationToken cancellationToken = default) =>
-        pipeline.ExecuteAsync(
-            async (state, token) => await state.Generator.InnerGenerateAsync(state.Values, state.Options, token),
-            (Generator: this, Values: values, Options: options),
-            cancellationToken).AsTask();
+        ModelCircuitBreaker.RunAsync(pipeline, token => base.GenerateAsync(values, options, token), cancellationToken);
+}
 
-    private Task<GeneratedEmbeddings<Embedding<float>>> InnerGenerateAsync(
-        IEnumerable<string> values, EmbeddingGenerationOptions? options, CancellationToken cancellationToken) =>
-        base.GenerateAsync(values, options, cancellationToken);
+/// <summary>Carries a call's result past the resilience pipeline (see <see cref="ModelCircuitBreaker"/>).</summary>
+internal sealed class Box<T>
+{
+    public T? Value { get; set; }
 }

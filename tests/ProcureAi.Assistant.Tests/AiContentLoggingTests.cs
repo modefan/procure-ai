@@ -151,7 +151,7 @@ public sealed class AiContentLoggingTests
     }
 
     [Fact]
-    public void Answer_pipeline_order_is_guard_limits_function_invocation_telemetry_logging_timeout_provider()
+    public void Answer_pipeline_order_is_guard_limits_function_invocation_telemetry_logging_breaker_timeout_provider()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -162,10 +162,10 @@ public sealed class AiContentLoggingTests
         Chain(provider.GetRequiredKeyedService<IChatClient>(AiClients.Answer)).ShouldBe(
         [
             nameof(PassThroughGuardrail.Stage), nameof(ConfigureOptionsChatClient), nameof(FunctionInvokingChatClient),
-            nameof(OpenTelemetryChatClient), "ModelCallLoggingChatClient", "ProviderTimeoutChatClient", "FakeChatClient",
+            nameof(OpenTelemetryChatClient), "ModelCallLoggingChatClient", "CircuitBreakerChatClient", "ProviderTimeoutChatClient", "FakeChatClient",
         ]);
         Chain(provider.GetRequiredKeyedService<IChatClient>(AiClients.Utility)).ShouldBe(
-            [nameof(ConfigureOptionsChatClient), nameof(OpenTelemetryChatClient), "ModelCallLoggingChatClient", "ProviderTimeoutChatClient", "FakeChatClient"]);
+            [nameof(ConfigureOptionsChatClient), nameof(OpenTelemetryChatClient), "ModelCallLoggingChatClient", "CircuitBreakerChatClient", "ProviderTimeoutChatClient", "FakeChatClient"]);
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class AiContentLoggingTests
         using (provider)
         {
             Chain(provider.GetRequiredKeyedService<IChatClient>(AiClients.Utility)).ShouldBe(
-                [nameof(ConfigureOptionsChatClient), nameof(OpenTelemetryChatClient), "ModelCallLoggingChatClient", nameof(LoggingChatClient), "ProviderTimeoutChatClient", "FakeChatClient"]);
+                [nameof(ConfigureOptionsChatClient), nameof(OpenTelemetryChatClient), "ModelCallLoggingChatClient", nameof(LoggingChatClient), "CircuitBreakerChatClient", "ProviderTimeoutChatClient", "FakeChatClient"]);
         }
     }
 
