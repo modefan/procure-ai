@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The model-judged evaluation of the Assistant (plan 05 Task 10): groundedness and relevance of real answers to eval/questions.json.
+    Its name does not end in "Tests" on purpose, so the CI test loop never runs it, and every test skips unless AI__Provider names a real
+    provider (it spends tokens). The retrieval half (hit@6 on the same questions) runs in ProcureAi.Assistant.IntegrationTests, on the
+    Fake provider too. Reports go to reports/ (gitignored).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <UserSecretsId>procureai-assistant-evaluation</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI.Evaluation.Quality" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Assistant/ProcureAi.Assistant.Application/ProcureAi.Assistant.Application.csproj" />
+    <ProjectReference Include="../../src/Services/Assistant/ProcureAi.Assistant.Infrastructure/ProcureAi.Assistant.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="eval/questions.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The Assistant's shipped settings (models, limits), overridden by the environment (AI__Provider, AI__Endpoint, AI__ApiKey ...). -->
+    <Content Include="../../src/Services/Assistant/ProcureAi.Assistant.Api/appsettings.json" Link="assistant.appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

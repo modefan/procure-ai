@@ -71,6 +71,8 @@
     <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
     <PackageVersion Include="PdfPig" Version="0.1.16" />
+    <!-- Assistant evaluation (tests/ProcureAi.Assistant.Evaluation): model-judged groundedness and relevance; runs only with a real provider -->
+    <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.11.0" />
     <!-- Tests -->
     <PackageVersion Include="Testcontainers" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.MongoDb" Version="4.16.0" />
