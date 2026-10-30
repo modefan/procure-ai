@@ -129,6 +129,7 @@ export class Shell {
       { path: 'orders', label: 'Orders', permission: 'orders.read' },
       { path: 'invoices', label: 'Invoices', permission: 'invoices.read' },
       { path: 'budgets', label: 'Budgets', permission: 'budgets.read' },
+      { path: 'assistant', label: 'Assistant', permission: 'assistant.use' },
     ];
     return all.filter((link) => this.auth.hasPermission(link.permission));
   });

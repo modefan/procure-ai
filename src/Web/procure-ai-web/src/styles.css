@@ -101,3 +101,88 @@
     @apply h-full w-(--share) bg-indigo-300;
   }
 }
+
+/* Assistant answers: Markdown rendered as HTML (features/assistant/markdown.ts), so these are global, not component styles. */
+@layer components {
+  .badge-muted {
+    @apply inline-flex w-fit items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-slate-700 ring-1 ring-slate-300 ring-inset;
+  }
+
+  .badge-error {
+    @apply inline-flex w-fit items-center rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-red-800 ring-1 ring-red-300 ring-inset;
+  }
+
+  .md-answer {
+    @apply min-w-0 text-[0.9375rem] leading-relaxed break-words text-slate-800;
+  }
+
+  .md-answer > * + * {
+    @apply mt-3;
+  }
+
+  .md-answer :is(h1, h2, h3, h4, h5, h6) {
+    @apply text-base font-semibold text-slate-900;
+  }
+
+  .md-answer strong {
+    @apply font-semibold text-slate-900;
+  }
+
+  .md-answer a {
+    @apply font-medium text-indigo-700 underline underline-offset-2 hover:text-indigo-900;
+  }
+
+  .md-answer ul {
+    @apply list-disc space-y-1 pl-5;
+  }
+
+  .md-answer ol {
+    @apply list-decimal space-y-1 pl-5;
+  }
+
+  .md-answer blockquote {
+    @apply border-l-4 border-slate-200 pl-3 text-slate-600;
+  }
+
+  .md-answer :not(pre) > code {
+    @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em] text-slate-900;
+  }
+
+  .md-answer pre {
+    @apply overflow-x-auto rounded-lg bg-slate-900 p-3 font-mono text-sm leading-normal text-slate-100;
+  }
+
+  /* A wide table scrolls inside the answer instead of widening the page. */
+  .md-answer table {
+    @apply block w-max max-w-full overflow-x-auto border-collapse text-sm;
+  }
+
+  .md-answer :is(th, td) {
+    @apply border border-slate-200 px-3 py-1.5 text-left align-top;
+  }
+
+  .md-answer th {
+    @apply bg-slate-50 font-semibold whitespace-nowrap text-slate-700;
+  }
+
+  /* The blinking cursor at the end of an answer being written. */
+  .md-cursor::after,
+  .md-streaming > :last-child::after {
+    content: '▍';
+    @apply ml-0.5 text-indigo-600;
+    animation: md-blink 1s steps(2, start) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .md-cursor::after,
+    .md-streaming > :last-child::after {
+      animation: none;
+    }
+  }
+}
+
+@keyframes md-blink {
+  to {
+    visibility: hidden;
+  }
+}

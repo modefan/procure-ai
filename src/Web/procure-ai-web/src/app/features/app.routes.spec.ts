@@ -51,3 +51,13 @@ describe('APP_ROUTES budgets', () => {
     expect(await (route!.loadComponent as () => Promise<unknown>)()).toBeTruthy();
   });
 });
+
+describe('APP_ROUTES assistant', () => {
+  it('assistant needs assistant.use and loads its page', async () => {
+    const route = APP_ROUTES.find((r) => r.path === 'assistant');
+    expect(route).toBeDefined();
+    expect(route?.data?.['permission']).toBe('assistant.use');
+    expect(route?.canActivate?.length).toBe(1);
+    expect(await (route!.loadComponent as () => Promise<unknown>)()).toBeTruthy();
+  });
+});

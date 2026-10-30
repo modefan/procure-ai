@@ -22,6 +22,8 @@
     "@angular/router": "^22.2.0",
     "@microsoft/signalr": "^10.0.11",
     "@ngrx/signals": "^22.0.1",
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.2",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

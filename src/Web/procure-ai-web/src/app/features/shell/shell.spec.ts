@@ -73,6 +73,11 @@ describe('Shell header', () => {
     expect(navLinks(await render())).toEqual(['Dashboard', 'Requests', 'Orders', 'Invoices', 'Budgets']);
   });
 
+  it('assistant_link_needs_assistant_use', async () => {
+    signIn(['requests.read', 'budgets.read', 'assistant.use']);
+    expect(navLinks(await render())).toEqual(['Dashboard', 'Requests', 'Budgets', 'Assistant']);
+  });
+
   it('a_manager_sees_the_approvals_link', async () => {
     signIn(['requests.read', 'requests.approve', 'budgets.read'], ['manager']);
     expect(navLinks(await render())).toEqual(['Dashboard', 'Requests', expect.stringContaining('Approvals'), 'Budgets']);

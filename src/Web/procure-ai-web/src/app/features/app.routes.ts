@@ -101,4 +101,11 @@ export const APP_ROUTES: Routes = [
     data: { permission: 'budgets.read' },
     loadComponent: () => import('./budgets/budgets.page').then((m) => m.BudgetsPage),
   },
+  {
+    path: 'assistant',
+    title: 'Policy assistant',
+    canActivate: [permissionGuard],
+    data: { permission: 'assistant.use' },
+    loadComponent: () => import('./assistant/assistant.page').then((m) => m.AssistantPage),
+  },
 ];

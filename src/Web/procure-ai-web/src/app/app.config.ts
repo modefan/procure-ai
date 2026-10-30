@@ -8,6 +8,7 @@ import { provideAppConfig } from './core/config/app-config';
 import { credentialsInterceptor } from './core/http/credentials.interceptor';
 import { correlationInterceptor } from './core/http/correlation.interceptor';
 import { errorsInterceptor } from './core/http/errors.interceptor';
+import { XSRF_COOKIE_NAME, XSRF_HEADER_NAME } from './core/http/xsrf';
 import { provideLogger } from './core/logging/provide-logger';
 
 export const appConfig: ApplicationConfig = {
@@ -19,7 +20,7 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(
       // The gateway's rule: unsafe methods carry X-XSRF-TOKEN, copied from the XSRF-TOKEN cookie. Angular does this
       // for relative (same-origin) urls only, which is all this app calls.
-      withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' }),
+      withXsrfConfiguration({ cookieName: XSRF_COOKIE_NAME, headerName: XSRF_HEADER_NAME }),
       withInterceptors([credentialsInterceptor, correlationInterceptor, errorsInterceptor]),
     ),
     provideRouter(routes, withComponentInputBinding()),
