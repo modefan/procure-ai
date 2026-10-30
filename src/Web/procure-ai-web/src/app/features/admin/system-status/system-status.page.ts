@@ -165,7 +165,7 @@ const ALERT_LABELS: Record<string, string> = {
             } @else {
               <p class="mt-3 text-sm text-slate-600">The simulated supplier is working normally. Break it to watch the circuit breaker open.</p>
               <div class="mt-3">
-                <app-busy-button variant="secondary" [busy]="store.chaosBusy()" busyLabel="Breaking…" (pressed)="store.setChaos('Failing')">Break the supplier API (chaos)</app-busy-button>
+                <app-busy-button variant="secondary" [busy]="store.chaosBusy()" busyLabel="Breaking…" (pressed)="store.setChaos('Down')">Break the supplier API (chaos)</app-busy-button>
               </div>
             }
             @if (store.chaosError(); as message) {

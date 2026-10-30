@@ -75,11 +75,11 @@ describe('SystemStatusPage', () => {
     expect([...el.querySelectorAll('button')].some((b) => text(b) === 'Restore now')).toBe(true);
   });
 
-  it('pressing the chaos button sends Failing, then shows the countdown', async () => {
+  it('pressing the chaos button sends Down, then shows the countdown', async () => {
     const { fixture, el } = await setup();
     [...el.querySelectorAll('button')].find((b) => text(b).startsWith('Break the supplier API'))!.click();
     await settle(fixture);
-    expect(chaos.setSupplierChaos.mock.calls[0][0].body).toEqual({ mode: 'Failing' });
+    expect(chaos.setSupplierChaos.mock.calls[0][0].body).toEqual({ mode: 'Down' });
     expect(text(el.querySelector('[data-testid="chaos"]'))).toContain('restores in 4:12');
   });
 

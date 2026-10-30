@@ -126,7 +126,7 @@ export const SystemStatusStore = signalStore(
         };
       },
 
-      /** Sets the simulated supplier API's mode (Failing to break it, Normal to restore it). One idempotency key per call. */
+      /** Sets the simulated supplier API's mode (Down to break it: Failing alone fails only some calls and did not open the breaker on the real stack, Normal to restore it). One idempotency key per call. */
       async setChaos(mode: ChaosMode): Promise<void> {
         if (store.chaosBusy()) {
           return;
