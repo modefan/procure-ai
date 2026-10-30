@@ -99,6 +99,25 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Trace_id_passes_through_gateway()
+    {
+        var browser = Browser();
+
+        // The gateway's own responses carry a trace ID, and so does a proxied one the service did not tag.
+        using var own = await browser.GetAsync("/bff/user", Ct);
+        using var proxied = await browser.SendAsync(
+            Request(HttpMethod.Get, Api, headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme")]), Ct);
+        // A service's own trace ID and dev panel headers reach the browser untouched.
+        using var tagged = await browser.SendAsync(
+            Request(HttpMethod.Get, Api, headers: [("X-Api-Key", "key-value"), ("X-Tenant-Id", "acme"), ("X-Stub-Trace-Id", "abc123abc123abc123abc123abc123ab"), ("X-Dev-Panel", "1")]), Ct);
+
+        own.Headers.GetValues("X-Trace-Id").Single().Length.ShouldBe(32);
+        proxied.Headers.GetValues("X-Trace-Id").Single().Length.ShouldBe(32);
+        tagged.Headers.GetValues("X-Trace-Id").Single().ShouldBe("abc123abc123abc123abc123abc123ab");
+        tagged.Headers.GetValues("X-Cache").Single().ShouldBe("hit; age-ms=7");
+    }
+
+    [Fact]
     public async Task Api_call_without_session_or_key_is_401()
     {
         using var response = await Browser().GetAsync(Api, Ct);

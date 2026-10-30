@@ -28,6 +28,7 @@ public sealed class ServiceResourcesTests
 
         // The api carries every setting a service needs, including the hash of the admin key (a secret parameter).
         apiEnv.ShouldContainKey("Auth__AdminApiKeySha256");
+        apiEnv.ShouldContainKeyAndValue("DevPanel__Enabled", "true");
         apiEnv.ShouldContainKey("Auth__Authority");
         apiEnv.ShouldContainKey("Auth__RequireHttpsMetadata");
         apiEnv.ShouldContainKey("Auth__OpenApi__AuthorizationUrl");
@@ -102,6 +103,7 @@ public sealed class ServiceResourcesTests
         api.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
         api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+        gatewayEnv.ShouldContainKeyAndValue("DevPanel__Enabled", "true");
         gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__budgets__Destinations__d1__Address");
         gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
         foreach (var cap in CapResources)
@@ -275,6 +277,7 @@ public sealed class ServiceResourcesTests
         var env = await EnvironmentOfAsync(simulators);
 
         // The simulated supplier and ERP: their API key and the webhook secret (secret parameters), and the admin key hash for the chaos switch.
+        env.ShouldContainKeyAndValue("DevPanel__Enabled", "true");
         env.ShouldContainKey("Simulators__ApiKey");
         env.ShouldContainKey("Simulators__Webhooks__Secret");
         env.ShouldContainKey("Auth__AdminApiKeySha256");

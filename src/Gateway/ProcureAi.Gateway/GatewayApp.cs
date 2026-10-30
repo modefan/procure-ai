@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using ProcureAi.BuildingBlocks.Web.Access;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Correlation;
+using ProcureAi.BuildingBlocks.Web.Diagnostics;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Health;
 using ProcureAi.BuildingBlocks.Web.Http;
@@ -41,6 +42,7 @@ public static class GatewayApp
         services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
         services.AddValidatedOptions<RegistrationOptions>(configuration, RegistrationOptions.SectionName);
         services.AddValidatedOptions<HubOptions>(configuration, HubOptions.SectionName);
+        services.AddValidatedOptions<DevPanelOptions>(configuration, DevPanelOptions.SectionName);
         services.AddValidatedOptions<ClientLogOptions>(configuration, ClientLogOptions.SectionName);
         services.AddSingleton<ClientLogRateLimiter>();
         services.AddValidatedOptions<RateLimitingOptions>(configuration, RateLimitingOptions.SectionName);
@@ -71,6 +73,7 @@ public static class GatewayApp
 
         app.UseProcureAiForwardedHeaders();
         app.UseMiddleware<CorrelationIdMiddleware>();
+        app.UseMiddleware<DevPanelMiddleware>();
         app.UseExceptionHandler();
         app.UseStatusCodePages();
         // By client IP, before authentication: it also protects the login endpoints.

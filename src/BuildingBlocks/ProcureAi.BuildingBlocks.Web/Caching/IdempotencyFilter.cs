@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Diagnostics;
 using ZiggyCreatures.Caching.Fusion;
 
 namespace ProcureAi.BuildingBlocks.Web.Caching;
@@ -24,7 +25,8 @@ public sealed class IdempotencyFilter(
     IDistributedLockProvider locks,
     ICurrentUser user,
     IOptions<IdempotencyOptions> options,
-    IOptions<FusionCacheSettings> cacheSettings) : IAsyncResourceFilter
+    IOptions<FusionCacheSettings> cacheSettings,
+    IDailyStats stats) : IAsyncResourceFilter
 {
     public async Task OnResourceExecutionAsync(ResourceExecutingContext context, ResourceExecutionDelegate next)
     {
@@ -109,11 +111,16 @@ public sealed class IdempotencyFilter(
             return null;
         }
 
-        return found.Value.RequestHash == requestHash
-            ? found.Value.ToResult()
-            : ResponseCapture.Problem(
-                StatusCodes.Status422UnprocessableEntity,
-                $"This {IdempotentAttribute.HeaderName} was already used with a different request.");
+        if (found.Value.RequestHash == requestHash)
+        {
+            DevPanelHeaders.Note(http, DevPanelHeaders.Idempotent, "replayed");
+            await stats.TryCountCoalescedAsync();
+            return found.Value.ToResult();
+        }
+
+        return ResponseCapture.Problem(
+            StatusCodes.Status422UnprocessableEntity,
+            $"This {IdempotentAttribute.HeaderName} was already used with a different request.");
     }
 
     private static async Task<string> HashRequestAsync(HttpContext http)

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Auth;
+using ProcureAi.BuildingBlocks.Web.Diagnostics;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ZiggyCreatures.Caching.Fusion;
 
@@ -22,13 +23,15 @@ public sealed class CachedGetFilter(
     IDistributedLockProvider locks,
     ICurrentUser user,
     IOptions<CachingOptions> options,
-    IOptions<FusionCacheSettings> cacheSettings) : IAsyncResourceFilter
+    IOptions<FusionCacheSettings> cacheSettings,
+    IDailyStats stats) : IAsyncResourceFilter
 {
     public async Task OnResourceExecutionAsync(ResourceExecutingContext context, ResourceExecutionDelegate next)
     {
         var http = context.HttpContext;
         if (!HttpMethods.IsGet(http.Request.Method))
         {
+            DevPanelHeaders.Note(http, DevPanelHeaders.Cache, "bypass");
             await next();
             return;
         }
@@ -41,6 +44,8 @@ public sealed class CachedGetFilter(
         var failureKey = "fail:" + key;
         var lockName = cacheSettings.Value.KeyPrefix + "lock:" + key;
         var executed = default(ResponseCapture.Captured?);
+        var startedUtc = DateTimeOffset.UtcNow;
+        var waitedForLock = false;
 
         try
         {
@@ -49,6 +54,7 @@ public sealed class CachedGetFilter(
                 async (factory, token) =>
                 {
                     var (handle, waited) = await LockHelper.AcquireAsync(locks, lockName, settings.LockTimeout, token);
+                    waitedForLock = waited;
                     if (handle is null)
                     {
                         throw new LockTimeoutException();
@@ -112,6 +118,7 @@ public sealed class CachedGetFilter(
 
             if (executed is { } ran)
             {
+                DevPanelHeaders.Note(http, DevPanelHeaders.Cache, "miss");
                 if (!ran.Threw)
                 {
                     await ResponseCapture.SendAsync(http, ran.Response);
@@ -119,6 +126,19 @@ public sealed class CachedGetFilter(
             }
             else
             {
+                // Not run by this caller. A value created after this request began came from a call we waited for
+                // (in this process, or on another instance behind the lock); an older one is a plain cache hit.
+                if (waitedForLock || response.CreatedUtc >= startedUtc)
+                {
+                    DevPanelHeaders.Note(http, DevPanelHeaders.Cache, "miss");
+                    DevPanelHeaders.Note(http, DevPanelHeaders.Coalesced, "joined");
+                    await stats.TryCountCoalescedAsync();
+                }
+                else
+                {
+                    DevPanelHeaders.Note(http, DevPanelHeaders.Cache, DevPanelHeaders.CacheHit(DateTimeOffset.UtcNow - response.CreatedUtc));
+                }
+
                 context.Result = response.ToResult();
             }
         }

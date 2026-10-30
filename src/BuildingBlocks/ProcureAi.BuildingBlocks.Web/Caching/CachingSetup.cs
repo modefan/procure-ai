@@ -3,6 +3,8 @@ using Medallion.Threading.Redis;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProcureAi.BuildingBlocks.Web.Diagnostics;
 using ProcureAi.BuildingBlocks.Web.Options;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using StackExchange.Redis;
@@ -40,6 +42,10 @@ public static class CachingSetup
             configuration.AbortOnConnectFail = false;
             return ConnectionMultiplexer.Connect(configuration);
         });
+        services.Replace(ServiceDescriptor.Singleton<IDailyStats>(provider => new RedisDailyStats(
+            provider.GetRequiredService<IConnectionMultiplexer>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RedisDailyStats>>(),
+            provider.GetService<TimeProvider>())));
         services.AddSingleton<IDistributedLockProvider>(provider =>
             new RedisDistributedSynchronizationProvider(provider.GetRequiredService<IConnectionMultiplexer>().GetDatabase()));
 

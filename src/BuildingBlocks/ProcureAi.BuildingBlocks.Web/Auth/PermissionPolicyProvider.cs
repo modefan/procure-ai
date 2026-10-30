@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using ProcureAi.BuildingBlocks.Web.Diagnostics;
 
 namespace ProcureAi.BuildingBlocks.Web.Auth;
 
@@ -36,6 +37,11 @@ internal sealed class PermissionAuthorizationHandler(
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context, PermissionRequirement requirement)
     {
+        if (accessor.HttpContext is { } http)
+        {
+            DevPanelHeaders.NotePolicy(http, requirement.Permission);
+        }
+
         var permissions = await provider.GetPermissionsAsync(
             user, accessor.HttpContext?.RequestAborted ?? CancellationToken.None);
         if (permissions.Contains(requirement.Permission))

@@ -1,11 +1,13 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Correlation;
+using ProcureAi.BuildingBlocks.Web.Diagnostics;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Logging;
 using ProcureAi.BuildingBlocks.Web.OpenApi;
@@ -27,6 +29,10 @@ public static class WebExtensions
         var services = builder.Services;
         services.AddValidatedOptions<CachingOptions>(builder.Configuration, CachingOptions.SectionName);
         services.AddValidatedOptions<ErrorResponseOptions>(builder.Configuration, ErrorResponseOptions.SectionName);
+        services.AddValidatedOptions<DevPanelOptions>(builder.Configuration, DevPanelOptions.SectionName);
+        services.TryAddSingleton(new ServiceIdentity(serviceName));
+        // Counts nothing until AddProcureAiCaching swaps in the Redis store.
+        services.TryAddSingleton<IDailyStats, NoOpDailyStats>();
         services.AddValidatedOptions<RateLimitingOptions>(builder.Configuration, RateLimitingOptions.SectionName);
         // The limits behind PagingQuery.
         services.AddValidatedOptions<PagingOptions>(builder.Configuration, PagingOptions.SectionName);
@@ -59,6 +65,7 @@ public static class WebExtensions
     {
         app.UseProcureAiForwardedHeaders();
         app.UseMiddleware<CorrelationIdMiddleware>();
+        app.UseMiddleware<DevPanelMiddleware>();
         app.UseExceptionHandler();
         app.UseStatusCodePages();
         // Authentication first: the limiter partitions signed-in callers by user and tenant.

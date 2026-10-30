@@ -95,6 +95,13 @@ public sealed class StubDownstream : IAsyncDisposable
                 return;
             }
 
+            // Stands in for a service that sent its own trace ID and dev panel header: the gateway must pass them on untouched.
+            if (headers.TryGetValue("X-Stub-Trace-Id", out var stubTrace))
+            {
+                context.Response.Headers["X-Trace-Id"] = stubTrace;
+                context.Response.Headers["X-Cache"] = "hit; age-ms=7";
+            }
+
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsJsonAsync(new { stub = true, host = context.Request.Host.Value, path = context.Request.Path.Value });
         });

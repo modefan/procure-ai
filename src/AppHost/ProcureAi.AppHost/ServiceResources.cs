@@ -117,6 +117,8 @@ public static class ServiceResources
         var api = builder.AddProject<TProject>(spec.Name + ApiSuffix)
             // No launchSettings.json: Aspire picks a free port, so dev runs and test runs never clash.
             .WithHttpEndpoint(name: "http")
+            // The Angular dev panel asks for the "behind the scenes" response headers (X-Cache, X-Policy, ...).
+            .WithEnvironment("DevPanel__Enabled", "true")
             .WithEnvironment("Service__Store", spec.Store.ToString())
             .WithReference(shared.RabbitMq)
             .WithReference(shared.Redis)

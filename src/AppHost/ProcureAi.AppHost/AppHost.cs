@@ -167,6 +167,7 @@ var requestsApi = builder.AddProcureAiService<Projects.ProcureAi_Requests_Api>(
 var simulatorSupplier = builder.Configuration.GetSection("Simulators:Supplier");
 var simulators = builder.AddProject<Projects.ProcureAi_Simulators>(ResourceNames.Simulators)
     .WithHttpEndpoint(name: "http")
+    .WithEnvironment("DevPanel__Enabled", "true")
     .WithEnvironment("Simulators__ApiKey", simulatorApiKey)
     .WithEnvironment("Simulators__Webhooks__Secret", supplierWebhookSecret)
     .WithEnvironment("Simulators__Supplier__ConfirmDelay", simulatorSupplier["ConfirmDelay"] ?? throw new InvalidOperationException("Simulators:Supplier:ConfirmDelay is missing."))
@@ -247,6 +248,7 @@ web.WithArgs(context =>
 // certificate). Keycloak's gateway client accepts https://localhost:* callbacks.
 var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithHttpsEndpoint(name: "https")
+    .WithEnvironment("DevPanel__Enabled", "true")
     .WithExternalHttpEndpoints()
     .WithReference(redis)
     .WithReference(requestsApi)
