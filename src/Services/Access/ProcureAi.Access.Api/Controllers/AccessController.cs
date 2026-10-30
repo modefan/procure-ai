@@ -100,6 +100,37 @@ public sealed class AccessController(
         return updated;
     }
 
+    /// <summary>The cost centers of the tenant with their department, manager and department head (users screen).</summary>
+    [HttpGet("cost-centers", Name = "ListCostCenters")]
+    [CachedGet(Tags = [UsersTagTemplate])]
+    [RequirePermission(Permissions.AdminUsers)]
+    [ProducesResponseType<IReadOnlyList<CostCenterAdminDto>>(StatusCodes.Status200OK, "application/json")]
+    public async Task<ActionResult<IReadOnlyList<CostCenterAdminDto>>> ListCostCenters(CancellationToken cancellationToken) =>
+        Ok(await bus.InvokeAsync<IReadOnlyList<CostCenterAdminDto>>(new ListCostCenters(), cancellationToken));
+
+    /// <summary>Replaces the cost centers assigned to a user. Send the user version (<c>version</c> of the list) in <c>If-Match</c>. An unknown code is 422.</summary>
+    [HttpPut("users/{userId}/cost-centers", Name = "SetUserCostCenters")]
+    [RequirePermission(Permissions.AdminUsers)]
+    [RequireIfMatch]
+    [ProducesResponseType<UserDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
+    public async Task<ActionResult<UserDto>> SetUserCostCenters(
+        [MaxLength(AccessLimits.MaxCodeLength)] string userId, SetUserCostCentersBody body, CancellationToken cancellationToken)
+    {
+        if (Request.ExpectedVersion() is not { } version)
+        {
+            return IfMatchExtensions.PreconditionFailed("If-Match is not a version tag of this resource.");
+        }
+
+        var updated = await bus.InvokeAsync<UserDto>(new SetUserCostCenters(userId, body.Codes, version), cancellationToken);
+        await InvalidateAsync(UsersTagTemplate);
+        Response.Headers.ETag = VersionETag.Format(updated.Version);
+        return updated;
+    }
+
     // The internal lookups below are deliberately NOT [CachedGet] (an exception to the "1 s cache on every GET" rule, final
     // review I-3). A write sends AccessChanged through the outbox inside InvokeAsync, before this controller evicts its cache,
     // so a consumer reacting to it could get the pre-change answer from the micro-cache and keep it under its new cache
@@ -119,6 +150,15 @@ public sealed class AccessController(
         var parsed = roles.SelectMany(r => r.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).Distinct().ToList();
         return await bus.InvokeAsync<EffectiveAccessDto>(new GetEffectiveAccess(userId, parsed), cancellationToken);
     }
+
+    /// <summary>Internal: why a user of the tenant has the permissions they have (roles stored for them, the roles granting each permission, cost centers, headed departments, limit). 404 when the tenant has no such user.</summary>
+    [HttpGet("internal/explain", Name = "ExplainUserAccess")]
+    [Authorize(Policy = InternalPolicy.Name)]
+    [ProducesResponseType<AccessExplanationDto>(StatusCodes.Status200OK, "application/json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AccessExplanationDto>> ExplainUserAccess(
+        [FromQuery, Required, MaxLength(AccessLimits.MaxCodeLength)] string userId, CancellationToken cancellationToken) =>
+        await bus.InvokeAsync<AccessExplanationDto>(new ExplainUserAccess(userId, user.TenantId ?? ""), cancellationToken);
 
     /// <summary>Internal: the manager, department head and finance approvers of a cost center.</summary>
     [HttpGet("internal/cost-centers/{code}/approvers", Name = "GetCostCenterApprovers")]

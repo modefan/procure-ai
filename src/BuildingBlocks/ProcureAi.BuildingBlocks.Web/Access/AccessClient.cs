@@ -93,6 +93,30 @@ public sealed class AccessClient(
         return found is null ? null : new DirectoryUser(found.UserId, found.DisplayName, found.Email ?? "", found.TenantName);
     }
 
+    public async ValueTask<AccessExplanation?> ExplainAsync(string userId, string tenantId, CancellationToken cancellationToken)
+    {
+        var url = $"api/v1/access/internal/explain?userId={Uri.EscapeDataString(userId)}";
+        var generation = await generations.GetAsync(tenantId, cancellationToken);
+        return await cache.GetOrSetAsync<AccessExplanation?>(
+            Key("explain", tenantId, generation, userId),
+            async (context, token) =>
+            {
+                var explanation = await GetAsync<AccessExplanation>(url, tenantId, token, allowNotFound: true);
+                if (explanation is null)
+                {
+                    // "No such user" is an answer: kept only briefly, and never replaced by a stale explanation.
+                    context.Options.Duration = options.Value.NotFoundCacheDuration;
+                    context.Options.DistributedCacheDuration = options.Value.NotFoundCacheDuration;
+                    context.Options.IsFailSafeEnabled = false;
+                }
+
+                return explanation;
+            },
+            options: EntryOptions(),
+            tags: [AccessCacheTag.Tenant(tenantId)],
+            token: cancellationToken);
+    }
+
     /// <summary>Access's answer; <c>Email</c> and <c>TenantName</c> are null from an Access that predates them.</summary>
     private sealed record UserEntry(string UserId, string DisplayName, string? Email, string? TenantName = null);
 

@@ -71,6 +71,19 @@ public sealed class TenantUser
         ApprovalLimit = limit;
     }
 
+    /// <summary>Replaces the assigned cost centers (duplicates dropped, order kept).</summary>
+    public void SetCostCenters(IEnumerable<string> codes)
+    {
+        var wanted = codes.Distinct(StringComparer.Ordinal).ToList();
+        if (wanted.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new DomainException("A cost center code cannot be empty.");
+        }
+
+        _costCenterCodes.Clear();
+        _costCenterCodes.AddRange(wanted);
+    }
+
     private static void Require(string? value, string name)
     {
         if (string.IsNullOrWhiteSpace(value))

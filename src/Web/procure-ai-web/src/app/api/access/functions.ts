@@ -11,8 +11,14 @@ export type { ListUsers$Params as ListUsers$Params } from './fn/access/list-user
 export { listUsers as listUsers } from './fn/access/list-users';
 export type { SetApprovalLimit$Params as SetApprovalLimit$Params } from './fn/access/set-approval-limit';
 export { setApprovalLimit as setApprovalLimit } from './fn/access/set-approval-limit';
+export type { ListCostCenters$Params as ListCostCenters$Params } from './fn/access/list-cost-centers';
+export { listCostCenters as listCostCenters } from './fn/access/list-cost-centers';
+export type { SetUserCostCenters$Params as SetUserCostCenters$Params } from './fn/access/set-user-cost-centers';
+export { setUserCostCenters as setUserCostCenters } from './fn/access/set-user-cost-centers';
 export type { GetEffectiveAccess$Params as GetEffectiveAccess$Params } from './fn/access/get-effective-access';
 export { getEffectiveAccess as getEffectiveAccess } from './fn/access/get-effective-access';
+export type { ExplainUserAccess$Params as ExplainUserAccess$Params } from './fn/access/explain-user-access';
+export { explainUserAccess as explainUserAccess } from './fn/access/explain-user-access';
 export type { GetCostCenterApprovers$Params as GetCostCenterApprovers$Params } from './fn/access/get-cost-center-approvers';
 export { getCostCenterApprovers as getCostCenterApprovers } from './fn/access/get-cost-center-approvers';
 export type { GetUserName$Params as GetUserName$Params } from './fn/access/get-user-name';

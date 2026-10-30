@@ -9,8 +9,12 @@ import { BaseService } from '../base-service';
 import { ApiConfiguration } from '../api-configuration';
 import { StrictHttpResponse } from '../strict-http-response';
 
+import { AccessExplanationDto } from '../models/access-explanation-dto';
+import { CostCenterAdminDto } from '../models/cost-center-admin-dto';
 import { CostCenterApproversDto } from '../models/cost-center-approvers-dto';
 import { EffectiveAccessDto } from '../models/effective-access-dto';
+import { explainUserAccess } from '../fn/access/explain-user-access';
+import { ExplainUserAccess$Params } from '../fn/access/explain-user-access';
 import { getCostCenterApprovers } from '../fn/access/get-cost-center-approvers';
 import { GetCostCenterApprovers$Params } from '../fn/access/get-cost-center-approvers';
 import { getEffectiveAccess } from '../fn/access/get-effective-access';
@@ -21,6 +25,8 @@ import { getMe } from '../fn/access/get-me';
 import { GetMe$Params } from '../fn/access/get-me';
 import { getUserName } from '../fn/access/get-user-name';
 import { GetUserName$Params } from '../fn/access/get-user-name';
+import { listCostCenters } from '../fn/access/list-cost-centers';
+import { ListCostCenters$Params } from '../fn/access/list-cost-centers';
 import { listUsers } from '../fn/access/list-users';
 import { ListUsers$Params } from '../fn/access/list-users';
 import { MatrixDto } from '../models/matrix-dto';
@@ -32,6 +38,8 @@ import { setApprovalLimit } from '../fn/access/set-approval-limit';
 import { SetApprovalLimit$Params } from '../fn/access/set-approval-limit';
 import { setRolePermissions } from '../fn/access/set-role-permissions';
 import { SetRolePermissions$Params } from '../fn/access/set-role-permissions';
+import { setUserCostCenters } from '../fn/access/set-user-cost-centers';
+import { SetUserCostCenters$Params } from '../fn/access/set-user-cost-centers';
 import { UserDto } from '../models/user-dto';
 import { UserNameDto } from '../models/user-name-dto';
 
@@ -166,6 +174,56 @@ export class AccessService extends BaseService {
     return resp.then((r: StrictHttpResponse<UserDto>): UserDto => r.body);
   }
 
+  /** Path part for operation `listCostCenters()` */
+  static readonly ListCostCentersPath = '/api/v1/access/cost-centers';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `listCostCenters()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  listCostCenters$Response(params?: ListCostCenters$Params, context?: HttpContext): Promise<StrictHttpResponse<Array<CostCenterAdminDto>>> {
+    const obs = listCostCenters(this.http, this.rootUrl, params, context);
+    return firstValueFrom(obs);
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `listCostCenters$Response()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  listCostCenters(params?: ListCostCenters$Params, context?: HttpContext): Promise<Array<CostCenterAdminDto>> {
+    const resp = this.listCostCenters$Response(params, context);
+    return resp.then((r: StrictHttpResponse<Array<CostCenterAdminDto>>): Array<CostCenterAdminDto> => r.body);
+  }
+
+  /** Path part for operation `setUserCostCenters()` */
+  static readonly SetUserCostCentersPath = '/api/v1/access/users/{userId}/cost-centers';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `setUserCostCenters()` instead.
+   *
+   * This method sends `application/*+json` and handles request body of type `application/*+json`.
+   */
+  setUserCostCenters$Response(params: SetUserCostCenters$Params, context?: HttpContext): Promise<StrictHttpResponse<UserDto>> {
+    const obs = setUserCostCenters(this.http, this.rootUrl, params, context);
+    return firstValueFrom(obs);
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `setUserCostCenters$Response()` instead.
+   *
+   * This method sends `application/*+json` and handles request body of type `application/*+json`.
+   */
+  setUserCostCenters(params: SetUserCostCenters$Params, context?: HttpContext): Promise<UserDto> {
+    const resp = this.setUserCostCenters$Response(params, context);
+    return resp.then((r: StrictHttpResponse<UserDto>): UserDto => r.body);
+  }
+
   /** Path part for operation `getEffectiveAccess()` */
   static readonly GetEffectiveAccessPath = '/api/v1/access/internal/effective';
 
@@ -189,6 +247,31 @@ export class AccessService extends BaseService {
   getEffectiveAccess(params: GetEffectiveAccess$Params, context?: HttpContext): Promise<EffectiveAccessDto> {
     const resp = this.getEffectiveAccess$Response(params, context);
     return resp.then((r: StrictHttpResponse<EffectiveAccessDto>): EffectiveAccessDto => r.body);
+  }
+
+  /** Path part for operation `explainUserAccess()` */
+  static readonly ExplainUserAccessPath = '/api/v1/access/internal/explain';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `explainUserAccess()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  explainUserAccess$Response(params: ExplainUserAccess$Params, context?: HttpContext): Promise<StrictHttpResponse<AccessExplanationDto>> {
+    const obs = explainUserAccess(this.http, this.rootUrl, params, context);
+    return firstValueFrom(obs);
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `explainUserAccess$Response()` instead.
+   *
+   * This method doesn't expect any request body.
+   */
+  explainUserAccess(params: ExplainUserAccess$Params, context?: HttpContext): Promise<AccessExplanationDto> {
+    const resp = this.explainUserAccess$Response(params, context);
+    return resp.then((r: StrictHttpResponse<AccessExplanationDto>): AccessExplanationDto => r.body);
   }
 
   /** Path part for operation `getCostCenterApprovers()` */

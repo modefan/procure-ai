@@ -44,4 +44,22 @@ public static class AccessResolver
     /// <summary>True when the user's stored roles grant <see cref="Permissions.RequestsApprove"/> in this tenant's matrix.</summary>
     public static bool CanApprove(PermissionMatrix? matrix, TenantUser user) =>
         matrix?.PermissionsFor(user.Roles).Contains(Permissions.RequestsApprove) == true;
+
+    /// <summary>For each permission the given roles hold in this tenant matrix, the roles that grant it (both sorted).</summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> PermissionSources(PermissionMatrix? matrix, IEnumerable<string> roles)
+    {
+        var sources = new SortedDictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        if (matrix is null)
+        {
+            return sources;
+        }
+
+        var distinct = roles.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        foreach (var permission in matrix.PermissionsFor(distinct).Order(StringComparer.Ordinal))
+        {
+            sources[permission] = [.. distinct.Where(role => matrix.PermissionsOf(role).Contains(permission))];
+        }
+
+        return sources;
+    }
 }

@@ -21,6 +21,12 @@ public interface IAccessDirectory
     /// when the tenant has no such user. The same cached lookup as <see cref="GetDisplayNameAsync"/>.
     /// </summary>
     ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Why <paramref name="userId"/> has the permissions they have in <paramref name="tenantId"/>: stored roles, the roles granting each
+    /// permission, cost centers, departments they head, approval limit. Null when the tenant has no such user.
+    /// </summary>
+    ValueTask<AccessExplanation?> ExplainAsync(string userId, string tenantId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -37,3 +43,9 @@ public sealed record Approver(string UserId, string DisplayName, decimal Approva
 
 public sealed record CostCenterApprovers(
     string CostCenterCode, string DepartmentCode, Approver? Manager, Approver? DepartmentHead, IReadOnlyList<Approver> Finance);
+
+/// <summary>The explanation of a user's access (see <see cref="IAccessDirectory.ExplainAsync"/>). <c>PermissionSources</c> maps each permission to the roles that grant it.</summary>
+public sealed record AccessExplanation(
+    string UserId, string DisplayName, string TenantId, IReadOnlyList<string> Roles,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> PermissionSources, IReadOnlyList<string> CostCenterCodes,
+    IReadOnlyList<string> DepartmentCodes, decimal ApprovalLimit, bool IsFinanceApprover);

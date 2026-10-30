@@ -298,6 +298,9 @@ public sealed class RecipientRulesTests
         public ValueTask<DirectoryUser?> GetUserAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
             ValueTask.FromResult(userId == "nomail" ? new DirectoryUser(userId, "No Mail", "") : new DirectoryUser(userId, userId, $"{userId}@acme.test"))!;
 
+        public ValueTask<AccessExplanation?> ExplainAsync(string userId, string tenantId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public ValueTask<EffectiveAccess> GetEffectiveAccessAsync(
             string userId, IReadOnlyCollection<string> roles, string tenantId, CancellationToken cancellationToken) => throw new NotSupportedException();
 

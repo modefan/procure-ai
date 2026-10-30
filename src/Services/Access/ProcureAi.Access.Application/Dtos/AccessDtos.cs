@@ -45,3 +45,17 @@ public sealed record MeDto(
 
 /// <summary>A tenant a user belongs to: its ID (the token's tenant claim) and the name it is shown under.</summary>
 public sealed record TenantDto(string Id, string Name);
+
+/// <summary>A cost center with its department, manager and department head (names are null when nobody is assigned or the user is gone).</summary>
+public sealed record CostCenterAdminDto(
+    string Code, string Name, string DepartmentCode, string DepartmentName, string? ManagerId, string? ManagerName,
+    string? DepartmentHeadId, string? DepartmentHeadName);
+
+/// <summary>
+/// Why a user may do what they may: the roles stored for them, for each permission the roles that grant it, the cost centers
+/// they act for, the departments they head, the approval limit in Rand and the finance flag.
+/// </summary>
+public sealed record AccessExplanationDto(
+    string UserId, string DisplayName, string TenantId, IReadOnlyList<string> Roles,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> PermissionSources, IReadOnlyList<string> CostCenterCodes,
+    IReadOnlyList<string> DepartmentCodes, decimal ApprovalLimit, bool IsFinanceApprover);

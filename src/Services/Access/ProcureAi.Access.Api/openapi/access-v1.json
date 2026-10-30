@@ -289,6 +289,169 @@
         }
       }
     },
+    "/api/v1/access/cost-centers": {
+      "get": {
+        "tags": [
+          "Access"
+        ],
+        "operationId": "ListCostCenters",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CostCenterAdminDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/users/{userId}/cost-centers": {
+      "put": {
+        "tags": [
+          "Access"
+        ],
+        "operationId": "SetUserCostCenters",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The ETag of the version you last read, e.g. \"3\". Missing: 428; stale: 412.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserCostCentersBody"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserCostCentersBody"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserCostCentersBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/access/internal/effective": {
       "get": {
         "tags": [
@@ -323,6 +486,57 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EffectiveAccessDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/internal/explain": {
+      "get": {
+        "tags": [
+          "Access"
+        ],
+        "operationId": "ExplainUserAccess",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessExplanationDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -610,6 +824,65 @@
   },
   "components": {
     "schemas": {
+      "AccessExplanationDto": {
+        "required": [
+          "userId",
+          "displayName",
+          "tenantId",
+          "roles",
+          "permissionSources",
+          "costCenterCodes",
+          "departmentCodes",
+          "approvalLimit",
+          "isFinanceApprover"
+        ],
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "permissionSources": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "costCenterCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "departmentCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "approvalLimit": {
+            "type": "number",
+            "format": "double"
+          },
+          "isFinanceApprover": {
+            "type": "boolean"
+          }
+        }
+      },
       "ApproverDto": {
         "required": [
           "userId",
@@ -631,6 +904,57 @@
           },
           "canApprove": {
             "type": "boolean"
+          }
+        }
+      },
+      "CostCenterAdminDto": {
+        "required": [
+          "code",
+          "name",
+          "departmentCode",
+          "departmentName",
+          "managerId",
+          "managerName",
+          "departmentHeadId",
+          "departmentHeadName"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "departmentCode": {
+            "type": "string"
+          },
+          "departmentName": {
+            "type": "string"
+          },
+          "managerId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "managerName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "departmentHeadId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "departmentHeadName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -893,6 +1217,20 @@
         "type": "object",
         "properties": {
           "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SetUserCostCentersBody": {
+        "required": [
+          "codes"
+        ],
+        "type": "object",
+        "properties": {
+          "codes": {
             "type": "array",
             "items": {
               "type": "string"

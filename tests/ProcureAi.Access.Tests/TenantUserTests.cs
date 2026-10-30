@@ -37,6 +37,35 @@ public sealed class TenantUserTests
     }
 
     [Fact]
+    public void Each_permission_lists_the_roles_that_grant_it()
+    {
+        var matrix = PermissionMatrix.Create("acme", new Dictionary<string, IReadOnlyCollection<string>>
+        {
+            ["manager"] = [Permissions.RequestsRead, Permissions.RequestsApprove],
+            ["requester"] = [Permissions.RequestsRead],
+            ["admin"] = [Permissions.AdminAuthorization],
+        }, DateTimeOffset.UtcNow);
+
+        var sources = AccessResolver.PermissionSources(matrix, ["requester", "manager", "ghost"]);
+
+        sources[Permissions.RequestsRead].ShouldBe(["manager", "requester"]);
+        sources[Permissions.RequestsApprove].ShouldBe(["manager"]);
+        sources.ShouldNotContainKey(Permissions.AdminAuthorization);
+        AccessResolver.PermissionSources(null, ["manager"]).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Cost_centers_are_replaced_without_duplicates_and_blank_codes_refused()
+    {
+        var user = NewUser();
+
+        user.SetCostCenters(["MK-110", "MK-110", "IT-200"]);
+        user.CostCenterCodes.ShouldBe(["MK-110", "IT-200"]);
+        Should.Throw<DomainException>(() => user.SetCostCenters([" "]));
+        user.CostCenterCodes.ShouldBe(["MK-110", "IT-200"]);
+    }
+
+    [Fact]
     public void Roles_and_cost_centers_are_kept_without_duplicates()
     {
         var user = TenantUser.Create("acme", "u-1", "Maria", "m@acme.test", ["manager", "manager"], Money.Zero, false, ["IT-200", "IT-200", "MK-110"]);
