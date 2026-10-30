@@ -33,7 +33,7 @@ describe('RequestDetailPage', () => {
         eventDto('BudgetReserved', 'R 86 940,00 reserved on IT-200 (2026)', '2026-10-28T09:03:00Z', 'system'),
       ]),
     };
-    ask = vi.fn().mockResolvedValue(true);
+    ask = vi.fn().mockResolvedValue({ confirmed: true, value: '' });
     fake = fakeHubFactory();
     TestBed.configureTestingModule({
       providers: [
@@ -45,7 +45,7 @@ describe('RequestDetailPage', () => {
         { provide: AuditService, useValue: { getRequestHistory: api['getRequestHistory'] } },
         { provide: AuthStore, useValue: { hasPermission: (p: string) => permissions.includes(p), user: signal({ userId, name: 'Tom Mokoena' }) } },
         { provide: ConflictDialog, useValue: { show: vi.fn().mockResolvedValue(undefined) } },
-        { provide: ConfirmDialog, useValue: { ask } },
+        { provide: ConfirmDialog, useValue: { askWithInput: ask } },
         { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
       ],
     });
@@ -123,10 +123,10 @@ describe('RequestDetailPage', () => {
 
   it('the cancel button asks first, and a "no" does nothing', async () => {
     const { fixture, el } = await setup();
-    ask.mockResolvedValue(false);
+    ask.mockResolvedValue({ confirmed: false, value: '' });
     (Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Cancel request') as HTMLButtonElement).click();
     await settle(fixture);
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ confirm: 'Cancel request' }));
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ confirm: 'Cancel request', input: { label: 'Reason (optional)', minLength: 0, maxLength: 500, required: false } }));
     expect(api['cancelRequest']).not.toHaveBeenCalled();
   });
 
@@ -137,6 +137,21 @@ describe('RequestDetailPage', () => {
     await settle(fixture);
     expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', 'If-Match': '"1730"' }), expect.anything());
     expect(text(el.querySelector('header'))).toContain('Cancelling');
+  });
+
+  it('cancel_sends_typed_reason', async () => {
+    const { fixture, el } = await setup();
+    ask.mockResolvedValue({ confirmed: true, value: 'Wrong supplier' });
+    (Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Cancel request') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1', body: { reason: 'Wrong supplier' } }), expect.anything());
+  });
+
+  it('cancel without a reason sends no reason', async () => {
+    const { fixture, el } = await setup();
+    (Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Cancel request') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ body: { reason: null } }), expect.anything());
   });
 
   it('someone who did not raise the request gets no cancel button', async () => {

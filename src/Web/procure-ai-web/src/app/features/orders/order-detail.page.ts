@@ -11,6 +11,10 @@ import { OrderDetailStore, ReceiptInput } from './order-detail.store';
 import { outstandingTotal, receivedText } from './order-quantities';
 import { ReceiptForm } from './receipt-form';
 
+/** The reason length the Purchasing API accepts for closing an order short (the OpenAPI document does not state it). */
+const CLOSE_SHORT_REASON_MIN = 3;
+const CLOSE_SHORT_REASON_MAX = 500;
+
 /**
  * Screen 9, one order: lines (ordered, received, invoiced, paid), receipts, the linked request and invoices, and the two
  * writes: record delivery and close short (both need `orders.receive`). The route resolver passes the order it already
@@ -237,14 +241,15 @@ export class OrderDetailPage {
     if (!order) {
       return;
     }
-    const sure = await this.confirm.ask({
+    const answer = await this.confirm.askWithInput({
       title: `Close ${order.number} short?`,
       body: `The ${this.outstanding()} units still outstanding will not be delivered, and the order is finished with what has been received. This cannot be undone.`,
       confirm: 'Close short',
       cancel: 'Keep open',
+      input: { label: 'Reason', minLength: CLOSE_SHORT_REASON_MIN, maxLength: CLOSE_SHORT_REASON_MAX, required: true },
     });
-    if (sure) {
-      await this.store.closeShort();
+    if (answer.confirmed) {
+      await this.store.closeShort(answer.value);
     }
   }
 }

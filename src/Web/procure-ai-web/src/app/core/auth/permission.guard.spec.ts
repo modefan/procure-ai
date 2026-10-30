@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { ActivatedRouteSnapshot, provideRouter, Router, RouterStateSnapshot, UrlTree } from '@angular/router';
+import { ActivatedRouteSnapshot, provideRouter, RedirectCommand, Router, RouterStateSnapshot, UrlTree } from '@angular/router';
 import { permissionGuard } from './permission.guard';
 import { AuthStore } from './auth.store';
 
@@ -28,12 +28,19 @@ describe('permissionGuard', () => {
     return TestBed.runInInjectionContext(() => permissionGuard(route, { url: '/app/requests' } as RouterStateSnapshot));
   }
 
-  const serialize = (tree: unknown) => TestBed.inject(Router).serializeUrl(tree as UrlTree);
+  const redirect = (result: unknown) => result as RedirectCommand;
+  const serialize = (result: unknown) => TestBed.inject(Router).serializeUrl(redirect(result).redirectTo as UrlTree);
 
   it('sends a user without requests.read to /forbidden', async () => {
     await signIn(['requests.create']);
 
     expect(serialize(run('requests.read'))).toBe('/forbidden');
+  });
+
+  it('forbidden_names_permission_from_guard: the redirect carries the permission as navigation state', async () => {
+    await signIn(['requests.create']);
+
+    expect(redirect(run('requests.read')).navigationBehaviorOptions?.state).toEqual({ permission: 'requests.read' });
   });
 
   it('lets a user with requests.read through', async () => {

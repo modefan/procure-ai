@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { inject, signal } from '@angular/core';
 import { getState, patchState, signalStoreFeature, type, withHooks, withMethods, withProps } from '@ngrx/signals';
 import { AppConfigService } from '../config/app-config';
 import { Logger } from '../logging/logger';
@@ -54,13 +54,28 @@ export function withCache(options: CacheOptions = {}) {
   return signalStoreFeature(
     { state: type<object>() },
     // Internal: where `onInit` leaves the state snapshot for `reset()` and the registry handle for `onDestroy`.
-    withProps(() => ({ _cacheInternals: { initialState: null as object | null, deregister: null as (() => void) | null } })),
+    withProps(() => ({
+      _cacheInternals: { initialState: null as object | null, deregister: null as (() => void) | null },
+      _revalidateFailed: signal(false),
+    })),
+    // True while a background refresh has failed and the key has not loaded again (the shell shows "Couldn't refresh").
+    withProps((store) => ({ revalidateError: store._revalidateFailed.asReadonly() })),
     withMethods((store) => {
       const log = inject(Logger).withSource('withCache');
       const config = inject(AppConfigService);
       const staleMs = options.staleMs ?? config.config().cache.staleMs;
       const trailers = new Map<string, TrailingReload>();
       const entries = new Map<string, Entry>();
+      /** Keys whose last background refresh failed. */
+      const failedKeys = new Set<string>();
+      const markFailed = (key: string, ok: boolean) => {
+        if (ok) {
+          failedKeys.delete(key);
+        } else {
+          failedKeys.add(key);
+        }
+        store._revalidateFailed.set(failedKeys.size > 0);
+      };
       let epoch = 0;
 
       const isFresh = (entry: Entry) => entry.loadedAt !== null && Date.now() - entry.loadedAt < staleMs;
@@ -70,7 +85,11 @@ export function withCache(options: CacheOptions = {}) {
         entries.delete(key);
         entries.set(key, entry);
         while (entries.size > MAX_KEYS) {
-          entries.delete(entries.keys().next().value as string);
+          const dropped = entries.keys().next().value as string;
+          entries.delete(dropped);
+          if (failedKeys.delete(dropped)) {
+            store._revalidateFailed.set(failedKeys.size > 0);
+          }
         }
       };
 
@@ -82,6 +101,9 @@ export function withCache(options: CacheOptions = {}) {
             await entry.loader();
             if (myEpoch === epoch) {
               entry.loadedAt = Date.now();
+              if (failedKeys.has(key)) {
+                markFailed(key, true);
+              }
             }
           } catch (error) {
             if (myEpoch === epoch) {
@@ -94,12 +116,19 @@ export function withCache(options: CacheOptions = {}) {
             }
             if (myEpoch === epoch && entry.rerun) {
               entry.rerun = false;
-              void run(key, entry).catch((error: unknown) => log.warn(`Background refresh of "${key}" failed`, error));
+              void run(key, entry).catch((error: unknown) => backgroundFailed(key, error));
             }
           }
         })();
         entry.inFlight = promise;
         return promise;
+      };
+
+      const backgroundFailed = (key: string, error: unknown) => {
+        log.warn(`Background refresh of "${key}" failed`, error);
+        if (entries.has(key)) {
+          markFailed(key, false);
+        }
       };
 
       const matches = (match: string | ((key: string) => boolean)) =>
@@ -153,7 +182,7 @@ export function withCache(options: CacheOptions = {}) {
             if (entry.inFlight) {
               entry.rerun = true;
             } else {
-              void run(key, entry).catch((error: unknown) => log.warn(`Background refresh of "${key}" failed`, error));
+              void run(key, entry).catch((error: unknown) => backgroundFailed(key, error));
             }
           }
         },
@@ -170,6 +199,8 @@ export function withCache(options: CacheOptions = {}) {
           trailers.forEach((trailer) => trailer.cancel());
           trailers.clear();
           entries.clear();
+          failedKeys.clear();
+          store._revalidateFailed.set(false);
           epoch++;
         },
 

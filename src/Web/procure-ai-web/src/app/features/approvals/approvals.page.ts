@@ -4,6 +4,7 @@ import { form, FormField, maxLength, validate } from '@angular/forms/signals';
 import { RouterLink } from '@angular/router';
 import { ApprovalStepDto } from '../../api/approvals/models/approval-step-dto';
 import { BusyButton } from '../../core/ui/busy-button';
+import { ConfirmDialog } from '../../core/ui/confirm-dialog';
 import { KeepRandPipe } from '../../core/ui/money.pipe';
 import { Pager } from '../../core/ui/pager';
 import { ApprovalsStore } from './approvals.store';
@@ -172,6 +173,7 @@ const MAX_REASON = 500;
 })
 export class ApprovalsPage implements OnInit {
   protected readonly store = inject(ApprovalsStore);
+  private readonly confirm = inject(ConfirmDialog);
   protected readonly skeletonRows = [1, 2, 3];
   /** The step whose reject box is open (one at a time). */
   protected readonly rejecting = signal<string | null>(null);
@@ -206,8 +208,17 @@ export class ApprovalsPage implements OnInit {
     return escalatesIn(step.dueAt, this.now());
   }
 
-  protected approve(step: ApprovalStepDto): void {
-    void this.store.approve(step);
+  protected async approve(step: ApprovalStepDto): Promise<void> {
+    const answer = await this.confirm.askWithInput({
+      title: `Approve ${step.requestNumber}?`,
+      body: `${step.requestTitle}, ${step.totalInclVatDisplay}. The requester sees your comment in the history.`,
+      confirm: 'Approve',
+      cancel: 'Not yet',
+      input: { label: 'Comment (optional)', minLength: 0, maxLength: MAX_REASON, required: false },
+    });
+    if (answer.confirmed) {
+      await this.store.approve(step, answer.value);
+    }
   }
 
   protected startReject(step: ApprovalStepDto): void {

@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { CacheRegistry } from './cache-registry';
 
@@ -67,5 +68,25 @@ describe('CacheRegistry', () => {
 
     expect(bad.revalidateAll).toHaveBeenCalledTimes(1);
     expect(good.revalidateAll).toHaveBeenCalledTimes(1);
+  });
+  it('revalidateErrors_is_true_while_any_store_reports_one, and retryRevalidation_retries_only_those', () => {
+    const registry = TestBed.inject(CacheRegistry);
+    const failing = signal(true);
+    const sick = { clearCache: vi.fn(), revalidateAll: vi.fn(), revalidateError: () => failing() };
+    const fine = { clearCache: vi.fn(), revalidateAll: vi.fn(), revalidateError: () => false };
+    const plain = { clearCache: vi.fn() };
+    expect(registry.revalidateErrors()).toBe(false);
+    registry.register(fine);
+    registry.register(plain);
+    expect(registry.revalidateErrors()).toBe(false);
+    registry.register(sick);
+    expect(registry.revalidateErrors()).toBe(true);
+
+    registry.retryRevalidation();
+
+    expect(sick.revalidateAll).toHaveBeenCalledWith({ force: true });
+    expect(fine.revalidateAll).not.toHaveBeenCalled();
+    failing.set(false);
+    expect(registry.revalidateErrors()).toBe(false);
   });
 });

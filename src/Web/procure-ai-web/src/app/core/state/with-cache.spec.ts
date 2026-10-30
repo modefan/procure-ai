@@ -290,6 +290,42 @@ describe('withCache', () => {
     expect(warn.mock.calls[0][0]).toContain('a');
   });
 
+  it('revalidate_error_is_set_by_a_failing_background_rerun_and_cleared_by_the_next_success', async () => {
+    const loader = vi.fn(async () => undefined);
+    await store().cacheLoad('a', loader);
+    expect(store().revalidateError()).toBe(false);
+    loader.mockRejectedValueOnce(new Error('network'));
+
+    store().invalidate('a');
+    await vi.waitFor(() => expect(store().revalidateError()).toBe(true));
+
+    store().invalidate('a');
+    await vi.waitFor(() => expect(store().revalidateError()).toBe(false));
+  });
+
+  it('revalidate_error_stays_until_every_failed_key_has_loaded_again_and_clearCache_forgets_it', async () => {
+    const a = vi.fn(async () => undefined);
+    const b = vi.fn(async () => undefined);
+    await store().cacheLoad('a', a);
+    await store().cacheLoad('b', b);
+    a.mockRejectedValueOnce(new Error('x'));
+    b.mockRejectedValueOnce(new Error('y'));
+    store().invalidate(() => true);
+    await vi.waitFor(() => expect(store().revalidateError()).toBe(true));
+
+    store().invalidate('a');
+    await vi.waitFor(() => expect(a).toHaveBeenCalledTimes(3));
+    expect(store().revalidateError()).toBe(true); // b is still failing
+
+    store().clearCache();
+    expect(store().revalidateError()).toBe(false);
+  });
+
+  it('a failing foreground load does not raise the refresh banner (the screen shows its own error)', async () => {
+    await expect(store().cacheLoad('a', async () => Promise.reject(new Error('x')))).rejects.toThrow();
+    expect(store().revalidateError()).toBe(false);
+  });
+
   it('a_destroyed_store_is_dropped_from_the_registry', async () => {
     const injector = createEnvironmentInjector([Store], TestBed.inject(EnvironmentInjector));
     const scoped = injector.get(Store);

@@ -103,10 +103,14 @@ export const ApprovalsStore = signalStore(
         return store.load(store.page());
       },
 
-      /** Approves the step with the version that was read. Resolves true when the server agreed. */
-      approve(step: ApprovalStepDto): Promise<boolean> {
+      /** Approves the step with the version that was read, with an optional comment. Resolves true when the server agreed. */
+      approve(step: ApprovalStepDto, comment = ''): Promise<boolean> {
+        const text = comment.trim();
         return act(step, 'approve', () =>
-          api.approveStep({ stepId: step.id, 'If-Match': `"${step.version}"`, 'Idempotency-Key': keyFor(step.id, 'approve', step.version) }, quietly()),
+          api.approveStep(
+            { stepId: step.id, 'If-Match': `"${step.version}"`, 'Idempotency-Key': keyFor(step.id, 'approve', step.version, text), ...(text ? { body: { comment: text } } : {}) },
+            quietly(),
+          ),
         );
       },
 

@@ -114,7 +114,7 @@ describe('OrderDetailStore', () => {
     let finish!: (o: unknown) => void;
     api['receiveGoods'].mockReturnValueOnce(new Promise((r) => (finish = r)));
     const receiving = store.receive({ deliveryNote: null, lines: [{ lineNo: 1, quantity: 1 }] });
-    expect(await store.closeShort()).toBe(false);
+    expect(await store.closeShort('Supplier cannot deliver')).toBe(false);
     expect(api['closeOrderShort']).not.toHaveBeenCalled();
     expect(store.busy()).toBe('receiving');
     finish(order({ version: 5 }));
@@ -166,9 +166,9 @@ describe('OrderDetailStore', () => {
   it('close short sends If-Match, a key and a reason, and shows the updated order', async () => {
     const store = setup();
     await store.init('o1', order({ status: 'PartiallyReceived', version: 4 }));
-    expect(await store.closeShort()).toBe(true);
+    expect(await store.closeShort('Supplier cannot deliver')).toBe(true);
     expect(api['closeOrderShort']).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'o1', 'If-Match': '"4"', body: { reason: expect.stringMatching(/\S/) } }),
+      expect.objectContaining({ id: 'o1', 'If-Match': '"4"', body: { reason: 'Supplier cannot deliver' } }),
       expect.any(HttpContext),
     );
     expect(store.order()?.status).toBe('ClosedShort');

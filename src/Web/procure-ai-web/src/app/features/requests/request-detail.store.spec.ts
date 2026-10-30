@@ -258,6 +258,13 @@ describe('RequestDetailStore', () => {
       expect(store.generalError()).toBeNull();
     });
 
+    it('cancel_sends_typed_reason', async () => {
+      const store = setup();
+      await store.init('r1', null);
+      await store.cancel('Wrong supplier');
+      expect(api['cancelRequest']).toHaveBeenCalledWith(expect.objectContaining({ body: { reason: 'Wrong supplier' } }), expect.any(HttpContext));
+    });
+
     it('cancel_conflict_shows_dialog_and_reloads', async () => {
       const store = setup();
       await store.init('r1', null);
@@ -354,6 +361,21 @@ describe('RequestDetailStore', () => {
       api['getOrderForRequest'].mockResolvedValue(orderDto({ status: 'PartiallyReceived', receipts: [{ id: 'g', receivedAt: 't', receivedBy: 'u', deliveryNote: null, lines: [] }] }));
       await received.init('r1', null);
       expect(received.canCancel()).toBe(false);
+    });
+
+    it('cancel_hidden_without_orders_read', async () => {
+      // Without orders.read the page cannot see whether goods were received, so it cannot promise the cancel will work.
+      const store = setup(['requests.read', 'requests.create']);
+      await store.init('r1', null);
+      expect(store.canCancel()).toBe(false);
+      TestBed.resetTestingModule();
+
+      const draft = setup(['requests.read', 'requests.create']);
+      api['getRequest'].mockResolvedValue(requestDto({ status: 'Draft', submittedAt: null }));
+      api['getApprovalChain'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
+      api['getRequestHistory'].mockRejectedValue(new HttpErrorResponse({ status: 404 }));
+      await draft.init('r1', null);
+      expect(draft.canCancel()).toBe(true); // a draft has no order to look at
     });
 
     it('no cancel without requests.create', async () => {

@@ -27,7 +27,6 @@ interface OrderDetail {
 }
 
 /** Sent as the reason of a close-short: the screen asks "are you sure", it has no free text field. */
-export const CLOSE_SHORT_REASON = 'Closed short from the orders screen: the remaining quantities will not be delivered.';
 const quietly = () => new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true);
 
 /**
@@ -161,7 +160,7 @@ export const OrderDetailStore = signalStore(
       },
 
       /** Closes the order short: what is still outstanding will not be delivered. */
-      closeShort(): Promise<boolean> {
+      closeShort(reason: string): Promise<boolean> {
         const order = store.order();
         if (!order) {
           return Promise.resolve(false);
@@ -169,9 +168,9 @@ export const OrderDetailStore = signalStore(
         return write(
           'closing',
           order,
-          (etag, key) => orders.closeOrderShort({ id: order.id, 'If-Match': etag, 'Idempotency-Key': key, body: { reason: CLOSE_SHORT_REASON } }, quietly()),
+          (etag, key) => orders.closeOrderShort({ id: order.id, 'If-Match': etag, 'Idempotency-Key': key, body: { reason: reason.trim() } }, quietly()),
           'closing the order short',
-          ['close-short'],
+          ['close-short', reason.trim()],
         );
       },
     };

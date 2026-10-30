@@ -129,7 +129,10 @@ export const RequestDetailStore = signalStore(
       canCancel: computed(() => {
         const request = store.request();
         const received = (store.order()?.receipts.length ?? 0) > 0;
-        return !!request && CANCELLABLE.includes(request.status) && !received && auth.hasPermission('requests.create') && mine();
+        // Whether goods were received is only visible with orders.read; without it the cancel could be refused, so it is not offered.
+        // A draft has no order, so it needs no look.
+        const knowsReceipts = canSeeOrder() || request?.status === 'Draft';
+        return !!request && CANCELLABLE.includes(request.status) && knowsReceipts && !received && auth.hasPermission('requests.create') && mine();
       }),
       timeline: computed(() => {
         const request = store.request();
@@ -154,17 +157,17 @@ export const RequestDetailStore = signalStore(
       /** Shows request `id`. `initial` is what the route resolver already fetched, so it is not asked for twice. */
       init: (id: string, initial: RequestDto | null): Promise<void> => store.open(id, initial),
 
-      /** Cancels the request, after the page has asked the user. */
-      async cancel(): Promise<void> {
+      /** Cancels the request, after the page has asked the user. `reason` is what the user typed (may be empty). */
+      async cancel(reason = ''): Promise<void> {
         const request = store.request();
         if (!request) {
           return;
         }
-        await store.runWrite((etag, key) => requests.cancelRequest({ id: request.id, 'If-Match': etag ?? versionEtag(request), 'Idempotency-Key': key }, quietly()), {
+        await store.runWrite((etag, key) => requests.cancelRequest({ id: request.id, 'If-Match': etag ?? versionEtag(request), 'Idempotency-Key': key, body: { reason: reason.trim() || null } }, quietly()), {
           what: 'Cancelling the request',
           failureMessage: 'The request could not be cancelled. Please try again.',
           conflictMessage: (error) => problemOf(error).general ?? 'This request was changed by someone else. The latest version is loaded.',
-          keyParts: [request.id, request.version],
+          keyParts: [request.id, request.version, reason.trim()],
           apply: (updated, current) => ({ value: { ...(current ?? NO_PARTS), request: updated }, etag: versionEtag(updated) }),
           reloadAfter: true,
         });

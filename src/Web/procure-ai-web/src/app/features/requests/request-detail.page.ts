@@ -11,6 +11,9 @@ import { RequestDetailStore } from './request-detail.store';
 import { StatusBadge } from './status-badge';
 import { WorkflowTimeline } from './workflow-timeline';
 
+/** The longest cancellation reason the Requests API accepts (the OpenAPI document does not state it). */
+const CANCEL_REASON_MAX = 500;
+
 /**
  * Screen 7: one request with its workflow, audit trail and who else is looking at it (needs `requests.read`).
  * The route resolver passes the request it already loaded (`request`); everything else loads in parallel here and
@@ -229,14 +232,15 @@ export class RequestDetailPage {
     if (!request) {
       return;
     }
-    const sure = await this.confirm.ask({
+    const answer = await this.confirm.askWithInput({
       title: `Cancel ${request.number}?`,
       body: 'The request stops here and any budget reserved for it is released. This cannot be undone.',
       confirm: 'Cancel request',
       cancel: 'Keep request',
+      input: { label: 'Reason (optional)', minLength: 0, maxLength: CANCEL_REASON_MAX, required: false },
     });
-    if (sure) {
-      await this.store.cancel();
+    if (answer.confirmed) {
+      await this.store.cancel(answer.value);
     }
   }
 }

@@ -12,6 +12,8 @@ export interface BffUser {
   userId: string;
   name: string | null;
   tenantId: string | null;
+  /** The company's display name; null when Access could not be asked (show the tenant ID then). */
+  tenantName?: string | null;
   roles: string[];
   permissions: string[];
 }

@@ -96,6 +96,20 @@ describe('ApprovalsStore', () => {
     expect(store.actingOn('s1')).toBeNull();
   });
 
+  it('approve_sends_optional_comment', async () => {
+    const store = await setup();
+    await store.load(1);
+    await store.approve(store.entities()[0], '  Within budget  ');
+    expect((api['approveStep'].mock.calls[0][0] as Record<string, unknown>)['body']).toEqual({ comment: 'Within budget' });
+  });
+
+  it('a blank comment sends no body', async () => {
+    const store = await setup();
+    await store.load(1);
+    await store.approve(store.entities()[0], '   ');
+    expect((api['approveStep'].mock.calls[0][0] as Record<string, unknown>)['body']).toBeUndefined();
+  });
+
   it('a double click is one call', async () => {
     const store = await setup();
     await store.load(1);

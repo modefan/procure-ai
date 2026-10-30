@@ -97,6 +97,10 @@ export class ReceiptForm {
 
   protected readonly model = signal<Model>({ deliveryNote: '', lines: [] });
   protected readonly tried = signal(false);
+  /** The order id and receipt count as they were when this form last sent a receipt: the next change after that starts it over. */
+  private sentAtReceipts: number | null = null;
+  private shownOrderId: string | null = null;
+  private shownReceipts = 0;
 
   protected readonly receiptForm = form(this.model, (p) => {
     maxLength(p.deliveryNote, MAX_NOTE, { message: `Use at most ${MAX_NOTE} characters` });
@@ -121,15 +125,34 @@ export class ReceiptForm {
   protected readonly noQuantity = computed(() => !this.model().lines.some((l) => typeof l.quantity === 'number' && l.quantity > 0));
 
   constructor() {
-    // A new order, or a receipt just recorded, starts the form over; a push that changes nothing here keeps what is typed.
-    const startKey = computed(() => `${this.order().id}:${this.order().receipts.length}`);
+    // A different order, or the receipt this form just sent, starts the form over. Any other push (somebody else received
+    // something, the supplier status changed) refreshes the lines the user has not touched and keeps the quantities typed.
     effect(() => {
-      startKey();
+      const order = this.order();
       untracked(() => {
-        this.model.set(emptyModel(this.order()));
-        this.tried.set(false);
+        const receipts = order.receipts.length;
+        const sameOrder = this.shownOrderId === order.id;
+        const ownReceipt = this.sentAtReceipts !== null && receipts > this.sentAtReceipts;
+        if (!sameOrder || ownReceipt) {
+          this.model.set(emptyModel(order));
+          this.tried.set(false);
+        } else {
+          this.model.update((current) => this.merge(current, order));
+        }
+        if (ownReceipt) {
+          this.sentAtReceipts = null;
+        }
+        this.shownOrderId = order.id;
+        this.shownReceipts = receipts;
       });
     });
+  }
+
+  /** The new order's lines; a line keeps the quantity the user typed (non-zero), the rest show the fresh outstanding. */
+  private merge(current: Model, order: PurchaseOrderDto): Model {
+    const typed = new Map(current.lines.filter((l) => typeof l.quantity !== 'number' || l.quantity !== 0).map((l) => [l.lineNo, l.quantity]));
+    const fresh = emptyModel(order);
+    return { deliveryNote: current.deliveryNote, lines: fresh.lines.map((l) => (typed.has(l.lineNo) ? { ...l, quantity: typed.get(l.lineNo)! } : l)) };
   }
 
   protected lineError(index: number): string | null {
@@ -148,6 +171,7 @@ export class ReceiptForm {
         return;
       }
       const value = this.model();
+      this.sentAtReceipts = this.shownReceipts;
       this.submitted.emit({
         deliveryNote: value.deliveryNote.trim() === '' ? null : value.deliveryNote.trim(),
         lines: value.lines.filter((l) => l.quantity > 0).map((l) => ({ lineNo: l.lineNo, quantity: l.quantity })),

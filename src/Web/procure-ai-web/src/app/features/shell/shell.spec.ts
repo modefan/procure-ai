@@ -7,10 +7,11 @@ import { LiveConnection, LiveState } from '../../core/live/live-connection';
 import { NotificationsStore } from '../../core/live/notifications.store';
 import { NotificationsService } from '../../api/notifications/services/notifications.service';
 import { PresenceStore } from '../../core/live/presence.store';
+import { CacheRegistry } from '../../core/state/cache-registry';
 import { Shell } from './shell';
 
 describe('Shell header', () => {
-  const user = signal<{ userId: string; name: string; tenantId: string; roles: string[]; permissions: string[] } | null>(null);
+  const user = signal<{ userId: string; name: string; tenantId: string; tenantName?: string | null; roles: string[]; permissions: string[] } | null>(null);
   const state = signal<LiveState>('connected');
   const items = signal<{ id: string; text: string; link: string; read: boolean; createdAt: string; requestId: string | null }[]>([]);
   const unread = signal(0);
@@ -243,6 +244,125 @@ describe('Shell header', () => {
     expect(trigger).toContain('Tom Requester');
     expect(trigger).toContain('Manager');
     expect(trigger).toContain('Acme');
+  });
+
+  it('user_menu_shows_tenant_name', async () => {
+    signIn(['requests.read'], ['manager']);
+    user.update((u) => ({ ...u!, tenantName: 'Acme Corp' }));
+    const named = text((await render()).querySelector('[data-testid=user-menu]'));
+    expect(named).toContain('Manager · Acme Corp');
+    TestBed.resetTestingModule();
+  });
+
+  it('user_menu_falls_back_to_the_tenant_id_when_the_name_is_unknown', async () => {
+    signIn(['requests.read'], ['manager']);
+    user.update((u) => ({ ...u!, tenantName: null }));
+    expect(text((await render()).querySelector('[data-testid=user-menu]'))).toContain('Manager · Acme');
+  });
+
+  describe('phone menu', () => {
+    beforeEach(() => {
+      HTMLDialogElement.prototype.showModal = function () {
+        this.setAttribute('open', '');
+      };
+      HTMLDialogElement.prototype.close = function () {
+        this.removeAttribute('open');
+        this.dispatchEvent(new Event('close'));
+      };
+    });
+
+    const setupPhone = async () => {
+      signIn(['requests.read', 'requests.approve', 'orders.read']);
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      const settle = async () => {
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+      };
+      return { fixture, el, settle, dialog: () => el.querySelector('dialog[data-testid=phone-drawer]') as HTMLDialogElement, button: () => el.querySelector('[data-testid=phone-menu]') as HTMLButtonElement };
+    };
+
+    it('phone_menu_opens_drawer_and_closes_on_navigation', async () => {
+      const { el, settle, dialog, button } = await setupPhone();
+      TestBed.inject(Router).resetConfig([{ path: 'app/orders', children: [] }]);
+      expect(dialog().hasAttribute('open')).toBe(false);
+      expect(button().getAttribute('aria-expanded')).toBe('false');
+
+      button().click();
+      await settle();
+
+      expect(dialog().hasAttribute('open')).toBe(true);
+      expect(button().getAttribute('aria-expanded')).toBe('true');
+      const links = [...dialog().querySelectorAll('nav a')].map((a) => text(a));
+      expect(links).toEqual(['Dashboard', 'Requests', expect.stringContaining('Approvals'), 'Orders']);
+      expect(dialog().querySelector('nav')?.getAttribute('aria-label')).toBe('Menu');
+
+      (dialog().querySelector('nav a[href="/app/orders"]') as HTMLAnchorElement).click();
+      await new Promise((r) => setTimeout(r, 30));
+      await settle();
+
+      expect(dialog().hasAttribute('open')).toBe(false);
+      expect(el.querySelector('dialog[data-testid=phone-drawer] nav a')).toBeNull(); // the links are only built while it is open
+      expect(button().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('closes with its close button and with Esc (the native close event)', async () => {
+      const { settle, dialog, button } = await setupPhone();
+      button().click();
+      await settle();
+      (dialog().querySelector('[data-testid=phone-menu-close]') as HTMLButtonElement).click();
+      await settle();
+      expect(dialog().hasAttribute('open')).toBe(false);
+
+      button().click();
+      await settle();
+      dialog().close(); // what Esc does
+      await settle();
+      expect(button().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('a click on the backdrop closes it', async () => {
+      const { settle, dialog, button } = await setupPhone();
+      button().click();
+      await settle();
+      dialog().click(); // the target is the dialog itself, not its content
+      await settle();
+      expect(dialog().hasAttribute('open')).toBe(false);
+    });
+  });
+
+  describe('refresh failure banner', () => {
+    it('refresh_failure_banner_shows_and_retries', async () => {
+      signIn(['requests.read']);
+      const failing = signal(false);
+      const revalidateAll = vi.fn(() => failing.set(false));
+      TestBed.inject(CacheRegistry).register({ clearCache: vi.fn(), revalidateAll, revalidateError: () => failing() });
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('[data-testid=refresh-banner]')).toBeNull();
+
+      failing.set(true);
+      fixture.detectChanges();
+      const banner = el.querySelector('[data-testid=refresh-banner]')!;
+      expect(text(banner)).toContain("Couldn't refresh. Showing what we had.");
+
+      (banner.querySelector('button') as HTMLButtonElement).click();
+      fixture.detectChanges();
+
+      expect(revalidateAll).toHaveBeenCalledWith({ force: true });
+      expect(el.querySelector('[data-testid=refresh-banner]')).toBeNull();
+    });
+
+    it('is not shown to a signed-out visitor', async () => {
+      const failing = signal(true);
+      TestBed.inject(CacheRegistry).register({ clearCache: vi.fn(), revalidateError: () => failing() });
+      expect((await render()).querySelector('[data-testid=refresh-banner]')).toBeNull();
+    });
   });
 
   it('marking_read_or_a_push_does_not_trigger_another_list_call', async () => {

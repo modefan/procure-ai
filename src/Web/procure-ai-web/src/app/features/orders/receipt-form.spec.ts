@@ -77,4 +77,55 @@ describe('ReceiptForm', () => {
     const { el } = await setup(undefined, { 'line.1': ['Quantity exceeds what is outstanding.'] });
     expect(text(el)).toContain('Quantity exceeds what is outstanding.');
   });
+  describe('when the order is updated by a push', () => {
+    const receipt = (id: string) => ({ id, deliveryNote: null, receivedAt: '2026-10-29T08:00:00Z', receivedBy: 'u9', lines: [{ lineNo: 2, quantity: 1 }] });
+    const pushed = () =>
+      order({ status: 'PartiallyReceived', version: 3, lines: [orderLine(1, 5, 2), orderLine(2, 4, 1), orderLine(3, 2, 2)], receipts: [receipt('g9')] });
+    const refresh = async (fixture: { componentRef: { setInput(n: string, v: unknown): void }; detectChanges(): void; whenStable(): Promise<unknown> }, o: ReturnType<typeof order>) => {
+      fixture.componentRef.setInput('order', o);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+
+    it('receipt_form_keeps_typed_quantities_on_push', async () => {
+      const { fixture, inputs, type, el } = await setup();
+      await type(inputs()[0], '2');
+
+      await refresh(fixture, pushed()); // somebody else received 1 of item 2
+
+      expect(inputs()).toHaveLength(2);
+      expect(inputs()[0].value).toBe('2'); // typed, so kept
+      expect(text(el)).toContain('3 outstanding'); // the line nobody touched shows the new outstanding
+      expect(text(el)).not.toContain('4 outstanding');
+    });
+
+    it('a touched line whose outstanding fell below what was typed shows the error instead of losing the number', async () => {
+      const { fixture, inputs, type, submit, sent, el } = await setup();
+      await type(inputs()[1], '4');
+      await refresh(fixture, pushed());
+      expect(inputs()[1].value).toBe('4');
+      await submit();
+      expect(sent).toHaveLength(0);
+      expect(text(el)).toContain('Only 3 outstanding');
+    });
+
+    it('starts over after the receipt this form sent was recorded', async () => {
+      const { fixture, inputs, type, submit, sent } = await setup();
+      await type(inputs()[0], '2');
+      await submit();
+      expect(sent).toHaveLength(1);
+
+      await refresh(fixture, order({ status: 'PartiallyReceived', version: 3, lines: [orderLine(1, 5, 4), orderLine(2, 4), orderLine(3, 2, 2)], receipts: [receipt('g8')] }));
+
+      expect(inputs()[0].value).toBe('0');
+    });
+
+    it('a different order starts over', async () => {
+      const { fixture, inputs, type } = await setup();
+      await type(inputs()[0], '2');
+      await refresh(fixture, order({ id: 'other', status: 'PartiallyReceived', lines: [orderLine(1, 5, 2), orderLine(2, 4)] }));
+      expect(inputs()[0].value).toBe('0');
+    });
+  });
 });

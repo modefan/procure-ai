@@ -309,14 +309,15 @@ export class InvoiceDetailPage {
   }
 
   /**
-   * " · released by you". The payment holds the releaser's user ID, not a name (names come from Access, which the API
-   * does not call for this): the caller's own payments say "you", an ID is never shown, a readable name is.
+   * " · released by you" for the caller's own payments, else " · released by Ben Finance" with the name the API resolved
+   * (`releasedByName`). A user ID is never shown: when no name is known the text is left out.
    */
   protected releasedBy(payment: InvoiceDto['payments'][number]): string {
     if (payment.releasedBy === this.auth.user()?.userId) {
       return ' · released by you';
     }
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(payment.releasedBy) ? '' : ` · released by ${payment.releasedBy}`;
+    const name = payment.releasedByName?.trim() || (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(payment.releasedBy) ? '' : payment.releasedBy);
+    return name ? ` · released by ${name}` : '';
   }
 
   protected retry(): void {

@@ -27,7 +27,7 @@ describe('OrderDetailPage', () => {
       listInvoices: vi.fn().mockResolvedValue({ items: [invoiceDto({ lines: [{ lineNo: 1, quantity: 2, paid: 1 }] as never })], page: 1, pageSize: 50, total: 1 }),
       listSuppliers: vi.fn().mockResolvedValue({ items: [{ code: 'CH', name: 'Contoso Hardware', active: true, itemCount: 4 }], page: 1, pageSize: 100, total: 1 }),
     };
-    ask = vi.fn().mockResolvedValue(true);
+    ask = vi.fn().mockResolvedValue({ confirmed: true, value: 'Supplier cannot deliver the rest' });
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
@@ -36,7 +36,7 @@ describe('OrderDetailPage', () => {
         { provide: SuppliersService, useValue: { listSuppliers: api['listSuppliers'] } },
         { provide: AuthStore, useValue: { hasPermission: (p: string) => permissions.includes(p), user: signal({ userId: 'tom', name: 'Tom' }) } },
         { provide: ConflictDialog, useValue: { show: vi.fn().mockResolvedValue(undefined) } },
-        { provide: ConfirmDialog, useValue: { ask } },
+        { provide: ConfirmDialog, useValue: { askWithInput: ask } },
         { provide: LIVE_HUB_FACTORY, useValue: fakeHubFactory().factory },
       ],
     });
@@ -94,15 +94,23 @@ describe('OrderDetailPage', () => {
     const { fixture, el } = await setup(order({ status: 'PartiallyReceived', lines: [orderLine(1, 2, 1), orderLine(2, 1)], receipts: [receipt] }));
     const button = () => el.querySelector('[data-action="close-short"] button') as HTMLButtonElement;
     api['getOrder'].mockResolvedValue(order({ status: 'ClosedShort', version: 3 }));
-    ask.mockResolvedValueOnce(false);
+    ask.mockResolvedValueOnce({ confirmed: false, value: '' });
     button().click();
     await settle(fixture);
     expect(api['closeOrderShort']).not.toHaveBeenCalled();
     button().click();
     await settle(fixture);
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining('PO-881') }));
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining('PO-881'), input: { label: 'Reason', minLength: 3, maxLength: 500, required: true } }));
     expect(api['closeOrderShort']).toHaveBeenCalledTimes(1);
     expect(text(el)).toContain('Closed short');
+  });
+
+  it('close_short_sends_typed_reason', async () => {
+    const { fixture, el } = await setup(order({ status: 'PartiallyReceived', lines: [orderLine(1, 2, 1), orderLine(2, 1)], receipts: [receipt] }));
+    ask.mockResolvedValue({ confirmed: true, value: 'Supplier stopped making it' });
+    (el.querySelector('[data-action="close-short"] button') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(api['closeOrderShort']).toHaveBeenCalledWith(expect.objectContaining({ body: { reason: 'Supplier stopped making it' } }), expect.anything());
   });
 
   it('actions_hidden_without_orders_receive: no form, no close short', async () => {

@@ -5,6 +5,7 @@ import { ApprovalsService } from '../../api/approvals/services/approvals.service
 import { fakeHubFactory } from '../../core/live/fake-hub.testing';
 import { LIVE_HUB_FACTORY } from '../../core/live/hub-connection';
 import { LiveConnection } from '../../core/live/live-connection';
+import { ConfirmDialog } from '../../core/ui/confirm-dialog';
 import { ConflictDialog } from '../../core/ui/conflict-dialog';
 import { ApprovalsPage } from './approvals.page';
 import { ApprovalsStore } from './approvals.store';
@@ -13,6 +14,7 @@ import { inboxPage, inboxStep } from './approvals.testing';
 describe('ApprovalsPage', () => {
   let api: Record<string, ReturnType<typeof vi.fn>>;
   let live: LiveConnection;
+  let ask: ReturnType<typeof vi.fn>;
   const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 
   async function setup(items = [inboxStep(), inboxStep({ id: 's2', requestId: 'r2', requestNumber: 'PR-1045', requestTitle: 'Office chairs', version: 77, dueAt: null })]) {
@@ -21,11 +23,13 @@ describe('ApprovalsPage', () => {
       approveStep: vi.fn().mockResolvedValue(inboxStep({ status: 'Approved' })),
       rejectStep: vi.fn().mockResolvedValue(inboxStep({ status: 'Rejected' })),
     };
+    ask = vi.fn().mockResolvedValue({ confirmed: true, value: '' });
     const fake = fakeHubFactory();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
         { provide: ApprovalsService, useValue: { getApprovalInbox: api['getApprovalInbox'], approveStep: api['approveStep'], rejectStep: api['rejectStep'] } },
+        { provide: ConfirmDialog, useValue: { askWithInput: ask } },
         { provide: ConflictDialog, useValue: { show: vi.fn().mockResolvedValue(undefined) } },
         { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
       ],
@@ -73,11 +77,33 @@ describe('ApprovalsPage', () => {
     expect(el.querySelectorAll('tbody tr[data-step]')).toHaveLength(1);
   });
 
+  it('approve_sends_optional_comment', async () => {
+    const { fixture, el } = await setup();
+    ask.mockResolvedValueOnce({ confirmed: true, value: 'Within budget, go ahead' });
+    (el.querySelector('tr[data-step] [data-action="approve"] button') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ confirm: 'Approve', title: expect.stringContaining('PR-1044'), input: { label: 'Comment (optional)', minLength: 0, maxLength: 500, required: false } }));
+    expect(api['approveStep']).toHaveBeenCalledWith(expect.objectContaining({ stepId: 's1', body: { comment: 'Within budget, go ahead' } }), expect.anything());
+  });
+
+  it('approving without a comment sends no body, and backing out sends nothing', async () => {
+    const { fixture, el } = await setup();
+    (el.querySelector('tr[data-step] [data-action="approve"] button') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect((api['approveStep'].mock.calls[0][0] as Record<string, unknown>)['body']).toBeUndefined();
+
+    ask.mockResolvedValueOnce({ confirmed: false, value: 'typed but dropped' });
+    (el.querySelector('tr[data-step] [data-action="approve"] button') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(api['approveStep']).toHaveBeenCalledTimes(1);
+  });
+
   it('a row shows a busy state while the server works', async () => {
     const { fixture, el } = await setup();
     let finish!: () => void;
     api['approveStep'].mockReturnValue(new Promise((resolve) => (finish = () => resolve(inboxStep()))));
     (el.querySelector('tr[data-step] [data-action="approve"] button') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(api['approveStep']).toHaveBeenCalled()); // after the comment dialog answered
     fixture.detectChanges();
     const row = el.querySelector('tbody tr[data-step]') as HTMLElement;
     expect(text(row)).toContain('Approving');

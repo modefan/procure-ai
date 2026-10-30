@@ -231,6 +231,19 @@ describe('InvoiceDetailPage', () => {
     expect(text(id.el.querySelector('[data-section="payments"]'))).not.toContain('released by');
   });
 
+  it('payment_shows_released_by_name', async () => {
+    const uuid = '00000000-0000-4000-8000-000000000009';
+    const named = await setup(mismatched({ payments: [payment({ releasedBy: uuid, releasedByName: 'Ben Finance' })] }));
+    expect(text(named.el.querySelector('[data-section="payments"]'))).toContain('released by Ben Finance');
+    expect(text(named.el.querySelector('[data-section="payments"]'))).not.toContain('00000000');
+    TestBed.resetTestingModule();
+    const mine = await setup(mismatched({ payments: [payment({ releasedBy: 'thandi', releasedByName: 'Thandi Finance' })] }));
+    expect(text(mine.el.querySelector('[data-section="payments"]'))).toContain('released by you');
+    TestBed.resetTestingModule();
+    const unknown = await setup(mismatched({ payments: [payment({ releasedBy: uuid, releasedByName: null })] }));
+    expect(text(unknown.el.querySelector('[data-section="payments"]'))).not.toContain('released by');
+  });
+
   it('links to the order only for callers who may read orders', async () => {
     const withOrders = await setup();
     expect(withOrders.el.querySelector('a[href="/app/orders/o1"]')).not.toBeNull();
