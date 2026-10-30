@@ -245,12 +245,17 @@ flowchart LR
    their parent section into the prompt as numbered sources `[S1]` to `[S6]`.
 4. *Answer.* The model answers from those sources only, citing them; the answer streams to the browser as server-sent
    events (`sources`, `tool_call`, `tool_result`, `delta`, `done`). Stop keeps what was written; regenerate and edit
-   replace the last answer. One answer at a time per user (a Redis lock), 50 questions a day (SAST), 800 output tokens.
+   replace the last answer. One answer at a time per conversation (a Redis lock), 50 questions a day (SAST), 800 output
+   tokens. Every model call has a timeout and a circuit breaker (`AI:Resilience`): when the provider is down, the stream
+   ends with "The assistant is unavailable right now." at once instead of a hung spinner.
 
-**Tools act as the user, never as the service.** `get_request_status`, `explain_approval_chain`, `get_budget`,
-`find_similar_purchases`, `get_supplier` and `search_policy` call the other services with the signed-in user's token
-relayed (`AddProcureAiUserClient`), so the callee's own permission checks and tenant filters decide what the model can see.
-A requester asking about someone else's request gets the answer the API would give them: not allowed.
+**Tools act as the user, never as the service.** `get_request_status`, `explain_approval_chain`, `get_budget` and
+`get_supplier` call the other services with the signed-in user's token relayed (`AddProcureAiUserClient`), so the callee's
+own permission checks and tenant filters decide what the model can see: the assistant shows exactly what the API would
+show that user (a user without `budgets.read` gets "you don't have access" from `get_budget`). Requests are scoped by
+tenant, so anyone with `requests.read` sees every request of their company, here as in the app. `search_policy` and
+`find_similar_purchases` search the Assistant's own index in the user's tenant; past purchases (as sources and through the
+tool) only for users with `requests.read` in the runtime permission matrix.
 
 **Guardrails, in layers.**
 
