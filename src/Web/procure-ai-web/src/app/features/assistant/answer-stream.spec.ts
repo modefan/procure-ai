@@ -5,6 +5,7 @@ import { AuthStore } from '../../core/auth/auth.store';
 import { SessionExpired } from '../../core/auth/session-expired';
 import { AppConfigService } from '../../core/config/app-config';
 import { CORRELATION_HEADER } from '../../core/http/correlation.interceptor';
+import { DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { XSRF_HEADER_NAME } from '../../core/http/xsrf';
 import { AnswerStream, FETCH, parseSse, SseEvent, StreamProblem } from './answer-stream';
 
@@ -108,6 +109,22 @@ describe('AnswerStream', () => {
     expect(headers.get(CORRELATION_HEADER)).toMatch(/^[0-9a-f-]{36}$/);
     expect(headers.get('Accept')).toBe('text/event-stream');
     expect(headers.get('Content-Type')).toBe('application/json');
+  });
+
+  it('records the stream call in the dev panel and asks for the headers, only while the panel is open', async () => {
+    TestBed.inject(AppConfigService).config.update((c) => ({ ...c, devPanel: { enabled: true } }));
+    const panel = TestBed.inject(DevPanelStore);
+    const answer = () => new Response(body(['event: delta\ndata: {"text":"Hi"}\n\n']), { status: 200, headers: { 'X-Trace-Id': 'abc123', 'X-Tenant': 'acme' } });
+    fetchMock.mockImplementation(() => Promise.resolve(answer()));
+
+    await collect(TestBed.inject(AnswerStream).streamAnswer('c-1', { text: 'Q', mode: 'New' }, new AbortController().signal));
+    expect(new Headers((fetchMock.mock.calls[0] as [string, RequestInit])[1].headers).has('X-Dev-Panel')).toBe(false);
+    expect(panel.calls()).toEqual([]);
+
+    panel.setOpen(true);
+    await collect(TestBed.inject(AnswerStream).streamAnswer('c-1', { text: 'Q', mode: 'New' }, new AbortController().signal));
+    expect(new Headers((fetchMock.mock.calls[1] as [string, RequestInit])[1].headers).get('X-Dev-Panel')).toBe('1');
+    expect(panel.calls()[0]).toMatchObject({ method: 'POST', url: '/api/v1/assistant/conversations/c-1/messages', status: 200, traceId: 'abc123', tenant: 'acme' });
   });
 
   it('a gateway on another origin gets the absolute url and the cookies (credentials include)', async () => {

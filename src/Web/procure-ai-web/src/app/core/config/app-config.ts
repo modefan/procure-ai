@@ -45,6 +45,12 @@ export interface ObservabilityConfig {
   dashboardUrl: string;
 }
 
+/** The "Behind the scenes" panel (cache, coalescing and trace details of the last API calls). */
+export interface DevPanelConfig {
+  /** Show the panel's menu item and shortcut. The server must also have `DevPanel:Enabled` for the headers to come back. */
+  enabled: boolean;
+}
+
 export interface AppConfig {
   /** Absolute origin of the gateway when the app is not served by it (development only); empty = same origin. */
   apiBaseUrl: string;
@@ -53,6 +59,7 @@ export interface AppConfig {
   live: LiveConfig;
   cache: CacheConfig;
   observability: ObservabilityConfig;
+  devPanel: DevPanelConfig;
 }
 
 /**
@@ -85,6 +92,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const live = (isRecord(source['live']) ? source['live'] : {}) as Record<string, unknown>;
   const cache = (isRecord(source['cache']) ? source['cache'] : {}) as Record<string, unknown>;
   const observability = (isRecord(source['observability']) ? source['observability'] : {}) as Record<string, unknown>;
+  const devPanel = (isRecord(source['devPanel']) ? source['devPanel'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
@@ -109,6 +117,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
     observability: {
       dashboardUrl: typeof observability['dashboardUrl'] === 'string' ? observability['dashboardUrl'] : defaults.observability.dashboardUrl,
     },
+    devPanel: { enabled: typeof devPanel['enabled'] === 'boolean' ? devPanel['enabled'] : defaults.devPanel.enabled },
   };
 }
 

@@ -8,6 +8,8 @@ import { AuthStore } from '../../core/auth/auth.store';
 import { LiveConnection } from '../../core/live/live-connection';
 import { NotificationsStore } from '../../core/live/notifications.store';
 import { CacheRegistry } from '../../core/state/cache-registry';
+import { DevPanel } from '../../core/dev-panel/dev-panel';
+import { DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { BellMenu } from './bell-menu';
 import { LiveIndicator } from './live-indicator';
 import { OnlineUsers } from './online-users';
@@ -35,8 +37,8 @@ const ADMIN_LINKS: NavLink[] = [
  */
 @Component({
   selector: 'app-shell',
-  host: { '(window:resize)': 'onResize()', '(document:keydown.escape)': 'adminOpen.set(false)', '(document:click)': 'onDocumentClick($event)' },
-  imports: [RouterLink, RouterLinkActive, RouterOutlet, Menu, MenuContent, MenuItem, MenuTrigger, BellMenu, LiveIndicator, OnlineUsers],
+  host: { '(window:resize)': 'onResize()', '(document:keydown.escape)': 'adminOpen.set(false)', '(document:click)': 'onDocumentClick($event)', '(document:keydown)': 'onKeydown($event)' },
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, Menu, MenuContent, MenuItem, MenuTrigger, BellMenu, DevPanel, LiveIndicator, OnlineUsers],
   template: `
     <a
       href="#main"
@@ -135,6 +137,11 @@ const ADMIN_LINKS: NavLink[] = [
                 <ng-template ngMenuContent>
                   <div ngMenuItem value="logout" class="cursor-pointer px-4 py-2 text-sm text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:text-indigo-900 focus-visible:outline-offset-[-2px]">Log out</div>
                   <div ngMenuItem value="logout-all" class="cursor-pointer px-4 py-2 text-sm whitespace-nowrap text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:text-indigo-900 focus-visible:outline-offset-[-2px]">Log out everywhere</div>
+                  @if (devPanel.enabled()) {
+                    <div ngMenuItem value="dev-panel" class="cursor-pointer border-t border-slate-100 px-4 py-2 text-sm whitespace-nowrap text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:text-indigo-900 focus-visible:outline-offset-[-2px]">
+                      Behind the scenes <span class="ml-2 text-xs text-slate-500">Alt+Shift+D</span>
+                    </div>
+                  }
                 </ng-template>
               </div>
             </div>
@@ -201,9 +208,16 @@ const ADMIN_LINKS: NavLink[] = [
       </div>
     }
 
-    <main id="main" tabindex="-1" class="outline-none">
+    <main id="main" tabindex="-1" class="outline-none" [class]="mainPadding()">
       <router-outlet />
     </main>
+
+    @if (devPanelShown()) {
+      <!-- Loaded on first use: most visits never open it, and it would push the initial bundle over its budget. -->
+      @defer {
+        <app-dev-panel />
+      }
+    }
   `,
 })
 export class Shell {
@@ -216,6 +230,11 @@ export class Shell {
   /** True while more of the phone nav lies off to the right: the nav then fades out at its right edge. */
   protected readonly fadeEnd = signal(false);
   protected readonly auth = inject(AuthStore);
+  protected readonly devPanel = inject(DevPanelStore);
+  /** Room at the bottom of the page so the open sheet does not cover its end. */
+  protected readonly mainPadding = computed(() => (!this.devPanelShown() ? '' : this.devPanel.collapsed() ? 'pb-14' : 'pb-[42vh]'));
+  /** The "Behind the scenes" sheet is on screen: enabled in the config, opened by the user, and somebody is signed in. */
+  protected readonly devPanelShown = computed(() => this.auth.isLoggedIn() && this.devPanel.active());
   protected readonly live = inject(LiveConnection);
   private readonly notifications = inject(NotificationsStore);
   private readonly approvals = inject(ApprovalsStore);
@@ -319,6 +338,16 @@ export class Shell {
       void this.auth.logout();
     } else if (value === 'logout-all') {
       void this.auth.logoutAll();
+    } else if (value === 'dev-panel') {
+      this.devPanel.toggle();
+    }
+  }
+
+  /** Alt+Shift+D shows or hides "Behind the scenes" (when the config enables it). */
+  protected onKeydown(event: KeyboardEvent): void {
+    if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyD' && this.auth.isLoggedIn() && this.devPanel.enabled()) {
+      event.preventDefault();
+      this.devPanel.toggle();
     }
   }
 }

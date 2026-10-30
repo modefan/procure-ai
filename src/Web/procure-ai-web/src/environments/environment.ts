@@ -29,4 +29,6 @@ export const environment: AppConfig = {
   },
   // The local Aspire dashboard (AppHost launchSettings `https` profile). Deployments set their own in config.json.
   observability: { dashboardUrl: 'https://localhost:17100' },
+  // Off by default; local and demo set it in config.json (the server needs DevPanel:Enabled too).
+  devPanel: { enabled: false },
 };

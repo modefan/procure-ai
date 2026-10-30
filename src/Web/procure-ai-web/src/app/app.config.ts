@@ -9,6 +9,7 @@ import { credentialsInterceptor } from './core/http/credentials.interceptor';
 import { correlationInterceptor } from './core/http/correlation.interceptor';
 import { errorsInterceptor } from './core/http/errors.interceptor';
 import { XSRF_COOKIE_NAME, XSRF_HEADER_NAME } from './core/http/xsrf';
+import { devPanelInterceptor } from './core/dev-panel/dev-panel.interceptor';
 import { provideLogger } from './core/logging/provide-logger';
 
 export const appConfig: ApplicationConfig = {
@@ -21,7 +22,7 @@ export const appConfig: ApplicationConfig = {
       // The gateway's rule: unsafe methods carry X-XSRF-TOKEN, copied from the XSRF-TOKEN cookie. Angular does this
       // for relative (same-origin) urls only, which is all this app calls.
       withXsrfConfiguration({ cookieName: XSRF_COOKIE_NAME, headerName: XSRF_HEADER_NAME }),
-      withInterceptors([credentialsInterceptor, correlationInterceptor, errorsInterceptor]),
+      withInterceptors([credentialsInterceptor, correlationInterceptor, devPanelInterceptor, errorsInterceptor]),
     ),
     provideRouter(routes, withComponentInputBinding()),
     // Ask the gateway who is signed in before the first page, so the header is right from the first paint. The live

@@ -29,6 +29,7 @@ import * as m19 from '../../features/admin/users/users.store';
 import * as m20 from '../../features/admin/access-check/access-check.store';
 import * as m21 from '../../features/admin/system-status/system-status.store';
 import * as m22 from '../../features/admin/conversations/conversations.store';
+import * as m23 from '../../core/dev-panel/dev-panel.store';
 
 /**
  * Every store that can forget its data (`clearCache`) must be registered with `CacheRegistry`, or logout leaves the
@@ -59,6 +60,7 @@ const STORE_MODULES: Record<string, Record<string, unknown>> = {
   '../../features/admin/access-check/access-check.store.ts': m20,
   '../../features/admin/system-status/system-status.store.ts': m21,
   '../../features/admin/conversations/conversations.store.ts': m22,
+  '../../core/dev-panel/dev-panel.store.ts': m23,
 };
 
 type Store = { clearCache?: unknown };

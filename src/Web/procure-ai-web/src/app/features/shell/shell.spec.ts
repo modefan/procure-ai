@@ -8,6 +8,8 @@ import { NotificationsStore } from '../../core/live/notifications.store';
 import { NotificationsService } from '../../api/notifications/services/notifications.service';
 import { PresenceStore } from '../../core/live/presence.store';
 import { CacheRegistry } from '../../core/state/cache-registry';
+import { AppConfigService } from '../../core/config/app-config';
+import { DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { Shell } from './shell';
 
 describe('Shell header', () => {
@@ -458,5 +460,38 @@ describe('Shell header', () => {
 
     expect(before).toBe(1);
     expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  describe('dev panel', () => {
+    const keydown = (init: KeyboardEventInit) => document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
+    const enable = (enabled: boolean) => TestBed.inject(AppConfigService).config.update((c) => ({ ...c, devPanel: { enabled } }));
+
+    beforeEach(() => sessionStorage.clear());
+
+    it('alt_shift_d_toggles', async () => {
+      signIn(['requests.read']);
+      enable(true);
+      const el = await render();
+      const store = TestBed.inject(DevPanelStore);
+      expect(store.open()).toBe(false);
+
+      keydown({ altKey: true, shiftKey: true, code: 'KeyD', key: 'D' });
+      expect(store.open()).toBe(true);
+      TestBed.tick();
+      await vi.waitFor(() => expect(el.querySelector('app-dev-panel')).not.toBeNull());
+
+      keydown({ altKey: true, code: 'KeyD', key: 'd' }); // without Shift: not ours
+      expect(store.open()).toBe(true);
+      keydown({ altKey: true, shiftKey: true, code: 'KeyD', key: 'D' });
+      expect(store.open()).toBe(false);
+    });
+
+    it('shortcut_does_nothing_when_disabled', async () => {
+      signIn(['requests.read']);
+      enable(false);
+      await render();
+      keydown({ altKey: true, shiftKey: true, code: 'KeyD', key: 'D' });
+      expect(TestBed.inject(DevPanelStore).open()).toBe(false);
+    });
   });
 });

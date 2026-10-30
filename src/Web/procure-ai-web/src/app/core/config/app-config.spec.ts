@@ -33,4 +33,10 @@ describe('merge (live and cache settings)', () => {
   it('the heartbeat default stays under the server TTL of 45 s', () => {
     expect(environment.live.heartbeatMs).toBeLessThan(45_000);
   });
+
+  it('devPanel.enabled comes from config.json and ignores a non-boolean', () => {
+    expect(merge(environment, { devPanel: { enabled: true } }).devPanel.enabled).toBe(true);
+    expect(merge(environment, { devPanel: { enabled: 'yes' } }).devPanel).toEqual(environment.devPanel);
+    expect(merge(environment, {}).devPanel).toEqual(environment.devPanel);
+  });
 });

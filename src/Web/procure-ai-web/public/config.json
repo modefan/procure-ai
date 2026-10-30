@@ -22,5 +22,8 @@
   },
   "observability": {
     "dashboardUrl": "https://localhost:17100"
+  },
+  "devPanel": {
+    "enabled": true
   }
 }

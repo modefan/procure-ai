@@ -31,6 +31,11 @@
     @apply text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent;
   }
 
+  /* Buttons on the dark "Behind the scenes" sheet. */
+  .dev-btn {
+    @apply cursor-pointer rounded border border-slate-600 px-2 py-0.5 text-xs text-slate-100 hover:bg-slate-700;
+  }
+
   .menu-item {
     @apply cursor-pointer px-4 py-2 text-sm text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus-visible:outline-offset-[-2px];
   }

@@ -8,6 +8,7 @@ import { ConversationsService } from '../../api/assistant/services/conversations
 import { AuthStore } from '../../core/auth/auth.store';
 import { SessionExpired } from '../../core/auth/session-expired';
 import { AppConfigService } from '../../core/config/app-config';
+import { DEV_PANEL_HEADER, devCallFrom, DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { CORRELATION_HEADER } from '../../core/http/correlation.interceptor';
 import { XSRF_HEADER_NAME } from '../../core/http/xsrf';
 import { Logger } from '../../core/logging/logger';
@@ -149,6 +150,7 @@ export class AnswerStream {
   private readonly auth = inject(AuthStore);
   private readonly router = inject(Router);
   private readonly log = inject(Logger).withSource('AnswerStream');
+  private readonly devPanel = inject(DevPanelStore);
 
   async *streamAnswer(conversationId: string, body: AskQuestionRequest, signal: AbortSignal): AsyncGenerator<SseEvent> {
     const base = this.config.config().apiBaseUrl;
@@ -163,6 +165,11 @@ export class AnswerStream {
     if (token) {
       headers[XSRF_HEADER_NAME] = token;
     }
+    const record = this.devPanel.active();
+    if (record) {
+      headers[DEV_PANEL_HEADER] = '1';
+    }
+    const started = performance.now();
 
     const response = await this.fetch(base + path, {
       method: 'POST',
@@ -172,6 +179,10 @@ export class AnswerStream {
       cache: 'no-store',
       signal,
     });
+    if (record) {
+      // Status, time to the first byte and the server's diagnostic headers; never the question or the answer.
+      this.devPanel.record(devCallFrom('POST', path, response.status, performance.now() - started, response.headers));
+    }
 
     if (!response.ok || !response.body) {
       const problem = await problemOf(response);
