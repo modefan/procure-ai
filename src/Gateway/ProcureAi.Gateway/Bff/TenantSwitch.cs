@@ -132,7 +132,7 @@ public static class TenantSwitchEndpoints
     private static async Task<IResult> SwitchAsync(
         HttpContext http, string? tenant, string? returnUrl, ICurrentUser user, IUserTenantsClient tenants,
         IOptionsMonitor<CookieAuthenticationOptions> cookies, IOptions<DemoLoginOptions> demoLogin, DemoSignIn demoSignIn,
-        ILogger<UserTenantsClient> logger)
+        TokenRefresher refresher, ILogger<UserTenantsClient> logger)
     {
         var target = BffEndpoints.SafeReturnUrl(returnUrl);
         var subject = http.User.FindFirst("sub")?.Value;
@@ -146,8 +146,9 @@ public static class TenantSwitchEndpoints
         {
             memberships = await tenants.ListAsync(subject, http.RequestAborted);
         }
-        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or System.Text.Json.JsonException
-                                              or TaskCanceledException { CancellationToken.IsCancellationRequested: false })
+        // Anything but the browser's own abort: the Access client's resilience pipeline throws its own exceptions too (an open circuit,
+        // the total timeout), and every one of them means "cannot check the membership now", never a 500.
+        catch (Exception exception) when (!http.RequestAborted.IsCancellationRequested)
         {
             logger.LogWarning(exception, "Tenant switch: Access could not list the user's tenants");
             return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Switching company is not available right now");
@@ -170,7 +171,7 @@ public static class TenantSwitchEndpoints
         if (session is not null && session.Items.TryGetValue(TokenRefresher.ClientItem, out var client)
             && string.Equals(client, demoClient, StringComparison.Ordinal))
         {
-            return await SwitchDemoSessionAsync(http, tenant, subject, target, demoLogin.Value, demoSignIn);
+            return await SwitchDemoSessionAsync(http, tenant, subject, target, session, demoLogin.Value, demoSignIn, refresher);
         }
 
         var properties = new AuthenticationProperties { RedirectUri = target };
@@ -188,7 +189,8 @@ public static class TenantSwitchEndpoints
 
     /// <summary>A one-click demo session has no single sign-on at the provider: the demo client signs the same demo user in again.</summary>
     private static async Task<IResult> SwitchDemoSessionAsync(
-        HttpContext http, string tenant, string subject, string target, DemoLoginOptions demo, DemoSignIn demoSignIn)
+        HttpContext http, string tenant, string subject, string target, AuthenticationProperties session, DemoLoginOptions demo,
+        DemoSignIn demoSignIn, TokenRefresher refresher)
     {
         var username = http.User.FindFirst("preferred_username")?.Value;
         var demoUser = demo.Enabled
@@ -205,6 +207,9 @@ public static class TenantSwitchEndpoints
             return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "Switching company is not available right now");
         }
 
+        // The password grant opened a new session at the provider; the one it replaces ends there too (like a logout), so repeated
+        // switches do not pile up provider sessions. A code-flow switch shares the browser's single sign-on session and keeps it.
+        await refresher.EndProviderSessionAsync(session.GetTokenValue("refresh_token"), session, http.RequestAborted);
         await SessionRotation.ReplaceAsync(http, signIn.Value.Principal, signIn.Value.Properties);
         return Results.Redirect(target);
     }

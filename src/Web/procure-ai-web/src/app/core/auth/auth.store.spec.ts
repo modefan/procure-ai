@@ -182,6 +182,14 @@ describe('AuthStore', () => {
     expect(clearCache.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
   });
 
+  it('switchTenant navigates even when stopping the live connection fails', async () => {
+    vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockRejectedValue(new Error('hub gone'));
+
+    await store.switchTenant('globex').catch(() => undefined);
+
+    expect(assign).toHaveBeenCalledWith('/bff/switch-tenant?tenant=globex&returnUrl=%2Fapp%2Fdashboard');
+  });
+
   it('switchTenant encodes the tenant and the return url', async () => {
     vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
 

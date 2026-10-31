@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using ProcureAi.Contracts;
 using StackExchange.Redis;
@@ -189,6 +190,62 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         }
 
         (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+    }
+
+    [Fact]
+    public async Task Switch_is_refused_with_503_when_the_access_circuit_is_open()
+    {
+        // The Access client's resilience pipeline throws its own exceptions (open circuit, total timeout), not HttpRequestException.
+        await using var gateway = await GatewayHost.StartAsync(keycloak, redis, new()
+        {
+            ["DemoLogin:Enabled"] = "true",
+            ["DemoLogin:ClientSecret"] = keycloak.DemoLoginSecret,
+            ["DemoLogin:Password"] = keycloak.DemoPassword,
+        }, configureServices: services => services.AddHttpClient(nameof(ProcureAi.Gateway.Bff.IUserTenantsClient))
+            .AddHttpMessageHandler(() => new OpenCircuitHandler()));
+        var (browser, _) = gateway.NewBrowserWithCookies();
+        _disposables.Add(browser);
+        using (var users = await browser.GetAsync("/bff/demo-login/users", Ct))
+        using (var request = new HttpRequestMessage(HttpMethod.Post, "/bff/demo-login") { Content = JsonContent.Create(new { user = "thandi" }) })
+        {
+            request.Headers.Add("X-XSRF-TOKEN", Xsrf(users));
+            (await browser.SendAsync(request, Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        using var response = await browser.GetAsync("/bff/switch-tenant?tenant=globex&returnUrl=/app/dashboard", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        response.Headers.Location.ShouldBeNull("no challenge");
+        (await UserAsync(browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+    }
+
+    /// <summary>Stands in for the resilience pipeline with its circuit open: the Access call throws before it is sent.</summary>
+    private sealed class OpenCircuitHandler : DelegatingHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new Polly.CircuitBreaker.BrokenCircuitException("The circuit is now open");
+    }
+
+    [Fact]
+    public async Task Demo_switch_ends_the_old_keycloak_session()
+    {
+        // A demo switch is a new password grant (a new Keycloak session); the old one must end, or switches pile them up.
+        var session = await SignInAsync("demo");
+        var before = await KeycloakSessionsAsync(DemoUsers.Thandi);
+
+        using var switched = await SwitchAsync(session, "globex");
+        LoginDriver.IsRedirect(switched.StatusCode).ShouldBeTrue();
+        using var back = await SwitchAsync(session, "acme");
+        LoginDriver.IsRedirect(back.StatusCode).ShouldBeTrue();
+
+        (await KeycloakSessionsAsync(DemoUsers.Thandi)).ShouldBe(before, "each switch ends the session it replaces");
+    }
+
+    private async Task<int> KeycloakSessionsAsync(string userId)
+    {
+        using var admin = await keycloak.AdminHttpAsync();
+        var sessions = await admin.GetFromJsonAsync<JsonElement>($"/admin/realms/{KeycloakFixture.Realm}/users/{userId}/sessions", Ct);
+        return sessions.GetArrayLength();
     }
 
     [Fact]

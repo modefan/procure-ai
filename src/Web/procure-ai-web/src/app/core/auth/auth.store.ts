@@ -136,8 +136,12 @@ export const AuthStore = signalStore(
        */
       async switchTenant(tenantId: string, returnUrl = '/app/dashboard'): Promise<void> {
         caches.clearAll();
-        await live.stop();
-        location.assign(`/bff/switch-tenant?tenant=${encodeURIComponent(tenantId)}&returnUrl=${encodeURIComponent(returnUrl)}`);
+        try {
+          await live.stop();
+        } finally {
+          // Even if the connection did not close cleanly: the page load that follows ends it anyway.
+          location.assign(`/bff/switch-tenant?tenant=${encodeURIComponent(tenantId)}&returnUrl=${encodeURIComponent(returnUrl)}`);
+        }
       },
 
       hasPermission(permission: string): boolean {
