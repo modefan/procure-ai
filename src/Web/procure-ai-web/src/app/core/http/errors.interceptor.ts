@@ -1,4 +1,4 @@
-import { HttpContextToken, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
@@ -9,12 +9,10 @@ import { AppConfigService } from '../config/app-config';
 import { Logger } from '../logging/logger';
 import { CORRELATION_HEADER } from './correlation.interceptor';
 import { isOwnRequest } from './own-requests';
+import { SKIP_FORBIDDEN_REDIRECT } from './skip-forbidden';
 
-/**
- * Set on a call whose 403 is part of the page's own story (a secondary section the user may not read, a refused write):
- * the caller handles the error and the page stays where it is, instead of the forbidden page taking over.
- */
-export const SKIP_FORBIDDEN_REDIRECT = new HttpContextToken<boolean>(() => false);
+// Kept in its own file so the auth store can use it without importing this interceptor (which imports the store).
+export { SKIP_FORBIDDEN_REDIRECT } from './skip-forbidden';
 
 /**
  * What every failed call to the gateway does besides failing:

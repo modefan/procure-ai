@@ -1,11 +1,12 @@
 import { computed, inject } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { firstValueFrom } from 'rxjs';
 import { BrowserLocation } from '../browser/browser-location';
 import { LiveConnection } from '../live/live-connection';
 import { CacheRegistry } from '../state/cache-registry';
+import { SKIP_FORBIDDEN_REDIRECT } from '../http/skip-forbidden';
 
 /** What the gateway's GET /bff/user returns. */
 export interface BffUser {
@@ -26,12 +27,30 @@ export interface BffTenant {
   name: string;
 }
 
+/** What the gateway's POST /bff/switch-tenant answers: the page to open next (a path on this site). */
+interface SwitchAnswer {
+  navigateTo: string;
+}
+
+/** The messages of a refused switch (the toast). */
+export const SWITCH_REFUSED = 'You are not a member of that company any more.';
+export const SWITCH_UNAVAILABLE = 'Switching company is not available right now. Please try again.';
+
+/** Only a path on this site: no other host, no protocol-relative `//host` or `/\host`. */
+function localPath(url: string | undefined): string {
+  return url && url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/\\') ? url : '/';
+}
+
 export interface AuthState {
   user: BffUser | null;
   /** True once /bff/user has been asked at least once (answered or failed). */
   loaded: boolean;
   /** True when the gateway could not be asked (5xx, network): we do not know who is signed in. */
   error: boolean;
+  /** True while a company switch waits for the gateway (the menu does not start a second one). */
+  switching: boolean;
+  /** Why the last company switch was refused (shown as a toast until dismissed); null when there is nothing to say. */
+  switchError: string | null;
 }
 
 /**
@@ -42,7 +61,7 @@ export interface AuthState {
  */
 export const AuthStore = signalStore(
   { providedIn: 'root' },
-  withState<AuthState>({ user: null, loaded: false, error: false }),
+  withState<AuthState>({ user: null, loaded: false, error: false, switching: false, switchError: null }),
   withComputed(({ user }) => ({
     isLoggedIn: computed(() => user() !== null),
     permissions: computed(() => new Set(user()?.permissions ?? [])),
@@ -130,18 +149,46 @@ export const AuthStore = signalStore(
       },
 
       /**
-       * Moves to another company the user belongs to. Nothing of the current company may stay on screen or arrive afterwards: every
-       * cache is cleared and the live connection stopped first. Then the browser goes to the gateway (a full page load), which gets a
-       * token for that company and starts a new session; the app starts again there, with a new connection.
+       * Moves to another company the user belongs to. The gateway is asked first (a POST with the XSRF header, which HttpClient adds):
+       * when it refuses (not a member: 403; Access or Keycloak unavailable: 5xx), nothing here changes and `switchError` says why.
+       * When it agrees, nothing of the current company may stay on screen or arrive afterwards: every cache is cleared and the live
+       * connection stopped, then the browser opens the page the gateway named (a full page load). For a demo session the switch is
+       * already done and that is the return url; for a Keycloak session it is the gateway's single-use URL that gets the token for that
+       * company. The app starts again there, with a new connection.
        */
       async switchTenant(tenantId: string, returnUrl = '/app/dashboard'): Promise<void> {
+        if (store.switching()) {
+          return;
+        }
+        patchState(store, { switching: true, switchError: null });
+        let navigateTo: string;
+        try {
+          const answer = await firstValueFrom(
+            http.post<SwitchAnswer>(
+              '/bff/switch-tenant',
+              { tenant: tenantId, returnUrl },
+              { context: new HttpContext().set(SKIP_FORBIDDEN_REDIRECT, true) },
+            ),
+          );
+          navigateTo = localPath(answer?.navigateTo);
+        } catch (error) {
+          const refused = error instanceof HttpErrorResponse && error.status === 403;
+          patchState(store, { switching: false, switchError: refused ? SWITCH_REFUSED : SWITCH_UNAVAILABLE });
+          return;
+        }
+
         caches.clearAll();
         try {
           await live.stop();
         } finally {
           // Even if the connection did not close cleanly: the page load that follows ends it anyway.
-          location.assign(`/bff/switch-tenant?tenant=${encodeURIComponent(tenantId)}&returnUrl=${encodeURIComponent(returnUrl)}`);
+          location.assign(navigateTo);
         }
+      },
+
+      /** Hides the toast of a refused switch. */
+      dismissSwitchError(): void {
+        patchState(store, { switchError: null });
       },
 
       hasPermission(permission: string): boolean {

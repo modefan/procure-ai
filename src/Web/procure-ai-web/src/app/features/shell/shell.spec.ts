@@ -32,6 +32,8 @@ describe('Shell header', () => {
   const logout = vi.fn();
   const logoutAll = vi.fn();
   const switchTenant = vi.fn().mockResolvedValue(undefined);
+  const switchError = signal<string | null>(null);
+  const dismissSwitchError = vi.fn(() => switchError.set(null));
 
   const signIn = (permissions: string[], roles = ['requester']) =>
     user.set({ userId: 'u1', name: 'Tom Requester', tenantId: 'acme', roles, permissions });
@@ -44,6 +46,7 @@ describe('Shell header', () => {
     count.set(0);
     online.set([]);
     markRead.mockClear();
+    switchError.set(null);
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
@@ -57,6 +60,8 @@ describe('Shell header', () => {
             logout,
             logoutAll,
             switchTenant,
+            switchError,
+            dismissSwitchError,
           },
         },
         { provide: LiveConnection, useValue: { state } },
@@ -305,6 +310,23 @@ describe('Shell header', () => {
       expect(switchTenant).toHaveBeenCalledWith('globex');
     });
 
+    it('switch_refused_shows_a_toast_that_can_be_closed', async () => {
+      signIn(['requests.read'], ['finance']);
+      const el = await render();
+      expect(el.querySelector('[data-testid=switch-error]')).toBeNull();
+
+      switchError.set('You are not a member of that company any more.');
+      TestBed.tick();
+      const toast = el.querySelector('[data-testid=switch-error]');
+      expect(toast?.getAttribute('role')).toBe('alert');
+      expect(text(toast)).toContain('You are not a member of that company any more.');
+
+      toast!.querySelector<HTMLButtonElement>('button')!.click();
+      TestBed.tick();
+      expect(dismissSwitchError).toHaveBeenCalled();
+      expect(el.querySelector('[data-testid=switch-error]')).toBeNull();
+    });
+
     it('no switch entry with a single tenant', async () => {
       signIn(['requests.read'], ['requester']);
       user.update((u) => ({ ...u!, tenants: [{ id: 'acme', name: 'Acme Corp' }] }));
@@ -489,7 +511,7 @@ describe('Shell header', () => {
       providers: [
         provideRouter([]),
         { provide: NotificationsService, useValue: { listNotifications: list, markNotificationRead: vi.fn().mockResolvedValue(undefined), markAllNotificationsRead: vi.fn() } },
-        { provide: AuthStore, useValue: { user, isLoggedIn: () => user() !== null, hasPermission: () => false, logout, logoutAll } },
+        { provide: AuthStore, useValue: { user, isLoggedIn: () => user() !== null, hasPermission: () => false, logout, logoutAll, switchError: () => null, dismissSwitchError: vi.fn() } },
         { provide: LiveConnection, useValue: { state, on: () => () => undefined, onReconnected: () => () => undefined, onEntityChanged: () => () => undefined, onViewersChanged: () => () => undefined } },
         { provide: PresenceStore, useValue: { online } },
         { provide: ApprovalsStore, useValue: { total: count, refresh: vi.fn() } },

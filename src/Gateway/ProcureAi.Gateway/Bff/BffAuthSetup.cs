@@ -31,6 +31,7 @@ internal static class BffAuthSetup
         services.AddSingleton<RedisTicketStore>();
         services.AddSingleton<TokenRefresher>();
         services.AddSingleton<SessionCookieEvents>();
+        services.AddSingleton<SwitchTicketStore>();
 
         services.AddDataProtection().SetApplicationName("procure-gateway");
         services.AddOptions<KeyManagementOptions>()

@@ -29,7 +29,9 @@
 - `procure-demo-login` is the gateway's one-click demo login client (plan 06 ruling 17): confidential, direct access grants (password
   grant) only, no browser flow. The gateway uses it only for the users listed in its `DemoLogin:Users`, and only when
   `DemoLogin:Enabled`. It asks for `scope=openid organization:<tenant>`, so the token carries exactly that tenant.
-- Tenant switch (plan 06 ruling 18): `GET /bff/switch-tenant?tenant=<alias>` checks the membership with Access, then asks Keycloak for
-  `organization:<alias>` with `prompt=none` (code-flow session; one visible retry if Keycloak needs the user) or through the demo client
-  (demo session), checks the token is for the same user and that tenant, and replaces the session with a new key.
+- Tenant switch (plan 06 ruling 18): `POST /bff/switch-tenant` with `{ tenant, returnUrl }` and the `X-XSRF-TOKEN` header checks the
+  membership with Access and answers `200 { navigateTo }` (never a redirect; a plain GET changes nothing). A demo session is switched
+  inside the POST through the demo client. A code-flow session gets a single-use, 60-second URL (`/bff/switch-tenant/challenge?ticket=`,
+  bound to that session) that asks Keycloak for `organization:<alias>` with `prompt=none` (one visible retry if Keycloak needs the
+  user). Either way the gateway checks the token is for the same user and that tenant, and replaces the session with a new key.
 - The password-grant test client `test-direct` exists only in the tests, never in this file.

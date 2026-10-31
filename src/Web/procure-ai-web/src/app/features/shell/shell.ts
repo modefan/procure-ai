@@ -21,6 +21,9 @@ interface NavLink {
   count?: number;
 }
 
+/** How long the toast of a refused company switch stays up. */
+const SWITCH_ERROR_MS = 8000;
+
 /** The admin pages, in menu order; each shows only for a user who has its permission. Later admin screens are added here. */
 const ADMIN_LINKS: NavLink[] = [
   { path: 'admin/authorization', label: 'Authorization', permission: 'admin.authorization' },
@@ -221,6 +224,20 @@ const ADMIN_LINKS: NavLink[] = [
       <router-outlet />
     </main>
 
+    @if (auth.switchError(); as message) {
+      <!-- A refused company switch: the page stays as it was; this says why and goes away by itself. -->
+      <div
+        data-testid="switch-error"
+        role="alert"
+        class="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-lg"
+      >
+        <span class="min-w-0 flex-1">{{ message }}</span>
+        <button type="button" class="-my-1 -mr-2 shrink-0 rounded-md p-1 text-red-900 hover:bg-red-100" aria-label="Dismiss" (click)="auth.dismissSwitchError()">
+          <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+    }
+
     @if (devPanelShown()) {
       <!-- Loaded on first use: most visits never open it, and it would push the initial bundle over its budget. -->
       @defer {
@@ -298,6 +315,14 @@ export class Shell {
       this.menuOpen.set(false);
       this.adminOpen.set(false);
       this.adminActive.set(e.urlAfterRedirects.startsWith('/app/admin/'));
+    });
+
+    // The toast of a refused company switch closes by itself after a while (or at once with its button).
+    effect((onCleanup) => {
+      if (this.auth.switchError()) {
+        const timer = setTimeout(() => this.auth.dismissSwitchError(), SWITCH_ERROR_MS);
+        onCleanup(() => clearTimeout(timer));
+      }
     });
 
     // Fill the bell and the approvals count once somebody is signed in (the connection itself is started by the app initializer).

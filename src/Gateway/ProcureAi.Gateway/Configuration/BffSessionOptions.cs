@@ -15,7 +15,13 @@ public sealed class BffSessionOptions
     [Range(1, 43_200)]
     public int IdleTimeoutMinutes { get; set; } = 480;
 
-    /// <summary>Prefix of the Redis keys (sessions, per-user index, data protection keys).</summary>
+    /// <summary>
+    /// How long the single-use URL that starts a code-flow tenant switch stays valid (the app opens it right after the switch POST).
+    /// </summary>
+    [Range(5, 600)]
+    public int SwitchTicketSeconds { get; set; } = 60;
+
+    /// <summary>Prefix of the Redis keys (sessions, per-user index, data protection keys, switch tickets).</summary>
     [Required(AllowEmptyStrings = false)]
     public string RedisKeyPrefix { get; set; } = "procure:bff:";
 }

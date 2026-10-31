@@ -10,10 +10,11 @@ using StackExchange.Redis;
 namespace ProcureAi.Gateway.IntegrationTests;
 
 /// <summary>
-/// The tenant switch (plan 06 ruling 18): <c>GET /bff/switch-tenant?tenant=globex</c> checks the membership with Access, then gets a
-/// token for that one organization (a silent OIDC challenge with <c>organization:globex</c> for a code-flow session, the demo client's
-/// password grant for a demo session) and replaces the session with a new one. Real Keycloak (Thandi is in Acme and Globex) and Redis,
-/// stub Access.
+/// The tenant switch (plan 06 ruling 18, Task 14b): <c>POST /bff/switch-tenant</c> with <c>{ tenant, returnUrl }</c> and the XSRF header
+/// checks the membership with Access, then gets a token for that one organization and replaces the session with a new one. A demo
+/// session switches inside the POST (the demo client's password grant); a code-flow session gets a single-use challenge URL
+/// (<c>/bff/switch-tenant/challenge?ticket=</c>) that starts the silent OIDC challenge with <c>organization:globex</c>. The POST answers
+/// <c>200 { navigateTo }</c>; nothing changes on a plain GET. Real Keycloak (Thandi is in Acme and Globex) and Redis, stub Access.
 /// </summary>
 [Collection(GatewayCollection.Name)]
 public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture redis) : IAsyncLifetime
@@ -77,22 +78,51 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         return new SignedIn(browser, cookies, driver);
     }
 
-    /// <summary>
-    /// Opens the switch URL like the app does (a full page load) and follows it to where the gateway sends the browser at the end.
-    /// A code-flow session goes to Keycloak and back; the authorize request must ask silently for exactly that organization.
-    /// </summary>
-    private static async Task<HttpResponseMessage> SwitchAsync(SignedIn session, string tenant, string returnUrl = "/app/dashboard")
+    /// <summary>The switch POST like the app sends it: JSON body, the XSRF header (unless <paramref name="xsrf"/> is false).</summary>
+    private static async Task<HttpResponseMessage> PostSwitchAsync(HttpClient browser, string tenant, string returnUrl = "/app/dashboard", bool xsrf = true)
     {
-        var response = await session.Browser.GetAsync(
-            $"/bff/switch-tenant?tenant={Uri.EscapeDataString(tenant)}&returnUrl={Uri.EscapeDataString(returnUrl)}", Ct);
-        if (session.Keycloak is null || !LoginDriver.IsRedirect(response.StatusCode)
-            || response.Headers.Location!.AbsolutePath.StartsWith("/realms/", StringComparison.Ordinal) is false)
+        using var user = await browser.GetAsync("/bff/user", Ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/bff/switch-tenant")
         {
-            return response;
+            Content = JsonContent.Create(new { tenant, returnUrl }),
+        };
+        if (xsrf)
+        {
+            request.Headers.Add("X-XSRF-TOKEN", Xsrf(user));
         }
 
+        return await browser.SendAsync(request, Ct);
+    }
+
+    private static async Task<string> NavigateToAsync(HttpResponseMessage response)
+    {
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        response.Headers.Location.ShouldBeNull("the switch POST never redirects");
+        return (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("navigateTo").GetString()!;
+    }
+
+    /// <summary>
+    /// Switches like the app does: the POST, then a full page load of <c>navigateTo</c>, followed to where the gateway sends the browser
+    /// at the end. A code-flow session goes to Keycloak and back; the authorize request must ask silently for exactly that organization.
+    /// Returns the final local URL the browser lands on.
+    /// </summary>
+    private static async Task<string> SwitchAsync(SignedIn session, string tenant, string returnUrl = "/app/dashboard")
+    {
+        using var post = await PostSwitchAsync(session.Browser, tenant, returnUrl);
+        var navigateTo = await NavigateToAsync(post);
+        if (session.Keycloak is null)
+        {
+            return navigateTo;
+        }
+
+        using var response = await session.Browser.GetAsync(navigateTo, Ct);
+        LoginDriver.IsRedirect(response.StatusCode).ShouldBeTrue(await response.Content.ReadAsStringAsync(Ct));
         var authorize = response.Headers.Location!;
-        response.Dispose();
+        if (!authorize.IsAbsoluteUri || !authorize.AbsolutePath.StartsWith("/realms/", StringComparison.Ordinal))
+        {
+            return authorize.OriginalString;
+        }
+
         // The handler pushes the request to Keycloak first (PAR) when Keycloak offers it: then the browser URL holds only a request_uri.
         // Silence (prompt=none) and the one organization show in the outcome: no page below, and the new token's tenant.
         var query = QueryHelpers.ParseQuery(authorize.Query);
@@ -104,7 +134,9 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
             scopes.ShouldNotContain("organization", "Keycloak refuses the bare scope next to organization:<alias>");
         }
         var callback = await session.Keycloak.FollowSilentAsync(authorize);
-        return await session.Browser.GetAsync(callback, Ct);
+        using var landed = await session.Browser.GetAsync(callback, Ct);
+        LoginDriver.IsRedirect(landed.StatusCode).ShouldBeTrue();
+        return landed.Headers.Location!.OriginalString;
     }
 
     private static string Xsrf(HttpResponseMessage response)
@@ -130,10 +162,8 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var session = await SignInAsync(mode);
         (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
 
-        using var switched = await SwitchAsync(session, "globex");
+        (await SwitchAsync(session, "globex")).ShouldBe("/app/dashboard");
 
-        LoginDriver.IsRedirect(switched.StatusCode).ShouldBeTrue(await switched.Content.ReadAsStringAsync(Ct));
-        switched.Headers.Location!.OriginalString.ShouldBe("/app/dashboard");
         var user = await UserAsync(session.Browser);
         user.GetProperty("userId").GetString().ShouldBe(DemoUsers.Thandi);
         user.GetProperty("tenantId").GetString().ShouldBe("globex");
@@ -145,8 +175,7 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         (await ForwardedTenantAsync(session.Browser)).ShouldBe("globex");
 
         // And back again.
-        using var back = await SwitchAsync(session, "acme");
-        LoginDriver.IsRedirect(back.StatusCode).ShouldBeTrue();
+        (await SwitchAsync(session, "acme")).ShouldBe("/app/dashboard");
         (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
         (await ForwardedTenantAsync(session.Browser)).ShouldBe("acme");
     }
@@ -164,7 +193,7 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var session = await SignInAsync(mode);
         var before = SessionKeys();
 
-        using var response = await session.Browser.GetAsync($"/bff/switch-tenant?tenant={Uri.EscapeDataString(tenant)}&returnUrl=/app/dashboard", Ct);
+        using var response = await PostSwitchAsync(session.Browser, tenant);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         response.Headers.Location.ShouldBeNull("no challenge for a tenant the user does not belong to");
@@ -179,7 +208,7 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         _gateway.Access.Down = true;
         try
         {
-            using var response = await session.Browser.GetAsync("/bff/switch-tenant?tenant=globex&returnUrl=/app/dashboard", Ct);
+            using var response = await PostSwitchAsync(session.Browser, "globex");
 
             response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
             response.Headers.Location.ShouldBeNull();
@@ -212,7 +241,7 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
             (await browser.SendAsync(request, Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
         }
 
-        using var response = await browser.GetAsync("/bff/switch-tenant?tenant=globex&returnUrl=/app/dashboard", Ct);
+        using var response = await PostSwitchAsync(browser, "globex");
 
         response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
         response.Headers.Location.ShouldBeNull("no challenge");
@@ -233,10 +262,8 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var session = await SignInAsync("demo");
         var before = await KeycloakSessionsAsync(DemoUsers.Thandi);
 
-        using var switched = await SwitchAsync(session, "globex");
-        LoginDriver.IsRedirect(switched.StatusCode).ShouldBeTrue();
-        using var back = await SwitchAsync(session, "acme");
-        LoginDriver.IsRedirect(back.StatusCode).ShouldBeTrue();
+        (await SwitchAsync(session, "globex")).ShouldBe("/app/dashboard");
+        (await SwitchAsync(session, "acme")).ShouldBe("/app/dashboard");
 
         (await KeycloakSessionsAsync(DemoUsers.Thandi)).ShouldBe(before, "each switch ends the session it replaces");
     }
@@ -254,10 +281,13 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var browser = _gateway.NewBrowser();
         _disposables.Add(browser);
 
-        using var response = await browser.GetAsync("/bff/switch-tenant?tenant=globex&returnUrl=/app/dashboard", Ct);
-
+        using var response = await browser.PostAsJsonAsync("/bff/switch-tenant", new { tenant = "globex", returnUrl = "/app/dashboard" }, Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         response.Headers.Location.ShouldBeNull();
+
+        using var challenge = await browser.GetAsync("/bff/switch-tenant/challenge?ticket=anything", Ct);
+        challenge.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        challenge.Headers.Location.ShouldBeNull();
     }
 
     [Theory]
@@ -270,8 +300,7 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var oldKeys = SessionKeys();
         oldKeys.Length.ShouldBe(1);
 
-        using var switched = await SwitchAsync(session, "globex");
-        LoginDriver.IsRedirect(switched.StatusCode).ShouldBeTrue();
+        (await SwitchAsync(session, "globex")).ShouldBe("/app/dashboard");
 
         // One session for this browser, under a new key; the old one is gone from Redis and from the user's index.
         var newKeys = SessionKeys();
@@ -305,10 +334,7 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
     {
         var session = await SignInAsync(mode);
 
-        using var switched = await SwitchAsync(session, "globex", returnUrl);
-
-        LoginDriver.IsRedirect(switched.StatusCode).ShouldBeTrue();
-        switched.Headers.Location!.OriginalString.ShouldBe("/");
+        (await SwitchAsync(session, "globex", returnUrl)).ShouldBe("/");
         (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("globex");
     }
 
@@ -321,7 +347,8 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var oldKeys = SessionKeys();
 
         // The silent request: Keycloak answers with an error instead of a code.
-        using var start = await session.Browser.GetAsync("/bff/switch-tenant?tenant=globex&returnUrl=/app/dashboard", Ct);
+        using var post = await PostSwitchAsync(session.Browser, "globex");
+        using var start = await session.Browser.GetAsync(await NavigateToAsync(post), Ct);
         var callback = await session.Keycloak!.FollowSilentAsync(start.Headers.Location!);
         using var silent = await session.Browser.GetAsync(callback, Ct);
         var final = silent.Headers.Location!;
@@ -342,6 +369,140 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
         SessionKeys().ShouldBe(oldKeys);
         (await ForwardedTenantAsync(session.Browser)).ShouldBe("acme");
+    }
+
+    [Theory]
+    [InlineData("code")]
+    [InlineData("demo")]
+    public async Task Get_switch_tenant_changes_nothing(string mode)
+    {
+        // A link or an image on any same-site page is a GET: it must neither switch nor start a challenge.
+        var session = await SignInAsync(mode);
+        var before = SessionKeys();
+
+        using var response = await session.Browser.GetAsync("/bff/switch-tenant?tenant=globex&returnUrl=/app/dashboard", Ct);
+
+        ((int)response.StatusCode).ShouldBeOneOf(404, 405);
+        response.Headers.Location.ShouldBeNull("no challenge, no redirect");
+        SessionKeys().ShouldBe(before);
+        (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+    }
+
+    [Theory]
+    [InlineData("code")]
+    [InlineData("demo")]
+    public async Task Switch_post_without_xsrf_is_rejected(string mode)
+    {
+        var session = await SignInAsync(mode);
+        var before = SessionKeys();
+
+        using var response = await PostSwitchAsync(session.Browser, "globex", xsrf: false);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync(Ct)).ShouldContain("anti-forgery");
+        response.Headers.Location.ShouldBeNull();
+        SessionKeys().ShouldBe(before);
+        (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+    }
+
+    [Theory]
+    [InlineData("code")]
+    [InlineData("demo")]
+    public async Task Switch_post_for_member_returns_navigate_url(string mode)
+    {
+        var session = await SignInAsync(mode);
+
+        using var response = await PostSwitchAsync(session.Browser, "globex", "/app/budgets");
+        var navigateTo = await NavigateToAsync(response);
+
+        response.Headers.CacheControl!.NoStore.ShouldBeTrue();
+        if (mode == "demo")
+        {
+            // Switched inside the POST; the app just goes where it asked to.
+            navigateTo.ShouldBe("/app/budgets");
+            (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("globex");
+        }
+        else
+        {
+            // Nothing has happened yet: the URL is the gateway's own, single-use start of the challenge.
+            navigateTo.ShouldStartWith("/bff/switch-tenant/challenge?ticket=");
+            navigateTo.ShouldNotContain("globex");
+            (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+        }
+
+        // The current company: nothing to do, the app goes to the return URL.
+        using var same = await PostSwitchAsync(session.Browser, mode == "demo" ? "globex" : "acme", "/app/requests");
+        (await NavigateToAsync(same)).ShouldBe("/app/requests");
+    }
+
+    [Fact]
+    public async Task Challenge_ticket_is_single_use()
+    {
+        var session = await SignInAsync("code");
+        using var post = await PostSwitchAsync(session.Browser, "globex");
+        var navigateTo = await NavigateToAsync(post);
+
+        using (var first = await session.Browser.GetAsync(navigateTo, Ct))
+        {
+            LoginDriver.IsRedirect(first.StatusCode).ShouldBeTrue();
+            first.Headers.Location!.AbsolutePath.ShouldStartWith("/realms/", Case.Sensitive, "the first use starts the challenge");
+        }
+
+        using var second = await session.Browser.GetAsync(navigateTo, Ct);
+        second.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        second.Headers.Location.ShouldBeNull("a used ticket starts nothing");
+
+        using var madeUp = await session.Browser.GetAsync("/bff/switch-tenant/challenge?ticket=not-a-ticket", Ct);
+        madeUp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        using var missing = await session.Browser.GetAsync("/bff/switch-tenant/challenge", Ct);
+        missing.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        missing.Headers.Location.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Challenge_ticket_of_another_session_is_rejected()
+    {
+        var thandi = await SignInAsync("code");
+        using var post = await PostSwitchAsync(thandi.Browser, "globex");
+        var navigateTo = await NavigateToAsync(post);
+
+        // Another user, and the same user in another browser: neither may start the challenge with it.
+        var tom = await SignInAsync("code", "tom@acme.test");
+        using (var other = await tom.Browser.GetAsync(navigateTo, Ct))
+        {
+            other.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+            other.Headers.Location.ShouldBeNull();
+        }
+
+        var thandiElsewhere = await SignInAsync("demo");
+        using (var elsewhere = await thandiElsewhere.Browser.GetAsync(navigateTo, Ct))
+        {
+            elsewhere.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+            elsewhere.Headers.Location.ShouldBeNull();
+        }
+
+        (await UserAsync(tom.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+        (await UserAsync(thandiElsewhere.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
+
+        // Refused elsewhere, the ticket still works for the session it was made for.
+        using var own = await thandi.Browser.GetAsync(navigateTo, Ct);
+        LoginDriver.IsRedirect(own.StatusCode).ShouldBeTrue();
+        own.Headers.Location!.AbsolutePath.ShouldStartWith("/realms/");
+    }
+
+    [Fact]
+    public async Task Expired_challenge_ticket_is_rejected()
+    {
+        var session = await SignInAsync("code");
+        using var post = await PostSwitchAsync(session.Browser, "globex");
+        var navigateTo = await NavigateToAsync(post);
+
+        _gateway.Clock.Advance(TimeSpan.FromSeconds(61));
+        using var response = await session.Browser.GetAsync(navigateTo, Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        response.Headers.Location.ShouldBeNull();
+        (await UserAsync(session.Browser)).GetProperty("tenantId").GetString().ShouldBe("acme");
     }
 
     [Fact]

@@ -1,11 +1,17 @@
+using System.Buffers.Text;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Http;
 using ProcureAi.Gateway.Configuration;
+using StackExchange.Redis;
 
 namespace ProcureAi.Gateway.Bff;
 
@@ -105,12 +111,95 @@ public sealed class SessionCookieManager : ICookieManager
     public void DeleteCookie(HttpContext context, string key, CookieOptions options) => _inner.DeleteCookie(context, key, options);
 }
 
+/// <summary>The body of <c>POST /bff/switch-tenant</c>.</summary>
+public sealed record SwitchTenantRequest(string? Tenant, string? ReturnUrl);
+
 /// <summary>
-/// <c>GET /bff/switch-tenant?tenant=globex&amp;returnUrl=/app/dashboard</c> (plan 06 ruling 18): the signed-in user moves to another
-/// company they belong to. The membership is checked with Access first (not a member, or an unknown ID: 403). A code-flow session then
-/// gets a token for exactly that organization through a silent OIDC challenge (<c>prompt=none</c>, scope <c>organization:globex</c>);
-/// a demo session through the demo client's password grant. Either way the callback checks that the token is for the same user and
-/// that tenant, and the session is replaced by a new one (<see cref="SessionRotation"/>). The return URL is a local path only.
+/// The single-use, short-lived tickets behind the URL that starts a code-flow tenant switch (<c>/bff/switch-tenant/challenge</c>). A
+/// ticket is bound to the session that asked for it (its <c>sub</c> and its store key) and carries the tenant and return URL, so the
+/// URL itself names nothing and can start exactly one challenge, for that browser, within <see cref="BffSessionOptions.SwitchTicketSeconds"/>.
+/// Kept in Redis under a hash of the ticket (every gateway instance redeems it).
+/// </summary>
+public sealed class SwitchTicketStore(IConnectionMultiplexer redis, IOptions<BffSessionOptions> options, TimeProvider time)
+{
+    /// <summary>A ticket is 32 random bytes, base64url: 43 characters. Anything much longer is not one.</summary>
+    private const int MaxTicketLength = 64;
+
+    public sealed record Ticket(string Subject, string Session, string Tenant, string ReturnUrl, DateTimeOffset ExpiresAt);
+
+    /// <summary>A new ticket for this session's switch to <paramref name="tenant"/>.</summary>
+    public async Task<string> IssueAsync(string subject, string session, string tenant, string returnUrl)
+    {
+        var id = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        var lifetime = TimeSpan.FromSeconds(options.Value.SwitchTicketSeconds);
+        var ticket = new Ticket(subject, session, tenant, returnUrl, time.GetUtcNow() + lifetime);
+        // The Redis expiry only cleans up; the ticket's own ExpiresAt (gateway clock) decides.
+        await redis.GetDatabase().StringSetAsync(Key(id), JsonSerializer.Serialize(ticket), lifetime + TimeSpan.FromSeconds(30));
+        return id;
+    }
+
+    /// <summary>
+    /// The ticket, used up, when it exists, belongs to this session and has not expired; otherwise null. A ticket shown by another
+    /// session is refused without being used up (only the browser it was issued to can spend it); of two concurrent redemptions by its
+    /// own session exactly one wins.
+    /// </summary>
+    public async Task<Ticket?> RedeemAsync(string? id, string subject, string session)
+    {
+        if (string.IsNullOrEmpty(id) || id.Length > MaxTicketLength)
+        {
+            return null;
+        }
+
+        var db = redis.GetDatabase();
+        var key = Key(id);
+        var stored = await db.StringGetAsync(key);
+        if (!stored.HasValue || Read(stored) is not { } ticket
+            || !string.Equals(ticket.Subject, subject, StringComparison.Ordinal)
+            || !string.Equals(ticket.Session, session, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        // GETDEL: atomic, so a ticket is spent once even across gateway instances.
+        var taken = await db.StringGetDeleteAsync(key);
+        if (!taken.HasValue || taken != stored)
+        {
+            return null;
+        }
+
+        return time.GetUtcNow() < ticket.ExpiresAt ? ticket : null;
+    }
+
+    private string Key(string id) =>
+        $"{options.Value.RedisKeyPrefix}switch-ticket:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(id)))}";
+
+    private static Ticket? Read(RedisValue value)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Ticket>((string)value!);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// <c>POST /bff/switch-tenant</c> with <c>{ "tenant": "globex", "returnUrl": "/app/dashboard" }</c> (plan 06 ruling 18, Task 14b): the
+/// signed-in user moves to another company they belong to. A POST behind the XSRF header like every other state-changing BFF call: a
+/// link or an image on a same-site page cannot switch. The membership is checked with Access first (not a member, or an unknown ID: 403;
+/// Access unavailable: 503). The answer is never a redirect but <c>200 { "navigateTo": "…" }</c>:
+/// <list type="bullet">
+/// <item>a demo session is switched inside the POST (the demo client's password grant for the same user and that tenant; the old
+/// provider session ends and the gateway session is replaced), and <c>navigateTo</c> is the return URL;</item>
+/// <item>a code-flow session gets <c>navigateTo = /bff/switch-tenant/challenge?ticket=…</c>, a single-use, short-lived URL bound to this
+/// session (<see cref="SwitchTicketStore"/>). Opening it starts the silent OIDC challenge (<c>prompt=none</c>, scope
+/// <c>organization:globex</c>); without a valid ticket it answers 400 and starts nothing.</item>
+/// </list>
+/// Either way the callback checks that the token is for the same user and that tenant, and the session is replaced by a new one
+/// (<see cref="SessionRotation"/>). The return URL is a local path only.
 /// </summary>
 public static class TenantSwitchEndpoints
 {
@@ -123,18 +212,30 @@ public static class TenantSwitchEndpoints
     /// <summary><see cref="HttpContext.Items"/> key: where a refused switch callback sends the browser back to.</summary>
     public const string RefusedReturnItem = "procure.switch.refused-return";
 
+    public const string ChallengePath = "/bff/switch-tenant/challenge";
+
+    /// <summary>The switch body is two short strings; anything larger is not one.</summary>
+    private const long MaxBodyBytes = 4096;
+
     public static IEndpointRouteBuilder MapTenantSwitch(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/bff/switch-tenant", SwitchAsync).RequireAuthorization(BffAuthSetup.SessionPolicy);
+        app.MapPost("/bff/switch-tenant", SwitchAsync)
+            .RequireAuthorization(BffAuthSetup.SessionPolicy)
+            .WithMetadata(new RequestSizeLimitAttribute(MaxBodyBytes));
+        // A GET because the app opens it as a page (the OIDC challenge is a top-level redirect), but it changes nothing without the
+        // single-use ticket the POST above issued to this very session.
+        app.MapGet(ChallengePath, ChallengeAsync).RequireAuthorization(BffAuthSetup.SessionPolicy);
         return app;
     }
 
     private static async Task<IResult> SwitchAsync(
-        HttpContext http, string? tenant, string? returnUrl, ICurrentUser user, IUserTenantsClient tenants,
+        HttpContext http, [FromBody] SwitchTenantRequest request, ICurrentUser user, IUserTenantsClient tenants,
         IOptionsMonitor<CookieAuthenticationOptions> cookies, IOptions<DemoLoginOptions> demoLogin, DemoSignIn demoSignIn,
-        TokenRefresher refresher, ILogger<UserTenantsClient> logger)
+        TokenRefresher refresher, SwitchTicketStore tickets, ILogger<UserTenantsClient> logger)
     {
-        var target = BffEndpoints.SafeReturnUrl(returnUrl);
+        http.Response.Headers.CacheControl = "no-store";
+        var tenant = request.Tenant;
+        var target = BffEndpoints.SafeReturnUrl(request.ReturnUrl);
         var subject = http.User.FindFirst("sub")?.Value;
         if (string.IsNullOrEmpty(tenant) || string.IsNullOrEmpty(subject))
         {
@@ -151,7 +252,7 @@ public static class TenantSwitchEndpoints
         catch (Exception exception) when (!http.RequestAborted.IsCancellationRequested)
         {
             logger.LogWarning(exception, "Tenant switch: Access could not list the user's tenants");
-            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Switching company is not available right now");
+            return Unavailable();
         }
 
         // Exactly one of the IDs Access lists (ordinal): anything else, also an existing organization the user is not in, is a 403.
@@ -160,10 +261,9 @@ public static class TenantSwitchEndpoints
             return Forbidden();
         }
 
-        http.Response.Headers.CacheControl = "no-store";
         if (string.Equals(user.TenantId, tenant, StringComparison.Ordinal))
         {
-            return Results.Redirect(target);
+            return NavigateTo(target);
         }
 
         var session = (await http.AuthenticateAsync(BffSchemes.Cookie)).Properties;
@@ -174,16 +274,37 @@ public static class TenantSwitchEndpoints
             return await SwitchDemoSessionAsync(http, tenant, subject, target, session, demoLogin.Value, demoSignIn, refresher);
         }
 
-        var properties = new AuthenticationProperties { RedirectUri = target };
-        properties.Items[TenantItem] = tenant;
+        // The ticket binds the challenge to this session: its store key (and the sub) must match when the URL is opened.
+        if (SessionRotation.CurrentKey(http, cookies.Get(BffSchemes.Cookie)) is not { } key)
+        {
+            return Unavailable();
+        }
+
+        var ticket = await tickets.IssueAsync(subject, key, tenant, target);
+        return NavigateTo($"{ChallengePath}?ticket={Uri.EscapeDataString(ticket)}");
+    }
+
+    /// <summary>
+    /// <c>GET /bff/switch-tenant/challenge?ticket=…</c>: spends the ticket the switch POST issued to this session and starts the OIDC
+    /// challenge for its tenant. A missing, used, expired or other session's ticket is a 400 and starts nothing.
+    /// </summary>
+    private static async Task<IResult> ChallengeAsync(
+        HttpContext http, string? ticket, SwitchTicketStore tickets, IOptionsMonitor<CookieAuthenticationOptions> cookies)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var subject = http.User.FindFirst("sub")?.Value;
+        var key = SessionRotation.CurrentKey(http, cookies.Get(BffSchemes.Cookie));
+        if (string.IsNullOrEmpty(subject) || key is null || await tickets.RedeemAsync(ticket, subject, key) is not { } redeemed)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "This company switch has expired; please try again");
+        }
+
+        var properties = new AuthenticationProperties { RedirectUri = BffEndpoints.SafeReturnUrl(redeemed.ReturnUrl) };
+        properties.Items[TenantItem] = redeemed.Tenant;
         properties.Items[SubjectItem] = subject;
         // The old session's store key travels in the state, which Data Protection encrypts and signs like the session cookie itself: the
         // callback usually arrives without the cookie (SameSite=Strict after the cross-site hop through the identity provider).
-        if (SessionRotation.CurrentKey(http, cookies.Get(BffSchemes.Cookie)) is { } key)
-        {
-            properties.Items[SessionItem] = key;
-        }
-
+        properties.Items[SessionItem] = key;
         return Results.Challenge(properties, [BffSchemes.Oidc]);
     }
 
@@ -198,7 +319,7 @@ public static class TenantSwitchEndpoints
             : null;
         if (demoUser is null)
         {
-            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Switching company is not available right now");
+            return Unavailable();
         }
 
         var signIn = await demoSignIn.AcquireAsync(http, demoUser, tenant);
@@ -211,8 +332,14 @@ public static class TenantSwitchEndpoints
         // switches do not pile up provider sessions. A code-flow switch shares the browser's single sign-on session and keeps it.
         await refresher.EndProviderSessionAsync(session.GetTokenValue("refresh_token"), session, http.RequestAborted);
         await SessionRotation.ReplaceAsync(http, signIn.Value.Principal, signIn.Value.Properties);
-        return Results.Redirect(target);
+        return NavigateTo(target);
     }
+
+    /// <summary>The app opens this URL as a full page load (the gateway's own path, never another site).</summary>
+    private static IResult NavigateTo(string url) => Results.Json(new { navigateTo = url });
+
+    private static IResult Unavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Switching company is not available right now");
 
     private static IResult Forbidden() =>
         Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "You do not belong to that company");

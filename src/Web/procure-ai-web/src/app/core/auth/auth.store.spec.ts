@@ -6,6 +6,7 @@ import { AuthStore } from './auth.store';
 import { BrowserLocation } from '../browser/browser-location';
 import { CacheRegistry } from '../state/cache-registry';
 import { LiveConnection } from '../live/live-connection';
+import { SKIP_FORBIDDEN_REDIRECT } from '../http/skip-forbidden';
 
 describe('AuthStore', () => {
   let http: HttpTestingController;
@@ -167,35 +168,106 @@ describe('AuthStore', () => {
     expect(navigate).toHaveBeenCalledWith('/');
   });
 
-  it('switch_clears_caches_and_stops_live', async () => {
-    const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
-    const clearCache = vi.fn();
-    TestBed.inject(CacheRegistry).register({ clearCache });
+  describe('switchTenant', () => {
+    const challenge = '/bff/switch-tenant/challenge?ticket=t1';
+    const switchRequest = () => vi.waitFor(() => http.expectOne('/bff/switch-tenant'));
+    const signedIn = async () => {
+      const loading = store.load();
+      (await userRequest()).flush({ ...tom, tenants: [{ id: 'acme', name: 'Acme Corp' }, { id: 'globex', name: 'Globex' }] });
+      await loading;
+    };
 
-    await store.switchTenant('globex');
+    it('switch_posts_then_navigates', async () => {
+      const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+      const clearCache = vi.fn();
+      TestBed.inject(CacheRegistry).register({ clearCache });
 
-    expect(clearCache).toHaveBeenCalledTimes(1);
-    expect(stop).toHaveBeenCalledTimes(1);
-    expect(assign).toHaveBeenCalledWith('/bff/switch-tenant?tenant=globex&returnUrl=%2Fapp%2Fdashboard');
-    // Nothing of the old company may arrive or be shown while the browser leaves: the caches and the connection go first.
-    expect(stop.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
-    expect(clearCache.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
-  });
+      const switching = store.switchTenant('globex');
+      const request = await switchRequest();
 
-  it('switchTenant navigates even when stopping the live connection fails', async () => {
-    vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockRejectedValue(new Error('hub gone'));
+      // A POST with the tenant and return url in the body (the XSRF header is added by HttpClient for unsafe methods); nothing
+      // is cleared or stopped before the gateway has said yes.
+      expect(request.request.method).toBe('POST');
+      expect(request.request.body).toEqual({ tenant: 'globex', returnUrl: '/app/dashboard' });
+      // A refusal (403) is answered on this page, not by the forbidden page.
+      expect(request.request.context.get(SKIP_FORBIDDEN_REDIRECT)).toBe(true);
+      expect(store.switching()).toBe(true);
+      expect(clearCache).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+      request.flush({ navigateTo: challenge });
+      await switching;
 
-    await store.switchTenant('globex').catch(() => undefined);
+      expect(clearCache).toHaveBeenCalledTimes(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(assign).toHaveBeenCalledWith(challenge);
+      // Nothing of the old company may arrive or be shown while the browser leaves: the caches and the connection go first.
+      expect(stop.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
+      expect(clearCache.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
+    });
 
-    expect(assign).toHaveBeenCalledWith('/bff/switch-tenant?tenant=globex&returnUrl=%2Fapp%2Fdashboard');
-  });
+    it.each([
+      [403, 'You are not a member of that company any more.'],
+      [503, 'Switching company is not available right now. Please try again.'],
+      [400, 'Switching company is not available right now. Please try again.'],
+      [0, 'Switching company is not available right now. Please try again.'],
+    ])('switch_refused_shows_message_and_keeps_state (%i)', async (status, message) => {
+      await signedIn();
+      const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+      const clearCache = vi.fn();
+      TestBed.inject(CacheRegistry).register({ clearCache });
+      const router = TestBed.inject(Router);
+      const navigate = vi.spyOn(router, 'navigateByUrl');
 
-  it('switchTenant encodes the tenant and the return url', async () => {
-    vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+      const switching = store.switchTenant('globex');
+      (await switchRequest()).flush(null, { status, statusText: 'Refused' });
+      await switching;
 
-    await store.switchTenant('a&b c', '/app/requests?status=open');
+      expect(store.switchError()).toBe(message);
+      expect(store.switching()).toBe(false);
+      expect(store.user()?.tenantId).toBe('acme');
+      expect(clearCache).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled();
+      expect(assign).not.toHaveBeenCalled();
+      // A refused switch is not the forbidden page: the user stays where they are.
+      expect(navigate).not.toHaveBeenCalledWith('/forbidden');
 
-    expect(assign).toHaveBeenCalledWith('/bff/switch-tenant?tenant=a%26b%20c&returnUrl=%2Fapp%2Frequests%3Fstatus%3Dopen');
+      store.dismissSwitchError();
+      expect(store.switchError()).toBeNull();
+    });
+
+    it('switchTenant navigates even when stopping the live connection fails', async () => {
+      vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockRejectedValue(new Error('hub gone'));
+
+      const switching = store.switchTenant('globex').catch(() => undefined);
+      (await switchRequest()).flush({ navigateTo: '/app/dashboard' });
+      await switching;
+
+      expect(assign).toHaveBeenCalledWith('/app/dashboard');
+    });
+
+    it('switchTenant sends the return url and goes only to a path on this site', async () => {
+      vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+
+      const switching = store.switchTenant('a&b c', '/app/requests?status=open');
+      const request = await switchRequest();
+      expect(request.request.body).toEqual({ tenant: 'a&b c', returnUrl: '/app/requests?status=open' });
+      request.flush({ navigateTo: 'https://evil.test/' });
+      await switching;
+
+      expect(assign).toHaveBeenCalledWith('/');
+    });
+
+    it('a second click while a switch is under way sends nothing', async () => {
+      vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+
+      const first = store.switchTenant('globex');
+      await store.switchTenant('globex');
+      const request = await switchRequest();
+      request.flush({ navigateTo: '/app/dashboard' });
+      await first;
+
+      expect(assign).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('load() keeps the tenants and tenant name the gateway sends', async () => {
