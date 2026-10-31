@@ -13,6 +13,7 @@ public sealed partial class LoginDriver : IDisposable
     private readonly KeycloakFixture _keycloak;
     private readonly HttpClient _keycloakBrowser;
     private string _lastPage = "";
+    private string _lastStep = "";
 
     public LoginDriver(KeycloakFixture keycloak)
     {
@@ -61,6 +62,16 @@ public sealed partial class LoginDriver : IDisposable
         }
     }
 
+    /// <summary>
+    /// Opens an authorize URL that must not show a page (a <c>prompt=none</c> request, or one Keycloak's SSO session answers): returns the
+    /// redirect out of Keycloak (to the gateway callback).
+    /// </summary>
+    public async Task<Uri> FollowSilentAsync(Uri authorizeUrl)
+    {
+        var (_, redirect) = await OpenLoginPageAsync(authorizeUrl);
+        return redirect ?? throw new InvalidOperationException("Keycloak showed a page instead of answering at once: " + PageText(_lastPage));
+    }
+
     /// <summary>True when the page last opened is Keycloak's registration form.</summary>
     public bool IsRegistrationPage => FindFormAction(_lastPage, "login-actions/registration") is not null;
 
@@ -81,34 +92,55 @@ public sealed partial class LoginDriver : IDisposable
         return await FollowToGatewayAsync(response, "registration");
     }
 
+    /// <summary>The organization buttons (<c>kc.org</c> values) of the last Keycloak page; empty unless it asked which company.</summary>
+    public IReadOnlyList<string> OfferedOrganizations { get; private set; } = [];
+
     /// <summary>
     /// Posts the credentials; returns the callback URL Keycloak redirects to. This realm asks for the username and
-    /// then, on a second page, the password; each page is posted with the fields it understands.
+    /// then, on a second page, the password; each page is posted with the fields it understands. A user in several
+    /// organizations is then asked which one (Keycloak's organization picker, shown when the login asks for scope
+    /// <c>organization</c>): <paramref name="organization"/> is the one clicked; without it the picker fails the login.
     /// </summary>
-    public async Task<Uri> SubmitCredentialsAsync(string formAction, string user, string password)
+    public async Task<Uri> SubmitCredentialsAsync(string formAction, string user, string password, string? organization = null)
     {
         var action = formAction;
-        for (var step = 0; step < 3; step++)
+        var credentials = new Dictionary<string, string>
         {
-            var response = await _keycloakBrowser.PostAsync(action, new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["username"] = user,
-                ["password"] = password,
-                ["credentialId"] = "",
-            }));
+            ["username"] = user,
+            ["password"] = password,
+            ["credentialId"] = "",
+        };
+        var fields = credentials;
+        for (var step = 0; step < 5; step++)
+        {
+            var response = await _keycloakBrowser.PostAsync(action, new FormUrlEncodedContent(fields));
             if (IsRedirect(response.StatusCode))
             {
                 return await FollowToGatewayAsync(response, "login");
             }
 
-            // 200: the next page of the login (the password page). Anything without a form is an error page.
+            // 200: the next page of the login (the password page, or the organization picker). Anything without a form is an error page.
             var html = await response.Content.ReadAsStringAsync();
+            _lastStep = html;
             response.Dispose();
             action = FindFormAction(html, "login-actions/authenticate")
                      ?? throw new InvalidOperationException("Keycloak did not complete the login: " + PageText(html));
+            var offered = OrganizationButton().Matches(html).Select(m => WebUtility.HtmlDecode(m.Groups[1].Value)).ToList();
+            if (offered.Count > 0)
+            {
+                OfferedOrganizations = offered;
+            }
+
+            fields = offered.Count == 0
+                ? credentials
+                : new Dictionary<string, string>
+                {
+                    ["kc.org"] = organization ?? throw new InvalidOperationException(
+                        $"Keycloak asks which organization ({string.Join(", ", offered)}); the test named none."),
+                };
         }
 
-        throw new InvalidOperationException("Keycloak kept asking for credentials; the password is probably wrong.");
+        throw new InvalidOperationException("Keycloak kept asking for credentials; the password is probably wrong. Last page: " + PageText(_lastStep));
     }
 
     /// <summary>
@@ -144,12 +176,12 @@ public sealed partial class LoginDriver : IDisposable
     /// <summary>The headers of the gateway's answer to the last login callback (the one that issues the session cookie).</summary>
     public Dictionary<string, string>? CallbackHeaders { get; private set; }
 
-    public async Task<Uri> LoginAsync(HttpClient gateway, string user, string path = "/bff/login")
+    public async Task<Uri> LoginAsync(HttpClient gateway, string user, string path = "/bff/login", string? organization = null)
     {
         var authorizeUrl = await StartAsync(gateway, path);
         var (formAction, redirect) = await OpenLoginPageAsync(authorizeUrl);
         var callback = redirect ?? await SubmitCredentialsAsync(
-            formAction ?? throw new InvalidOperationException("No login form on Keycloak's page."), user, _keycloak.DemoPassword);
+            formAction ?? throw new InvalidOperationException("No login form on Keycloak's page."), user, _keycloak.DemoPassword, organization);
         using var done = await gateway.GetAsync(callback);
         CallbackHeaders = done.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase);
         IsRedirect(done.StatusCode).ShouldBeTrue("Gateway callback failed: " + await done.Content.ReadAsStringAsync());
@@ -190,6 +222,9 @@ public sealed partial class LoginDriver : IDisposable
 
     [GeneratedRegex(@"[ \t\r\n]+")]
     private static partial Regex Whitespace();
+
+    [GeneratedRegex("<button\\b[^>]*\\bname=\"kc\\.org\"[^>]*\\bvalue=\"([^\"]*)\"", RegexOptions.IgnoreCase)]
+    private static partial Regex OrganizationButton();
 
     [GeneratedRegex("<form\\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex FormTag();

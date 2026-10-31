@@ -86,6 +86,9 @@
       "members": [
         {
           "username": "ben@globex.test"
+        },
+        {
+          "username": "thandi@acme.test"
         }
       ]
     },
@@ -261,7 +264,7 @@
   "clientScopes": [
     {
       "name": "procure-api",
-      "description": "Audience, tenant and roles claims for the procurement APIs",
+      "description": "Audience, name and roles claims for the procurement APIs (the tenant claim comes from the organization scope)",
       "protocol": "openid-connect",
       "attributes": {
         "include.in.token.scope": "false",
@@ -328,22 +331,6 @@
           }
         },
         {
-          "name": "tenant",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-organization-membership-mapper",
-          "config": {
-            "claim.name": "tenant",
-            "jsonType.label": "String",
-            "multivalued": "false",
-            "addOrganizationId": "false",
-            "addOrganizationAttributes": "false",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "userinfo.token.claim": "true",
-            "introspection.token.claim": "true"
-          }
-        },
-        {
           "name": "roles",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-usermodel-realm-role-mapper",
@@ -361,7 +348,7 @@
     },
     {
       "name": "organization",
-      "description": "Lets a login ask for one organization (scope organization:<alias>). Adds no claim itself: the tenant claim comes from procure-api",
+      "description": "The tenant claim: the one organization of the login. Keycloak treats every scope with an organization mapper as an organization scope, so this is the only one (see infra/keycloak/README.md)",
       "protocol": "openid-connect",
       "attributes": {
         "include.in.token.scope": "true",
@@ -369,17 +356,19 @@
       },
       "protocolMappers": [
         {
-          "name": "organization",
+          "name": "tenant",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-organization-membership-mapper",
           "config": {
-            "claim.name": "organization",
+            "claim.name": "tenant",
             "jsonType.label": "String",
-            "multivalued": "true",
-            "id.token.claim": "false",
-            "access.token.claim": "false",
-            "userinfo.token.claim": "false",
-            "introspection.token.claim": "false"
+            "multivalued": "false",
+            "addOrganizationId": "false",
+            "addOrganizationAttributes": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
           }
         }
       ]
@@ -412,7 +401,8 @@
         "profile",
         "email",
         "roles",
-        "procure-api"
+        "procure-api",
+        "organization"
       ],
       "optionalClientScopes": [
         "offline_access"
@@ -441,7 +431,8 @@
         "profile",
         "email",
         "roles",
-        "procure-api"
+        "procure-api",
+        "organization"
       ]
     },
     {
@@ -497,11 +488,11 @@
         "profile",
         "email",
         "roles",
-        "procure-api"
+        "procure-api",
+        "organization"
       ],
       "optionalClientScopes": [
-        "offline_access",
-        "organization"
+        "offline_access"
       ]
     }
   ]

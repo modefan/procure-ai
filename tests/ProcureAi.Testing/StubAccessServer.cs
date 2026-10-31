@@ -140,6 +140,11 @@ public sealed class StubAccessServer : IAsyncDisposable
     private sealed record StubExplainedUser(
         string DisplayName, string[] Roles, string[] CostCenters, string[] Departments, decimal ApprovalLimit, bool IsFinanceApprover);
 
+    private readonly ConcurrentDictionary<string, (string Id, string Name)[]> _userTenants = new(StringComparer.Ordinal);
+
+    /// <summary>The tenants <c>internal/users/{userId}/tenants</c> lists for one user (in this order); users without any get an empty list.</summary>
+    public void SetUserTenants(string userId, params (string Id, string Name)[] tenants) => _userTenants[userId] = tenants;
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -223,6 +228,17 @@ public sealed class StubAccessServer : IAsyncDisposable
             return user.Email is null
                 ? Results.Json(new { userId, displayName = user.Name, tenantName })
                 : Results.Json(new { userId, displayName = user.Name, email = user.Email, tenantName });
+        });
+        app.MapGet("/api/v1/access/internal/users/{userId}/tenants", (HttpContext http, string userId) =>
+        {
+            stub.Record(http);
+            if (stub.Down)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var tenants = stub._userTenants.GetValueOrDefault(userId) ?? [];
+            return Results.Json(tenants.Select(t => new { id = t.Id, name = t.Name }));
         });
         app.MapGet("/api/v1/access/internal/explain", (HttpContext http, string userId) =>
         {

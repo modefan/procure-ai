@@ -33,7 +33,7 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         first["permission_grants"].ShouldBe(3 * 47);
         first["departments"].ShouldBe(4);
         first["cost_centers"].ShouldBe(4, "IT-200, MK-110, GX-100 and the demo sandbox DEMO-100");
-        first["tenant_users"].ShouldBe(7);
+        first["tenant_users"].ShouldBe(8, "seven demo users, and Thandi again in Globex");
     }
 
     [Fact]
@@ -59,6 +59,21 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         (await ScalarAsync(connection, "SELECT head_user_id FROM departments WHERE tenant_id='globex' AND code='OPS'")).ShouldBeNull();
         (await ScalarAsync(connection, "SELECT approval_limit::text FROM tenant_users WHERE tenant_id='acme' AND user_id='" + DemoUsers.Thandi + "'")).ShouldBe("2000000.00");
         (await ScalarAsync(connection, "SELECT is_finance_approver::text FROM tenant_users WHERE tenant_id='acme' AND user_id='" + DemoUsers.Thandi + "'")).ShouldBe("true");
+    }
+
+    [Fact]
+    public async Task Seeded_thandi_is_finance_in_globex_too()
+    {
+        // Plan 06 Task 14: Thandi belongs to two companies (the tenant switch), finance in both, with the same limit.
+        await using var connection = new NpgsqlConnection(infra.DbConnectionString);
+        await connection.OpenAsync(Ct);
+        var thandi = "tenant_id='globex' AND user_id='" + DemoUsers.Thandi + "'";
+
+        (await ScalarAsync(connection, "SELECT approval_limit::text FROM tenant_users WHERE " + thandi)).ShouldBe("2000000.00");
+        (await ScalarAsync(connection, "SELECT is_finance_approver::text FROM tenant_users WHERE " + thandi)).ShouldBe("true");
+        (await ScalarAsync(connection, "SELECT array_to_string(roles, ',') FROM tenant_users WHERE " + thandi)).ShouldBe("finance");
+        (await ScalarAsync(connection, "SELECT string_agg(tenant_id, ',' ORDER BY tenant_id) FROM tenant_users WHERE user_id='" + DemoUsers.Thandi + "'"))
+            .ShouldBe("acme,globex");
     }
 
     [Fact]

@@ -42,7 +42,7 @@ public static class BffEndpoints
 
     private static async Task<IResult> GetUserAsync(
         HttpContext http, ICurrentUser user, IPermissionProvider permissions, IAccessDirectory directory, IAntiforgery antiforgery,
-        DemoRegistration registration, CancellationToken cancellationToken)
+        DemoRegistration registration, IUserTenantsClient userTenants, ILogger<UserTenantsClient> logger, CancellationToken cancellationToken)
     {
         // A user without a tenant just registered: they join the demo company (and get their new claims) on this call.
         // When that fails they are answered as before: no tenant, no permissions.
@@ -61,6 +61,7 @@ public static class BffEndpoints
         IssueXsrfToken(http, antiforgery);
 
         var tenantName = await TenantNameAsync(user, directory, cancellationToken);
+        var tenants = await TenantsAsync(user, tenantName, userTenants, logger, cancellationToken);
         var principal = http.User;
         return Results.Json(new
         {
@@ -68,6 +69,7 @@ public static class BffEndpoints
             name = principal.FindFirst("name")?.Value ?? principal.FindFirst("preferred_username")?.Value ?? principal.FindFirst("email")?.Value,
             tenantId = user.TenantId,
             tenantName,
+            tenants = tenants.Select(t => new { id = t.Id, name = t.Name }),
             roles = user.Roles.Order(StringComparer.Ordinal),
             permissions = granted.Order(StringComparer.Ordinal),
         });
@@ -91,6 +93,31 @@ public static class BffEndpoints
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The companies the user may switch to (plan 06 ruling 18), from Access. When Access cannot answer, only the current one: who-am-I
+    /// must not fail, and the app then offers no switch. None for a user without a tenant.
+    /// </summary>
+    private static async Task<IReadOnlyList<UserTenant>> TenantsAsync(
+        ICurrentUser user, string? tenantName, IUserTenantsClient userTenants, ILogger logger, CancellationToken cancellationToken)
+    {
+        if (user.TenantId is not { } tenant)
+        {
+            return [];
+        }
+
+        try
+        {
+            var listed = await userTenants.ListAsync(user.UserId, cancellationToken);
+            // The current tenant is always in the list, even if Access has not caught up with a membership yet.
+            return listed.Any(t => t.Id == tenant) ? listed : [new UserTenant(tenant, tenantName ?? tenant), .. listed];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(exception, "Could not list the user's tenants; offering no switch");
+            return [new UserTenant(tenant, tenantName ?? tenant)];
         }
     }
 

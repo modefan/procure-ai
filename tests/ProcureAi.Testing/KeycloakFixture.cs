@@ -53,7 +53,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
               "publicClient": true,
               "standardFlowEnabled": false,
               "directAccessGrantsEnabled": true,
-              "defaultClientScopes": ["profile", "email", "roles", "procure-api"]
+              "defaultClientScopes": ["profile", "email", "roles", "procure-api", "organization"]
             }
             """)!);
 
@@ -83,19 +83,27 @@ public sealed class KeycloakFixture : IAsyncLifetime
         await _container.StartAsync();
     }
 
-    /// <summary>Password-grant login with the test-only client; returns the decoded access token payload.</summary>
-    public async Task<JsonElement> LoginAsync(string user)
+    /// <summary>
+    /// Password-grant login with the test-only client; returns the decoded access token payload. <paramref name="scope"/> is the
+    /// <c>scope</c> parameter (e.g. <c>openid organization:globex</c>); null sends none.
+    /// </summary>
+    public async Task<JsonElement> LoginAsync(string user, string? scope = null)
     {
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "password",
+            ["client_id"] = TestClient,
+            ["username"] = user,
+            ["password"] = DemoPassword,
+        };
+        if (scope is not null)
+        {
+            form["scope"] = scope;
+        }
+
         using var http = new HttpClient();
         using var response = await http.PostAsync(
-            $"{BaseUrl}/realms/{Realm}/protocol/openid-connect/token",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "password",
-                ["client_id"] = TestClient,
-                ["username"] = user,
-                ["password"] = DemoPassword,
-            }));
+            $"{BaseUrl}/realms/{Realm}/protocol/openid-connect/token", new FormUrlEncodedContent(form));
         var body = await response.Content.ReadAsStringAsync();
         EnsureSuccess(response, $"Token request for {user}", body);
         var token = JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()!;

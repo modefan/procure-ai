@@ -64,6 +64,7 @@ public static class GatewayApp
         services.AddProcureAiAccessClient(configuration, ServiceName);
         services.AddBffAuthentication();
         services.AddProcureAiServiceClient<IRegistrationClient, RegistrationClient>(AccessClientSetup.AccessServiceName);
+        services.AddProcureAiServiceClient<IUserTenantsClient, UserTenantsClient>(AccessClientSetup.AccessServiceName);
         services.AddScoped<DemoRegistration>();
         services.AddSingleton<DemoSignIn>();
 
@@ -89,6 +90,7 @@ public static class GatewayApp
 
         app.MapBff();
         app.MapDemoLogin();
+        app.MapTenantSwitch();
         app.MapClientLogs();
         app.MapDefaultEndpoints();
         // An unknown /api path is a 404, not the web app's index page. Order: after the proxied API routes (10).

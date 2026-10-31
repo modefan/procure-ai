@@ -48,7 +48,6 @@ public sealed class RealmTests(KeycloakFixture keycloak)
     [Theory]
     [InlineData("maria@acme.test", "acme", "manager")]
     [InlineData("dept@acme.test", "acme", "department-head")]
-    [InlineData("thandi@acme.test", "acme", "finance")]
     [InlineData("admin@acme.test", "acme", "admin")]
     [InlineData("ben@globex.test", "globex", "manager")]
     [InlineData("approver@demo.test", "demo", "manager")]
@@ -58,6 +57,72 @@ public sealed class RealmTests(KeycloakFixture keycloak)
 
         claims.GetProperty("tenant").GetString().ShouldBe(tenant);
         Strings(claims, "roles").ShouldContain(role);
+    }
+
+    [Theory]
+    [InlineData("acme")]
+    [InlineData("globex")]
+    public async Task Thandi_in_two_organizations_gets_exactly_the_one_she_asks_for(string organization)
+    {
+        // Repeated: with the tenant mapper in procure-api, Keycloak picked the organization scope in a varying order and the claim
+        // came only sometimes (plan 06 Task 13). One string, never a list, every time.
+        for (var i = 0; i < 20; i++)
+        {
+            var claims = await keycloak.LoginAsync("thandi@acme.test", $"openid organization:{organization}");
+
+            claims.GetProperty("tenant").ValueKind.ShouldBe(JsonValueKind.String, $"login {i}");
+            claims.GetProperty("tenant").GetString().ShouldBe(organization, $"login {i}");
+            Strings(claims, "roles").ShouldContain("finance");
+        }
+    }
+
+    [Fact]
+    public async Task Multi_org_user_who_names_no_organization_gets_no_tenant_rather_than_any()
+    {
+        // No silent pick: without a choice (code flow: Keycloak's picker; demo login: its configured tenant) there is no tenant.
+        for (var i = 0; i < 10; i++)
+        {
+            (await keycloak.LoginAsync("thandi@acme.test")).TryGetProperty("tenant", out _).ShouldBeFalse($"login {i}");
+            (await keycloak.LoginAsync("thandi@acme.test", "openid organization")).TryGetProperty("tenant", out _).ShouldBeFalse($"login {i}");
+        }
+    }
+
+    [Fact]
+    public async Task Single_org_user_gets_the_tenant_every_time_with_or_without_the_organization_scope()
+    {
+        for (var i = 0; i < 10; i++)
+        {
+            (await keycloak.LoginAsync("tom@acme.test")).GetProperty("tenant").GetString().ShouldBe("acme", $"login {i}");
+            (await keycloak.LoginAsync("tom@acme.test", "openid organization")).GetProperty("tenant").GetString().ShouldBe("acme", $"login {i}");
+            (await keycloak.LoginAsync("tom@acme.test", "openid organization:acme")).GetProperty("tenant").GetString().ShouldBe("acme", $"login {i}");
+        }
+    }
+
+    [Fact]
+    public async Task User_cannot_ask_for_an_organization_they_are_not_in()
+    {
+        var claims = await keycloak.LoginAsync("tom@acme.test", "openid organization:globex");
+
+        claims.TryGetProperty("tenant", out var tenant).ShouldBe(false, $"Tom got tenant {tenant}");
+    }
+
+    [Fact]
+    public async Task Only_the_organization_scope_maps_organizations()
+    {
+        // Keycloak treats every client scope with an organization mapper as an organization scope and takes the first it meets in
+        // the requested scopes. With two (procure-api and organization) the tenant depended on their order. Keep exactly one.
+        var realm = JsonDocument.Parse(await File.ReadAllTextAsync("procure-realm.json")).RootElement;
+
+        var mapping = realm.GetProperty("clientScopes").EnumerateArray()
+            .Where(s => s.TryGetProperty("protocolMappers", out var mappers)
+                        && mappers.EnumerateArray().Any(m => m.GetProperty("protocolMapper").GetString() == "oidc-organization-membership-mapper"))
+            .ToArray();
+
+        mapping.Select(s => s.GetProperty("name").GetString()).ShouldBe(["organization"]);
+        var mapper = mapping.Single().GetProperty("protocolMappers").EnumerateArray().Single();
+        mapper.GetProperty("config").GetProperty("claim.name").GetString().ShouldBe("tenant");
+        mapper.GetProperty("config").GetProperty("multivalued").GetString().ShouldBe("false");
+        mapper.GetProperty("config").GetProperty("access.token.claim").GetString().ShouldBe("true");
     }
 
     [Theory]

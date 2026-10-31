@@ -63,6 +63,8 @@ internal static class BffAuthSetup
                 options.Cookie.Path = "/";
                 options.SlidingExpiration = true;
                 options.EventsType = typeof(SessionCookieEvents);
+                // Chunked like the default; a tenant switch can make the handler ignore the request's cookie (a new session key).
+                options.CookieManager = new SessionCookieManager();
             })
             .AddOpenIdConnect(BffSchemes.Oidc, _ => { });
 
@@ -118,7 +120,32 @@ internal static class BffAuthSetup
                     AccessTokenClaims.Apply(identity, token);
                 }
 
+                // A tenant switch: the same user, exactly the tenant asked for, or no new session (the old one stays).
+                if (context.Principal is { } principal && TenantSwitchEndpoints.Refusal(context.Properties!, principal) is { } refusal)
+                {
+                    // The failure handler does not get the properties of a failed validation: it finds the way back here.
+                    context.HttpContext.Items[TenantSwitchEndpoints.RefusedReturnItem] = BffEndpoints.SafeReturnUrl(context.Properties!.RedirectUri);
+                    context.Fail($"Tenant switch refused: {refusal}");
+                }
+
                 return Task.CompletedTask;
+            },
+            OnTicketReceived = async context =>
+            {
+                if (context.Properties is not { } properties || !properties.Items.ContainsKey(TenantSwitchEndpoints.TenantItem))
+                {
+                    return;
+                }
+
+                // A tenant switch replaces the session: the new ticket gets a new key (the cookie handler must not see a request cookie that
+                // a same-site callback may carry), and the old ticket leaves the store and the user's index.
+                context.HttpContext.Items[SessionRotation.HideRequestCookieItem] = true;
+                if (properties.Items.TryGetValue(TenantSwitchEndpoints.SessionItem, out var old) && !string.IsNullOrEmpty(old))
+                {
+                    await context.HttpContext.RequestServices.GetRequiredService<RedisTicketStore>().RemoveAsync(old, context.HttpContext.RequestAborted);
+                }
+
+                TenantSwitchEndpoints.Forget(properties);
             },
             OnRedirectToIdentityProvider = context =>
             {
@@ -128,15 +155,51 @@ internal static class BffAuthSetup
                     context.ProtocolMessage.Prompt = prompt;
                 }
 
+                // A tenant switch asks for exactly one organization, silently unless this is the visible retry.
+                if (context.Properties.Items.TryGetValue(TenantSwitchEndpoints.TenantItem, out var tenant) && tenant is not null)
+                {
+                    context.ProtocolMessage.Scope = OrganizationScope.For(context.Options.Scope, tenant);
+                    if (!context.Properties.Items.ContainsKey(TenantSwitchEndpoints.InteractiveItem))
+                    {
+                        context.ProtocolMessage.Prompt = "none";
+                    }
+                }
+
                 return Task.CompletedTask;
             },
-            OnRemoteFailure = context =>
+            OnRemoteFailure = async context =>
             {
-                // The user cancelled, or the provider refused: back to the app, not an error page.
+                // A silent switch the provider could not answer without the user (its own session ended): ask once more, visibly. The
+                // state carries what the retry needs; the session cookie does not come along on this cross-site redirect.
+                if (context.Properties is { } properties && properties.Items.ContainsKey(TenantSwitchEndpoints.TenantItem)
+                    && !properties.Items.ContainsKey(TenantSwitchEndpoints.InteractiveItem)
+                    && context.Failure?.Data["error"] is "login_required" or "interaction_required" or "consent_required" or "account_selection_required")
+                {
+                    logger.LogInformation("Tenant switch: the identity provider needs the user; asking again with its login page");
+                    var retry = new AuthenticationProperties { RedirectUri = BffEndpoints.SafeReturnUrl(properties.RedirectUri) };
+                    foreach (var item in new[] { TenantSwitchEndpoints.TenantItem, TenantSwitchEndpoints.SubjectItem, TenantSwitchEndpoints.SessionItem })
+                    {
+                        if (properties.Items.TryGetValue(item, out var value))
+                        {
+                            retry.Items[item] = value;
+                        }
+                    }
+
+                    retry.Items[TenantSwitchEndpoints.InteractiveItem] = "true";
+                    await context.HttpContext.ChallengeAsync(BffSchemes.Oidc, retry);
+                    context.HandleResponse();
+                    return;
+                }
+
+                // The user cancelled, or the provider refused: back to the app, not an error page (a refused switch keeps the old session
+                // and goes back to where it started).
                 logger.LogWarning(context.Failure, "Sign-in at the identity provider failed");
-                context.Response.Redirect("/");
+                var back = context.HttpContext.Items[TenantSwitchEndpoints.RefusedReturnItem] as string
+                           ?? (context.Properties?.Items.ContainsKey(TenantSwitchEndpoints.TenantItem) == true
+                               ? BffEndpoints.SafeReturnUrl(context.Properties.RedirectUri)
+                               : "/");
+                context.Response.Redirect(back);
                 context.HandleResponse();
-                return Task.CompletedTask;
             },
         };
     }
