@@ -12,7 +12,7 @@
   - `organization` is a default scope of the gateway, Swagger and demo login clients, so a user in one organization gets it without
     asking.
   - A user in several organizations (Thandi: Acme and Globex) gets a tenant only by naming one: the gateway's code flow asks for scope
-    `organization` (`Oidc:Scopes`), so Keycloak shows its organization picker after the password; the demo login and the tenant switch
+    `organization` (`Oidc:Scopes`), so Keycloak shows its organization picker during the login; the demo login and the tenant switch
     ask for `organization:<alias>`. Without a choice there is no tenant (never an arbitrary one). The bare `organization` and
     `organization:<alias>` cannot be sent together (Keycloak answers `invalid_scope`); `OrganizationScope.For` replaces the one with the
     other. A refresh keeps the organization of the login.
