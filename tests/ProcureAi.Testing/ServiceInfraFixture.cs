@@ -24,6 +24,8 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
     private RedisFixture? _redis;
     private MongoFixture? _mongo;
     private DebeziumFixture? _debezium;
+    private MongoDebeziumFixture? _mongoDebezium;
+    private readonly SemaphoreSlim _mongoLock = new(1, 1);
     private readonly List<DebeziumFixture> _otherDebeziums = [];
 
     /// <summary>The service's database, migrated by <see cref="MigrateAsync"/>.</summary>
@@ -60,7 +62,7 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         var starting = new List<Task> { _postgres.InitializeAsync().AsTask(), _rabbit.InitializeAsync().AsTask(), _redis.InitializeAsync().AsTask() };
         if (UsesMongo)
         {
-            _mongo = new MongoFixture();
+            _mongo = new MongoFixture { Network = _network };
             starting.Add(_mongo.InitializeAsync().AsTask());
         }
 
@@ -115,6 +117,38 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         return connectionString;
     }
 
+    /// <summary>
+    /// MongoDB change data capture (plan 06 ruling 16), once per run: the MongoDB replica set (started now when the service does not use
+    /// MongoDB itself) and the MongoDB Debezium Server capturing <paramref name="collections"/> (<c>&lt;database&gt;.&lt;collection&gt;</c>), as
+    /// the AppHost's <c>debezium-mongo</c>. For a service that reads the MongoDB changes (Audit). Returns once the change stream is open.
+    /// </summary>
+    public async Task<MongoFixture> EnsureMongoCdcAsync(params string[] collections)
+    {
+        await _mongoLock.WaitAsync();
+        try
+        {
+            if (_mongo is null)
+            {
+                var mongo = new MongoFixture { Network = _network };
+                await mongo.InitializeAsync();
+                _mongo = mongo;
+            }
+
+            if (_mongoDebezium is null)
+            {
+                var debezium = new MongoDebeziumFixture(_network!, _mongo);
+                _mongoDebezium = debezium;
+                await debezium.StartAsync(collections);
+            }
+
+            return _mongo;
+        }
+        finally
+        {
+            _mongoLock.Release();
+        }
+    }
+
     /// <summary>An empty database (no migrations), for tests that migrate it themselves.</summary>
     public Task<string> CreateEmptyDatabaseAsync(string name) => _postgres!.CreateDatabaseAsync(name);
 
@@ -134,6 +168,11 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         if (_debezium is not null)
         {
             await _debezium.DisposeAsync();
+        }
+
+        if (_mongoDebezium is not null)
+        {
+            await _mongoDebezium.DisposeAsync();
         }
 
         foreach (var debezium in _otherDebeziums)

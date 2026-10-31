@@ -70,8 +70,11 @@ if (useDataVolumes)
 // MongoDB: single-node replica set (needed for change streams / CDC). Aspire's WithReplicaSet generates the
 // key file, initiates the set and only reports the server healthy once it is PRIMARY.
 #pragma warning disable ASPIREMONGODB001 // experimental Aspire API; replaces ~30 lines of hand-rolled key file and rs.initiate
+// TLS (Aspire's developer certificate) is preferred, not required: the services connect with TLS, but debezium-mongo (Java, which does
+// not trust the developer certificate) connects on the container network without it (plan 06 ruling 16; SCRAM authentication still applies).
 var mongo = builder.AddMongoDB(ResourceNames.Mongo)
     .WithReplicaSet(ResourceNames.MongoReplicaSet)
+    .WithTlsMode(MongoDBTlsMode.PreferTls)
 #pragma warning restore ASPIREMONGODB001
     .WithArgs("--wiredTigerCacheSizeGB", limits.Mongo.WiredTigerCacheGb.ToString(System.Globalization.CultureInfo.InvariantCulture))
     .WithContainerLimits(limits.Mongo);
@@ -130,7 +133,8 @@ var mailpit = builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1
     .WithContainerLimits(limits.Mailpit);
 
 // The services, each added the same way: database, `<name>-migrate` (`--migrate`: schema, Wolverine message store, demo
-// seed; runs first), `<name>-api` (waits for the migration) and, when it captures tables, `debezium-<db>`. See ServiceResources.cs.
+// seed; runs first), `<name>-api` (waits for the migration) and, when it captures tables, `debezium-<db>` (Postgres) or the shared
+// `debezium-mongo` (MongoDB collections). See ServiceResources.cs.
 // Access comes first: every other service calls it (CallsServices adds the reference and the wait).
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
@@ -163,9 +167,10 @@ var auditApi = builder.AddProcureAiService<Projects.ProcureAi_Audit_Api>(
     shared)
     .CallsServices(accessApi)
     .WithAuditLogReader(builder, postgres, ResourceNames.AuditDb, auditLogReaderPassword);
-// Suppliers (MongoDB): the catalog of suppliers and items per tenant. It publishes no events, so it has no message store and no Debezium.
+// Suppliers (MongoDB): the catalog of suppliers and items per tenant. It publishes no events, so it has no message store. Its suppliers are
+// captured by the one MongoDB Debezium (debezium-mongo, plan 06 ruling 16): a supplier changed outside the app (mongosh) raises an alert.
 var suppliersApi = builder.AddProcureAiService<Projects.ProcureAi_Suppliers_Api>(
-    new ServiceSpec("suppliers", ResourceNames.SuppliersDb, CapturedTables: [], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),
+    new ServiceSpec("suppliers", ResourceNames.SuppliersDb, CapturedTables: ["suppliers"], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),
     shared)
     .CallsServices(accessApi);
 // Requests checks with Approvals that a request can be approved before it submits it, and takes line descriptions and prices from
@@ -200,12 +205,13 @@ var purchasingApi = builder.AddProcureAiService<Projects.ProcureAi_Purchasing_Ap
     .WithEnvironment("SupplierClient__ApiKey", simulatorApiKey)
     .WithEnvironment("Webhooks__Sources__supplier__Secret", supplierWebhookSecret);
 // The Assistant (plan 05): Postgres assistantdb (pgvector, outbox and inbox; Debezium captures the documents and audit rows) plus MongoDB
-// assistantchatdb (conversations, invoice scans). Its tools read requests, approvals, budgets and suppliers as the signed-in user (token
+// assistantchatdb (conversations, invoice scans; debezium-mongo captures the conversations, values masked by Audit). Its tools read requests, approvals, budgets and suppliers as the signed-in user (token
 // relay), so it references and waits for them. The model provider is configuration: without AI settings here it runs on the Fake provider
 // (no key, no account); with AppHost user secrets AI:Provider, AI:Endpoint, AI:ApiKey, AI:Chat:Model, AI:Embedding:Model, AI:Guard:Model
 // it uses that provider. Each is passed only when set, so nothing is required.
 var assistantApi = builder.AddProcureAiService<Projects.ProcureAi_Assistant_Api>(
-    new ServiceSpec("assistant", ResourceNames.AssistantDb, CapturedTables: ["policy_documents", "audit_entries"], GatewayCluster: "assistant", ApiRoutePrefix: "/api/assistant", SecondaryMongoDatabase: ResourceNames.AssistantChatDb),
+    new ServiceSpec("assistant", ResourceNames.AssistantDb, CapturedTables: ["policy_documents", "audit_entries"], GatewayCluster: "assistant", ApiRoutePrefix: "/api/assistant", SecondaryMongoDatabase: ResourceNames.AssistantChatDb,
+        SecondaryMongoCapturedCollections: ["conversations"]),
     shared)
     .CallsServices(accessApi, requestsApi, approvalsApi, budgetsApi, suppliersApi)
     .WithOptionalAiSettings(builder);

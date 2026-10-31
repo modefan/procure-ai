@@ -191,6 +191,12 @@ public sealed class AuditApp : IAsyncLifetime
         }
     }
 
+    /// <summary>The MongoDB collections the AppHost's <c>debezium-mongo</c> captures (plan 06 ruling 16).</summary>
+    public static readonly string[] MongoCollections = ["suppliersdb.suppliers", "assistantchatdb.conversations"];
+
+    /// <summary>Once per run: a MongoDB replica set and the MongoDB Debezium Server capturing <see cref="MongoCollections"/>.</summary>
+    public Task<MongoFixture> EnsureMongoCdcAsync() => _infra.EnsureMongoCdcAsync(MongoCollections);
+
     private static async Task MigrateBudgetsAsync(string connectionString)
     {
         await using var db = new BudgetsDbContext(

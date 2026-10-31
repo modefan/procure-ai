@@ -9,7 +9,7 @@ namespace ProcureAi.Assistant.Infrastructure.Chat;
 /// write. A class of its own, so the domain stays free of MongoDB. IDs are strings ("D" form) and times UTC dates (millisecond precision),
 /// so no GUID representation needs configuring and <c>updatedAt</c> sorts as a date.
 /// </summary>
-internal sealed class ConversationDocument : ITenantDocument
+internal sealed class ConversationDocument : ITenantDocument, IAuditedDocument
 {
     [BsonId]
     public string Id { get; set; } = null!;
@@ -29,6 +29,11 @@ internal sealed class ConversationDocument : ITenantDocument
     /// <summary>Null when a list read left the messages out (projection).</summary>
     [BsonIgnoreIfNull]
     public List<MessageDocument>? Messages { get; set; }
+
+    /// <summary>Who wrote the document last (set by <see cref="TenantCollection{T}"/> on every write; read by change data capture).</summary>
+    [BsonElement(AuditStamp.ElementName)]
+    [BsonIgnoreIfNull]
+    public AuditStamp? Audit { get; set; }
 
     public static ConversationDocument From(Conversation conversation) => new()
     {

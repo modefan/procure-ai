@@ -17,6 +17,6 @@ export interface DataChangeDto {
   subjectId: (string | null);
   table: string;
   tenantId: (string | null);
-  transactionId: number;
+  transactionId: (number | null);
   userId: (string | null);
 }

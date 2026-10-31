@@ -34,5 +34,6 @@ public static class MongoSetup
         where T : ITenantDocument =>
         services.AddScoped(sp => new TenantCollection<T>(
             sp.GetRequiredService<IMongoDatabase>().GetCollection<T>(collectionName),
-            sp.GetRequiredService<ProcureAi.BuildingBlocks.Application.ICallerContext>()));
+            sp.GetRequiredService<ProcureAi.BuildingBlocks.Application.ICallerContext>(),
+            sp.GetService<TimeProvider>()));
 }

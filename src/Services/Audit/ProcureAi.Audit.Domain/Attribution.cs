@@ -34,4 +34,8 @@ public sealed record Attribution(
     /// <summary>Made by the app, as the interceptor row of the same transaction says.</summary>
     public static Attribution App(InterceptorEntry entry) =>
         new(AttributionKind.App, entry.UserId, entry.ActorId, entry.CallingService, entry.CorrelationId, entry.Id);
+
+    /// <summary>Made by the app, as the <c>_audit</c> stamp of a MongoDB document says (no interceptor row: the stamp names the user).</summary>
+    public static Attribution Stamped(DocumentStamp stamp) =>
+        new(AttributionKind.App, stamp.UserId, stamp.UserId, null, stamp.CorrelationId, null);
 }

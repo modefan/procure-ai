@@ -33,6 +33,15 @@ public static class DependencyInjection
     /// <summary>The queue Debezium's changes reach: bound to the <c>cdc</c> exchange only (and nothing else is bound to it).</summary>
     public const string CdcQueue = "audit-cdc";
 
+    /// <summary>The queue the MongoDB Debezium Server's changes reach (plan 06 ruling 16): bound to <c>cdc</c> with <see cref="CdcMongoRoutingKey"/>.</summary>
+    public const string CdcMongoQueue = "audit-cdc-mongo";
+
+    /// <summary>The Postgres Debezium Servers' routing keys, <c>&lt;database&gt;.public.&lt;table&gt;</c> (and no MongoDB key matches it).</summary>
+    public const string CdcPostgresRoutingKey = "*.public.*";
+
+    /// <summary>The MongoDB Debezium Server's routing keys, <c>mongo.&lt;database&gt;.&lt;collection&gt;</c>.</summary>
+    public const string CdcMongoRoutingKey = "mongo.#";
+
     /// <summary>The topic exchange every Debezium Server publishes to (routing key <c>&lt;database&gt;.public.&lt;table&gt;</c>); declared by the AppHost.</summary>
     public const string CdcExchange = "cdc";
 
@@ -79,7 +88,9 @@ public static class DependencyInjection
                     .Metadata(metadata => metadata.Version.MapTo(c => c.Version))
                     .Index(Columns<DataChange>(c => c.TenantId!, c => c.SubjectId!))
                     .Index(c => c.CommittedAt)
-                    .Index(c => c.Database);
+                    .Index(c => c.Database)
+                    // A MongoDB change is decided against the document's previous change (LatestChangeAsync).
+                    .Index(Columns<DataChange>(c => c.Database, c => c.Table, c => c.PrimaryKey));
                 options.Schema.For<AttributionMatch>()
                     .UseOptimisticConcurrency(true)
                     .Metadata(metadata => metadata.Version.MapTo(m => m.Version))
@@ -99,15 +110,17 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// The shared handler setup (durable inbox, caller headers, shared handlers) and two queues:
+    /// The shared handler setup (durable inbox, caller headers, shared handlers) and three queues:
     /// <list type="bullet">
     /// <item><c>audit-events</c>, bound with <c>#</c> to every exchange in <see cref="AuditedExchanges"/>. Every integration event type
     /// of the contracts is registered up front, so Wolverine knows each one when it arrives (the recording handler takes the
     /// <c>IIntegrationEvent</c> interface). <c>AccessChanged</c> reaches this queue too (exchange <c>access</c>), so the service has no
     /// separate access-changed queue: one delivery both records it and evicts the cached Access answers.</item>
-    /// <item><c>audit-cdc</c>, bound with <c>#</c> to the topic exchange <c>cdc</c> only. Debezium publishes plain JSON without
-    /// Wolverine's headers, so every message on it is read as a <see cref="DebeziumChange"/>. It is durable like every listener: a
-    /// message is acknowledged once it is in the durable inbox (Postgres), and handled from there.</item>
+    /// <item><c>audit-cdc</c>, bound with <c>*.public.*</c> (the Postgres Debezium Servers' keys) to the topic exchange <c>cdc</c> only.
+    /// Debezium publishes plain JSON without Wolverine's headers, so every message on it is read as a <see cref="DebeziumChange"/>. It is
+    /// durable like every listener: a message is acknowledged once it is in the durable inbox (Postgres), and handled from there.</item>
+    /// <item><c>audit-cdc-mongo</c>, bound with <c>mongo.#</c> to <c>cdc</c>: the MongoDB Debezium Server's changes, read as
+    /// <see cref="DebeziumMongoMessage"/> (plan 06 ruling 16).</item>
     /// </list>
     /// A handler that lost a race (concurrency exception) is retried inline with backoff and jitter (<c>Audit:ConcurrencyRetry</c>).
     /// </summary>
@@ -137,8 +150,15 @@ public static class DependencyInjection
         // One message at a time per instance: Debezium's order is kept, and the change and the interceptor row of one transaction
         // (published back to back) do not race each other on every app write (each lost race is retried, but logged as an error).
         // Several instances still compete for the queue; the matches' optimistic concurrency covers that.
-        options.ListenToRabbitQueue(CdcQueue, queue => queue.BindExchange(CdcExchange, "#"))
+        // The Postgres changes only (<database>.public.<table>): the MongoDB ones have their own queue and their own message shape.
+        options.ListenToRabbitQueue(CdcQueue, queue => queue.BindExchange(CdcExchange, CdcPostgresRoutingKey))
             .DefaultIncomingMessage<DebeziumChange>()
+            .Sequential();
+
+        // The MongoDB changes (mongo.<database>.<collection>, plan 06 ruling 16), one at a time like the Postgres ones: a document's
+        // change is decided against its previous one, so their order matters.
+        options.ListenToRabbitQueue(CdcMongoQueue, queue => queue.BindExchange(CdcExchange, CdcMongoRoutingKey))
+            .DefaultIncomingMessage<DebeziumMongoMessage>()
             .Sequential();
 
         // The grace timeout survives a restart: scheduled in the durable message store.

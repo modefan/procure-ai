@@ -65,6 +65,7 @@
     <Project Path="tests/ProcureAi.Approvals.IntegrationTests/ProcureAi.Approvals.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Access.IntegrationTests/ProcureAi.Access.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Audit.IntegrationTests/ProcureAi.Audit.IntegrationTests.csproj" />
+    <Project Path="tests/ProcureAi.Audit.Tests/ProcureAi.Audit.Tests.csproj" />
     <Project Path="tests/ProcureAi.Suppliers.Tests/ProcureAi.Suppliers.Tests.csproj" />
     <Project Path="tests/ProcureAi.Purchasing.Tests/ProcureAi.Purchasing.Tests.csproj" />
     <Project Path="tests/ProcureAi.Purchasing.IntegrationTests/ProcureAi.Purchasing.IntegrationTests.csproj" />

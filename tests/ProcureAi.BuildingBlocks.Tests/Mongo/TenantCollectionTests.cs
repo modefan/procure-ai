@@ -169,6 +169,81 @@ public sealed class TenantCollectionTests(MongoFixture mongo) : IClassFixture<Mo
         }
     }
 
+    private sealed class AuditedNote : ITenantDocument, IAuditedDocument
+    {
+        [BsonId]
+        public string Id { get; init; } = Guid.NewGuid().ToString("N");
+
+        public string TenantId { get; init; } = null!;
+
+        public string Text { get; set; } = null!;
+
+        [BsonElement(AuditStamp.ElementName)]
+        [BsonIgnoreIfNull]
+        public AuditStamp? Audit { get; set; }
+    }
+
+    /// <summary>Every insert and replace of an audited document carries the caller's stamp (plan 06 ruling 16): what change data capture attributes.</summary>
+    [Fact]
+    public async Task Insert_and_replace_stamp_an_audited_document_with_the_caller()
+    {
+        var raw = mongo.Client.GetDatabase("tenant-tests").GetCollection<AuditedNote>($"audited-{Guid.NewGuid():N}");
+        var collection = new TenantCollection<AuditedNote>(raw, new Caller("A"));
+        var before = DateTime.UtcNow.AddSeconds(-1);
+
+        await collection.InsertOneAsync(new AuditedNote { Id = "n1", TenantId = "A", Text = "first" }, Ct);
+        var inserted = await raw.Find(n => n.Id == "n1").SingleAsync(Ct);
+        await collection.ReplaceOneAsync(n => n.Id == "n1", new AuditedNote { Id = "n1", TenantId = "A", Text = "second" }, cancellationToken: Ct);
+        var replaced = await raw.Find(n => n.Id == "n1").SingleAsync(Ct);
+
+        foreach (var stamp in new[] { inserted.Audit, replaced.Audit })
+        {
+            stamp.ShouldNotBeNull();
+            stamp.UserId.ShouldBe("u-1");
+            stamp.At.ShouldBeGreaterThan(before);
+            stamp.Deleting.ShouldBeFalse();
+        }
+
+        replaced.Audit!.At.ShouldBeGreaterThanOrEqualTo(inserted.Audit!.At);
+    }
+
+    /// <summary>A delete event carries no document: the document is stamped "deleting" first, so Audit can tell the app's delete.</summary>
+    [Fact]
+    public async Task Delete_stamps_an_audited_document_as_deleting_before_it_goes()
+    {
+        var raw = mongo.Client.GetDatabase("tenant-tests").GetCollection<AuditedNote>($"audited-{Guid.NewGuid():N}");
+        var collection = new TenantCollection<AuditedNote>(raw, new Caller("A"));
+        await collection.InsertOneAsync(new AuditedNote { Id = "n1", TenantId = "A", Text = "first" }, Ct);
+        using var changes = await raw.WatchAsync(
+            new ChangeStreamOptions { FullDocument = ChangeStreamFullDocumentOption.UpdateLookup }, Ct);
+
+        await collection.DeleteOneAsync(n => n.Id == "n1", Ct);
+
+        var events = new List<ChangeStreamDocument<AuditedNote>>();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        while (events.Count < 2 && !timeout.IsCancellationRequested)
+        {
+            try
+            {
+                if (await changes.MoveNextAsync(timeout.Token))
+                {
+                    events.AddRange(changes.Current);
+                }
+            }
+            catch (OperationCanceledException) when (!Ct.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        events.Select(e => e.OperationType).ShouldBe([ChangeStreamOperationType.Update, ChangeStreamOperationType.Delete]);
+        var stamp = events[0].UpdateDescription.UpdatedFields[AuditStamp.ElementName].AsBsonDocument;
+        stamp["userId"].AsString.ShouldBe("u-1");
+        stamp["deleting"].AsBoolean.ShouldBeTrue();
+        (await raw.CountDocumentsAsync(Builders<AuditedNote>.Filter.Empty, cancellationToken: Ct)).ShouldBe(0);
+    }
+
     [Fact]
     public async Task Migrations_receive_the_database()
     {

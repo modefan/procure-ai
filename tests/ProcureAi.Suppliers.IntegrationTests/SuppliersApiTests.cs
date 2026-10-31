@@ -25,6 +25,25 @@ public sealed class SuppliersApiTests(SuppliersApp app)
         return (await response.Content.ReadFromJsonAsync<T>(Ct))!;
     }
 
+    /// <summary>
+    /// The seed (the only writer of the catalog) stamps every supplier with <c>_audit</c> (plan 06 ruling 16), so change data capture
+    /// attributes it to the app (<c>system</c>), not to someone outside it.
+    /// </summary>
+    [Fact]
+    public async Task Seeded_suppliers_carry_an_audit_stamp()
+    {
+        var suppliers = await app.Infra.Db.GetCollection<BsonDocument>("suppliers").Find(FilterDefinition<BsonDocument>.Empty).ToListAsync(Ct);
+
+        suppliers.ShouldNotBeEmpty();
+        foreach (var supplier in suppliers)
+        {
+            supplier.Contains("_audit").ShouldBeTrue(supplier["_id"].AsString);
+            var stamp = supplier["_audit"].AsBsonDocument;
+            stamp["userId"].AsString.ShouldBe(SystemCaller.Id);
+            stamp["at"].ToUniversalTime().ShouldBeGreaterThan(DateTime.UtcNow.AddHours(-1));
+        }
+    }
+
     [Fact]
     public async Task Acme_lists_three_suppliers_globex_one()
     {

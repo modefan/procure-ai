@@ -85,6 +85,23 @@ public sealed class CdcOptions : IValidatableObject
     [Required]
     public string[] RequestTables { get; set; } = [];
 
+    /// <summary>
+    /// MongoDB collections (<c>&lt;database&gt;.&lt;collection&gt;</c>) whose values are never stored: their changes keep the field names
+    /// only, every value is <c>***</c> (the assistant's conversations, plan 06 ruling 16).
+    /// </summary>
+    [Required]
+    public string[] MaskedCollections { get; set; } = [];
+
+    /// <summary>
+    /// A MongoDB change is the app's when the <c>_audit.at</c> it wrote is at most this far from the change's cluster time (and, for a
+    /// delete, when the document's "deleting" stamp is). Covers the time between the app's clock and the write, and clock skew.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
+    public TimeSpan MongoStampWindow { get; set; }
+
+    public bool IsMasked(string database, string collection) =>
+        MaskedCollections.Contains($"{database}.{collection}", StringComparer.Ordinal);
+
     public string[] KeyColumnsOf(string table) => KeyColumns.TryGetValue(table, out var columns) ? columns : DefaultKeyColumns;
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

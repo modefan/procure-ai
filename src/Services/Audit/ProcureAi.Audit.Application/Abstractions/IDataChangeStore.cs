@@ -32,6 +32,16 @@ public interface IDataChangeStore
     /// </summary>
     Task<DataChange?> ResolveAsync(string changeId, DateTimeOffset now, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Stores a change whose attribution is already decided (a MongoDB change: <see cref="AttributionKind.App"/> or
+    /// <see cref="AttributionKind.OutsideApp"/>), once, with the alert of one made outside the app in the same commit. Returns false when
+    /// it was stored before (a redelivery), so the caller counts and logs it once.
+    /// </summary>
+    Task<bool> RecordDecidedChangeAsync(DataChange change, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>The newest stored change of one row or document, other than <paramref name="exceptId"/>; null when there is none.</summary>
+    Task<DataChange?> LatestChangeAsync(string database, string table, string primaryKey, string exceptId, CancellationToken cancellationToken);
+
     /// <summary>Deletes changes, interceptor rows, matches and alerts from before <paramref name="cutoff"/>, at most <paramref name="batchSize"/> per statement. Returns how many.</summary>
     Task<int> PurgeAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken);
 

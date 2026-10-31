@@ -15,15 +15,19 @@ public enum ServiceStore
 /// <summary>What one service needs from the AppHost. Everything else comes from <see cref="SharedResources"/>.</summary>
 /// <param name="Name">Short service name, e.g. <c>requests</c>; the resources are called <c>&lt;name&gt;-migrate</c> and <c>&lt;name&gt;-api</c>.</param>
 /// <param name="Database">The service's database on the Postgres or MongoDB server, e.g. <c>requestsdb</c> (also its connection-string name); unused for <see cref="ServiceStore.None"/>.</param>
-/// <param name="CapturedTables">Tables Debezium captures for the audit trail (wired by <c>AddDebeziumFor</c>); empty when none.</param>
+/// <param name="CapturedTables">Tables Debezium captures for the audit trail (wired by <c>AddDebeziumFor</c>); for a <see cref="ServiceStore.MongoDB"/>
+/// service, its collections (wired by <c>AddDebeziumForMongo</c>, plan 06 ruling 16); empty when none.</param>
 /// <param name="GatewayCluster">The YARP cluster the gateway routes this service's traffic to, e.g. <c>requests</c>.</param>
 /// <param name="ApiRoutePrefix">The path the gateway exposes the service under, e.g. <c>/api/requests</c>.</param>
-/// <param name="Store">Which server holds the database, or <see cref="ServiceStore.None"/>. MongoDB services and services without a database have no Debezium (it reads the Postgres WAL), so <c>CapturedTables</c> must be empty.</param>
+/// <param name="Store">Which server holds the database, or <see cref="ServiceStore.None"/>. A service without a database has nothing to capture, so
+/// its <c>CapturedTables</c> must be empty.</param>
 /// <param name="SecondaryMongoDatabase">A second database on the <c>mongo</c> resource next to a Postgres store (the Assistant's chat history,
 /// <c>assistantchatdb</c>), also its connection-string name; null for none. Only for <see cref="ServiceStore.Postgres"/>.</param>
+/// <param name="SecondaryMongoCapturedCollections">Collections of <paramref name="SecondaryMongoDatabase"/> the MongoDB Debezium captures (the
+/// conversations); empty or null when none.</param>
 public sealed record ServiceSpec(
     string Name, string Database, string[] CapturedTables, string GatewayCluster, string ApiRoutePrefix, ServiceStore Store = ServiceStore.Postgres,
-    string? SecondaryMongoDatabase = null);
+    string? SecondaryMongoDatabase = null, string[]? SecondaryMongoCapturedCollections = null);
 
 /// <summary>The infrastructure and settings every service resource is wired to.</summary>
 /// <param name="InternalClientSecret">Secret of the Keycloak client <c>procure-internal</c>, with which services call each other (<c>Auth:Internal:ClientSecret</c>).</param>
@@ -58,6 +62,12 @@ public static class ServiceResources
     public const string InternalClientId = "procure-internal";
 
     private const string DebeziumPrefix = "debezium-";
+
+    /// <summary>The one Debezium Server for every captured MongoDB collection (plan 06 ruling 16).</summary>
+    public const string DebeziumMongoName = DebeziumPrefix + "mongo";
+
+    /// <summary>The port MongoDB listens on inside its container (the <c>mongo</c> resource's target port).</summary>
+    private const int MongoContainerPort = 27017;
     private const string DebeziumImage = "quay.io/debezium/server";
     private const string DebeziumTag = "3.7.0.Final";
     private const int DebeziumHttpPort = 8080;
@@ -80,11 +90,16 @@ public static class ServiceResources
     {
         // Aspire creates the database on the server. The Postgres init script only creates the debezium role; the
         // migration creates the publication and grants (CdcMigrations.EnableCdc).
-        // A MongoDB service's database is created on the mongo resource instead. Debezium reads the Postgres WAL, so there is nothing to capture.
-        // A service without a database (ServiceStore.None, Notifications) gets neither a database nor a migrate resource.
-        if (spec.Store != ServiceStore.Postgres && spec.CapturedTables.Length > 0)
+        // A MongoDB service's database is created on the mongo resource instead; its captured collections go to the one MongoDB Debezium.
+        // A service without a database (ServiceStore.None, Notifications) gets neither a database nor a migrate resource, and captures nothing.
+        if (spec.Store == ServiceStore.None && spec.CapturedTables.Length > 0)
         {
-            throw new ArgumentException($"{spec.Name}: a {spec.Store} service has no Debezium capture (CapturedTables must be empty).", nameof(spec));
+            throw new ArgumentException($"{spec.Name}: a service without a database has no Debezium capture (CapturedTables must be empty).", nameof(spec));
+        }
+
+        if (spec.SecondaryMongoCapturedCollections is { Length: > 0 } && spec.SecondaryMongoDatabase is null)
+        {
+            throw new ArgumentException($"{spec.Name}: SecondaryMongoCapturedCollections need a SecondaryMongoDatabase.", nameof(spec));
         }
 
         if (spec.SecondaryMongoDatabase is not null && spec.Store != ServiceStore.Postgres)
@@ -157,7 +172,17 @@ public static class ServiceResources
             }
         }
 
-        if (migrate is not null && spec.CapturedTables.Length > 0)
+        if (migrate is not null && spec.Store == ServiceStore.MongoDB && spec.CapturedTables.Length > 0)
+        {
+            api.WaitFor(builder.AddDebeziumForMongo([.. spec.CapturedTables.Select(c => $"{spec.Database}.{c}")], migrate, shared));
+        }
+
+        if (migrate is not null && spec.SecondaryMongoDatabase is not null && spec.SecondaryMongoCapturedCollections is { Length: > 0 } secondaryCollections)
+        {
+            api.WaitFor(builder.AddDebeziumForMongo([.. secondaryCollections.Select(c => $"{spec.SecondaryMongoDatabase}.{c}")], migrate, shared));
+        }
+
+        if (migrate is not null && spec.Store == ServiceStore.Postgres && spec.CapturedTables.Length > 0)
         {
             // Debezium takes no data snapshot (snapshot.mode=configuration_based, snapshot.data=false), so it only sees changes made after its slot exists. The API
             // therefore waits for Debezium to be healthy: no change made through the app can precede the capture.
@@ -226,6 +251,69 @@ public static class ServiceResources
         }
 
         return debezium;
+    }
+
+    /// <summary>
+    /// Adds <paramref name="collections"/> (<c>&lt;database&gt;.&lt;collection&gt;</c>) to the one MongoDB Debezium Server, <c>debezium-mongo</c>
+    /// (plan 06 ruling 16), creating it on the first call: change streams of the <c>mongo</c> replica set to the <c>cdc</c> exchange with
+    /// routing keys <c>mongo.&lt;database&gt;.&lt;collection&gt;</c>. One MongoDB connector watches the whole replica set, so one instance serves
+    /// every MongoDB service (unlike Postgres, one per database). It runs infra/debezium/application-mongo.properties with the same caps as
+    /// the Postgres ones, connects as the server's root user straight to the one member, and starts after every migration that adds
+    /// collections (the seed is not captured) and after RabbitMQ. The caller's API waits for it (no change made through the app precedes the
+    /// capture, as no data snapshot is taken).
+    /// </summary>
+    public static IResourceBuilder<ContainerResource> AddDebeziumForMongo(
+        this IDistributedApplicationBuilder builder,
+        string[] collections,
+        IResourceBuilder<ProjectResource> migrate,
+        SharedResources shared)
+    {
+        var existing = builder.Resources.OfType<ContainerResource>().SingleOrDefault(r => r.Name == DebeziumMongoName);
+        if (existing is not null)
+        {
+            existing.Annotations.OfType<MongoCaptureAnnotation>().Single().Collections.AddRange(collections);
+            return builder.CreateResourceBuilder(existing).WaitForCompletion(migrate);
+        }
+
+        var capture = new MongoCaptureAnnotation([.. collections]);
+        var mongo = shared.Mongo.Resource;
+#pragma warning disable ASPIREMONGODB001 // experimental, like WithReplicaSet in AppHost.cs: the name the set was initiated with
+        var replicaSet = mongo.ReplicaSetName
+            ?? throw new InvalidOperationException("MongoDB change data capture needs the mongo resource to be a replica set (WithReplicaSet).");
+#pragma warning restore ASPIREMONGODB001
+        var password = mongo.PasswordParameter ?? throw new InvalidOperationException("The mongo resource has no password parameter.");
+        // Aspire initiates the single-member set with an address only it can reach, so Debezium connects straight to the member by its
+        // container name (directConnection); the connector still insists on the replica set's name.
+        var connectionString = ReferenceExpression.Create(
+            $"mongodb://{mongo.UserNameReference}:{password:uri}@{mongo.Name}:{MongoContainerPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}/?authSource=admin&replicaSet={replicaSet}&directConnection=true");
+        var debezium = builder.AddContainer(DebeziumMongoName, DebeziumImage, DebeziumTag)
+            .WithAnnotation(capture)
+            .WithHttpEndpoint(targetPort: DebeziumHttpPort, name: "http")
+            .WithBindMount("../../../infra/debezium/application-mongo.properties", "/debezium/config/application.properties", isReadOnly: true)
+            .WithEnvironment("JAVA_OPTS", shared.Limits.Debezium.JavaOpts)
+            .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING", connectionString)
+            .WithEnvironment(context => context.EnvironmentVariables["DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST"] = string.Join(',', capture.Collections))
+            .WithEnvironment(SelfHealEnvironmentVariable, shared.DebeziumSelfHealLostOffsets ? "true" : "false")
+            .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", shared.RabbitMq.Resource.UserNameReference)
+            .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", shared.RabbitMq.Resource.PasswordParameter)
+            .WithHttpHealthCheck("/q/health")
+            .WaitFor(shared.Mongo)
+            .WaitForCompletion(migrate)
+            .WaitFor(shared.RabbitMq)
+            .WithContainerLimits(shared.Limits.Debezium);
+        if (shared.UseDataVolumes)
+        {
+            // The resume token must live as long as the oplog it points into; the mongo data volume is scoped per AppHost, so is this one.
+            debezium.WithVolume(VolumeNameGenerator.Generate(debezium, "data"), "/debezium/data");
+        }
+
+        return debezium;
+    }
+
+    /// <summary>The collections <c>debezium-mongo</c> captures, collected from every service that adds some.</summary>
+    private sealed class MongoCaptureAnnotation(List<string> collections) : IResourceAnnotation
+    {
+        public List<string> Collections { get; } = collections;
     }
 
     /// <summary>The Postgres role that reads the server's audit log (plan 06 ruling 14); Audit's <c>--migrate</c> creates it.</summary>

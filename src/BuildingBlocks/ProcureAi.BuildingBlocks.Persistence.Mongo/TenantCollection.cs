@@ -20,10 +20,19 @@ namespace ProcureAi.BuildingBlocks.Persistence.Mongo;
 /// Operations that could move a document to another tenant (updates with operators, aggregation) are deliberately not offered:
 /// read, change in code, then <see cref="ReplaceOneAsync(FilterDefinition{T}, T, ReplaceOptions?, CancellationToken)"/>.
 /// Seeding and migrations (<see cref="IMongoMigration"/>) work on the raw database as the system, outside this wrapper.
+/// <para>
+/// A document that is <see cref="IAuditedDocument"/> is stamped on every write (plan 06 ruling 16): inserts and replaces carry the caller's
+/// <see cref="AuditStamp"/>, and a delete first stamps the documents it is about to delete as "deleting", so change data capture can tell
+/// the app's writes from changes made outside it.
+/// </para>
 /// </summary>
-public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerContext caller)
+public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerContext caller, TimeProvider? clock = null)
     where T : ITenantDocument
 {
+    private static readonly bool Audited = typeof(IAuditedDocument).IsAssignableFrom(typeof(T));
+
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     // The element name of TenantId, found once from the class map (a document may rename it), and checked to be a plain string.
     private static readonly string TenantElement = ResolveTenantElement();
 
@@ -41,6 +50,7 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
     {
         var tenant = RequireTenant();
         EnsureOwn(document, tenant);
+        Stamp(document);
         return collection.InsertOneAsync(document, cancellationToken: cancellationToken);
     }
 
@@ -51,6 +61,7 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
         foreach (var document in all)
         {
             EnsureOwn(document, tenant);
+            Stamp(document);
         }
 
         return collection.InsertManyAsync(all, cancellationToken: cancellationToken);
@@ -62,6 +73,7 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
     {
         var scoped = Scoped(filter, out var tenant);
         EnsureOwn(replacement, tenant);
+        Stamp(replacement);
         return collection.ReplaceOneAsync(scoped, replacement, options ?? new ReplaceOptions(), cancellationToken);
     }
 
@@ -69,14 +81,42 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
         Expression<Func<T, bool>> filter, T replacement, ReplaceOptions? options = null, CancellationToken cancellationToken = default) =>
         ReplaceOneAsync((FilterDefinition<T>)filter, replacement, options, cancellationToken);
 
-    public Task<DeleteResult> DeleteOneAsync(FilterDefinition<T> filter, CancellationToken cancellationToken = default) =>
-        collection.DeleteOneAsync(Scoped(filter, out _), cancellationToken);
+    public async Task<DeleteResult> DeleteOneAsync(FilterDefinition<T> filter, CancellationToken cancellationToken = default)
+    {
+        var scoped = Scoped(filter, out _);
+        if (Audited)
+        {
+            await collection.UpdateOneAsync(scoped, DeletingStamp(), cancellationToken: cancellationToken);
+        }
+
+        return await collection.DeleteOneAsync(scoped, cancellationToken);
+    }
 
     public Task<DeleteResult> DeleteOneAsync(Expression<Func<T, bool>> filter, CancellationToken cancellationToken = default) =>
         DeleteOneAsync((FilterDefinition<T>)filter, cancellationToken);
 
-    public Task<DeleteResult> DeleteManyAsync(FilterDefinition<T> filter, CancellationToken cancellationToken = default) =>
-        collection.DeleteManyAsync(Scoped(filter, out _), cancellationToken);
+    public async Task<DeleteResult> DeleteManyAsync(FilterDefinition<T> filter, CancellationToken cancellationToken = default)
+    {
+        var scoped = Scoped(filter, out _);
+        if (Audited)
+        {
+            await collection.UpdateManyAsync(scoped, DeletingStamp(), cancellationToken: cancellationToken);
+        }
+
+        return await collection.DeleteManyAsync(scoped, cancellationToken);
+    }
+
+    private void Stamp(T document)
+    {
+        if (document is IAuditedDocument audited)
+        {
+            audited.Audit = AuditStamp.For(caller, AuditStamp.CurrentCorrelationId(), _clock.GetUtcNow());
+        }
+    }
+
+    // A delete event carries no document: the stamp written right before it tells Audit the delete is the app's.
+    private UpdateDefinition<T> DeletingStamp() =>
+        Builders<T>.Update.Set(AuditStamp.ElementName, AuditStamp.For(caller, AuditStamp.CurrentCorrelationId(), _clock.GetUtcNow(), deleting: true));
 
     private FilterDefinition<T> Scoped(FilterDefinition<T> filter, out string tenant)
     {

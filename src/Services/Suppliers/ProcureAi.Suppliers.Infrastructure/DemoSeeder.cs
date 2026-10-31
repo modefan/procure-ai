@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
@@ -9,7 +10,7 @@ namespace ProcureAi.Suppliers.Infrastructure;
 
 /// <summary>
 /// The demo catalogs the AppHost migrate step writes when DemoSeed:Enabled is true. Idempotent: each supplier is read and then
-/// inserted or replaced by its definition here, so a second run changes nothing. The seed works through a
+/// inserted, or replaced by its definition here when it differs, so a second run changes nothing (not even the audit stamp). The seed works through a
 /// <see cref="TenantCollection{T}"/> for the tenant it seeds, so even the seed cannot write another tenant's documents.
 /// </summary>
 public static class DemoSeeder
@@ -31,10 +32,26 @@ public static class DemoSeeder
             {
                 await tenantCollection.InsertOneAsync(document, cancellationToken);
             }
-            else
+            else if (!SameContent(existing, document))
             {
                 await tenantCollection.ReplaceOneAsync(d => d.Id == document.Id, document, cancellationToken: cancellationToken);
             }
+        }
+    }
+
+    // Unchanged documents are not written again: every write carries a new audit stamp (and is captured by change data capture),
+    // so a re-run of the seed must leave them alone. The stamps themselves are not content.
+    private static bool SameContent(SupplierDocument existing, SupplierDocument seeded)
+    {
+        var stamp = existing.Audit;
+        existing.Audit = null;
+        try
+        {
+            return existing.ToBsonDocument() == seeded.ToBsonDocument();
+        }
+        finally
+        {
+            existing.Audit = stamp;
         }
     }
 

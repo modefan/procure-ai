@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Audit/ProcureAi.Audit.Domain/ProcureAi.Audit.Domain.csproj" />
+    <ProjectReference Include="../../src/Services/Audit/ProcureAi.Audit.Application/ProcureAi.Audit.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Real Debezium Server 3.7 output (MongoDB connector, infra/debezium/application-mongo.properties): message bodies as published,
+         and the documentKey AMQP header of each in the .key file next to it. -->
+    <Content Include="Fixtures/mongo/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

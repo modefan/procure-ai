@@ -51,13 +51,14 @@ For a service whose data is documents and that publishes no integration events. 
 
 - **`Service:Store`** (`ServiceOptions.Store`, default `Postgres`): set `MongoDB` through `ServiceSpec(..., Store: ServiceStore.MongoDB)`
   in the AppHost, which creates the database on the `mongo` resource (`mongo.AddDatabase`), passes its connection string and
-  `Service__Store=MongoDB` to `-migrate` and `-api`, and adds **no Debezium** (it reads the Postgres WAL; `CapturedTables` must be
-  empty). `ServiceHost` then adds a MongoDB readiness check (`ping`) instead of Postgres. `--migrate` runs every registered
+  `Service__Store=MongoDB` to `-migrate` and `-api`. Its `CapturedTables` are **collections** for the one MongoDB Debezium
+  (`debezium-mongo`, see "Change data capture: MongoDB" below); empty for none. `ServiceHost` then adds a MongoDB readiness check (`ping`) instead of Postgres. `--migrate` runs every registered
   `IMongoMigration.ApplyAsync(IMongoDatabase, ct)` (indexes; idempotent), then the optional `migrate` callback (pass `null`), then the
   demo seed; there is no Wolverine message store to migrate. Register migrations as singletons.
 - **Infrastructure**: `services.AddProcureAiMongo(configuration, "<name>db")` (one `IMongoClient` singleton, the `IMongoDatabase`, tracing),
   and `services.AddTenantCollection<T>("collection")` for each collection of tenant data. `T : ITenantDocument` (a mapped `TenantId`
-  string).
+  string). A captured collection's document class also implements `IAuditedDocument` (`[BsonElement(AuditStamp.ElementName)]
+  [BsonIgnoreIfNull] public AuditStamp? Audit`), so `TenantCollection` stamps every write (see below).
 - **`TenantCollection<T>` is the tenant boundary** (the MongoDB equivalent of the EF Core tenant query filter): the raw
   `IMongoCollection<T>` is not exposed; `Find`/`CountAsync`/`ReplaceOneAsync`/`DeleteOneAsync`/`DeleteManyAsync` AND `TenantId == caller's tenant`
   onto the caller's filter (never replace it), `InsertOneAsync`/`InsertManyAsync`/`ReplaceOneAsync` throw `ForbiddenException` for a
@@ -89,7 +90,7 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
 - **AppHost**: `ServiceSpec(..., Store: ServiceStore.Postgres, SecondaryMongoDatabase: "<name>chatdb")`. `AddProcureAiService` then also
   creates that database on the `mongo` resource and gives `-migrate` and `-api` its connection string, a wait for it and
   `Service__SecondaryMongoConnectionName=<name>chatdb`. Only for a Postgres service (anything else throws). Debezium captures the Postgres
-  tables as usual; MongoDB change streams are not captured yet (plan 06).
+  tables as usual; `SecondaryMongoCapturedCollections: ["conversations"]` adds collections of the second database to `debezium-mongo`.
 - **`Service:SecondaryMongoConnectionName`** (`ServiceOptions`): also set it in the api's `appsettings.json`, so a bare `--migrate` run works.
   `ServiceHost` then adds the MongoDB readiness check (`mongodb`, a ping) next to `postgres`, and `--migrate` runs every registered
   `IMongoMigration` against it first, then the EF Core migrations, Wolverine's message store and the seed.
@@ -293,7 +294,7 @@ For a service that holds no business data of its own (Notifications: live pushes
 - Tests: `DebeziumFixture(network, postgres).StartAsync(database, tables...)` in `ProcureAi.Testing`, same mechanism.
   A test project that reads other services' changes (Audit) adds their databases with
   `ServiceInfraFixture.AddCapturedDatabaseAsync(database, migrate, tables...)` (each with its own Debezium).
-- **The Audit service consumes it** (queue `audit-cdc`, bound with `#` to `cdc` only; Wolverine reads Debezium's plain JSON as
+- **The Audit service consumes it** (queue `audit-cdc`, bound with `*.public.*` to `cdc` only, so the MongoDB keys never reach it; Wolverine reads Debezium's plain JSON as
   `DebeziumChange` through `DefaultIncomingMessage`). Each change is matched to the `audit_entries` row of the same transaction,
   table and key (the app user) or flagged "changed outside the app" after `Audit:Matching:Grace`. Debezium does not say which
   columns are a table's key, so **a new captured table whose key is not `id` needs an entry in `Audit:Cdc:KeyColumns`** (Audit's
@@ -308,6 +309,37 @@ For a service that holds no business data of its own (Notifications: live pushes
     by matching. Cover it with pgaudit (database-role audit), and give only the app's database role INSERT on `audit_entries`.
     (2) Debezium skips truncates by default, so a psql `TRUNCATE` is never flagged as outside the app. To capture them set
     `skipped.operations=none` and handle op `t` (it names no row, so it needs its own alert).
+
+## Change data capture: MongoDB (plan 06 ruling 16)
+
+- **One Debezium Server for every captured collection**, `debezium-mongo`: one MongoDB connector watches the whole replica set, so unlike
+  Postgres one instance serves Suppliers (`suppliersdb.suppliers`) and the Assistant (`assistantchatdb.conversations`). `AddProcureAiService`
+  calls `AddDebeziumForMongo(collections, migrate, shared)` for a MongoDB service's `CapturedTables` and for
+  `SecondaryMongoCapturedCollections`; the first call creates the container, later calls add their collections and a wait for their
+  migration. It runs `infra/debezium/application-mongo.properties` with the same caps as the Postgres ones (`Resources:Debezium`: 512 MB,
+  0.3 CPU, `-Xmx256m`; with eight Debezium Servers the 0.35 CPU of before would pass the 8-CPU budget). Environment:
+  `DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING` (root user, `mongo:27017`, `replicaSet=rs0&directConnection=true`: Aspire's single-member set
+  is initiated with an address only it can reach) and `DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST`. Routing keys are
+  `mongo.<database>.<collection>`; the APIs wait for it to be healthy (no data snapshot, as for Postgres).
+- **No transaction ID to match, so every write is stamped**: `TenantCollection<T>` sets `_audit: { userId, correlationId, at }`
+  (`AuditStamp`, BuildingBlocks.Persistence.Mongo) on every insert and replace of an `IAuditedDocument`, and before a delete it stamps
+  the documents `deleting: true` (a delete event carries no document). For updates with operators use `AuditStamp.Apply(update, caller,
+  correlationId, at)`. A write around `TenantCollection` (raw collection, mongosh) carries no new stamp.
+- **A delete event has no document, only its key**: the transform `HeaderFrom$Key` copies the key into the AMQP header `documentKey`
+  (the RabbitMQ sink publishes only the value).
+- **Audit** (queue `audit-cdc-mongo`, bound with `mongo.#`, sequential; `MongoChangeParser` turns the extended JSON into plain JSON, so
+  dates, decimals and object IDs read as text) decides each change at once from the stamp and the document's previous change
+  (`MongoChange.ToDataChange`): **App** with the stamp's user when the change wrote a stamp within `Audit:Cdc:MongoStampWindow` (30 s) of
+  its cluster time that is not the stamp the document already had (a mongosh replace that copies the document copies the old stamp); a
+  delete is the app's when the previous change was the app's `deleting` stamp. Anything else is **OutsideApp** with an alert straight away
+  (no grace period: there is nothing to wait for). Old values come from the previous change, so the log shows old -> new; `TransactionId`
+  is null. `Audit:Cdc:MaskedCollections` (`assistantchatdb.conversations`) keeps field names only (values `***`).
+- **Known limits**: someone with database access can forge a stamp (`$set: {"_audit.at": new Date()}`); pgaudit does not cover MongoDB.
+  A change of a document whose earlier changes were never captured has no old values. Several Audit instances may decide two changes of
+  one document in parallel (the queue is sequential per instance only).
+- Tests: `ServiceInfraFixture.EnsureMongoCdcAsync(collections...)` starts the replica set (on the test network as `mongo`) and
+  `MongoDebeziumFixture`, which returns once the change stream is open on the server; `MongoFixture.MongoshAsync` changes data outside
+  the app. The parser tests run on real Debezium output (`tests/ProcureAi.Audit.Tests/Fixtures/mongo`).
 
 ## Memory of the whole system (measured 2026-10-28, plan 03 Task 12)
 
@@ -349,7 +381,8 @@ budget (plan 03 ruling 20: nine .NET processes; it was 2.8 GB with five services
 Debezium stays at 512 MB / `-Xmx256m`; its CPU cap is 0.4 per instance so the six instances fit: 6 x 0.4 + 5.5 = 7.9 CPUs, and
 6 x 512 MB + 2.6 GB = 5.6 GB of memory caps (plan 03 ruling 19; the cost is slower CDC catch-up under load). Plan 05 adds a seventh
 (`debezium-assistantdb`) and lowers the cap to 0.35 per instance: 7 x 0.35 + 5.5 = 7.95 CPUs, and 7 x 512 MB + 2.6 GB = 6.1 GB of memory
-caps (plan 05 ruling 4; not measured yet).
+caps (plan 05 ruling 4; not measured yet). Plan 06 adds an eighth (`debezium-mongo`, ruling 16) and lowers the cap to 0.3 per instance:
+8 x 0.3 + 5.5 = 7.9 CPUs, and 8 x 512 MB + 2.6 GB = 6.6 GB of memory caps.
 
 ## Business metrics
 
@@ -398,6 +431,7 @@ Use this when a call must carry the **user's** permissions, not the service's: t
 | `AddProcureAiService`, `ServiceSpec`, `SharedResources` | `src/AppHost/ProcureAi.AppHost/ServiceResources.cs` |
 | `EnableCdc` / `DisableCdc` | `src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence/CdcMigrations.cs` |
 | `AddDebeziumFor`, Debezium shared properties | `ServiceResources.cs`, `infra/debezium/application.properties` |
+| `AddDebeziumForMongo`, MongoDB Debezium properties, `AuditStamp` | `ServiceResources.cs`, `infra/debezium/application-mongo.properties`, `BuildingBlocks.Persistence.Mongo/AuditStamp.cs` |
 | Test fixtures, auth and factory | `tests/ProcureAi.Testing` (`ServiceInfraFixture` is the per-service infrastructure base) |
 | Concurrency retries of message handlers | `ConcurrencyRetryOptions` (BuildingBlocks.Application, bound from the service's section) and `RetryConcurrencyConflicts` (BuildingBlocks.Messaging) |
 | Retries of message handlers when the database fails for a passing reason (transient `NpgsqlException`, `TimeoutException`, also wrapped) | `TransientDatabaseRetryPolicy` (BuildingBlocks.Messaging), set for every service by `UseProcureAiHandlers`: scheduled retries from `Messaging:TransientDatabaseRetry` (defaults 1 s, 5 s, 25 s, 2 min), then dead letters; it leaves lost races and failed service calls to their own rules |

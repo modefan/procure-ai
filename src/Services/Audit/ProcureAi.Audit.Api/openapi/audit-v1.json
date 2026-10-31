@@ -466,7 +466,10 @@
             "type": "string"
           },
           "transactionId": {
-            "type": "integer",
+            "type": [
+              "null",
+              "integer"
+            ],
             "format": "int64"
           },
           "committedAt": {

@@ -28,7 +28,8 @@ public sealed class MartenDataChangeStore(IDocumentStore store, TimeProvider clo
             return stored.Attribution; // redelivery
         }
 
-        var matchId = AttributionMatch.KeyOf(change.Database, change.TransactionId, change.Table, change.PrimaryKey);
+        var transactionId = change.TransactionId ?? throw new InvalidOperationException($"Change {change.Id} has no transaction ID to match.");
+        var matchId = AttributionMatch.KeyOf(change.Database, transactionId, change.Table, change.PrimaryKey);
         var existing = await session.LoadAsync<AttributionMatch>(matchId, cancellationToken);
         var (match, paired) = (existing ?? AttributionMatch.Start(matchId, change.CommittedAt))
             .WithChange(change.Id, lsn, change.CommittedAt)
@@ -45,6 +46,39 @@ public sealed class MartenDataChangeStore(IDocumentStore store, TimeProvider clo
         Save(session, match, isNew: existing is null);
         await CommitAsync(session, cancellationToken);
         return change.Attribution;
+    }
+
+    public async Task<bool> RecordDecidedChangeAsync(DataChange change, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (change.IsPending)
+        {
+            throw new ArgumentException($"Change {change.Id} is still pending; use {nameof(RecordChangeAsync)}.", nameof(change));
+        }
+
+        await using var session = store.LightweightSession();
+        if (await session.LoadAsync<DataChange>(change.Id, cancellationToken) is not null)
+        {
+            return false; // redelivery
+        }
+
+        session.Insert(change);
+        if (change.Attribution.Kind == AttributionKind.OutsideApp)
+        {
+            session.Store(OutsideAppAlert.For(change, now));
+        }
+
+        await CommitAsync(session, cancellationToken);
+        return true;
+    }
+
+    public async Task<DataChange?> LatestChangeAsync(
+        string database, string table, string primaryKey, string exceptId, CancellationToken cancellationToken)
+    {
+        await using var session = store.QuerySession();
+        return await session.Query<DataChange>()
+            .Where(c => c.Database == database && c.Table == table && c.PrimaryKey == primaryKey && c.Id != exceptId)
+            .OrderByDescending(c => c.CommittedAt).ThenByDescending(c => c.Id)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task RecordInterceptorEntryAsync(InterceptorEntry entry, long lsn, TimeSpan window, CancellationToken cancellationToken)

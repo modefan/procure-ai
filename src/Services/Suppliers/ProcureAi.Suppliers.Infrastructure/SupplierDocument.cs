@@ -11,7 +11,7 @@ namespace ProcureAi.Suppliers.Infrastructure;
 /// representation of the price live here). The ID is <c>{tenantId}:{code}</c>, so a code is unique within a tenant and the same code
 /// can exist in another.
 /// </summary>
-internal sealed class SupplierDocument : ITenantDocument
+internal sealed class SupplierDocument : ITenantDocument, IAuditedDocument
 {
     [BsonId]
     public string Id { get; set; } = null!;
@@ -29,6 +29,11 @@ internal sealed class SupplierDocument : ITenantDocument
     public bool Active { get; set; }
 
     public List<CatalogItemDocument> Items { get; set; } = [];
+
+    /// <summary>Who wrote the document last (set by <see cref="TenantCollection{T}"/> on every write; read by change data capture).</summary>
+    [BsonElement(AuditStamp.ElementName)]
+    [BsonIgnoreIfNull]
+    public AuditStamp? Audit { get; set; }
 
     public static SupplierDocument From(Supplier supplier) => new()
     {

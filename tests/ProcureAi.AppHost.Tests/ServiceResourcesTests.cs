@@ -172,7 +172,7 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
-    public async Task Suppliers_service_gets_its_database_on_mongo_migrate_and_api_without_debezium_and_the_gateway_routes_to_it()
+    public async Task Suppliers_service_gets_its_database_on_mongo_migrate_api_and_debezium_mongo_and_the_gateway_routes_to_it()
     {
         await using var scope = await ModelScope.BuildAsync();
         var model = scope.Model;
@@ -190,9 +190,12 @@ public sealed class ServiceResourcesTests
         apiEnv.ShouldContainKeyAndValue("Service__Store", "MongoDB");
         migrateEnv.ShouldContainKey("ConnectionStrings__suppliersdb");
         migrateEnv.ShouldContainKeyAndValue("DemoSeed__Enabled", "true");
+        // The suppliers are captured by the one MongoDB Debezium (plan 06 ruling 16), not by a Postgres-style one of their own.
         model.Resources.ShouldNotContain(r => r.Name == "debezium-suppliersdb");
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-mongo");
         api.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
         gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__suppliers__Destinations__d1__Address");
         gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
         foreach (var cap in CapResources)
@@ -546,8 +549,12 @@ public sealed class ServiceResourcesTests
         refused.Message.ShouldContain("SecondaryMongoDatabase");
     }
 
+    /// <summary>
+    /// A MongoDB service may capture collections (plan 06 ruling 16): they go to the one <c>debezium-mongo</c>, which waits for the service's
+    /// migration, and the api waits for it (no change made through the app precedes the capture).
+    /// </summary>
     [Fact]
-    public void A_mongo_service_cannot_ask_for_debezium_tables()
+    public async Task Mongo_service_with_captured_collections_gets_debezium_mongo()
     {
         var builder = DistributedApplication.CreateBuilder();
         builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "testcontainers.settings.json"), optional: false);
@@ -559,8 +566,70 @@ public sealed class ServiceResourcesTests
             secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
         #pragma warning restore ASPIREMONGODB001
 
-        Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
-            new ServiceSpec("suppliers", "suppliersdb", ["suppliers"], "suppliers", "/api/suppliers", ServiceStore.MongoDB), shared));
+        var api = builder.AddProcureAiService<MongoServiceProject>(
+            new ServiceSpec("suppliers", "suppliersdb", ["suppliers"], "suppliers", "/api/suppliers", ServiceStore.MongoDB), shared);
+
+        var debezium = builder.Resources.OfType<ContainerResource>().Single(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal));
+        debezium.Name.ShouldBe("debezium-mongo");
+        var migrate = builder.Resources.OfType<ProjectResource>().Single(r => r.Name == "suppliers-migrate");
+        (await EnvironmentOfAsync(debezium)).ShouldContainKeyAndValue("DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", "suppliersdb.suppliers");
+        debezium.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
+        api.Resource.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
+    }
+
+    /// <summary>
+    /// The MongoDB change data capture (plan 06 ruling 16): one Debezium Server for both captured MongoDB databases, from
+    /// application-mongo.properties, with the same caps as the Postgres ones; it starts after both migrations and RabbitMQ, and the two
+    /// APIs whose collections it captures wait for it.
+    /// </summary>
+    [Fact]
+    public async Task Debezium_mongo_resource_and_caps()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var debezium = model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-mongo");
+        var env = await EnvironmentOfAsync(debezium);
+
+        env.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", "suppliersdb.suppliers,assistantchatdb.conversations");
+        var connection = env["DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING"].ShouldBeOfType<ReferenceExpression>().ValueExpression;
+        connection.ShouldStartWith("mongodb://");
+        connection.ShouldContain("@mongo:27017/");
+        connection.ShouldContain("replicaSet=rs0");
+        connection.ShouldContain("directConnection=true");
+        connection.ShouldNotContain("tls=true", Case.Insensitive, "Debezium (Java) does not trust the developer certificate");
+        // So the server must accept connections without TLS (the services still use it).
+        // (Aspire keeps the mode in an internal annotation, a record that prints its value.)
+        model.Resources.OfType<MongoDBServerResource>().Single().Annotations
+            .Single(a => a.GetType().Name == "MongoDBServerTlsModeAnnotation").ToString()!.ShouldContain("PreferTls");
+        env.ShouldContainKeyAndValue("JAVA_OPTS", "-Xmx256m");
+        env.ShouldContainKey(ServiceResources.SelfHealEnvironmentVariable);
+        env.ShouldContainKey("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME");
+        env.ShouldContainKey("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD");
+        var mounts = debezium.Annotations.OfType<ContainerMountAnnotation>().ToList();
+        mounts.Single(m => m.Target == "/debezium/config/application.properties").Source!.ShouldEndWith("application-mongo.properties");
+        mounts.Select(m => m.Target).ShouldContain("/debezium/data");
+        debezium.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
+
+        var waits = debezium.Annotations.OfType<WaitAnnotation>().ToList();
+        waits.ShouldContain(w => w.Resource.Name == "suppliers-migrate" && w.WaitType == WaitType.WaitForCompletion);
+        waits.ShouldContain(w => w.Resource.Name == "assistant-migrate" && w.WaitType == WaitType.WaitForCompletion);
+        waits.ShouldContain(w => w.Resource.Name == "rabbitmq" && w.WaitType == WaitType.WaitUntilHealthy);
+        foreach (var api in new[] { "suppliers-api", "assistant-api" })
+        {
+            model.Resources.OfType<ProjectResource>().Single(r => r.Name == api).Annotations.OfType<WaitAnnotation>()
+                .ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy, api);
+        }
+
+        var args = new List<object>();
+        foreach (var annotation in debezium.Annotations.OfType<ContainerRuntimeArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(new ContainerRuntimeArgsCallbackContext(args, CancellationToken.None));
+        }
+
+        var texts = args.Select(a => a.ToString()!).ToList();
+        texts[texts.IndexOf("--memory") + 1].ShouldBe("512m");
+        // Eight Debezium Servers at 0.35 CPU would take the whole system past 8 CPUs, so every one is capped at 0.3 (ruling 16).
+        texts[texts.IndexOf("--cpus") + 1].ShouldBe("0.3");
     }
 
     [Fact]
@@ -632,7 +701,7 @@ public sealed class ServiceResourcesTests
         await using var scope = await ModelScope.BuildAsync(configured is null ? [] : [$"Debezium:SelfHealLostOffsets={configured}"]);
         var debeziums = scope.Model.Resources.OfType<ContainerResource>().Where(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal)).ToList();
 
-        debeziums.Count.ShouldBe(7);
+        debeziums.Count.ShouldBe(8);
         foreach (var debezium in debeziums)
         {
             (await EnvironmentOfAsync(debezium)).ShouldContainKeyAndValue(ServiceResources.SelfHealEnvironmentVariable, expected, debezium.Name);
@@ -838,7 +907,7 @@ public sealed class ServiceResourcesTests
             totalCpus += double.Parse(texts[cpus + 1], System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(7, "one Debezium per captured database");
+        containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(8, "one Debezium per captured Postgres database and one for MongoDB");
         totalMemoryMb.ShouldBeLessThanOrEqualTo(8 * 1024, "container memory caps in MB");
         totalCpus.ShouldBeLessThanOrEqualTo(8.0, "container CPU caps");
     }

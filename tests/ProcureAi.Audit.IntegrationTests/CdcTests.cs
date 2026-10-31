@@ -63,7 +63,7 @@ public sealed class CdcTests(AuditApp app)
         {
             var entryId = change.Attribution.InterceptorEntryId.ShouldNotBeNull();
             var entry = (await app.QueryAsync<InterceptorEntry>(q => q.Where(e => e.Id == entryId))).ShouldHaveSingleItem();
-            entry.TransactionId.ShouldBe(change.TransactionId);
+            change.TransactionId.ShouldBe(entry.TransactionId);
             entry.PrimaryKey.ShouldBe(change.PrimaryKey);
         }
 

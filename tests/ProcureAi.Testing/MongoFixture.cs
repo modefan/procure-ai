@@ -1,3 +1,4 @@
+using DotNet.Testcontainers.Networks;
 using MongoDB.Driver;
 using Testcontainers.MongoDb;
 
@@ -12,6 +13,17 @@ public sealed class MongoFixture : IAsyncLifetime
     private const string Image = "mongo:8.0";
 
     private MongoDbContainer? _container;
+
+    /// <summary>The replica set Testcontainers initiates (as <c>127.0.0.1:27017</c>, so other containers connect with <c>directConnection=true</c>).</summary>
+    public const string ReplicaSetName = "rs0";
+
+    /// <summary>The port MongoDB listens on inside its container.</summary>
+    public const int ContainerPort = 27017;
+
+    /// <summary>Optional shared network, set before the fixture starts (Debezium reads the change streams by <see cref="NetworkAlias"/>).</summary>
+    public INetwork? Network { get; init; }
+
+    public string NetworkAlias { get; init; } = "mongo";
 
     /// <summary>A client for the replica set (create databases freely; the container is thrown away with the run).</summary>
     public IMongoClient Client { get; private set; } = null!;
@@ -35,12 +47,17 @@ public sealed class MongoFixture : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         var limits = TestLimits.Section("Mongo");
-        _container = new MongoDbBuilder(Image)
+        var builder = new MongoDbBuilder(Image)
             // Testcontainers starts mongod with --replSet and initiates the set itself once it is up.
-            .WithReplicaSet()
+            .WithReplicaSet(ReplicaSetName)
             .WithCommand("--wiredTigerCacheSizeGB", limits["WiredTigerCacheGb"]!)
-            .WithCreateParameterModifier(p => TestLimits.Apply(p, "Mongo"))
-            .Build();
+            .WithCreateParameterModifier(p => TestLimits.Apply(p, "Mongo"));
+        if (Network is not null)
+        {
+            builder = builder.WithNetwork(Network).WithNetworkAliases(NetworkAlias);
+        }
+
+        _container = builder.Build();
         await _container.StartAsync();
         Client = new MongoClient(ConnectionString);
 
@@ -50,6 +67,37 @@ public sealed class MongoFixture : IAsyncLifetime
         {
             throw new InvalidOperationException("The MongoDB test container is not the PRIMARY of a replica set.");
         }
+    }
+
+    /// <summary>
+    /// A connection string for another container on <see cref="Network"/> (Debezium): the server by its alias, as the root user, straight to
+    /// the one member (the set is initiated as 127.0.0.1, which only resolves inside the MongoDB container).
+    /// </summary>
+    public string NetworkConnectionString
+    {
+        get
+        {
+            var url = new MongoUrl(ConnectionString);
+            return $"mongodb://{Uri.EscapeDataString(url.Username)}:{Uri.EscapeDataString(url.Password)}@{NetworkAlias}:{ContainerPort}/" +
+                $"?authSource=admin&replicaSet={ReplicaSetName}&directConnection=true";
+        }
+    }
+
+    /// <summary>
+    /// Runs a mongosh script inside the container as the root user, the way someone with database access changes data outside the app.
+    /// Fails with mongosh's output when it exits with an error.
+    /// </summary>
+    public async Task<string> MongoshAsync(string database, string script)
+    {
+        var url = new MongoUrl(ConnectionString);
+        var result = await _container!.ExecAsync(
+            ["mongosh", "--quiet", "--username", url.Username, "--password", url.Password, "--authenticationDatabase", "admin", database, "--eval", script]);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"mongosh failed ({result.ExitCode}): {result.Stderr} {result.Stdout}");
+        }
+
+        return result.Stdout;
     }
 
     public async ValueTask DisposeAsync()

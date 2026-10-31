@@ -2,7 +2,7 @@ using ProcureAi.Audit.Domain;
 
 namespace ProcureAi.Audit.Application.Dtos;
 
-/// <summary>One data change with its field-level old and new values, and who made it.</summary>
+/// <summary>One data change with its field-level old and new values, and who made it. <c>TransactionId</c> is null for a MongoDB change.</summary>
 public sealed record DataChangeDto(
     string Id,
     string Database,
@@ -11,7 +11,7 @@ public sealed record DataChangeDto(
     Guid? SubjectId,
     string? TenantId,
     string Operation,
-    long TransactionId,
+    long? TransactionId,
     DateTimeOffset CommittedAt,
     AttributionKind Attribution,
     string? UserId,

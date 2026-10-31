@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using MongoDB.Bson;
+using MongoDB.Driver;
 using Shouldly;
 using static ProcureAi.Assistant.IntegrationTests.ChatApi;
 
@@ -135,6 +137,35 @@ public sealed class ConversationTests(AssistantApp app)
         (await ConversationAsync(app.Client, User(tenant), id)).GetProperty("id").GetGuid().ShouldBe(id);
         using var other = AdminKeyRequest(HttpMethod.Get, $"{Conversations}/{id}", tenant, onBehalfOf: "sam");
         (await app.Client.SendAsync(other, Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    /// <summary>
+    /// Every write of a conversation carries the user's <c>_audit</c> stamp (plan 06 ruling 16), so change data capture attributes it to the
+    /// app; a delete stamps the document "deleting" first.
+    /// </summary>
+    [Fact]
+    public async Task Conversation_writes_carry_the_users_audit_stamp()
+    {
+        var tenant = AssistantApp.NewTenant();
+        await SeedPolicyAsync(app, tenant, StreamingTests.ThresholdRule, StreamingTests.LaptopRule);
+        var token = User(tenant, "rita");
+        var conversation = await CreateAsync(app.Client, token);
+        var collection = app.Infra.Mongo.Client.GetDatabase(AssistantInfraFixture.ChatDatabase)
+            .GetCollection<BsonDocument>("conversations");
+        var key = Builders<BsonDocument>.Filter.Eq("_id", conversation.ToString("D"));
+        var created = await collection.Find(key).SingleAsync(Ct);
+
+        await AskOkAsync(app.Client, token, conversation, Question);
+        var answered = await collection.Find(key).SingleAsync(Ct);
+
+        foreach (var document in new[] { created, answered })
+        {
+            var stamp = document["_audit"].AsBsonDocument;
+            stamp["userId"].AsString.ShouldBe("rita");
+            stamp.Contains("deleting").ShouldBeFalse();
+        }
+
+        answered["_audit"]["at"].ToUniversalTime().ShouldBeGreaterThanOrEqualTo(created["_audit"]["at"].ToUniversalTime());
     }
 
     [Fact]

@@ -10,7 +10,7 @@ public sealed record OutsideAppAlert(
     string Table,
     string PrimaryKey,
     string? TenantId,
-    long TransactionId,
+    long? TransactionId,
     DateTimeOffset CommittedAt,
     DateTimeOffset RaisedAt,
     DateTimeOffset? WithdrawnAt)
