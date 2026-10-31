@@ -1,3 +1,4 @@
+using ProcureAi.BuildingBlocks.Web.Demo;
 using ProcureAi.Audit.Application;
 using ProcureAi.Audit.Infrastructure;
 using ProcureAi.BuildingBlocks.Application;
@@ -19,5 +20,7 @@ public static class AuditApi
             // Marten changes its schema (and the Wolverine message store in it) only in the --migrate run.
             builder.Services.AddAuditInfrastructure(builder.Configuration, builder.Configuration.GetValue<bool>(ServiceHost.MigratingSetting));
             builder.Host.UseWolverine(options => options.ConfigureAudit(builder.Configuration, ServiceName));
-        });
+        })
+        // The nightly demo reset (plan 06 ruling 4): only where DemoReset:Enabled is true, else 404.
+        .MapProcureAiDemoReset("api/v1/audit");
 }

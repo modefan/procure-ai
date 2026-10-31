@@ -48,5 +48,25 @@ public sealed class DemoDataOptions : IValidatableObject
         }
     }
 
+    /// <summary>The simulators' base URL (not behind the gateway). Only the reset calls it (<c>POST api/v1/simulators/reset</c>, admin key).</summary>
+    [Url]
+    public string? SimulatorUrl { get; set; }
+
+    /// <summary>How long one service's reset call may take.</summary>
+    [Range(typeof(TimeSpan), "00:00:05", "00:30:00")]
+    public TimeSpan ResetCallTimeout { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>How often a failed reset call is retried before the reset stops with exit code 1.</summary>
+    [Range(0, 10)]
+    public int ResetRetries { get; set; } = 3;
+
+    /// <summary>The wait before a retry of a reset call.</summary>
+    [Range(typeof(TimeSpan), "00:00:00", "00:05:00")]
+    public TimeSpan ResetRetryDelay { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>The wait between the other services' resets and Audit's, so that late change data capture lands before Audit is cleared (ruling 4).</summary>
+    [Range(typeof(TimeSpan), "00:00:00", "00:05:00")]
+    public TimeSpan AuditGrace { get; set; } = TimeSpan.FromSeconds(10);
+
     public string ScenarioPath => Path.IsPathRooted(ScenarioDirectory) ? ScenarioDirectory : Path.Combine(AppContext.BaseDirectory, ScenarioDirectory);
 }

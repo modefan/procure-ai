@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
         services.AddSingleton<IEmailOnce, RedisEmailOnce>();
         services.AddScoped<IPersonalNotifier, PersonalNotifier>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, NotificationsDemoResetter>();
 
         // The system status screen: the snapshots every instance writes to Redis.
         services.AddSingleton<ISystemStatusSource, RedisSystemStatusSource>();

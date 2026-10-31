@@ -14,6 +14,9 @@ namespace ProcureAi.Assistant.Infrastructure.Chat;
 /// </summary>
 internal sealed class RedisQuestionQuota(IConnectionMultiplexer redis, IOptions<AssistantOptions> options, TimeProvider time) : IQuestionQuota
 {
+    /// <summary>Every counter (all tenants, users and days): the demo reset deletes them.</summary>
+    public const string KeyPattern = "assistant:quota:*";
+
     private static readonly TimeSpan KeyLifetime = TimeSpan.FromDays(2);
 
     // KEYS[1] the counter, ARGV[1] the limit, ARGV[2] the lifetime in seconds. Returns the count, negated when the limit was reached.

@@ -39,6 +39,9 @@ public sealed class RedisBellStore(IConnectionMultiplexer redis, IOptions<BellOp
 
     private IDatabase Db => redis.GetDatabase();
 
+    /// <summary>Every bell (all tenants and users): the demo reset deletes them.</summary>
+    public const string KeyPattern = "bell:*";
+
     private static (RedisKey Index, RedisKey Items, RedisKey Read) Keys(string tenantId, string userId)
     {
         var prefix = $"bell:{tenantId}:{userId}";

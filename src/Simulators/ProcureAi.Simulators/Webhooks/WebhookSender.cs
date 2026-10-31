@@ -54,6 +54,12 @@ internal sealed class WebhookSender(
 
             for (var attempt = 0; ; attempt++)
             {
+                if (queue.IsStale(webhook))
+                {
+                    logger.LogInformation("Dropped {Type} of order {SupplierOrderId}: scheduled before the demo reset", webhook.Type, webhook.SupplierOrderId);
+                    return;
+                }
+
                 if (store.IsCancelled(webhook.SupplierOrderId))
                 {
                     logger.LogInformation("Dropped {Type} of cancelled order {SupplierOrderId}", webhook.Type, webhook.SupplierOrderId);

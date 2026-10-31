@@ -6,9 +6,9 @@ using ProcureAi.DemoData;
 
 // ProcureAi.DemoData seed | reset | schedule  (plan 06 rulings 1-4)
 //   seed      drives the scenario requests of every tenant to their states through the gateway; safe to run again.
-//   reset     plan 06 Task 16: clears every service's business data, then seeds.
-//   schedule  plan 06 Task 16: runs reset and seed every night at DemoReset:TimeOfDay, Africa/Johannesburg.
-// Exit codes: 0 done, 1 a scenario failed (the message names the request and the step), 2 wrong usage.
+//   reset     clears every service's business data (simulators, the services in parallel, Audit last), then seeds.
+//   schedule  runs reset every night at DemoReset:TimeOfDay in DemoReset:TimeZone (02:00 Africa/Johannesburg), until stopped.
+// Exit codes: 0 done, 1 a scenario or a reset call failed (the log names it), 2 wrong usage.
 var command = args.FirstOrDefault()?.Trim().ToLowerInvariant();
 if (command is not ("seed" or "reset" or "schedule"))
 {
@@ -16,15 +16,23 @@ if (command is not ("seed" or "reset" or "schedule"))
     return 2;
 }
 
-if (command is not "seed")
-{
-    Console.Error.WriteLine($"'{command}' comes with the nightly reset (plan 06 Task 16); only 'seed' is available.");
-    return 2;
-}
+const string ResetGateway = "reset-gateway";
+const string ResetSimulators = "reset-simulators";
 
 var builder = Host.CreateApplicationBuilder(args[1..]);
 builder.ConfigureOpenTelemetry();
 builder.Services.AddOptions<DemoDataOptions>().Bind(builder.Configuration.GetSection(DemoDataOptions.Section)).ValidateDataAnnotations().ValidateOnStart();
+if (command is not "seed")
+{
+    builder.Services.AddOptions<DemoDataOptions>()
+        .Validate(o => !string.IsNullOrWhiteSpace(o.SimulatorUrl), "DemoData:SimulatorUrl is required for reset and schedule.");
+}
+
+builder.Services.AddOptions<DemoResetScheduleOptions>()
+    .Bind(builder.Configuration.GetSection(DemoResetScheduleOptions.Section))
+    .ValidateDataAnnotations()
+    .Validate(o => TimeZoneInfo.TryFindSystemTimeZoneById(o.TimeZone, out _), "DemoReset:TimeZone is not a known time zone.")
+    .ValidateOnStart();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ScenarioRunner>();
 builder.Services.AddHttpClient<GatewayClient>((services, http) =>
@@ -33,22 +41,29 @@ builder.Services.AddHttpClient<GatewayClient>((services, http) =>
         // The resilience handler's own timeouts apply (attempt and total); this one would only cut them short.
         http.Timeout = Timeout.InfiniteTimeSpan;
     })
-    .ConfigurePrimaryHttpMessageHandler(services =>
-    {
-        var handler = new HttpClientHandler();
-        if (services.GetRequiredService<IOptions<DemoDataOptions>>().Value.AllowUntrustedServerCertificate)
-        {
-            // Local AppHost only: the gateway serves the ASP.NET Core development certificate. Options validation refuses the switch for a
-            // gateway that is not on loopback, and the check is only skipped for loopback hosts, whatever the request (GatewayCertificates).
-            handler.ServerCertificateCustomValidationCallback = (request, _, _, errors) =>
-                errors == System.Net.Security.SslPolicyErrors.None
-                || (request.RequestUri is { } uri && GatewayCertificates.AcceptsUntrusted(uri));
-        }
-
-        return handler;
-    })
+    .ConfigurePrimaryHttpMessageHandler(CertificateHandler)
     // Retries 408/429/5xx with backoff. Writes are safe to retry: every one carries its Idempotency-Key.
     .AddStandardResilienceHandler();
+
+// The reset's calls: no resilience handler (ResetRunner retries and times out itself; a reset may outlast the standard attempt timeout).
+builder.Services.AddHttpClient(ResetGateway, (services, http) =>
+    {
+        http.BaseAddress = new Uri(services.GetRequiredService<IOptions<DemoDataOptions>>().Value.GatewayUrl);
+        http.Timeout = Timeout.InfiniteTimeSpan;
+    })
+    .ConfigurePrimaryHttpMessageHandler(CertificateHandler);
+builder.Services.AddHttpClient(ResetSimulators, (services, http) =>
+    {
+        http.BaseAddress = new Uri(services.GetRequiredService<IOptions<DemoDataOptions>>().Value.SimulatorUrl ?? "http://localhost/");
+        http.Timeout = Timeout.InfiniteTimeSpan;
+    })
+    .ConfigurePrimaryHttpMessageHandler(CertificateHandler);
+builder.Services.AddSingleton(services =>
+{
+    var factory = services.GetRequiredService<IHttpClientFactory>();
+    return new ResetClients(factory.CreateClient(ResetGateway), factory.CreateClient(ResetSimulators));
+});
+builder.Services.AddSingleton<ResetRunner>();
 
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ProcureAi.DemoData");
@@ -69,6 +84,26 @@ Console.CancelKeyPress += (_, e) =>
     stop.Cancel();
 };
 
-var exitCode = await new SeedCommand(host.Services).RunAsync(stop.Token);
+var exitCode = command switch
+{
+    "reset" => await new ResetCommand(host.Services).RunAsync(stop.Token),
+    "schedule" => await new ScheduleCommand(host.Services, host.Services.GetRequiredService<IOptions<DemoResetScheduleOptions>>().Value).RunAsync(stop.Token),
+    _ => await new SeedCommand(host.Services).RunAsync(stop.Token),
+};
 await host.StopAsync();
 return exitCode;
+
+static HttpMessageHandler CertificateHandler(IServiceProvider services)
+{
+    var handler = new HttpClientHandler();
+    if (services.GetRequiredService<IOptions<DemoDataOptions>>().Value.AllowUntrustedServerCertificate)
+    {
+        // Local AppHost only: the gateway serves the ASP.NET Core development certificate. Options validation refuses the switch for a
+        // gateway that is not on loopback, and the check is only skipped for loopback hosts, whatever the request (GatewayCertificates).
+        handler.ServerCertificateCustomValidationCallback = (request, _, _, errors) =>
+            errors == System.Net.Security.SslPolicyErrors.None
+            || (request.RequestUri is { } uri && GatewayCertificates.AcceptsUntrusted(uri));
+    }
+
+    return handler;
+}

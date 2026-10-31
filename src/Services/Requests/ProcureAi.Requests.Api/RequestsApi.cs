@@ -1,3 +1,4 @@
+using ProcureAi.BuildingBlocks.Web.Demo;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Web.Options;
@@ -20,5 +21,7 @@ public static class RequestsApi
             builder.Services.AddApprovalPreview(builder.Configuration);
             builder.Services.AddSupplierCatalog(builder.Configuration);
             builder.Host.UseWolverine(options => options.ConfigureRequests(builder.Configuration, ServiceName));
-        });
+        })
+        // The nightly demo reset (plan 06 ruling 4): only where DemoReset:Enabled is true, else 404.
+        .MapProcureAiDemoReset("api/v1/requests");
 }

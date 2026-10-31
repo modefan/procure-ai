@@ -28,6 +28,7 @@ public sealed class ChaosState : IDisposable
     private readonly TimeSpan _restoreAfter;
     private readonly ILogger<ChaosState> _logger;
     private readonly ITimer _restoreTimer;
+    private readonly ChaosOptionsSnapshot _start;
     private ChaosSettings _supplier;
     private ChaosSettings _erp;
 
@@ -38,6 +39,7 @@ public sealed class ChaosState : IDisposable
         _time = time;
         _restoreAfter = restore.Value.AutoRestoreAfter;
         _logger = logger;
+        _start = new ChaosOptionsSnapshot(value.Chaos.Supplier.Clone(), value.Chaos.Erp.Clone());
         _supplier = value.Chaos.Supplier.Clone();
         _erp = value.Chaos.Erp.Clone();
         // A mode configured at startup lasts as long as one switched on later.
@@ -66,6 +68,24 @@ public sealed class ChaosState : IDisposable
             RestoreDueLocked();
             _supplier = Next(_supplier, configuration.Supplier);
             _erp = Next(_erp, configuration.Erp);
+            ArmTimer();
+        }
+    }
+
+    /// <summary>
+    /// Back to the configured latencies and failure rates, both in <see cref="ChaosMode.Normal"/> with no countdown (the nightly demo reset):
+    /// a reviewer's chaos switch does not outlive the night.
+    /// </summary>
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _supplier = _start.Supplier.Clone();
+            _supplier.Mode = ChaosMode.Normal;
+            _supplier.RestoresAt = null;
+            _erp = _start.Erp.Clone();
+            _erp.Mode = ChaosMode.Normal;
+            _erp.RestoresAt = null;
             ArmTimer();
         }
     }
@@ -143,3 +163,6 @@ public sealed class ChaosState : IDisposable
         _restoreTimer?.Change(wait < TimeSpan.Zero ? TimeSpan.Zero : wait, Timeout.InfiniteTimeSpan);
     }
 }
+
+/// <summary>The chaos settings the simulator started with.</summary>
+internal sealed record ChaosOptionsSnapshot(ChaosSettings Supplier, ChaosSettings Erp);

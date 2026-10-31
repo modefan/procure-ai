@@ -45,6 +45,7 @@ public static class DependencyInjection
         services.AddTenantSequence<RequestsDbContext>();
         services.AddScoped<IRequestNumberGenerator, RequestNumberGenerator>();
         services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, RequestsDemoResetter>();
         return services;
     }
 

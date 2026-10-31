@@ -48,6 +48,7 @@ public static class DependencyInjection
         services.AddSingleton<PurchasingMetrics>();
         services.AddSingleton<IPurchasingMetrics>(sp => sp.GetRequiredService<PurchasingMetrics>());
         services.AddHostedService<WaitingOrdersCounter>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, PurchasingDemoResetter>();
         return services;
     }
 

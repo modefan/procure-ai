@@ -1,3 +1,4 @@
+using ProcureAi.BuildingBlocks.Web.Demo;
 using Microsoft.AspNetCore.Http.Connections;
 using ProcureAi.BuildingBlocks.Hosting;
 using ProcureAi.BuildingBlocks.Web.Options;
@@ -39,6 +40,8 @@ public static class NotificationsApi
 
         // WebSockets through the gateway; long polling for clients that cannot (the in-memory test server).
         app.MapHub<LiveHub>(LiveHubContract.Path, hub => hub.Transports = HttpTransportType.WebSockets | HttpTransportType.LongPolling);
+        // The nightly demo reset (plan 06 ruling 4): only where DemoReset:Enabled is true, else 404.
+        app.MapProcureAiDemoReset("api/v1/notifications");
         return app;
     }
 }

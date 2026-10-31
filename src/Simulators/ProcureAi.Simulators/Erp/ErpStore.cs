@@ -26,6 +26,16 @@ public sealed class ErpStore
         }
     }
 
+    /// <summary>Forgets every posting and starts the document numbers again (the nightly demo reset).</summary>
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _byReference.Clear();
+            _documents = 0;
+        }
+    }
+
     public PaymentDocument? Find(string paymentReference)
     {
         lock (_gate)

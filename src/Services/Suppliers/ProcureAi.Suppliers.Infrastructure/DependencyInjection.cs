@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddTenantCollection<SupplierDocument>(SuppliersCollection);
         services.AddScoped<ISupplierStore, MongoSupplierStore>();
         services.AddSingleton<IMongoMigration, SupplierIndexMigration>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, SuppliersDemoResetter>();
         return services;
     }
 

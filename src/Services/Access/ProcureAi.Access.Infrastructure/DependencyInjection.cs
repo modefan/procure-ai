@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IAccessDbContext>(sp => sp.GetRequiredService<AccessDbContext>());
         services.TryAddSingleton(TimeProvider.System);
         services.AddKeycloakAdmin(configuration);
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, AccessDemoResetter>();
         services.AddOptions<DemoRegistrationOptions>()
             .Bind(configuration.GetSection(DemoRegistrationOptions.SectionName))
             .ValidateDataAnnotations()

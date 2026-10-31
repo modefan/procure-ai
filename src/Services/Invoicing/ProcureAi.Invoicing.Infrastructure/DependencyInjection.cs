@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddWebhookInbox<InvoicingDbContext>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IInvoicingMetrics, InvoicingMetrics>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, InvoicingDemoResetter>();
         return services;
     }
 

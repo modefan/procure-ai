@@ -73,6 +73,18 @@ public sealed class SupplierStore
 
     public bool IsCancelled(string supplierOrderId) => Find(supplierOrderId)?.Cancelled ?? false;
 
+    /// <summary>Forgets every order and starts the order and invoice numbers again (the nightly demo reset).</summary>
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _byReference.Clear();
+            _byId.Clear();
+            _orders = 0;
+            _invoices = 0;
+        }
+    }
+
     public string NextInvoiceNumber()
     {
         lock (_gate)

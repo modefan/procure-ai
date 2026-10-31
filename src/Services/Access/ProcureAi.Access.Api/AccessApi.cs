@@ -1,3 +1,4 @@
+using ProcureAi.BuildingBlocks.Web.Demo;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ProcureAi.Access.Infrastructure;
@@ -19,5 +20,7 @@ public static class AccessApi
             // Access owns the matrix, so it answers permission checks from its own database instead of asking itself over HTTP.
             builder.Services.Replace(ServiceDescriptor.Scoped<IPermissionProvider, AccessPermissionProvider>());
             builder.Host.UseWolverine(options => options.ConfigureAccess(builder.Configuration, ServiceName));
-        });
+        })
+        // The nightly demo reset (plan 06 ruling 4): only where DemoReset:Enabled is true, else 404.
+        .MapProcureAiDemoReset("api/v1/access");
 }

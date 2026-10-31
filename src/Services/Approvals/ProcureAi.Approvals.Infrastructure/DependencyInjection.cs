@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<IApprovalsDbContext>(sp => sp.GetRequiredService<ApprovalsDbContext>());
         services.TryAddSingleton(TimeProvider.System);
         services.AddStatusContributor<ApprovalsStatusContributor>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, ApprovalsDemoResetter>();
         return services;
     }
 

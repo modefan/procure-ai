@@ -66,6 +66,7 @@ public static class DependencyInjection
         services.AddAssistantTools(configuration);
         services.AddAssistantScanning();
         services.AddHostedService<PlaceholderCleanup>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, AssistantDemoResetter>();
         return services;
     }
 

@@ -104,6 +104,7 @@ public static class DependencyInjection
         services.AddSingleton<IDataChangeStore, MartenDataChangeStore>();
         services.AddSingleton<IAuditMetrics, AuditMetrics>();
         services.AddHostedService<DataChangeRetention>();
+        services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, AuditDemoResetter>();
         services.AddStatusContributor<AuditStatusContributor>();
         services.AddPgAuditSummary(configuration);
         return services;
