@@ -84,12 +84,16 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
     public async Task<DeleteResult> DeleteOneAsync(FilterDefinition<T> filter, CancellationToken cancellationToken = default)
     {
         var scoped = Scoped(filter, out _);
-        if (Audited)
+        if (!Audited)
         {
-            await collection.UpdateOneAsync(scoped, DeletingStamp(), cancellationToken: cancellationToken);
+            return await collection.DeleteOneAsync(scoped, cancellationToken);
         }
 
-        return await collection.DeleteOneAsync(scoped, cancellationToken);
+        // Stamp one document, then delete exactly that one: the delete also matches this stamp, so it cannot take another document
+        // that matches the filter (e.g. when the stamped one was deleted in between).
+        var stamp = DeletingStamp();
+        await collection.UpdateOneAsync(scoped, StampUpdate(stamp), cancellationToken: cancellationToken);
+        return await collection.DeleteOneAsync(Builders<T>.Filter.And(scoped, Stamped(stamp)), cancellationToken);
     }
 
     public Task<DeleteResult> DeleteOneAsync(Expression<Func<T, bool>> filter, CancellationToken cancellationToken = default) =>
@@ -98,12 +102,15 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
     public async Task<DeleteResult> DeleteManyAsync(FilterDefinition<T> filter, CancellationToken cancellationToken = default)
     {
         var scoped = Scoped(filter, out _);
-        if (Audited)
+        if (!Audited)
         {
-            await collection.UpdateManyAsync(scoped, DeletingStamp(), cancellationToken: cancellationToken);
+            return await collection.DeleteManyAsync(scoped, cancellationToken);
         }
 
-        return await collection.DeleteManyAsync(scoped, cancellationToken);
+        // Only the documents stamped here are deleted: one inserted (or matching) only after the stamp is left alone, never deleted unstamped.
+        var stamp = DeletingStamp();
+        await collection.UpdateManyAsync(scoped, StampUpdate(stamp), cancellationToken: cancellationToken);
+        return await collection.DeleteManyAsync(Builders<T>.Filter.And(scoped, Stamped(stamp)), cancellationToken);
     }
 
     private void Stamp(T document)
@@ -114,9 +121,25 @@ public sealed class TenantCollection<T>(IMongoCollection<T> collection, ICallerC
         }
     }
 
-    // A delete event carries no document: the stamp written right before it tells Audit the delete is the app's.
-    private UpdateDefinition<T> DeletingStamp() =>
-        Builders<T>.Update.Set(AuditStamp.ElementName, AuditStamp.For(caller, AuditStamp.CurrentCorrelationId(), _clock.GetUtcNow(), deleting: true));
+    // A delete event carries no document: the stamp written right before it tells Audit the delete is the app's. The whole _audit object
+    // is set (Audit reads the stamp from the update itself). The delete matches the stamp by user, time (milliseconds, as MongoDB stores
+    // it) and the deleting flag.
+    private AuditStamp DeletingStamp()
+    {
+        var now = _clock.GetUtcNow();
+        var stored = DateTimeOffset.FromUnixTimeMilliseconds(now.ToUnixTimeMilliseconds()); // MongoDB keeps milliseconds
+        return AuditStamp.For(caller, AuditStamp.CurrentCorrelationId(), stored, deleting: true);
+    }
+
+    private static UpdateDefinition<T> StampUpdate(AuditStamp stamp) => Builders<T>.Update.Set(AuditStamp.ElementName, stamp);
+
+    private static FilterDefinition<T> Stamped(AuditStamp stamp) =>
+        new BsonDocumentFilterDefinition<T>(new BsonDocument
+        {
+            [$"{AuditStamp.ElementName}.deleting"] = true,
+            [$"{AuditStamp.ElementName}.userId"] = stamp.UserId,
+            [$"{AuditStamp.ElementName}.at"] = stamp.At,
+        });
 
     private FilterDefinition<T> Scoped(FilterDefinition<T> filter, out string tenant)
     {

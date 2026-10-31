@@ -87,10 +87,14 @@ public sealed class CdcOptions : IValidatableObject
 
     /// <summary>
     /// MongoDB collections (<c>&lt;database&gt;.&lt;collection&gt;</c>) whose values are never stored: their changes keep the field names
-    /// only, every value is <c>***</c> (the assistant's conversations, plan 06 ruling 16).
+    /// only, every value is <c>***</c> (the assistant's conversations, plan 06 ruling 16). Fails closed: the conversations are masked when
+    /// nothing is configured (the one default in this class), and an empty list is refused at startup.
     /// </summary>
-    [Required]
-    public string[] MaskedCollections { get; set; } = [];
+    [Required, MinLength(1)]
+    public string[] MaskedCollections { get; set; } = [DefaultMaskedCollection];
+
+    /// <summary>The collection masked by default: the assistant's conversations (what users asked).</summary>
+    public const string DefaultMaskedCollection = "assistantchatdb.conversations";
 
     /// <summary>
     /// A MongoDB change is the app's when the <c>_audit.at</c> it wrote is at most this far from the change's cluster time (and, for a

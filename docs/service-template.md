@@ -323,7 +323,8 @@ For a service that holds no business data of its own (Notifications: live pushes
   `mongo.<database>.<collection>`; the APIs wait for it to be healthy (no data snapshot, as for Postgres).
 - **No transaction ID to match, so every write is stamped**: `TenantCollection<T>` sets `_audit: { userId, correlationId, at }`
   (`AuditStamp`, BuildingBlocks.Persistence.Mongo) on every insert and replace of an `IAuditedDocument`, and before a delete it stamps
-  the documents `deleting: true` (a delete event carries no document). For updates with operators use `AuditStamp.Apply(update, caller,
+  the documents `deleting: true` (a delete event carries no document) and then deletes only the documents carrying that stamp (a document
+  inserted in between is left alone). Always `$set` the whole `_audit` object: Audit reads an update's stamp from its `updatedFields`. For updates with operators use `AuditStamp.Apply(update, caller,
   correlationId, at)`. A write around `TenantCollection` (raw collection, mongosh) carries no new stamp.
 - **A delete event has no document, only its key**: the transform `HeaderFrom$Key` copies the key into the AMQP header `documentKey`
   (the RabbitMQ sink publishes only the value).
@@ -333,7 +334,13 @@ For a service that holds no business data of its own (Notifications: live pushes
   its cluster time that is not the stamp the document already had (a mongosh replace that copies the document copies the old stamp); a
   delete is the app's when the previous change was the app's `deleting` stamp. Anything else is **OutsideApp** with an alert straight away
   (no grace period: there is nothing to wait for). Old values come from the previous change, so the log shows old -> new; `TransactionId`
-  is null. `Audit:Cdc:MaskedCollections` (`assistantchatdb.conversations`) keeps field names only (values `***`).
+  is null. `Audit:Cdc:MaskedCollections` keeps field names only (values `***`); it defaults to `assistantchatdb.conversations` and an
+  empty list fails at startup (masking fails closed).
+- **An update's `after` is a lookup** (`capture.mode=change_streams_update_full`): made when Debezium reads the event, so a lagging
+  Debezium sees later values or, after a delete, nothing. Audit therefore reads an update's stamp from `updatedFields._audit` and builds
+  its new values from the previous change's document plus `updatedFields`/`removedFields`; the lookup is used only without a previous
+  change (or for a path that does not fit it). Covered by `Bulk_delete_read_late_is_attributed_to_the_app` (Debezium paused during a
+  20-document delete).
 - **Known limits**: someone with database access can forge a stamp (`$set: {"_audit.at": new Date()}`); pgaudit does not cover MongoDB.
   A change of a document whose earlier changes were never captured has no old values. Several Audit instances may decide two changes of
   one document in parallel (the queue is sequential per instance only).

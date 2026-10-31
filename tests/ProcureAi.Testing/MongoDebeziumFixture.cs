@@ -50,6 +50,11 @@ public sealed class MongoDebeziumFixture(INetwork network, MongoFixture mongo) :
         await WaitForChangeStreamAsync();
     }
 
+    /// <summary>Freezes the Debezium container (<c>docker pause</c>): it reads nothing until <see cref="UnpauseAsync"/>, as when it lags behind.</summary>
+    public Task PauseAsync() => _container!.PauseAsync();
+
+    public Task UnpauseAsync() => _container!.UnpauseAsync();
+
     public async ValueTask DisposeAsync()
     {
         if (_container is not null)

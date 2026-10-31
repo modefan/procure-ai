@@ -149,6 +149,9 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
         }
     }
 
+    /// <summary>The MongoDB Debezium Server (after <see cref="EnsureMongoCdcAsync"/>), e.g. to pause it.</summary>
+    public MongoDebeziumFixture MongoDebezium => _mongoDebezium ?? throw new InvalidOperationException("Call EnsureMongoCdcAsync first.");
+
     /// <summary>An empty database (no migrations), for tests that migrate it themselves.</summary>
     public Task<string> CreateEmptyDatabaseAsync(string name) => _postgres!.CreateDatabaseAsync(name);
 

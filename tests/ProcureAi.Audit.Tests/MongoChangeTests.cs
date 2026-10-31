@@ -162,6 +162,82 @@ public sealed class MongoChangeTests
         }
     }
 
+    /// <summary>
+    /// <c>change_streams_update_full</c> fills an update's <c>after</c> by looking the document up when Debezium reads the event. When the
+    /// app's "deleting" stamp and its delete are read late (Debezium lagging, a bulk delete), the document is already gone and
+    /// <c>after</c> is null: the stamp must come from the update itself, or the stamp and the delete are both false alerts.
+    /// </summary>
+    [Fact]
+    public void Deleting_stamp_is_read_from_the_update_even_when_the_lookup_found_no_document()
+    {
+        var inserted = Parse("supplier-insert").ToDataChange(null, Cdc);
+
+        var intent = Parse("supplier-delete-intent", after: null);
+        intent.After.ShouldBeNull();
+        intent.Stamp.ShouldBe(new DocumentStamp("maria", "corr-delete", DateTimeOffset.Parse("2026-10-31T09:23:33.564Z", System.Globalization.CultureInfo.InvariantCulture), true));
+        var stamped = intent.ToDataChange(inserted, Cdc);
+        stamped.Attribution.ShouldBe(new Attribution(AttributionKind.App, "maria", "maria", null, "corr-delete", null));
+        stamped.Stamp!.Deleting.ShouldBeTrue();
+        stamped.TenantId.ShouldBe("acme");
+
+        var deleted = Parse("supplier-delete").ToDataChange(stamped, Cdc);
+        deleted.Attribution.ShouldBe(new Attribution(AttributionKind.App, "maria", "maria", null, "corr-delete", null));
+        deleted.TenantId.ShouldBe("acme");
+    }
+
+    /// <summary>
+    /// The lookup can also return a <i>later</i> state of the document. An update's values are therefore the previous change's document
+    /// with the update's own fields applied, not the lookup.
+    /// </summary>
+    [Fact]
+    public void Update_values_come_from_the_previous_document_and_the_update_not_the_lookup()
+    {
+        var inserted = Parse("supplier-insert").ToDataChange(null, Cdc);
+        // The lookup found the document as a later mongosh change left it.
+        var later = JsonDocument.Parse(File.ReadAllText(Fixture("supplier-update-outside.json"))).RootElement.GetProperty("after").GetString();
+
+        var updated = Parse("supplier-update", after: later).ToDataChange(inserted, Cdc);
+
+        using var after = JsonDocument.Parse(updated.After!);
+        after.RootElement.GetProperty("Email").GetString().ShouldBe("sales@contoso-hardware.test");
+        after.RootElement.GetProperty("Name").GetString().ShouldBe("Contoso Hardware", "the later mongosh name must not leak into Tom's change");
+        after.RootElement.GetProperty("VatNumber").GetString().ShouldBe("4123456789");
+        after.RootElement.GetProperty("_audit").GetProperty("userId").GetString().ShouldBe("tom");
+        DataChangeView.Fields(updated.Before, updated.After).Select(f => f.Column).ShouldBe(["Email", "_audit"]);
+        updated.Stamp!.UserId.ShouldBe("tom");
+
+        // An update that removes a field: the removed field is gone from the rebuilt document.
+        var outside = Parse("supplier-update-outside", after: null).ToDataChange(updated, Cdc);
+        using var outsideAfter = JsonDocument.Parse(outside.After!);
+        outsideAfter.RootElement.TryGetProperty("VatNumber", out _).ShouldBeFalse();
+        outsideAfter.RootElement.GetProperty("Email").GetString().ShouldBe("pay@attacker.test");
+        outside.Stamp.ShouldBe(updated.Stamp, "an update that leaves _audit alone keeps the document's stamp");
+    }
+
+    /// <summary>Masking fails closed: without a masked collection the Audit service does not start (plan 06 ruling 16).</summary>
+    [Fact]
+    public void Masked_collections_must_not_be_empty()
+    {
+        var options = new CdcOptions { DefaultKeyColumns = ["id"], MongoStampWindow = TimeSpan.FromSeconds(30), MaskedCollections = [] };
+
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+        System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+            options, new System.ComponentModel.DataAnnotations.ValidationContext(options), results, validateAllProperties: true).ShouldBeFalse();
+        results.ShouldContain(r => r.MemberNames.Contains(nameof(CdcOptions.MaskedCollections)));
+        new CdcOptions().MaskedCollections.ShouldBe(["assistantchatdb.conversations"], "the default masks the conversations");
+    }
+
+    private static string Fixture(string file) => Path.Combine(AppContext.BaseDirectory, "Fixtures", "mongo", file);
+
+    /// <summary>A fixture with its <c>after</c> replaced (null: the lookup found no document), as Debezium publishes it when it reads late.</summary>
+    private static MongoChange Parse(string fixture, string? after)
+    {
+        var body = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Fixture(fixture + ".json")))!.AsObject();
+        body["after"] = after;
+        var key = File.ReadAllText(Fixture(fixture + ".key"));
+        return MongoChangeParser.Parse(body.ToJsonString(), key) ?? throw new InvalidOperationException($"{fixture} did not parse.");
+    }
+
     private static MongoChange Parse(string fixture)
     {
         var folder = Path.Combine(AppContext.BaseDirectory, "Fixtures", "mongo");

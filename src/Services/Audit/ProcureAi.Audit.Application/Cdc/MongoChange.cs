@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using ProcureAi.Audit.Domain;
 
@@ -94,14 +95,31 @@ public sealed record MongoChange(
     {
         get
         {
-            var writesStamp = Operation == "c"
-                || (Operation == "u" && (IsReplace
-                    || UpdatedFields is { } updated && updated.EnumerateObject().Any(f => f.Name == StampField || f.Name.StartsWith(StampField + ".", StringComparison.Ordinal))));
-            return writesStamp ? DocumentStampAfter : null;
+            if (Operation == "c" || IsReplace)
+            {
+                // An insert's or replace's "after" is the document the change wrote (not a lookup).
+                return DocumentStampAfter;
+            }
+
+            if (Operation != "u" || UpdatedFields is not { ValueKind: JsonValueKind.Object } updated)
+            {
+                return null;
+            }
+
+            // An update's "after" is looked up when Debezium reads the event (change_streams_update_full): by then the document may be
+            // gone (the app's deleting stamp read after the delete) or changed again. The app sets the whole _audit object
+            // (TenantCollection, AuditStamp.Apply), so the stamp is read from the update itself; only a write of single _audit fields
+            // falls back to the lookup.
+            if (updated.TryGetProperty(StampField, out var written))
+            {
+                return StampOf(written);
+            }
+
+            return updated.EnumerateObject().Any(f => f.Name.StartsWith(StampField + ".", StringComparison.Ordinal)) ? DocumentStampAfter : null;
         }
     }
 
-    /// <summary>The stamp the document has after the change (written by it or left from before); null for a delete or a document without one.</summary>
+    /// <summary>The stamp in <see cref="After"/> (for an update: the looked-up document, which may be later than the change); null when none.</summary>
     public DocumentStamp? DocumentStampAfter =>
         After is { ValueKind: JsonValueKind.Object } after && after.TryGetProperty(StampField, out var stamp) ? StampOf(stamp) : null;
 
@@ -109,7 +127,12 @@ public sealed record MongoChange(
     /// The change as Audit stores it, attributed (plan 06 ruling 16): <b>App</b> with the stamp's user when the change wrote a new stamp
     /// (within <see cref="CdcOptions.MongoStampWindow"/> of the change and not the stamp the document already had); a delete is the app's
     /// when the document's previous change was the app's "deleting" stamp, within the same window. Anything else is <b>OutsideApp</b>.
-    /// <paramref name="previous"/> is the last change Audit stored for the same document (its old values and stamp), or null.
+    /// <paramref name="previous"/> is the last change Audit stored for the same document (its values and stamp), or null.
+    /// <para>
+    /// An update's values are the previous change's document with the update's own fields applied (updatedFields, removedFields), not
+    /// the looked-up <see cref="After"/>, which can already hold later changes; the lookup is used only when there is no previous document
+    /// (or a field path cannot be applied to it), and when it found nothing either, the updated fields alone are kept.
+    /// </para>
     /// Values of <see cref="CdcOptions.MaskedCollections"/> are replaced by <c>***</c> (field names only).
     /// </summary>
     public DataChange ToDataChange(DataChange? previous, CdcOptions cdc)
@@ -130,24 +153,135 @@ public sealed record MongoChange(
             attribution = fresh ? Attribution.Stamped(stamp!) : Attribution.OutsideApp;
         }
 
+        var isUpdate = Operation == "u" && !IsReplace;
+        var document = Operation switch
+        {
+            "d" => null,
+            _ when isUpdate => Rebuilt(previous?.After) ?? After ?? UpdatedFields,
+            _ => After,
+        };
         var masked = cdc.IsMasked(Database, Collection);
-        var after = After is { } document ? Serialise(document, masked) : null;
         return new DataChange(
             Id,
             Database,
             Collection,
             DocumentKey,
             SubjectId: null,
-            TenantId: TenantOf(After) ?? previous?.TenantId,
+            // The tenant never changes; a masked previous document shows it as ***, so the stored tenant comes first.
+            TenantId: isUpdate ? previous?.TenantId ?? TenantOf(After) : TenantOf(After) ?? previous?.TenantId,
             Operations[Operation],
             TransactionId: null,
             ClusterTime,
             Before: Operation == "c" ? null : previous?.After,
-            After: Operation == "d" ? null : after,
+            After: document is { } written ? Serialise(written, masked) : null,
             attribution)
         {
-            Stamp = DocumentStampAfter,
+            // The document's stamp after the change: the one it wrote, else (an update that left _audit alone) the one it had.
+            Stamp = Operation switch
+            {
+                "d" => null,
+                _ when isUpdate => stamp ?? (previous is not null ? previous.Stamp : DocumentStampAfter),
+                _ => stamp,
+            },
         };
+    }
+
+    // The previous document with this update applied; null when there is none or a path does not fit it (then the lookup is used).
+    private JsonElement? Rebuilt(string? previousDocument)
+    {
+        if (previousDocument is null || JsonNode.Parse(previousDocument) is not JsonObject document)
+        {
+            return null;
+        }
+
+        if (UpdatedFields is { ValueKind: JsonValueKind.Object } updated)
+        {
+            foreach (var field in updated.EnumerateObject())
+            {
+                if (!SetPath(document, field.Name, JsonNode.Parse(field.Value.GetRawText())))
+                {
+                    return null;
+                }
+            }
+        }
+
+        foreach (var removed in RemovedFields)
+        {
+            if (!RemovePath(document, removed))
+            {
+                return null;
+            }
+        }
+
+        return JsonDocument.Parse(document.ToJsonString()).RootElement.Clone();
+    }
+
+    private static bool SetPath(JsonObject document, string path, JsonNode? value)
+    {
+        var parts = path.Split('.');
+        if (!TryWalk(document, parts[..^1], create: true, out var parent))
+        {
+            return false;
+        }
+
+        switch (parent)
+        {
+            case JsonObject obj:
+                obj[parts[^1]] = value;
+                return true;
+            case JsonArray array when int.TryParse(parts[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index < array.Count:
+                array[index] = value;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool RemovePath(JsonObject document, string path)
+    {
+        var parts = path.Split('.');
+        if (!TryWalk(document, parts[..^1], create: false, out var parent))
+        {
+            return true; // nothing there to remove
+        }
+
+        switch (parent)
+        {
+            case JsonObject obj:
+                obj.Remove(parts[^1]);
+                return true;
+            case JsonArray array when int.TryParse(parts[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index < array.Count:
+                array[index] = null; // $unset of an array element leaves null
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryWalk(JsonObject document, string[] parts, bool create, out JsonNode? node)
+    {
+        node = document;
+        foreach (var part in parts)
+        {
+            switch (node)
+            {
+                case JsonObject obj when obj[part] is JsonObject or JsonArray:
+                    node = obj[part];
+                    break;
+                case JsonObject obj when create && obj[part] is null:
+                    var child = new JsonObject();
+                    obj[part] = child;
+                    node = child;
+                    break;
+                case JsonArray array when int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index < array.Count:
+                    node = array[index];
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return node is JsonObject or JsonArray;
     }
 
     private bool Near(DateTimeOffset at, TimeSpan window) => (ClusterTime - at).Duration() <= window;

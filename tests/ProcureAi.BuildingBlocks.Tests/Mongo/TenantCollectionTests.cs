@@ -169,7 +169,7 @@ public sealed class TenantCollectionTests(MongoFixture mongo) : IClassFixture<Mo
         }
     }
 
-    private sealed class AuditedNote : ITenantDocument, IAuditedDocument
+    public sealed class AuditedNote : ITenantDocument, IAuditedDocument
     {
         [BsonId]
         public string Id { get; init; } = Guid.NewGuid().ToString("N");
@@ -242,6 +242,76 @@ public sealed class TenantCollectionTests(MongoFixture mongo) : IClassFixture<Mo
         stamp["userId"].AsString.ShouldBe("u-1");
         stamp["deleting"].AsBoolean.ShouldBeTrue();
         (await raw.CountDocumentsAsync(Builders<AuditedNote>.Filter.Empty, cancellationToken: Ct)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The deleting stamp and the delete are two operations. A document inserted in between (here: right after the stamp) carries no
+    /// deleting stamp, so the delete must leave it alone: it is not what the caller asked to delete, and deleting it would be an unstamped
+    /// delete that change data capture flags as "outside the app".
+    /// </summary>
+    [Fact]
+    public async Task Delete_many_deletes_only_the_documents_it_stamped()
+    {
+        var raw = mongo.Client.GetDatabase("tenant-tests").GetCollection<AuditedNote>($"audited-{Guid.NewGuid():N}");
+        var writer = new TenantCollection<AuditedNote>(raw, new Caller("A"));
+        await writer.InsertManyAsync([new AuditedNote { Id = "n1", TenantId = "A", Text = "x" }, new AuditedNote { Id = "n2", TenantId = "A", Text = "x" }], Ct);
+        var collection = new TenantCollection<AuditedNote>(
+            AfterStamp.Wrap(raw, () => raw.InsertOneAsync(new AuditedNote { Id = "late", TenantId = "A", Text = "x" }, cancellationToken: Ct)),
+            new Caller("A"));
+
+        var result = await collection.DeleteManyAsync(Builders<AuditedNote>.Filter.Eq(n => n.Text, "x"), Ct);
+
+        result.DeletedCount.ShouldBe(2);
+        (await raw.Find(Builders<AuditedNote>.Filter.Empty).ToListAsync(Ct)).Select(n => n.Id).ShouldBe(["late"]);
+    }
+
+    /// <summary>
+    /// <c>DeleteOne</c> stamps one matching document and must delete that one: here the stamped document disappears in between (another
+    /// delete), and the second matching document, which was never stamped, must survive.
+    /// </summary>
+    [Fact]
+    public async Task Delete_one_deletes_only_the_document_it_stamped()
+    {
+        var raw = mongo.Client.GetDatabase("tenant-tests").GetCollection<AuditedNote>($"audited-{Guid.NewGuid():N}");
+        var writer = new TenantCollection<AuditedNote>(raw, new Caller("A"));
+        await writer.InsertManyAsync([new AuditedNote { Id = "n1", TenantId = "A", Text = "x" }, new AuditedNote { Id = "n2", TenantId = "A", Text = "x" }], Ct);
+        var stampedAway = AfterStamp.Wrap(raw, () => raw.DeleteOneAsync(
+            Builders<AuditedNote>.Filter.Eq($"{AuditStamp.ElementName}.deleting", true), Ct));
+        var collection = new TenantCollection<AuditedNote>(stampedAway, new Caller("A"));
+
+        var result = await collection.DeleteOneAsync(Builders<AuditedNote>.Filter.Eq(n => n.Text, "x"), Ct);
+
+        result.DeletedCount.ShouldBe(0, "the stamped document was already gone; the unstamped one is not the one this call chose");
+        (await raw.CountDocumentsAsync(Builders<AuditedNote>.Filter.Empty, cancellationToken: Ct)).ShouldBe(1);
+    }
+
+    /// <summary>A raw collection that runs <c>hook</c> right after each update (the deleting stamp), before the caller's next operation.</summary>
+    public class AfterStamp : System.Reflection.DispatchProxy
+    {
+        private object _target = null!;
+        private Func<Task> _hook = null!;
+
+        public static IMongoCollection<T> Wrap<T>(IMongoCollection<T> target, Func<Task> hook)
+        {
+            var proxy = Create<IMongoCollection<T>, AfterStamp>();
+            var self = (AfterStamp)(object)proxy;
+            self._target = target;
+            self._hook = hook;
+            return proxy;
+        }
+
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+        {
+            var result = targetMethod!.Invoke(_target, args);
+            return targetMethod.Name is "UpdateOneAsync" or "UpdateManyAsync" && result is Task<UpdateResult> update ? Then(update) : result;
+        }
+
+        private async Task<UpdateResult> Then(Task<UpdateResult> update)
+        {
+            var result = await update;
+            await _hook();
+            return result;
+        }
     }
 
     [Fact]

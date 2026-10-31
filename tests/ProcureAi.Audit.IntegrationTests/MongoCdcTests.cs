@@ -83,6 +83,43 @@ public sealed class MongoCdcTests(AuditApp app)
         alert.WithdrawnAt.ShouldBeNull();
     }
 
+    /// <summary>
+    /// Review finding (fix round 1): an update's <c>after</c> is looked up when Debezium reads the event. A bulk delete read late (Debezium
+    /// paused, as when it lags) finds every document gone; the deleting stamps must still be read from the updates themselves, so neither
+    /// the stamps nor the deletes raise an alert.
+    /// </summary>
+    [Fact]
+    public async Task Bulk_delete_read_late_is_attributed_to_the_app()
+    {
+        var mongo = await app.EnsureMongoCdcAsync();
+        var tenant = AuditApp.NewTenant();
+        var suppliers = SuppliersAs(mongo, tenant, "tom");
+        var keys = Enumerable.Range(1, 20).Select(i => $"{tenant}:s{i:D2}").ToList();
+        await suppliers.InsertManyAsync(keys.Select(k => new SupplierRow { Id = k, TenantId = tenant, Name = k, Email = "x@y.test" }), Ct);
+        await app.WaitForAsync<DataChange>(q => q.Where(c => c.Database == SuppliersDb && c.TenantId == tenant), found => found.Count == keys.Count);
+
+        var debezium = app.Infra.MongoDebezium;
+        await debezium.PauseAsync();
+        try
+        {
+            // Let a getMore that was waiting when the container froze come back empty, so every event below is read after the unpause.
+            await Task.Delay(TimeSpan.FromSeconds(3), Ct);
+            (await SuppliersAs(mongo, tenant, "maria").DeleteManyAsync(Builders<SupplierRow>.Filter.Empty, Ct)).DeletedCount.ShouldBe(keys.Count);
+        }
+        finally
+        {
+            await debezium.UnpauseAsync();
+        }
+
+        var changes = await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Database == SuppliersDb && c.TenantId == tenant),
+            found => found.Count(c => c.Operation == "Delete") == keys.Count && found.Count(c => c.Operation == "Update") == keys.Count,
+            TimeSpan.FromSeconds(90));
+        changes.Where(c => c.Operation != "Insert").ShouldAllBe(
+            c => c.Attribution.Kind == AttributionKind.App && c.Attribution.UserId == "maria", Describe(changes));
+        (await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.TenantId == tenant))).ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Postgres_queue_ignores_mongo_keys()
     {
