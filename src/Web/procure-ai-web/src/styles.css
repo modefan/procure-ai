@@ -250,3 +250,10 @@
     @apply -mb-px cursor-pointer border-b-2 border-transparent px-3 py-2 text-sm font-medium whitespace-nowrap text-slate-600 hover:text-slate-900 aria-selected:border-indigo-700 aria-selected:text-indigo-800;
   }
 }
+
+/* A tab panel that is not selected (Angular Aria keeps its content with preserveContent) is inert: hide it too. */
+@layer components {
+  [role='tabpanel'][inert] {
+    display: none;
+  }
+}

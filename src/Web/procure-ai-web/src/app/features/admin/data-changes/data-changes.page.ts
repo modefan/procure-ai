@@ -86,16 +86,16 @@ const TRUE = new Set(['true', '1', 'yes']);
         </div>
       } @else if (!store.error()) {
         <div class="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="data-changes">
-          <div class="hidden border-b border-slate-200 px-4 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase md:grid md:grid-cols-[9.5rem_8rem_minmax(0,1fr)_5.5rem_9rem_5.5rem] md:gap-x-4" aria-hidden="true">
+          <div class="hidden border-b border-slate-200 px-4 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase lg:grid lg:grid-cols-[9.5rem_8rem_minmax(0,1fr)_5.5rem_9rem_5.5rem] lg:gap-x-4" aria-hidden="true">
             <span>When</span><span>Service</span><span>Table &middot; key</span><span>Change</span><span>Who</span><span></span>
           </div>
           <ul class="divide-y divide-slate-100">
             @for (change of store.entities(); track change.id) {
               <li [attr.data-change]="change.id" class="px-4 py-3">
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm md:grid md:grid-cols-[9.5rem_8rem_minmax(0,1fr)_5.5rem_9rem_5.5rem]">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm lg:grid lg:grid-cols-[9.5rem_8rem_minmax(0,1fr)_5.5rem_9rem_5.5rem]">
                   <time class="whitespace-nowrap text-slate-600 tabular-nums" [attr.datetime]="change.committedAt">{{ change.committedAt | date: 'd MMM y, HH:mm:ss' }}</time>
                   <span class="font-medium whitespace-nowrap text-slate-900">{{ serviceLabel(change.database) }}</span>
-                  <span class="min-w-0 basis-full truncate md:basis-auto" [title]="change.table + ' ' + change.primaryKey">
+                  <span class="min-w-0 basis-full truncate lg:basis-auto" [title]="change.table + ' ' + change.primaryKey">
                     <span class="font-mono text-xs sm:text-sm">{{ change.table }}</span>
                     <span class="font-mono text-xs text-slate-500"> {{ change.primaryKey }}</span>
                   </span>
@@ -103,7 +103,7 @@ const TRUE = new Set(['true', '1', 'yes']);
                   <span class="min-w-0 text-slate-800"><app-data-change-who [change]="change" [names]="store.names()" /></span>
                   <button
                     type="button"
-                    class="btn-secondary ml-auto px-2 py-1 text-xs md:ml-0"
+                    class="btn-secondary ml-auto px-2 py-1 text-xs lg:ml-0"
                     [attr.aria-expanded]="isOpen(change.id)"
                     [attr.aria-controls]="'diff-' + change.id"
                     (click)="toggle(change.id)"
