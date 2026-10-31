@@ -358,6 +358,31 @@
           }
         }
       ]
+    },
+    {
+      "name": "organization",
+      "description": "Lets a login ask for one organization (scope organization:<alias>). Adds no claim itself: the tenant claim comes from procure-api",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "organization",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-organization-membership-mapper",
+          "config": {
+            "claim.name": "organization",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "clients": [
@@ -450,6 +475,34 @@
       "serviceAccountsEnabled": true,
       "defaultClientScopes": [],
       "optionalClientScopes": []
+    },
+    {
+      "clientId": "procure-demo-login",
+      "name": "Procure demo login (gateway, password grant for listed demo users only)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KC_DEMO_LOGIN_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "procure-api"
+      ],
+      "optionalClientScopes": [
+        "offline_access",
+        "organization"
+      ]
     }
   ]
 }

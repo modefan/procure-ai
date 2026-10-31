@@ -47,7 +47,7 @@ public sealed class SessionCookieEvents(
         var refreshToken = context.Properties.GetTokenValue("refresh_token");
         var tokens = string.IsNullOrEmpty(refreshToken)
             ? null
-            : await refresher.RefreshAsync(refreshToken, context.HttpContext.RequestAborted);
+            : await refresher.RefreshAsync(refreshToken, context.Properties, context.HttpContext.RequestAborted);
         if (tokens is null)
         {
             context.RejectPrincipal();

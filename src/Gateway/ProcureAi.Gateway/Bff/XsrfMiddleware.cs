@@ -18,15 +18,18 @@ public sealed class XsrfMiddleware(RequestDelegate next)
         if (Applies(context.Request) && context.User.Identity?.IsAuthenticated == true
             && !await antiforgery.IsRequestValidAsync(context))
         {
-            await Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Missing or invalid anti-forgery token",
-                detail: $"Send the value of the {CookieName} cookie in the {HeaderName} header.").ExecuteAsync(context);
+            await Rejection().ExecuteAsync(context);
             return;
         }
 
         await next(context);
     }
+
+    /// <summary>The answer to a state-changing call without a valid anti-forgery token (also used by the anonymous demo login).</summary>
+    public static IResult Rejection() => Results.Problem(
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Missing or invalid anti-forgery token",
+        detail: $"Send the value of the {CookieName} cookie in the {HeaderName} header.");
 
     private static bool Applies(HttpRequest request) =>
         !(HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)

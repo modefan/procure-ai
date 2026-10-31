@@ -661,6 +661,31 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Gateway_gets_demo_login_on_with_the_demo_client_secret_and_password_and_no_other_project_gets_them()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var keycloakEnv = await EnvironmentOfAsync(model.Resources.Single(r => r.Name == "keycloak"));
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var gatewayEnv = await EnvironmentOfAsync(gateway);
+
+        // Plan 06 ruling 17: the gateway's demo login uses the password grant on its own Keycloak client.
+        gatewayEnv.ShouldContainKeyAndValue("DemoLogin__Enabled", "true");
+        var secret = (ParameterResource)keycloakEnv["KC_DEMO_LOGIN_SECRET"];
+        secret.Name.ShouldBe("keycloak-demo-login-secret");
+        secret.Secret.ShouldBeTrue();
+        gatewayEnv["DemoLogin__ClientSecret"].ShouldBeSameAs(secret);
+        gatewayEnv["DemoLogin__Password"].ShouldBeSameAs(keycloakEnv["KC_DEMO_PASSWORD"]);
+        foreach (var resource in model.Resources.OfType<ProjectResource>().Where(r => r != gateway))
+        {
+            var env = await EnvironmentOfAsync(resource);
+            env.Values.ShouldNotContain(v => ReferenceEquals(v, secret), resource.Name);
+            env.Keys.ShouldNotContain(k => k.StartsWith("DemoLogin__", StringComparison.OrdinalIgnoreCase), resource.Name);
+        }
+    }
+
+    [Fact]
     public async Task Captured_database_gets_its_own_debezium_server_after_the_migration()
     {
         await using var scope = await ModelScope.BuildAsync();

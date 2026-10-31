@@ -123,6 +123,24 @@ describe('http interceptors', () => {
     expect(TestBed.inject(SessionExpired).returnUrl()).toBeNull();
   });
 
+  it('404 from the demo-user list (demo login off) is not logged', async () => {
+    const warn = vi.mocked(console.warn);
+    warn.mockClear();
+
+    await fail(firstValueFrom(http.get('/bff/demo-login/users')), '/bff/demo-login/users', 404);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a 404 from any other call is logged as a warning', async () => {
+    const warn = vi.mocked(console.warn);
+    warn.mockClear();
+
+    await fail(firstValueFrom(http.get('/api/v1/requests/x')), '/api/v1/requests/x', 404);
+
+    expect(warn).toHaveBeenCalled();
+  });
+
   it('401 while signed out opens nothing', async () => {
     await fail(firstValueFrom(http.get('/api/v1/requests')), '/api/v1/requests', 401);
 

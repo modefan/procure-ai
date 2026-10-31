@@ -41,6 +41,7 @@ public static class GatewayApp
         services.AddValidatedOptions<OidcOptions>(configuration, OidcOptions.SectionName);
         services.AddValidatedOptions<BffSessionOptions>(configuration, BffSessionOptions.SectionName);
         services.AddValidatedOptions<RegistrationOptions>(configuration, RegistrationOptions.SectionName);
+        services.AddValidatedOptions<DemoLoginOptions>(configuration, DemoLoginOptions.SectionName);
         services.AddValidatedOptions<HubOptions>(configuration, HubOptions.SectionName);
         services.AddValidatedOptions<DevPanelOptions>(configuration, DevPanelOptions.SectionName);
         services.AddValidatedOptions<ClientLogOptions>(configuration, ClientLogOptions.SectionName);
@@ -64,6 +65,7 @@ public static class GatewayApp
         services.AddBffAuthentication();
         services.AddProcureAiServiceClient<IRegistrationClient, RegistrationClient>(AccessClientSetup.AccessServiceName);
         services.AddScoped<DemoRegistration>();
+        services.AddSingleton<DemoSignIn>();
 
         services.AddReverseProxy()
             .LoadFromConfig(configuration.GetSection("ReverseProxy"))
@@ -86,6 +88,7 @@ public static class GatewayApp
         app.UseAuthorization();
 
         app.MapBff();
+        app.MapDemoLogin();
         app.MapClientLogs();
         app.MapDefaultEndpoints();
         // An unknown /api path is a 404, not the web app's index page. Order: after the proxied API routes (10).

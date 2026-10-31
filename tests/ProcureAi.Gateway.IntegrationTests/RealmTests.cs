@@ -84,7 +84,7 @@ public sealed class RealmTests(KeycloakFixture keycloak)
     }
 
     [Fact]
-    public async Task Committed_realm_file_has_only_placeholder_credentials_and_no_direct_access_client()
+    public async Task Committed_realm_file_has_only_placeholder_credentials_and_only_the_demo_login_client_has_direct_access()
     {
         var realm = JsonDocument.Parse(await File.ReadAllTextAsync("procure-realm.json")).RootElement;
 
@@ -97,7 +97,15 @@ public sealed class RealmTests(KeycloakFixture keycloak)
 
         var clients = realm.GetProperty("clients").EnumerateArray().ToArray();
         clients.ShouldNotContain(c => c.GetProperty("clientId").GetString() == KeycloakFixture.TestClient);
-        clients.Count(c => c.TryGetProperty("directAccessGrantsEnabled", out var d) && d.GetBoolean()).ShouldBe(0);
+        // The only password-grant client is the gateway's demo login (plan 06 ruling 17): confidential, no browser flow.
+        var direct = clients.Where(c => c.TryGetProperty("directAccessGrantsEnabled", out var d) && d.GetBoolean()).ToArray();
+        direct.Select(c => c.GetProperty("clientId").GetString()).ShouldBe([KeycloakFixture.DemoLoginClient]);
+        var demo = direct.Single();
+        demo.GetProperty("publicClient").GetBoolean().ShouldBeFalse();
+        demo.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeFalse();
+        demo.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse();
+        demo.GetProperty("serviceAccountsEnabled").GetBoolean().ShouldBeFalse();
+        demo.GetProperty("secret").GetString().ShouldBe("${KC_DEMO_LOGIN_SECRET}");
         clients.Single(c => c.GetProperty("clientId").GetString() == "procure-gateway")
             .GetProperty("secret").GetString().ShouldBe("${KC_GATEWAY_SECRET}");
         clients.Single(c => c.GetProperty("clientId").GetString() == KeycloakFixture.InternalClient)
@@ -130,6 +138,37 @@ public sealed class RealmTests(KeycloakFixture keycloak)
         claims.GetProperty("azp").GetString().ShouldBe(KeycloakFixture.InternalClient);
         Audiences(claims).ShouldContain("procure-api");
         claims.TryGetProperty("tenant", out _).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("tom@acme.test", "acme")]
+    [InlineData("ben@globex.test", "globex")]
+    public async Task Demo_login_client_accepts_the_organization_scope_and_issues_that_tenant(string user, string tenant)
+    {
+        // What the gateway's demo login asks for (pre-flight ruling P5): scope organization:<tenant>, so one tenant per login.
+        using var http = new HttpClient();
+        using var response = await http.PostAsync(
+            $"{keycloak.BaseUrl}/realms/{KeycloakFixture.Realm}/protocol/openid-connect/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["client_id"] = KeycloakFixture.DemoLoginClient,
+                ["client_secret"] = keycloak.DemoLoginSecret,
+                ["username"] = user,
+                ["password"] = keycloak.DemoPassword,
+                ["scope"] = $"openid organization:{tenant}",
+            }), Ct);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        var tokens = JsonDocument.Parse(body).RootElement;
+
+        var claims = KeycloakFixture.Payload(tokens.GetProperty("access_token").GetString()!);
+
+        claims.GetProperty("tenant").GetString().ShouldBe(tenant);
+        claims.GetProperty("azp").GetString().ShouldBe(KeycloakFixture.DemoLoginClient);
+        Audiences(claims).ShouldContain("procure-api");
+        tokens.TryGetProperty("id_token", out _).ShouldBeTrue();
+        tokens.TryGetProperty("refresh_token", out _).ShouldBeTrue();
     }
 
     [Fact]

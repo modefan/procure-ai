@@ -58,9 +58,7 @@ public static class BffEndpoints
             ? new HashSet<string>()
             : await permissions.GetPermissionsAsync(user, cancellationToken);
 
-        // The app copies this cookie into the X-XSRF-TOKEN header of every state-changing call.
-        var tokens = antiforgery.GetAndStoreTokens(http);
-        http.Response.Cookies.Append(XsrfMiddleware.CookieName, tokens.RequestToken!, XsrfCookieOptions());
+        IssueXsrfToken(http, antiforgery);
 
         var tenantName = await TenantNameAsync(user, directory, cancellationToken);
         var principal = http.User;
@@ -99,7 +97,8 @@ public static class BffEndpoints
     private static async Task<IResult> LogoutAsync(HttpContext http, TokenRefresher refresher)
     {
         ClearBrowserCache(http);
-        await refresher.EndProviderSessionAsync(await http.GetTokenAsync(BffSchemes.Cookie, "refresh_token"), http.RequestAborted);
+        var session = (await http.AuthenticateAsync(BffSchemes.Cookie)).Properties;
+        await refresher.EndProviderSessionAsync(session?.GetTokenValue("refresh_token"), session, http.RequestAborted);
         await http.SignOutAsync(BffSchemes.Cookie);
         http.Response.Cookies.Delete(XsrfMiddleware.CookieName, XsrfCookieOptions());
         return Results.NoContent();
@@ -109,13 +108,20 @@ public static class BffEndpoints
     private static async Task<IResult> LogoutAllAsync(HttpContext http, RedisTicketStore store, TokenRefresher refresher)
     {
         ClearBrowserCache(http);
-        var refreshToken = await http.GetTokenAsync(BffSchemes.Cookie, "refresh_token");
+        var session = (await http.AuthenticateAsync(BffSchemes.Cookie)).Properties;
         var subject = http.User.FindFirst("sub")?.Value;
         var revoked = subject is null ? 0 : await store.RevokeAllForUserAsync(subject, http.RequestAborted);
-        await refresher.EndProviderSessionAsync(refreshToken, http.RequestAborted);
+        await refresher.EndProviderSessionAsync(session?.GetTokenValue("refresh_token"), session, http.RequestAborted);
         await http.SignOutAsync(BffSchemes.Cookie);
         http.Response.Cookies.Delete(XsrfMiddleware.CookieName, XsrfCookieOptions());
         return Results.Json(new { revoked });
+    }
+
+    /// <summary>The app copies this cookie into the X-XSRF-TOKEN header of every state-changing call.</summary>
+    internal static void IssueXsrfToken(HttpContext http, IAntiforgery antiforgery)
+    {
+        var tokens = antiforgery.GetAndStoreTokens(http);
+        http.Response.Cookies.Append(XsrfMiddleware.CookieName, tokens.RequestToken!, XsrfCookieOptions());
     }
 
     /// <summary>

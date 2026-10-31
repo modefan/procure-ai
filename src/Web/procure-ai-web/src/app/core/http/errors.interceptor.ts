@@ -3,6 +3,7 @@ import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
 import { AuthStore } from '../auth/auth.store';
+import { DEMO_LOGIN_USERS_URL } from '../auth/demo-login';
 import { SessionExpired } from '../auth/session-expired';
 import { AppConfigService } from '../config/app-config';
 import { Logger } from '../logging/logger';
@@ -20,7 +21,8 @@ export const SKIP_FORBIDDEN_REDIRECT = new HttpContextToken<boolean>(() => false
  * - it is logged (5xx and network errors as errors, other statuses as warnings);
  * - 401 while signed in: the session ended, so the session-expired dialog opens (the page is kept as the return url);
  * - 403: the forbidden page (unless the call sets `SKIP_FORBIDDEN_REDIRECT`).
- * The caller still gets the error. /bff/user answering 401 is the normal "nobody is signed in" and is left alone.
+ * The caller still gets the error. /bff/user answering 401 is the normal "nobody is signed in" and is left alone, like
+ * the demo-user list answering 404 (demo login off).
  */
 export const errorsInterceptor: HttpInterceptorFn = (request, next) => {
   const log = inject(Logger).withSource('Http');
@@ -33,7 +35,8 @@ export const errorsInterceptor: HttpInterceptorFn = (request, next) => {
     catchError((error: unknown) => {
       if (error instanceof HttpErrorResponse && ownRequest) {
         const path = request.url.split('?')[0];
-        const isProbe = path === '/bff/user';
+        // Probes whose failure is a normal answer: nobody signed in (401), demo login off (404).
+        const isProbe = path === '/bff/user' || path === DEMO_LOGIN_USERS_URL;
         if (!isProbe) {
           const details = { method: request.method, url: path, status: error.status, correlationId: request.headers.get(CORRELATION_HEADER) };
           if (error.status === 0 || error.status >= 500) {

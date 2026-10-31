@@ -42,7 +42,7 @@ public sealed class DemoRegistration(
                 return false;
             }
 
-            var tokens = await refresher.RefreshAsync(refreshToken, cancellationToken);
+            var tokens = await refresher.RefreshAsync(refreshToken, properties, cancellationToken);
             if (tokens is null)
             {
                 logger.LogWarning("User {UserId} joined the demo company but the tokens could not be refreshed", userId);

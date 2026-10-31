@@ -14,7 +14,8 @@ var debeziumSelfHeal = builder.Configuration.GetValue("Debezium:SelfHealLostOffs
 // Parameters. Secrets come from AppHost user secrets (never the repo); see DEMO PASSWORDS.txt.
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
-// Substituted by Keycloak into the ${KC_DEMO_PASSWORD} / ${KC_GATEWAY_SECRET} / ${KC_INTERNAL_SECRET} / ${KC_ACCESS_ADMIN_SECRET} placeholders of the realm import,
+// Substituted by Keycloak into the ${KC_DEMO_PASSWORD} / ${KC_GATEWAY_SECRET} / ${KC_INTERNAL_SECRET} / ${KC_ACCESS_ADMIN_SECRET} /
+// ${KC_DEMO_LOGIN_SECRET} placeholders of the realm import,
 // so the committed realm file holds no passwords or secrets.
 var keycloakDemoPassword = builder.AddParameter("keycloak-demo-password", secret: true);
 var keycloakGatewaySecret = builder.AddParameter("keycloak-gateway-secret", secret: true);
@@ -22,6 +23,10 @@ var keycloakGatewaySecret = builder.AddParameter("keycloak-gateway-secret", secr
 var keycloakInternalSecret = builder.AddParameter("keycloak-internal-secret", secret: true);
 // Secret of `procure-access-admin`, the client with Keycloak admin rights (users, organizations). Only the Access service gets it.
 var keycloakAccessAdminSecret = builder.AddParameter("keycloak-access-admin-secret", secret: true);
+// Secret of `procure-demo-login`, the gateway's password-grant client for the one-click demo login (plan 06 ruling 17). Generated on
+// the first run and kept in the AppHost user secrets (Parameters:keycloak-demo-login-secret); Keycloak and the gateway read the same value.
+var keycloakDemoLoginSecret = builder.AddParameter(
+    "keycloak-demo-login-secret", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
@@ -120,6 +125,7 @@ var keycloak = builder.AddContainer(ResourceNames.Keycloak, "quay.io/keycloak/ke
     .WithEnvironment("KC_GATEWAY_SECRET", keycloakGatewaySecret)
     .WithEnvironment("KC_INTERNAL_SECRET", keycloakInternalSecret)
     .WithEnvironment("KC_ACCESS_ADMIN_SECRET", keycloakAccessAdminSecret)
+    .WithEnvironment("KC_DEMO_LOGIN_SECRET", keycloakDemoLoginSecret)
     .WithEnvironment("JAVA_OPTS_KC_HEAP", limits.Keycloak.JavaHeapOpts)
     .WithBindMount("../../../infra/keycloak", "/opt/keycloak/data/import", isReadOnly: true)
     .WithArgs("start-dev", "--import-realm")
@@ -296,6 +302,11 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
     // The local Keycloak container speaks plain http; the deployed authority is https and keeps the default (true).
     .WithEnvironment("Oidc__RequireHttpsMetadata", "false")
     .WithEnvironment("Oidc__ClientSecret", keycloakGatewaySecret)
+    // One-click demo login on the welcome page (off by default in the gateway; on for local runs): the password grant on its own
+    // client, with the demo users' password. The browser never sees either.
+    .WithEnvironment("DemoLogin__Enabled", "true")
+    .WithEnvironment("DemoLogin__ClientSecret", keycloakDemoLoginSecret)
+    .WithEnvironment("DemoLogin__Password", keycloakDemoPassword)
     // The gateway asks Access for permissions as the internal client, like the services do.
     .WithEnvironment("Auth__Internal__ClientId", ServiceResources.InternalClientId)
     .WithEnvironment("Auth__Internal__ClientSecret", keycloakInternalSecret)

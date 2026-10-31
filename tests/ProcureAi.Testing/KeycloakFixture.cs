@@ -22,6 +22,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
     public const string TestClient = "test-direct";
     public const string InternalClient = "procure-internal";
     public const string AccessAdminClient = "procure-access-admin";
+    public const string DemoLoginClient = "procure-demo-login";
 
     private IContainer? _container;
 
@@ -33,6 +34,9 @@ public sealed class KeycloakFixture : IAsyncLifetime
 
     /// <summary>The secret of the <c>procure-access-admin</c> client (Keycloak admin rights) for this run.</summary>
     public string AccessAdminSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+
+    /// <summary>The secret of the <c>procure-demo-login</c> client (the gateway's one-click demo login) for this run.</summary>
+    public string DemoLoginSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
 
     public string DemoPassword { get; } = "T" + Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 
@@ -64,6 +68,7 @@ public sealed class KeycloakFixture : IAsyncLifetime
             .WithEnvironment("KC_GATEWAY_SECRET", GatewaySecret)
             .WithEnvironment("KC_INTERNAL_SECRET", InternalSecret)
             .WithEnvironment("KC_ACCESS_ADMIN_SECRET", AccessAdminSecret)
+            .WithEnvironment("KC_DEMO_LOGIN_SECRET", DemoLoginSecret)
             .WithResourceMapping(Encoding.UTF8.GetBytes(realm.ToJsonString()), "/opt/keycloak/data/import/procure-realm.json")
             .WithCommand("start-dev", "--import-realm")
             .WithCreateParameterModifier(p =>

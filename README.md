@@ -344,17 +344,27 @@ deployment without the local tooling fits a 16 GB VM with room to spare. Running
 
 ## Demo users
 
-Sign in through Keycloak; the demo password is the `keycloak-demo-password` parameter you set above.
+**One click:** the welcome page shows **Try a demo role** buttons. Each signs you in as one demo user, no password typed.
+Or sign in through Keycloak as usual; the demo password is the `keycloak-demo-password` parameter you set above.
 
-| User | Tenant | Role |
-|---|---|---|
-| tom@acme.test | Acme | requester |
-| maria@acme.test | Acme | manager |
-| dept@acme.test | Acme | department-head |
-| thandi@acme.test | Acme | finance |
-| admin@acme.test | Acme | admin |
-| ben@globex.test | Globex | manager |
-| approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
+| Button | User | Tenant | Role |
+|---|---|---|---|
+| Requester (Tom) | tom@acme.test | Acme | requester |
+| Manager (Maria) | maria@acme.test | Acme | manager |
+| Department head | dept@acme.test | Acme | department-head |
+| Finance (Thandi) | thandi@acme.test | Acme | finance |
+| Admin | admin@acme.test | Acme | admin |
+| Globex manager (Ben) | ben@globex.test | Globex | manager |
+| (Keycloak login only) | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
+
+How the buttons work: the gateway (`POST /bff/demo-login` with `{ "user": "tom" }`, XSRF header required) signs the user in with
+the OAuth password grant on a **separate** Keycloak client, `procure-demo-login` (confidential, direct access grants only, no
+browser flow), and then creates exactly the session the normal code-flow login creates: tokens in the Redis ticket store, the
+same `__Host-` cookie, claims, refresh and logout. The browser only ever sends a key from the configured list (`DemoLogin:Users`
+in the gateway's appsettings); the username and password come from the gateway's configuration. The password grant is deprecated
+in OAuth 2.1, so it is used for these listed demo users only and is **off by default** (`DemoLogin:Enabled`): when off, both
+`/bff/demo-login` endpoints answer 404 and the welcome page shows no buttons. The AppHost switches it on and generates the demo
+client's secret on the first run (AppHost user secret `Parameters:keycloak-demo-login-secret`).
 
 ### Try the invoice scan
 

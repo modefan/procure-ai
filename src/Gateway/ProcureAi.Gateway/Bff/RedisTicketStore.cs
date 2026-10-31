@@ -112,7 +112,11 @@ public sealed class RedisTicketStore : ITicketStore
         var sessionKey = SessionKey(id);
         var lifetime = Lifetime(ticket);
 
-        var transaction = _redis.GetDatabase().CreateTransaction();
+        var db = _redis.GetDatabase();
+        // A renewal for another user (a browser with a session signs in as someone else): the key leaves the previous user's
+        // index, so their "log out everywhere" no longer reaches this browser's new session.
+        var previous = onlyIfExists ? await db.HashGetAsync(sessionKey, SubjectField) : RedisValue.Null;
+        var transaction = db.CreateTransaction();
         if (onlyIfExists)
         {
             transaction.AddCondition(Condition.KeyExists(sessionKey));
@@ -127,6 +131,11 @@ public sealed class RedisTicketStore : ITicketStore
             ]),
             transaction.KeyExpireAsync(sessionKey, lifetime),
         };
+        if (previous.HasValue && !string.IsNullOrEmpty((string?)previous) && (string?)previous != subject)
+        {
+            tasks.Add(transaction.SetRemoveAsync(UserKey((string)previous!), id));
+        }
+
         if (!string.IsNullOrEmpty(subject))
         {
             var userKey = UserKey(subject);
