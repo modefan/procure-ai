@@ -174,7 +174,7 @@ const CANCEL_REASON_MAX = 500;
             <div ngTabPanel value="data-changes" [preserveContent]="true">
               <ng-template ngTabContent>
                 <h2 class="sr-only">Data changes</h2>
-                <app-data-changes-tab [requestId]="id()" />
+                <app-data-changes-tab [requestId]="id()" [knownNames]="historyNames()" />
               </ng-template>
             </div>
           </div>
@@ -208,6 +208,10 @@ export class RequestDetailPage {
   protected readonly skeletonRows = [1, 2, 3, 4, 5];
   /** The open tab below the details: the business history, or the field-level data changes (loaded when first opened). */
   protected readonly tab = signal<string | undefined>('history');
+  /** Who did what, as the business history names them: the one place requesters can read other people's names. */
+  protected readonly historyNames = computed(
+    () => new Map(this.store.history().filter((e) => e.actorName).map((e) => [e.userId, e.actorName as string])),
+  );
 
   protected readonly activeStep = computed(() => this.store.timeline().find((s) => s.state === 'active' && s.key !== 'cancelling') ?? null);
   private readonly viewers = computed(() => this.presence.viewersOf('request', this.id())());

@@ -34,6 +34,7 @@ describe('RequestDetailPage', () => {
       getRequestHistory: forbidHistory ? vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 403 })) : vi.fn().mockResolvedValue([
         eventDto('RequestSubmitted', 'Submitted by Tom Mokoena: 3 laptops', '2026-10-28T09:02:00Z'),
         eventDto('BudgetReserved', 'R 86 940,00 reserved on IT-200 (2026)', '2026-10-28T09:03:00Z', 'system'),
+        eventDto('RequestApproved', 'Approved by Ben Dlamini', '2026-10-28T09:05:00Z', 'ben-0000-guid', { actorName: 'Ben Dlamini' }),
       ]),
     };
     api['getRequestDataChanges'] = vi.fn().mockResolvedValue({
@@ -87,8 +88,8 @@ describe('RequestDetailPage', () => {
     expect(header).toContain('Ordered');
     expect(text(el.querySelector('[aria-label="Workflow"]'))).toContain('Submitted');
     const rows = Array.from(el.querySelectorAll('[aria-label="Audit trail"] tbody tr')).map((r) => text(r));
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toContain('reserved on IT-200'); // newest first
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toContain('reserved on IT-200'); // newest first
   });
 
   it('shows_other_viewers_only: the server list includes me; the header names the others', async () => {
@@ -221,5 +222,25 @@ describe('RequestDetailPage', () => {
     await settle(fixture);
     expect(api['getRequestDataChanges']).toHaveBeenCalledTimes(1);
     expect(text(el.querySelector('[data-change="c1"]'))).toContain('Requests');
+  });
+  it('no_names_case: a requester sees "you", names from the history and "a colleague", never an ID', async () => {
+    const { fixture, el } = await setup();
+    api['getRequestDataChanges'].mockResolvedValue({
+      items: [
+        dataChangeDto('m1', { userId: 'tom' }),
+        dataChangeDto('m2', { userId: 'ben-0000-guid', actorId: 'ben-0000-guid' }),
+        dataChangeDto('m3', { userId: '9f1c7d52-0000-4000-8000-00000000abcd', actorId: '9f1c7d52-0000-4000-8000-00000000abcd' }),
+        dataChangeDto('m4', { userId: null, actorId: null }),
+      ],
+      page: 1, pageSize: 25, total: 4,
+    });
+    (Array.from(el.querySelectorAll<HTMLElement>('[role="tab"]')).find((t) => text(t) === 'Data changes') as HTMLElement).click();
+    await settle(fixture);
+    const who = (id: string) => text(el.querySelector(`[data-change="${id}"] [data-testid="who-user"]`));
+    expect(who('m1')).toBe('you');
+    expect(who('m2')).toBe('Ben Dlamini');
+    expect(who('m3')).toBe('a colleague');
+    expect(who('m4')).toBe('the app');
+    expect(text(el.querySelector('[data-testid="data-changes"]'))).not.toContain('9f1c7d52');
   });
 });

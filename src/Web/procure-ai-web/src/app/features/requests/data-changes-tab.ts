@@ -1,5 +1,6 @@
 import { DatePipe } from '@angular/common';
-import { Component, effect, inject, input, untracked } from '@angular/core';
+import { Component, computed, effect, inject, input, untracked } from '@angular/core';
+import { AuthStore } from '../../core/auth/auth.store';
 import { DataChangeWho, serviceLabel } from '../../core/ui/data-change-who';
 import { FieldDiff } from '../../core/ui/field-diff';
 import { Pager } from '../../core/ui/pager';
@@ -35,7 +36,7 @@ import { DataChangesTabStore } from './data-changes-tab.store';
             <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               <time class="whitespace-nowrap text-slate-600 tabular-nums" [attr.datetime]="change.committedAt">{{ change.committedAt | date: 'd MMM y, HH:mm:ss' }}</time>
               <span class="font-medium text-slate-900">{{ service(change.database) }} &middot; <span class="font-mono text-xs sm:text-sm">{{ change.table }}</span></span>
-              <span class="text-slate-700"><app-data-change-who [change]="change" [names]="store.names()" /></span>
+              <span class="text-slate-700"><app-data-change-who [change]="change" [names]="names()" [me]="me()" unknown="a colleague" /></span>
             </div>
             <app-field-diff [fields]="change.fields" [operation]="change.operation" />
           </li>
@@ -47,6 +48,12 @@ import { DataChangesTabStore } from './data-changes-tab.store';
 })
 export class DataChangesTab {
   readonly requestId = input.required<string>();
+  /** Names the page already has (the history's actors), for people the user list is not readable for. */
+  readonly knownNames = input<ReadonlyMap<string, string>>(new Map());
+  private readonly auth = inject(AuthStore);
+  protected readonly me = computed(() => this.auth.user()?.userId ?? null);
+  /** The user list's names win; then the page's own; anyone else shows as "a colleague". */
+  protected readonly names = computed(() => new Map([...this.knownNames(), ...this.store.names()]));
   protected readonly store = inject(DataChangesTabStore);
   protected readonly service = serviceLabel;
   protected readonly skeletonRows = [1, 2, 3];

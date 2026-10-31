@@ -41,10 +41,20 @@ export class DataChangeWho {
   readonly change = input.required<DataChangeDto>();
   /** user id to display name; empty when the names could not be read. */
   readonly names = input<ReadonlyMap<string, string>>(new Map());
+  /** The signed-in user's ID: their own changes read "you". */
+  readonly me = input<string | null>(null);
+  /** What to show for someone whose name is not known; without it the ID shows (the admin log). */
+  readonly unknown = input<string | null>(null);
 
   protected readonly name = computed(() => {
     const change = this.change();
     const id = change.userId ?? change.actorId;
-    return id ? (this.names().get(id) ?? id) : 'the app';
+    if (!id) {
+      return 'the app';
+    }
+    if (id === this.me()) {
+      return 'you';
+    }
+    return this.names().get(id) ?? this.unknown() ?? id;
   });
 }
