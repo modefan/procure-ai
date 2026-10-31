@@ -29,10 +29,24 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 
     public string ChatConnectionString => MongoConnectionStringFor(ChatDatabase);
 
-    protected override Task MigrateAsync(string connectionString) =>
+    protected override Task MigrateAsync(string connectionString) => MigrateAsync(connectionString, ChatConnectionString);
+
+    /// <summary>
+    /// Another Postgres database and another chat database on the same servers, migrated and demo-seeded like the shared ones (for a test
+    /// that must not touch them). Returns both connection strings.
+    /// </summary>
+    public async Task<(string Database, string Chat)> CreateSeededDatabasesAsync(string name)
+    {
+        var database = await CreateEmptyDatabaseAsync(name);
+        var chat = MongoConnectionStringFor(name + "_chat");
+        await MigrateAsync(database, chat);
+        return (database, chat);
+    }
+
+    private Task MigrateAsync(string connectionString, string chat) =>
         ApiMigrateProcess.RunAsync(
             ApiAssembly, Database, connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true,
-            environment: new Dictionary<string, string> { [$"ConnectionStrings__{ChatDatabase}"] = ChatConnectionString });
+            environment: new Dictionary<string, string> { [$"ConnectionStrings__{ChatDatabase}"] = chat });
 }
 
 /// <summary>
@@ -44,8 +58,10 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 /// </summary>
 public sealed class AssistantApiFactory(
     AssistantInfraFixture infra, StubAccessServer access, IEnumerable<KeyValuePair<string, string?>> services, List<Activity> exportedActivities,
-    EmbeddingProbe embeddings, ChatScript script, ChatFaults faults)
-    : ServiceApiFactory<Program>(AssistantInfraFixture.Database, infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
+    EmbeddingProbe embeddings, ChatScript script, ChatFaults faults, (string Database, string Chat)? databases = null,
+    IReadOnlyDictionary<string, string?>? settings = null)
+    : ServiceApiFactory<Program>(
+        AssistantInfraFixture.Database, databases?.Database ?? infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     /// <summary>The client of our own services' tokens (<c>azp</c>): Invoicing reads a stored scan with one.</summary>
     public const string InternalClientId = "procure-internal-test";
@@ -59,7 +75,12 @@ public sealed class AssistantApiFactory(
             builder.UseSetting(key, value);
         }
 
-        builder.UseSetting($"ConnectionStrings:{AssistantInfraFixture.ChatDatabase}", infra.ChatConnectionString);
+        builder.UseSetting($"ConnectionStrings:{AssistantInfraFixture.ChatDatabase}", databases?.Chat ?? infra.ChatConnectionString);
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(key, value);
+        }
+
         builder.UseSetting("AI:Fake:StreamDelayMs", "0");
         // A provider that stops answering fails the call after 2 s without an update (the scripted "hangs" question).
         builder.UseSetting("AI:Chat:Timeout", "00:00:02");
@@ -137,6 +158,13 @@ public sealed class AssistantApp : IAsyncLifetime
     /// <summary>Every embedding call of the service (see <see cref="EmbeddingProbe"/>).</summary>
     public EmbeddingProbe Embeddings { get; } = new();
 
+    private IEnumerable<KeyValuePair<string, string?>> StubSettings =>
+        Requests.Settings.Concat(Approvals.Settings).Concat(Budgets.Settings).Concat(Suppliers.Settings);
+
+    /// <summary>Another instance of the API on databases of its own (the caller disposes it), with settings of the test's own.</summary>
+    public AssistantApiFactory CreateInstance((string Database, string Chat) databases, IReadOnlyDictionary<string, string?> settings) =>
+        new(Infra, Access, StubSettings, [], Embeddings, Script, Faults, databases, settings);
+
     public async ValueTask InitializeAsync()
     {
         await Infra.InitializeAsync();
@@ -145,8 +173,7 @@ public sealed class AssistantApp : IAsyncLifetime
         Approvals = await StubApprovalsServer.StartAsync();
         Budgets = await StubBudgetsServer.StartAsync();
         Suppliers = await StubSuppliersServer.StartAsync();
-        var services = Requests.Settings.Concat(Approvals.Settings).Concat(Budgets.Settings).Concat(Suppliers.Settings);
-        _factory = new AssistantApiFactory(Infra, Access, services, ExportedActivities, Embeddings, Script, Faults);
+        _factory = new AssistantApiFactory(Infra, Access, StubSettings, ExportedActivities, Embeddings, Script, Faults);
         Client = _factory.CreateClient();
     }
 

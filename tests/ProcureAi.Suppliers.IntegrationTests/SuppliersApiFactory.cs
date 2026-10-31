@@ -31,8 +31,11 @@ public sealed class MongoCommandLog
 /// The real Suppliers API (its Program) on a test server, against the shared MongoDB, RabbitMQ and Redis, with the stub Access service.
 /// The MongoDB client is replaced by one that logs every command, so a test can count what the application asked the database.
 /// </summary>
-public sealed class SuppliersApiFactory(SuppliersInfra infra, StubAccessServer access, MongoCommandLog log)
-    : ServiceApiFactory<Program>("suppliersdb", infra.DatabaseConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
+/// <param name="database">The connection string of another database than the shared one (null: the shared one).</param>
+/// <param name="settings">Settings of the test's own, applied last.</param>
+public sealed class SuppliersApiFactory(
+    SuppliersInfra infra, StubAccessServer access, MongoCommandLog log, string? database = null, IReadOnlyDictionary<string, string?>? settings = null)
+    : ServiceApiFactory<Program>("suppliersdb", database ?? infra.DatabaseConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -43,13 +46,17 @@ public sealed class SuppliersApiFactory(SuppliersInfra infra, StubAccessServer a
         }
 
         builder.UseSetting("Auth:InternalClientId", SuppliersApp.InternalClientId);
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(key, value);
+        }
 
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IMongoClient>();
             services.AddSingleton<IMongoClient>(_ =>
             {
-                var settings = MongoClientSettings.FromUrl(new MongoUrl(infra.DatabaseConnectionString));
+                var settings = MongoClientSettings.FromUrl(new MongoUrl(database ?? infra.DatabaseConnectionString));
                 settings.ClusterConfigurator = cluster => cluster.Subscribe<CommandStartedEvent>(log.Record);
                 return new MongoClient(settings);
             });

@@ -348,6 +348,41 @@ For a service that holds no business data of its own (Notifications: live pushes
   `MongoDebeziumFixture`, which returns once the change stream is open on the server; `MongoFixture.MongoshAsync` changes data outside
   the app. The parser tests run on real Debezium output (`tests/ProcureAi.Audit.Tests/Fixtures/mongo`).
 
+## Demo reset (plan 06 ruling 4)
+
+The public demo is reset every night at 02:00 Africa/Johannesburg. Every service takes part:
+
+- **Endpoint**: `app.MapProcureAiDemoReset("api/v1/<name>")` in `<Name>Api.Build` (BuildingBlocks.Web `Demo/`) maps
+  `POST api/v1/<name>/internal/demo/reset` → 204. Only when `DemoReset:Enabled` is true (off by default; the AppHost sets
+  `DemoReset__Enabled=true` on every api): otherwise the route does not exist and every caller gets 404. `InternalPolicy` (a service
+  account or the admin key), never a user token, not even an admin's. Not in the OpenAPI document. It runs the service's `IDemoResetter`,
+  then clears the service's whole FusionCache (`ClearAsync(allowFailSafe: false)`: memory, Redis and the other instances through the
+  backplane), which also removes the stored `[Idempotent]` results (else a re-seed with the same Idempotency-Keys would get the old 201 of a
+  request that no longer exists).
+- **`IDemoResetter`** (one per service, in its Infrastructure, registered scoped): deletes the service's business data of every tenant,
+  then writes its own demo seed again. Running it twice must be safe. The pieces:
+  - `WolverineDemoReset.ClearMessageStoreAsync(runtime)`: every envelope (incoming, outgoing, scheduled saga timeouts, dead letters).
+  - `EfDemoReset.DeleteAllRowsAsync(db, keep?)`: loads every row of every root entity type (no query filters) and deletes it with ordinary
+    tracked deletes in one `SaveChanges`, so the audit interceptor writes one Delete row per deleted row in the same transaction and Audit
+    matches every Debezium delete to the app (ruling 5: a reset is never "changed outside the app"). Owned types go with their owner. It
+    keeps `audit_entries` (deleting one would be a captured change without an interceptor row) and Wolverine's tables, and empties
+    `tenant_sequences` (not captured), so numbers start again at PR-0001 and PO-1001. Never use `ExecuteDelete` or `TRUNCATE` on a captured table.
+  - `MongoDemoReset.DeleteAllAsync(collection)`: tenant by tenant through `TenantCollection`, so each delete is stamped "deleting" first.
+    Never `deleteMany` on the raw collection or drop it.
+  - `RedisDemoReset.DeleteKeysAsync(redis, "prefix:*")`: plain Redis state (Notifications' bell, the Assistant's question quotas).
+  - A service with a seed of its own reseeds in the same transaction when it can (Access, Budgets: no moment without a matrix or a budget).
+  - Per service: Access keeps the tenants and the users who registered themselves into the Demo company, and publishes
+    `AccessChanged(Matrix)` per tenant afterwards; Audit (called last) deletes every Marten document and purges the broker queue
+    `wolverine-dead-letter-queue`. The simulators have `POST api/v1/simulators/reset` (admin key): orders, postings, waiting webhooks,
+    number sequences and chaos back to the start.
+- **The caller**: `ProcureAi.DemoData reset` (simulators, then every service in parallel through the gateway with the admin key, then Audit
+  after `DemoData:AuditGrace`, then `seed`; each call retried `ResetRetries` times; a failure exits 1 before Audit, and the next run starts
+  from the beginning). `schedule` runs it at `DemoReset:TimeOfDay` in `DemoReset:TimeZone`. Locally the dashboard command "Reset demo data"
+  on `demo-data` starts the resource once with `reset`.
+- **A new service**: add its resetter, map the endpoint, add its name to `ResetRunner.ParallelServices`, and a
+  `Demo_reset_clears_business_rows_and_reseeds` test (on a database of its own: the reset deletes every tenant's data).
+- **Accepted limit**: a message still on the broker at 02:00 that refers to deleted rows fails and is dead-lettered.
+
 ## Memory of the whole system (measured 2026-10-28, plan 03 Task 12)
 
 The whole AppHost (eight services, six Debezium Servers, the simulators, gateway, Angular dev server) at the end of a system test

@@ -32,6 +32,14 @@ public sealed class AuditInfraFixture() : ServiceInfraFixture("auditdb")
         Password = AuditLogReaderTestPassword,
     }.ConnectionString;
 
+    /// <summary>Another, freshly migrated Audit database on the same Postgres (for a test that must not touch the shared one).</summary>
+    public async Task<string> CreateMigratedDatabaseAsync(string name)
+    {
+        var connectionString = await CreateEmptyDatabaseAsync(name);
+        await MigrateAsync(connectionString);
+        return connectionString;
+    }
+
     protected override Task MigrateAsync(string connectionString) =>
         ApiMigrateProcess.RunAsync(
             ApiAssembly, "auditdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false, ContentRoot,

@@ -33,6 +33,14 @@ public sealed class InvoicingInfraFixture()
         ApiMigrateProcess.RunAsync(
             ApiAssembly, "invoicingdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false,
             contentRoot: "src/Services/Invoicing/ProcureAi.Invoicing.Api");
+
+    /// <summary>Another, freshly migrated Invoicing database on the same Postgres (for a test that must not touch the shared one).</summary>
+    public async Task<string> CreateMigratedDatabaseAsync(string name)
+    {
+        var connectionString = await CreateEmptyDatabaseAsync(name);
+        await MigrateAsync(connectionString);
+        return connectionString;
+    }
 }
 
 /// <summary>One call Invoicing made to the ERP, with the ERP's answer.</summary>
@@ -75,8 +83,8 @@ public sealed class ErpTraffic(Func<HttpMessageHandler> erp) : HttpMessageHandle
 /// </summary>
 public sealed class InvoicingApiFactory(
     InvoicingInfraFixture infra, StubAccessServer access, StubAssistantServer assistant, ErpTraffic erp, List<MetricSnapshot> metrics,
-    InvoiceReadPause readPause)
-    : ServiceApiFactory<Program>("invoicingdb", infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
+    InvoiceReadPause readPause, string? database = null, IReadOnlyDictionary<string, string?>? settings = null)
+    : ServiceApiFactory<Program>("invoicingdb", database ?? infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -98,6 +106,10 @@ public sealed class InvoicingApiFactory(
         builder.UseSetting("Invoicing:OrderViewRetry:InitialDelay", "00:00:00.200");
         builder.UseSetting("Invoicing:OrderViewRetry:MaxDelay", "00:00:01");
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(key, value);
+        }
 
         builder.ConfigureTestServices(services =>
         {

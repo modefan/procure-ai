@@ -23,6 +23,11 @@ public sealed class SuppliersInfra : IAsyncLifetime
 
     public IMongoDatabase Db => _mongo.Client.GetDatabase(Database);
 
+    /// <summary>The connection string of another database on the same MongoDB (for a test that must not touch the shared one).</summary>
+    public string ConnectionStringFor(string database) => _mongo.ConnectionStringFor(database);
+
+    public IMongoClient Client => _mongo.Client;
+
     public async ValueTask InitializeAsync()
     {
         await _mongo.InitializeAsync();

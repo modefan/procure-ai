@@ -25,6 +25,14 @@ public sealed class AccessInfraFixture()
         return tenant;
     }
 
+    /// <summary>Another database on the same Postgres, migrated and demo-seeded like the shared one (for a test that must not touch it).</summary>
+    public async Task<string> CreateSeededDatabaseAsync(string name)
+    {
+        var connectionString = await CreateEmptyDatabaseAsync(name);
+        await MigrateAsync(connectionString);
+        return connectionString;
+    }
+
     // The seed is written before Debezium starts, so it is not captured (seed data is not a user action).
     protected override Task MigrateAsync(string connectionString) =>
         ApiMigrateProcess.RunAsync("ProcureAi.Access.Api.dll", "accessdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true);

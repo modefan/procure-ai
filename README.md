@@ -383,6 +383,15 @@ The seed is safe to run again: it finds each request by title and requester and 
 Idempotency-Key `demo:<tenant>:<key>:<step>`, so nothing is created twice. It ends with exit code 0, or 1 naming the request and the
 step that failed. It takes about two minutes on a fresh start (the simulated supplier confirms after 3 s and invoices after 20 s).
 
+### Nightly reset
+
+Reviewers can change anything, so the demo starts fresh every night at 02:00 (Africa/Johannesburg): `ProcureAi.DemoData reset` resets the
+simulators, then every service in parallel through its internal `POST .../internal/demo/reset` (admin key or service account only, and
+404 unless `DemoReset:Enabled`), then Audit last, and seeds again. The users who registered themselves into the Demo company stay;
+Keycloak is not touched. Each service deletes with its normal write paths, so the audit trail shows the reset as the app's own changes,
+never as "changed outside the app". `ProcureAi.DemoData schedule` runs it every night; locally, the dashboard command **Reset demo data**
+on the `demo-data` resource runs it once. There is no reset button in the app.
+
 ### Try the invoice scan
 
 Acme's first order, **PO-1001**, is seeded from Fabrikam Office: 2 × USB-C Dock and 2 × Laptop Stand, received in full. Fabrikam posts

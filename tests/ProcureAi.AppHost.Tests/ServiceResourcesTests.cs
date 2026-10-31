@@ -723,6 +723,39 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Every_service_api_has_the_demo_reset_switched_on()
+    {
+        // Plan 06 ruling 4: off by default in every service (404), on for the local AppHost.
+        await using var scope = await ModelScope.BuildAsync();
+        var apis = scope.Model.Resources.OfType<ProjectResource>().Where(r => r.Name.EndsWith("-api", StringComparison.Ordinal)).ToList();
+        apis.Count.ShouldBe(10);
+        foreach (var api in apis)
+        {
+            (await EnvironmentOfAsync(api)).ShouldContainKeyAndValue("DemoReset__Enabled", "true", api.Name);
+        }
+
+        foreach (var other in scope.Model.Resources.OfType<ProjectResource>().Where(r => !apis.Contains(r)))
+        {
+            (await EnvironmentOfAsync(other)).ShouldNotContainKey("DemoReset__Enabled", other.Name);
+        }
+    }
+
+    [Fact]
+    public async Task Demo_data_has_a_reset_command_and_reaches_the_simulators()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var demoData = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "demo-data");
+        var simulators = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "simulators");
+
+        var env = await EnvironmentOfAsync(demoData);
+        env["DemoData__SimulatorUrl"].ShouldBeOfType<EndpointReference>().Resource.ShouldBe(simulators);
+        var command = demoData.Annotations.OfType<ResourceCommandAnnotation>().Single(c => c.Name == "reset-demo-data");
+        command.DisplayName.ShouldBe("Reset demo data");
+        command.ConfirmationMessage.ShouldNotBeNullOrWhiteSpace("a reset deletes data: the dashboard asks first");
+    }
+
+    [Fact]
     public async Task Captured_database_gets_its_own_debezium_server_after_the_migration()
     {
         await using var scope = await ModelScope.BuildAsync();

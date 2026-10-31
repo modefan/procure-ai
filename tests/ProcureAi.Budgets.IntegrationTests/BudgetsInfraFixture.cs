@@ -28,6 +28,14 @@ public sealed class BudgetsInfraFixture()
         return budget;
     }
 
+    /// <summary>Another database on the same Postgres, migrated and demo-seeded like the shared one (for a test that must not touch it).</summary>
+    public async Task<string> CreateSeededDatabaseAsync(string name)
+    {
+        var connectionString = await CreateEmptyDatabaseAsync(name);
+        await MigrateAsync(connectionString);
+        return connectionString;
+    }
+
     public static string NewTenant() => $"t{Guid.NewGuid():N}"[..12];
 
     // The seed is written before Debezium starts, so it is not captured (seed data is not a user action).

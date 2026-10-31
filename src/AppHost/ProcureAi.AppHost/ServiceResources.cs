@@ -134,6 +134,8 @@ public static class ServiceResources
             .WithHttpEndpoint(name: "http")
             // The Angular dev panel asks for the "behind the scenes" response headers (X-Cache, X-Policy, ...).
             .WithEnvironment("DevPanel__Enabled", "true")
+            // The nightly demo reset's endpoint (plan 06 ruling 4; off by default, 404): ProcureAi.DemoData calls it through the gateway.
+            .WithEnvironment("DemoReset__Enabled", "true")
             .WithEnvironment("Service__Store", spec.Store.ToString())
             .WithReference(shared.RabbitMq)
             .WithReference(shared.Redis)

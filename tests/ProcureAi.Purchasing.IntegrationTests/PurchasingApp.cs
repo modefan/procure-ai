@@ -38,12 +38,23 @@ public sealed class PurchasingInfraFixture()
         ApiMigrateProcess.RunAsync(
             ApiAssembly, "purchasingdb", connectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false,
             contentRoot: "src/Services/Purchasing/ProcureAi.Purchasing.Api");
+
+    /// <summary>Another, freshly migrated Purchasing database on the same Postgres (for a test that must not touch the shared one).</summary>
+    public async Task<string> CreateMigratedDatabaseAsync(string name)
+    {
+        var connectionString = await CreateEmptyDatabaseAsync(name);
+        await MigrateAsync(connectionString);
+        return connectionString;
+    }
 }
 
 /// <summary>The real Purchasing API on a test server, against the shared infrastructure, the stub Access and the simulator.</summary>
+/// <param name="database">Another database than the shared one (null: the shared one).</param>
+/// <param name="settings">Settings of the test's own, applied last.</param>
 public sealed class PurchasingApiFactory(
-    PurchasingInfraFixture infra, StubAccessServer access, SupplierTraffic supplier, TestHooks hooks, List<MetricSnapshot> metrics)
-    : ServiceApiFactory<Program>("purchasingdb", infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
+    PurchasingInfraFixture infra, StubAccessServer access, SupplierTraffic supplier, TestHooks hooks, List<MetricSnapshot> metrics,
+    string? database = null, IReadOnlyDictionary<string, string?>? settings = null)
+    : ServiceApiFactory<Program>("purchasingdb", database ?? infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -64,6 +75,10 @@ public sealed class PurchasingApiFactory(
         builder.UseSetting("Purchasing:SupplierDelivery:MaxDelay", "00:00:01");
         builder.UseSetting("Purchasing:WaitingOrdersRefresh", "00:00:01");
         builder.UseSetting("RateLimiting:PermitLimit", "100000");
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(key, value);
+        }
 
         builder.ConfigureTestServices(services =>
         {

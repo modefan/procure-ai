@@ -345,13 +345,27 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
 // The demo data (plan 06 rulings 1-3): once the gateway is healthy, `seed` drives the scenario requests of acme and globex to every state
 // through the gateway with the admin key, as the demo users. It ends when done (exit code 0) and is safe to run again: it resumes what is
 // there and creates nothing twice. The gateway serves the development certificate locally, hence the untrusted-certificate switch.
+// The dashboard command "Reset demo data" (plan 06 ruling 4) starts the same resource once more with `reset` (clear every service, then seed);
+// any other start runs `seed` again. The nightly 02:00 loop is `schedule` (plan 07 turns `reset` into a Kubernetes CronJob instead).
+var demoDataRun = new DemoDataRun();
 builder.AddProject<Projects.ProcureAi_DemoData>(ResourceNames.DemoData)
-    .WithArgs("seed")
+    .WithArgs(context => context.Args.Add(demoDataRun.Next()))
     .WithEnvironment("DemoData__GatewayUrl", gateway.GetEndpoint("https"))
+    .WithEnvironment("DemoData__SimulatorUrl", simulators.GetEndpoint("http"))
     .WithEnvironment("DemoData__AdminApiKey", adminApiKey)
     .WithEnvironment("DemoData__AllowUntrustedServerCertificate", "true")
     .WaitFor(gateway)
-    .WithDotNetLimits(limits.DotNet);
+    .WithDotNetLimits(limits.DotNet)
+    .WithCommand(
+        DemoDataRun.ResetCommand,
+        "Reset demo data",
+        demoDataRun.ResetAsync,
+        new CommandOptions
+        {
+            Description = "Deletes every service's data (the users who registered in the Demo company stay) and seeds the demo data again.",
+            ConfirmationMessage = "Delete all demo data and seed it again? Everything reviewers changed is lost.",
+            IconName = "ArrowCounterclockwise",
+        });
 
 // The app as users open it: the links in the notification emails. An endpoint reference only (the gateway waits for Notifications, not
 // the other way round).
