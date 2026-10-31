@@ -46,7 +46,17 @@ public static class DemoResetEndpoints
         var logger = loggers.CreateLogger(typeof(DemoResetEndpoints).FullName!);
         var clock = Stopwatch.StartNew();
         logger.LogWarning("Demo reset of {Service} started by {Caller}", service.Name, caller.IsAdminApiKey ? "the admin key" : caller.UserId);
-        await resetter.ResetAsync(cancellationToken);
+        try
+        {
+            await resetter.ResetAsync(cancellationToken);
+        }
+        catch (TimeoutException exception)
+        {
+            // Not ready to reset yet (DemoResetOptions.DrainTimeout): the caller retries.
+            logger.LogWarning("Demo reset of {Service} not run: {Reason}", service.Name, exception.Message);
+            return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
         // Remove, not expire: no fail-safe may bring back an answer about data that is gone.
         await cache.ClearAsync(allowFailSafe: false, token: CancellationToken.None);
         logger.LogWarning("Demo reset of {Service} done in {Milliseconds} ms", service.Name, clock.ElapsedMilliseconds);

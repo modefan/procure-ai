@@ -16,11 +16,50 @@ namespace ProcureAi.Audit.Infrastructure;
 public sealed class AuditDemoResetter(
     IDocumentStore store, IWolverineRuntime runtime, IConfiguration configuration, ILogger<AuditDemoResetter> logger) : IDemoResetter
 {
+    private static readonly string[] Queues =
+        [DependencyInjection.CdcQueue, DependencyInjection.CdcMongoQueue, DependencyInjection.EventsQueue];
+
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
+        await WaitUntilQuietAsync(cancellationToken);
         await WolverineDemoReset.ClearMessageStoreAsync(runtime);
         await store.Advanced.Clean.DeleteAllDocumentsAsync(cancellationToken);
         var deadLetters = await WolverineDemoReset.PurgeBrokerDeadLettersAsync(configuration, cancellationToken);
         logger.LogInformation("Demo reset deleted every audit document and {DeadLetters} broker dead letters", deadLetters);
+    }
+
+    /// <summary>
+    /// Waits until the change data capture and events of the other services' resets are all handled: Audit's queues on the broker and its
+    /// inbox stay empty for <see cref="DemoResetOptions.QuietPeriod"/>. One reset transaction can carry hundreds of changes; clearing while
+    /// they are handled would keep the later half without the earlier (each change's interceptor row would be missing: false alerts).
+    /// </summary>
+    private async Task WaitUntilQuietAsync(CancellationToken cancellationToken)
+    {
+        var options = configuration.GetSection(DemoResetOptions.SectionName).Get<DemoResetOptions>() ?? new DemoResetOptions();
+        var poll = TimeSpan.FromMilliseconds(500);
+        var deadline = DateTimeOffset.UtcNow + options.DrainTimeout;
+        var quietSince = (DateTimeOffset?)null;
+        while (true)
+        {
+            var waiting = await WolverineDemoReset.QueueDepthAsync(configuration, Queues, cancellationToken)
+                          + (await runtime.Storage.Admin.FetchCountsAsync()).Incoming;
+            var now = DateTimeOffset.UtcNow;
+            if (waiting > 0)
+            {
+                quietSince = null;
+            }
+            else if ((quietSince ??= now) + options.QuietPeriod <= now)
+            {
+                return;
+            }
+
+            if (now > deadline)
+            {
+                throw new TimeoutException(
+                    $"Audit still had {waiting} message(s) to handle after {options.DrainTimeout}; the reset was not run (try again).");
+            }
+
+            await Task.Delay(poll, cancellationToken);
+        }
     }
 }

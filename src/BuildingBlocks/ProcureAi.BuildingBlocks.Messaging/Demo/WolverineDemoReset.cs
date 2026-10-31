@@ -16,6 +16,35 @@ public static class WolverineDemoReset
     /// </summary>
     public static Task ClearMessageStoreAsync(IWolverineRuntime runtime) => runtime.Storage.Admin.ClearAllAsync();
 
+    /// <summary>Messages waiting in each of <paramref name="queues"/> on the broker (0 for a queue that does not exist yet).</summary>
+    public static async Task<long> QueueDepthAsync(IConfiguration configuration, IEnumerable<string> queues, CancellationToken cancellationToken)
+    {
+        var connectionString = configuration.GetConnectionString(MessagingSetup.RabbitMqConnectionName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return 0;
+        }
+
+        var factory = new ConnectionFactory { Uri = new Uri(connectionString), ClientProvidedName = "demo-reset" };
+        await using var connection = await factory.CreateConnectionAsync(cancellationToken);
+        long depth = 0;
+        foreach (var queue in queues)
+        {
+            // A failed passive declare closes the channel: one channel per queue.
+            await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+            try
+            {
+                depth += (await channel.QueueDeclarePassiveAsync(queue, cancellationToken)).MessageCount;
+            }
+            catch (OperationInterruptedException)
+            {
+                // not declared yet
+            }
+        }
+
+        return depth;
+    }
+
     /// <summary>
     /// Empties the broker's shared dead-letter queue <see cref="WolverineCounts.BrokerDeadLetterQueue"/> (with RabbitMQ, a message moved to
     /// the error queue lands there, not in the store's table). Nothing to do when it does not exist yet. Returns how many were purged.

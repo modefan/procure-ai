@@ -372,7 +372,7 @@ The public demo is reset every night at 02:00 Africa/Johannesburg. Every service
   - `RedisDemoReset.DeleteKeysAsync(redis, "prefix:*")`: plain Redis state (Notifications' bell, the Assistant's question quotas).
   - A service with a seed of its own reseeds in the same transaction when it can (Access, Budgets: no moment without a matrix or a budget).
   - Per service: Access keeps the tenants and the users who registered themselves into the Demo company, and publishes
-    `AccessChanged(Matrix)` per tenant afterwards; Audit (called last) deletes every Marten document and purges the broker queue
+    `AccessChanged(Matrix)` per tenant afterwards; Audit (called last) first waits until its CDC and event queues and its inbox have been empty for `DemoReset:QuietPeriod` (3 s; at most `DemoReset:DrainTimeout`, 2 min, else 503 and the caller retries: clearing in the middle of a reset transaction's 600 changes left the later half without the interceptor rows of the earlier half, false alerts), then deletes every Marten document and purges the broker queue
     `wolverine-dead-letter-queue`. The simulators have `POST api/v1/simulators/reset` (admin key): orders, postings, waiting webhooks,
     number sequences and chaos back to the start.
 - **The caller**: `ProcureAi.DemoData reset` (simulators, then every service in parallel through the gateway with the admin key, then Audit

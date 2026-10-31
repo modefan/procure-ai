@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Aspire.Hosting.Testing;
 using System.Net;
 using System.Net.Http.Json;
@@ -91,9 +92,11 @@ public sealed class DemoDataTests(SystemFixture system)
         system.RequireReady();
         var extra = await CreateExtraRequestAsync("Extra chairs a reviewer added");
 
-        await ResetAndSeedAsync(checkOutsideApp: true);
+        // The first reset checks the deletes themselves (before Audit is cleared); the second runs exactly like the tool (Audit right after
+        // the grace period) and checks that nothing the services' resets caused is left half-matched after Audit's reset.
+        await ResetAndSeedAsync(checkDeletes: true);
         var first = await StableSnapshotAsync();
-        await ResetAndSeedAsync(checkOutsideApp: false);
+        await ResetAndSeedAsync(checkAfterSeed: true);
         var second = await StableSnapshotAsync();
 
         second.ShouldBe(first);
@@ -116,7 +119,7 @@ public sealed class DemoDataTests(SystemFixture system)
         await SystemFlow.EventuallyAsync(
             () => RequestsOfAsync("acme", tom), list => list.Any(r => r.Id == extra.Id), "the extra request listed", TimeSpan.FromSeconds(10));
 
-        await ResetAndSeedAsync(checkOutsideApp: false);
+        await ResetAndSeedAsync();
 
         var listed = await RequestsOfAsync("acme", tom);
         listed.ShouldNotContain(r => r.Id == extra.Id || r.Title == extra.Title);
@@ -149,15 +152,17 @@ public sealed class DemoDataTests(SystemFixture system)
     }
 
     /// <summary>
-    /// The reset as <c>ProcureAi.DemoData reset</c> runs it (simulators, the services, Audit after the grace period), then the seed. With
-    /// <paramref name="checkOutsideApp"/>, between the services and Audit: every change Audit got (the deletes too) is attributed to the app.
+    /// The reset as <c>ProcureAi.DemoData reset</c> runs it (simulators, the services, Audit after the grace period), then the seed.
+    /// <paramref name="checkDeletes"/>: between the services and Audit, every change Audit got (the deletes too) is attributed to the app.
+    /// <paramref name="checkAfterSeed"/>: after the seed, every change Audit has is attributed to the app (none left half-matched by Audit's
+    /// own reset).
     /// </summary>
-    private async Task ResetAndSeedAsync(bool checkOutsideApp)
+    private async Task ResetAndSeedAsync(bool checkDeletes = false, bool checkAfterSeed = false)
     {
         var clock = Stopwatch.StartNew();
         var resetter = Resetter();
         (await resetter.ResetServicesAsync(TestContext.Current.CancellationToken)).ShouldBeTrue("a service's reset failed");
-        if (checkOutsideApp)
+        if (checkDeletes)
         {
             await new SystemFlow(system).NoOutsideAppChangesAsync();
         }
@@ -165,8 +170,17 @@ public sealed class DemoDataTests(SystemFixture system)
         (await resetter.ResetAuditAsync(TestContext.Current.CancellationToken)).ShouldBeTrue("the reset of Audit failed");
         var reset = clock.Elapsed;
 
+        using var watching = new CancellationTokenSource();
+        var invoicingLog = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var watch = WatchAsync("invoicing-api", invoicingLog, watching.Token);
         var results = await Task.WhenAll(AllScenarios.Select(s => Runner().RunAsync(s, TestContext.Current.CancellationToken)));
-        results.SelectMany(r => r.Failures).Select(f => f.Message).ShouldBeEmpty();
+        await watching.CancelAsync();
+        await watch;
+        var failures = results.SelectMany(r => r.Failures).Select(f => f.Message).ToList();
+        failures.ShouldBeEmpty(
+            "invoicing-api errors during the seed:" + Environment.NewLine
+            + string.Join(Environment.NewLine, invoicingLog.Where(l => l.Contains("fail", StringComparison.OrdinalIgnoreCase)
+                || l.Contains("Exception", StringComparison.Ordinal) || l.StartsWith("   at ", StringComparison.Ordinal)).Take(80)));
         foreach (var result in results)
         {
             result.Created.ShouldBe(AllScenarios.Single(s => s.Tenant == result.Tenant).Requests.Count, result.Tenant);
@@ -174,6 +188,29 @@ public sealed class DemoDataTests(SystemFixture system)
 
         TestContext.Current.SendDiagnosticMessage(
             $"Demo reset {reset.TotalSeconds:0} s, seed {(clock.Elapsed - reset).TotalSeconds:0} s, total {clock.Elapsed.TotalSeconds:0} s");
+        if (checkAfterSeed)
+        {
+            await new SystemFlow(system).NoOutsideAppChangesAsync();
+        }
+    }
+
+    /// <summary>Collects a resource's console log lines until cancelled.</summary>
+    private async Task WatchAsync(string resource, System.Collections.Concurrent.ConcurrentQueue<string> lines, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var logs = system.App.Services.GetRequiredService<Aspire.Hosting.ApplicationModel.ResourceLoggerService>();
+            await foreach (var batch in logs.WatchAsync(resource).WithCancellation(cancellationToken))
+            {
+                foreach (var line in batch)
+                {
+                    lines.Enqueue(line.Content);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     /// <summary>A snapshot once two reads 3 s apart agree (the last payments' budget spend lands shortly after the seed ends).</summary>
@@ -201,14 +238,19 @@ public sealed class DemoDataTests(SystemFixture system)
         var lines = new List<string>();
         foreach (var tenant in AllScenarios.Select(s => s.Tenant))
         {
+            // Requests are created one by one (their numbers are fixed) and PO-1001 is driven alone; the other orders and the supplier's
+            // invoice numbers follow the order the parallel seed reaches the supplier, so they are keyed by their request's title here.
             var requests = await GetAsync<Paged<SeededRequest>>(tenant, null, "/api/v1/requests?pageSize=100");
             lines.AddRange(requests.Items.OrderBy(r => r.Number, StringComparer.Ordinal)
-                .Select(r => $"{tenant} request {r.Number} {r.Title} {r.Status} {r.OrderNumber}"));
+                .Select(r => $"{tenant} request {r.Number} {r.Title} {r.Status} {(r.OrderNumber is "PO-1001" or null ? r.OrderNumber : "ordered")}"));
+            var titles = requests.Items.Where(r => r.OrderId is not null).ToDictionary(r => r.OrderId!.Value, r => r.Title);
             var budgets = await GetAsync<List<BudgetView>>(tenant, null, "/api/v1/budgets");
             lines.AddRange(budgets.OrderBy(b => b.CostCenterCode + b.FiscalYear, StringComparer.Ordinal)
                 .Select(b => $"{tenant} budget {b.CostCenterCode} {b.FiscalYear} reserved {b.Reserved} spent {b.Spent}"));
             var invoices = await GetAsync<Paged<InvoiceView>>(tenant, null, "/api/v1/invoicing/invoices?pageSize=100");
-            lines.AddRange(invoices.Items.Select(i => $"{tenant} invoice {i.SupplierInvoiceNumber} {i.Status}").OrderBy(l => l, StringComparer.Ordinal));
+            lines.AddRange(invoices.Items
+                .Select(i => $"{tenant} invoice of {titles.GetValueOrDefault(i.OrderId, "another order")} {i.Source} {i.Status}")
+                .OrderBy(l => l, StringComparer.Ordinal));
         }
 
         return lines;
