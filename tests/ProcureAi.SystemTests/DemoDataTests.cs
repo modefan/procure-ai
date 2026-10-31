@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Aspire.Hosting.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -19,9 +19,9 @@ public sealed class DemoDataRun
 
     public async Task<ExecuteCommandResult> ResetAsync(ExecuteCommandContext context)
     {
-        var model = context.ServiceProvider.GetRequiredService<DistributedApplicationModel>();
+        var model = context.Services.GetRequiredService<DistributedApplicationModel>();
         var resource = model.Resources.Single(r => r.Name == ResourceNames.DemoData);
-        var commands = context.ServiceProvider.GetRequiredService<ResourceCommandService>();
+        var commands = context.Services.GetRequiredService<ResourceCommandService>();
 
         Interlocked.Exchange(ref _resetRequested, 1);
         var started = await commands.ExecuteCommandAsync(resource, KnownResourceCommands.StartCommand, context.CancellationToken);
@@ -34,7 +34,7 @@ public sealed class DemoDataRun
         if (!started.Success)
         {
             Interlocked.Exchange(ref _resetRequested, 0);
-            return CommandResults.Failure(started.ErrorMessage ?? "demo-data could not be started.");
+            return CommandResults.Failure(started.Message ?? "demo-data could not be started.");
         }
 
         return CommandResults.Success();
