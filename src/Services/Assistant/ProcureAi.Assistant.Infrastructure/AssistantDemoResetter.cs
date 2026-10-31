@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using ProcureAi.Assistant.Infrastructure.Chat;
@@ -21,7 +22,6 @@ namespace ProcureAi.Assistant.Infrastructure;
 /// </summary>
 public sealed class AssistantDemoResetter(
     AssistantDbContext db,
-    IWolverineRuntime runtime,
     IMongoDatabase chat,
     IConnectionMultiplexer redis,
     IServiceProvider services,
@@ -30,7 +30,7 @@ public sealed class AssistantDemoResetter(
 {
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
-        await WolverineDemoReset.ClearMessageStoreAsync(runtime);
+        await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
         var rows = await EfDemoReset.DeleteAllRowsAsync(db, cancellationToken: cancellationToken);
         var conversations = await MongoDemoReset.DeleteAllAsync(
             chat.GetCollection<ConversationDocument>(MongoConversationStore.CollectionName), time, cancellationToken);

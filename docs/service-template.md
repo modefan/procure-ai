@@ -361,7 +361,8 @@ The public demo is reset every night at 02:00 Africa/Johannesburg. Every service
   request that no longer exists).
 - **`IDemoResetter`** (one per service, in its Infrastructure, registered scoped): deletes the service's business data of every tenant,
   then writes its own demo seed again. Running it twice must be safe. The pieces:
-  - `WolverineDemoReset.ClearMessageStoreAsync(runtime)`: every envelope (incoming, outgoing, scheduled saga timeouts, dead letters).
+  - `WolverineDemoReset.ClearEnvelopesAsync(connectionString)`: every envelope (incoming, outgoing, scheduled saga timeouts, dead letters),
+    by plain deletes of the three envelope tables. Not `IMessageStoreAdmin.ClearAllAsync`: on a running node it also clears Wolverine's node records.
   - `EfDemoReset.DeleteAllRowsAsync(db, keep?)`: loads every row of every root entity type (no query filters) and deletes it with ordinary
     tracked deletes in one `SaveChanges`, so the audit interceptor writes one Delete row per deleted row in the same transaction and Audit
     matches every Debezium delete to the app (ruling 5: a reset is never "changed outside the app"). Owned types go with their owner. It

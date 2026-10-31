@@ -404,8 +404,27 @@ public sealed class DemoDataTests(SystemFixture system)
             ScenarioDirectory = "Scenarios",
             AllowUntrustedServerCertificate = true,
         });
-        var gateway = new GatewayClient(system.Gateway(), options);
+        var gateway = new GatewayClient(ResilientGateway(), options);
         return new ScenarioRunner(gateway, options, TimeProvider.System, NullLogger<ScenarioRunner>.Instance);
+    }
+
+    /// <summary>
+    /// A gateway client with the standard resilience handler, as ProcureAi.DemoData registers it: a 5xx while the whole stack is busy (the
+    /// shared Postgres has been seen at its connection limit, 53300, during a seed) is retried like the tool retries it.
+    /// </summary>
+    private HttpClient ResilientGateway()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient("gateway")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+            })
+            .AddStandardResilienceHandler();
+        var http = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>().CreateClient("gateway");
+        http.BaseAddress = system.Gateway().BaseAddress;
+        http.Timeout = Timeout.InfiniteTimeSpan;
+        return http;
     }
 
     private sealed record OrderSummary(Guid Id, string Number, string SupplierId, string Status);

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ProcureAi.Access.Application.Commands;
 using ProcureAi.Access.Domain;
@@ -18,13 +19,13 @@ namespace ProcureAi.Access.Infrastructure;
 /// answers, also those cached while the reset ran.
 /// </summary>
 public sealed class AccessDemoResetter(
-    AccessDbContext db, IWolverineRuntime runtime, IMessageBus bus, TimeProvider time, ILogger<AccessDemoResetter> logger) : IDemoResetter
+    AccessDbContext db, IMessageBus bus, TimeProvider time, ILogger<AccessDemoResetter> logger) : IDemoResetter
 {
     public const string DemoTenant = "demo";
 
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
-        await WolverineDemoReset.ClearMessageStoreAsync(runtime);
+        await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
 
         var seededDemoUsers = DemoSeeder.Users().Where(u => u.TenantId == DemoTenant).Select(u => u.UserId).ToHashSet(StringComparer.Ordinal);
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.Budgets.Application;
@@ -15,12 +16,12 @@ namespace ProcureAi.Budgets.Infrastructure;
 /// budget). The reservations come back when ProcureAi.DemoData submits the requests again.
 /// </summary>
 public sealed class BudgetsDemoResetter(
-    BudgetsDbContext db, IWolverineRuntime runtime, IOptions<BudgetsOptions> options, TimeProvider time, ILogger<BudgetsDemoResetter> logger)
+    BudgetsDbContext db, IOptions<BudgetsOptions> options, TimeProvider time, ILogger<BudgetsDemoResetter> logger)
     : IDemoResetter
 {
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
-        await WolverineDemoReset.ClearMessageStoreAsync(runtime);
+        await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var deleted = await EfDemoReset.DeleteAllRowsAsync(db, cancellationToken: cancellationToken);
         await DemoSeeder.SeedAsync(db, FiscalYear.For(time.GetUtcNow(), options.Value.Zone), cancellationToken);

@@ -22,7 +22,10 @@ public sealed class AuditDemoResetter(
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
         await WaitUntilQuietAsync(cancellationToken);
-        await WolverineDemoReset.ClearMessageStoreAsync(runtime);
+        await WolverineDemoReset.ClearEnvelopesAsync(
+            configuration.GetConnectionString(DependencyInjection.DatabaseConnectionName)
+            ?? throw new InvalidOperationException("The audit database connection string is missing."),
+            cancellationToken);
         await store.Advanced.Clean.DeleteAllDocumentsAsync(cancellationToken);
         var deadLetters = await WolverineDemoReset.PurgeBrokerDeadLettersAsync(configuration, cancellationToken);
         logger.LogInformation("Demo reset deleted every audit document and {DeadLetters} broker dead letters", deadLetters);

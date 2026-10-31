@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Persistence;
@@ -11,11 +12,11 @@ namespace ProcureAi.Requests.Infrastructure;
 /// the audit interceptor attributes each to the app) and the number counters. The service has no seed of its own: ProcureAi.DemoData
 /// creates its data again through the API.
 /// </summary>
-public sealed class RequestsDemoResetter(RequestsDbContext db, IWolverineRuntime runtime, ILogger<RequestsDemoResetter> logger) : IDemoResetter
+public sealed class RequestsDemoResetter(RequestsDbContext db, ILogger<RequestsDemoResetter> logger) : IDemoResetter
 {
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
-        await WolverineDemoReset.ClearMessageStoreAsync(runtime);
+        await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
         var deleted = await EfDemoReset.DeleteAllRowsAsync(db, cancellationToken: cancellationToken);
         logger.LogInformation("Demo reset deleted {Count} rows", deleted);
     }
