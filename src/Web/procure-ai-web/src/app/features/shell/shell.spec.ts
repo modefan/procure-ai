@@ -13,7 +13,15 @@ import { DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { Shell } from './shell';
 
 describe('Shell header', () => {
-  const user = signal<{ userId: string; name: string; tenantId: string; tenantName?: string | null; roles: string[]; permissions: string[] } | null>(null);
+  const user = signal<{
+    userId: string;
+    name: string;
+    tenantId: string;
+    tenantName?: string | null;
+    tenants?: { id: string; name: string }[];
+    roles: string[];
+    permissions: string[];
+  } | null>(null);
   const state = signal<LiveState>('connected');
   const items = signal<{ id: string; text: string; link: string; read: boolean; createdAt: string; requestId: string | null }[]>([]);
   const unread = signal(0);
@@ -23,6 +31,7 @@ describe('Shell header', () => {
   const markAllRead = vi.fn().mockResolvedValue(undefined);
   const logout = vi.fn();
   const logoutAll = vi.fn();
+  const switchTenant = vi.fn().mockResolvedValue(undefined);
 
   const signIn = (permissions: string[], roles = ['requester']) =>
     user.set({ userId: 'u1', name: 'Tom Requester', tenantId: 'acme', roles, permissions });
@@ -44,8 +53,10 @@ describe('Shell header', () => {
             user,
             isLoggedIn: () => user() !== null,
             hasPermission: (p: string) => user()?.permissions.includes(p) ?? false,
+            tenants: () => user()?.tenants ?? [],
             logout,
             logoutAll,
+            switchTenant,
           },
         },
         { provide: LiveConnection, useValue: { state } },
@@ -260,6 +271,49 @@ describe('Shell header', () => {
     signIn(['requests.read'], ['manager']);
     user.update((u) => ({ ...u!, tenantName: null }));
     expect(text((await render()).querySelector('[data-testid=user-menu]'))).toContain('Manager · Acme');
+  });
+
+  describe('switch company', () => {
+    const openUserMenu = async () => {
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const el = fixture.nativeElement as HTMLElement;
+      el.querySelector<HTMLButtonElement>('[data-testid=user-menu]')!.click();
+      // The menu renders its items on first open (deferred content).
+      await vi.waitFor(() => {
+        TestBed.tick();
+        expect(text(el.querySelector('[role=menu][aria-label=Account]'))).toContain('Log out');
+      });
+      return { el, fixture };
+    };
+    const switchItems = (el: HTMLElement) => [...el.querySelectorAll('[data-testid=switch-tenant]')];
+
+    beforeEach(() => switchTenant.mockClear());
+
+    it('menu_lists_tenants_when_more_than_one', async () => {
+      signIn(['requests.read'], ['finance']);
+      user.update((u) => ({ ...u!, tenantName: 'Acme Corp', tenants: [{ id: 'acme', name: 'Acme Corp' }, { id: 'globex', name: 'Globex' }] }));
+      const { el, fixture } = await openUserMenu();
+
+      expect(text(el.querySelector('[data-testid=switch-tenant-heading]'))).toBe('Switch company');
+      // Only the other companies are offered; the current one is the one shown under the name.
+      expect(switchItems(el).map(text)).toEqual(['Globex']);
+
+      (switchItems(el)[0] as HTMLElement).click();
+      fixture.detectChanges();
+      expect(switchTenant).toHaveBeenCalledWith('globex');
+    });
+
+    it('no switch entry with a single tenant', async () => {
+      signIn(['requests.read'], ['requester']);
+      user.update((u) => ({ ...u!, tenants: [{ id: 'acme', name: 'Acme Corp' }] }));
+      const { el } = await openUserMenu();
+
+      expect(el.querySelector('[data-testid=switch-tenant-heading]')).toBeNull();
+      expect(switchItems(el)).toEqual([]);
+      expect(text(el.querySelector('[role=menu][aria-label=Account]'))).toContain('Log out');
+    });
   });
 
   describe('admin group', () => {

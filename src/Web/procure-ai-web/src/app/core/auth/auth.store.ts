@@ -14,8 +14,16 @@ export interface BffUser {
   tenantId: string | null;
   /** The company's display name; null when Access could not be asked (show the tenant ID then). */
   tenantName?: string | null;
+  /** The companies this user belongs to (more than one: the user menu offers "Switch company"). Absent from an older gateway. */
+  tenants?: BffTenant[];
   roles: string[];
   permissions: string[];
+}
+
+/** A company the user belongs to. */
+export interface BffTenant {
+  id: string;
+  name: string;
 }
 
 export interface AuthState {
@@ -38,6 +46,9 @@ export const AuthStore = signalStore(
   withComputed(({ user }) => ({
     isLoggedIn: computed(() => user() !== null),
     permissions: computed(() => new Set(user()?.permissions ?? [])),
+    tenants: computed<BffTenant[]>(() => user()?.tenants ?? []),
+    /** The current company's name; its ID when the gateway could not name it. */
+    tenantName: computed(() => user()?.tenantName?.trim() || user()?.tenantId || ''),
   })),
   withMethods((store) => {
     const http = inject(HttpClient);
@@ -116,6 +127,17 @@ export const AuthStore = signalStore(
       /** The session is over (the user declined to log in again): stop the live connection, forget the user and everything the stores hold. */
       endSession(): void {
         forget();
+      },
+
+      /**
+       * Moves to another company the user belongs to. Nothing of the current company may stay on screen or arrive afterwards: every
+       * cache is cleared and the live connection stopped first. Then the browser goes to the gateway (a full page load), which gets a
+       * token for that company and starts a new session; the app starts again there, with a new connection.
+       */
+      async switchTenant(tenantId: string, returnUrl = '/app/dashboard'): Promise<void> {
+        caches.clearAll();
+        await live.stop();
+        location.assign(`/bff/switch-tenant?tenant=${encodeURIComponent(tenantId)}&returnUrl=${encodeURIComponent(returnUrl)}`);
       },
 
       hasPermission(permission: string): boolean {

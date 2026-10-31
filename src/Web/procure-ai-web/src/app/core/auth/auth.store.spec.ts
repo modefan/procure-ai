@@ -167,6 +167,47 @@ describe('AuthStore', () => {
     expect(navigate).toHaveBeenCalledWith('/');
   });
 
+  it('switch_clears_caches_and_stops_live', async () => {
+    const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+    const clearCache = vi.fn();
+    TestBed.inject(CacheRegistry).register({ clearCache });
+
+    await store.switchTenant('globex');
+
+    expect(clearCache).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith('/bff/switch-tenant?tenant=globex&returnUrl=%2Fapp%2Fdashboard');
+    // Nothing of the old company may arrive or be shown while the browser leaves: the caches and the connection go first.
+    expect(stop.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
+    expect(clearCache.mock.invocationCallOrder[0]).toBeLessThan(assign.mock.invocationCallOrder[0]);
+  });
+
+  it('switchTenant encodes the tenant and the return url', async () => {
+    vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+
+    await store.switchTenant('a&b c', '/app/requests?status=open');
+
+    expect(assign).toHaveBeenCalledWith('/bff/switch-tenant?tenant=a%26b%20c&returnUrl=%2Fapp%2Frequests%3Fstatus%3Dopen');
+  });
+
+  it('load() keeps the tenants and tenant name the gateway sends', async () => {
+    const loading = store.load();
+    (await userRequest()).flush({ ...tom, tenantName: 'Acme Corp', tenants: [{ id: 'acme', name: 'Acme Corp' }, { id: 'globex', name: 'Globex' }] });
+    await loading;
+
+    expect(store.tenants()).toEqual([{ id: 'acme', name: 'Acme Corp' }, { id: 'globex', name: 'Globex' }]);
+    expect(store.tenantName()).toBe('Acme Corp');
+  });
+
+  it('tenants falls back to none and tenantName to the tenant id for an older gateway answer', async () => {
+    const loading = store.load();
+    (await userRequest()).flush(tom);
+    await loading;
+
+    expect(store.tenants()).toEqual([]);
+    expect(store.tenantName()).toBe('acme');
+  });
+
   it('endSession() stops the connection', () => {
     const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
     store.endSession();

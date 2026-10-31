@@ -136,6 +136,14 @@ const ADMIN_LINKS: NavLink[] = [
                 aria-label="Account"
               >
                 <ng-template ngMenuContent>
+                  @if (switchTenants().length > 0) {
+                    <div role="group" aria-labelledby="switch-company-heading" class="border-b border-slate-100 pb-1">
+                      <div id="switch-company-heading" data-testid="switch-tenant-heading" class="px-4 pt-2 pb-1 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-600 uppercase">Switch company</div>
+                      @for (tenant of switchTenants(); track tenant.id) {
+                        <div ngMenuItem [value]="'tenant:' + tenant.id" data-testid="switch-tenant" class="cursor-pointer truncate px-4 py-2 text-sm text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:text-indigo-900 focus-visible:outline-offset-[-2px]">{{ tenant.name }}</div>
+                      }
+                    </div>
+                  }
                   <div ngMenuItem value="logout" class="cursor-pointer px-4 py-2 text-sm text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:text-indigo-900 focus-visible:outline-offset-[-2px]">Log out</div>
                   <div ngMenuItem value="logout-all" class="cursor-pointer px-4 py-2 text-sm whitespace-nowrap text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:text-indigo-900 focus-visible:outline-offset-[-2px]">Log out everywhere</div>
                   @if (devPanel.enabled()) {
@@ -259,6 +267,13 @@ export class Shell {
   /** True while an admin page is open (the Admin button then looks active). */
   protected readonly adminActive = signal(false);
 
+  /** The other companies this user belongs to (the "Switch company" group of the user menu); none unless there is more than one. */
+  protected readonly switchTenants = computed(() => {
+    const tenants = this.auth.tenants();
+    const current = this.auth.user()?.tenantId;
+    return tenants.length > 1 ? tenants.filter((tenant) => tenant.id !== current) : [];
+  });
+
   protected readonly roleAndTenant = computed(() => {
     const user = this.auth.user();
     const role = user?.roles[0] ? capitalise(user.roles[0]) : '';
@@ -339,6 +354,8 @@ export class Shell {
       void this.auth.logout();
     } else if (value === 'logout-all') {
       void this.auth.logoutAll();
+    } else if (value?.startsWith('tenant:')) {
+      void this.auth.switchTenant(value.slice('tenant:'.length));
     } else if (value === 'dev-panel') {
       this.devPanel.toggle();
     }
