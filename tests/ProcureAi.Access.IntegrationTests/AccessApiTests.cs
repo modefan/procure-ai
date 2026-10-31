@@ -254,7 +254,8 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         var approvers = await ReadAsync<CostCenterApproversDto>(own);
         approvers.Manager.ShouldNotBeNull().UserId.ShouldBe(DemoUsers.Ben);
         approvers.DepartmentHead.ShouldBeNull("the OPS department has no head");
-        approvers.Finance.ShouldBeEmpty();
+        // Thandi works for Globex too (plan 06 Task 14), as its finance approver.
+        approvers.Finance.Select(f => f.UserId).ShouldBe([DemoUsers.Thandi]);
     }
 
     [Fact]
@@ -424,7 +425,7 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
     public async Task Approval_limit_below_zero_is_a_400_and_an_unknown_user_a_404()
     {
         var users = await ReadAsync<List<UserDto>>(await _client.SendAsync(Request(HttpMethod.Get, $"{Base}/users", AdminToken(Globex)), Ct));
-        var ben = users.Single();
+        var ben = users.Single(u => u.UserId == DemoUsers.Ben);
 
         var negative = await _client.SendAsync(
             Request(HttpMethod.Put, $"{Base}/users/{DemoUsers.Ben}/approval-limit", AdminToken(Globex), ifMatch: ETag(ben.Version), body: new { amount = -1m }), Ct);
