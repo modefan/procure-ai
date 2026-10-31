@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace ProcureAi.DemoData;
 
 /// <summary>Configuration section <c>DemoData</c>. Defaults live in appsettings.json; the AppHost sets the gateway URL and the admin key.</summary>
-public sealed class DemoDataOptions
+public sealed class DemoDataOptions : IValidatableObject
 {
     public const string Section = "DemoData";
 
@@ -36,6 +36,17 @@ public sealed class DemoDataOptions
     /// certificate; off by default, so a deployment validates.
     /// </summary>
     public bool AllowUntrustedServerCertificate { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (AllowUntrustedServerCertificate
+            && (!Uri.TryCreate(GatewayUrl, UriKind.Absolute, out var gateway) || !GatewayCertificates.AcceptsUntrusted(gateway)))
+        {
+            yield return new ValidationResult(
+                "AllowUntrustedServerCertificate is only allowed for a gateway on localhost (127.0.0.1, ::1): the admin key is sent to it.",
+                [nameof(AllowUntrustedServerCertificate)]);
+        }
+    }
 
     public string ScenarioPath => Path.IsPathRooted(ScenarioDirectory) ? ScenarioDirectory : Path.Combine(AppContext.BaseDirectory, ScenarioDirectory);
 }

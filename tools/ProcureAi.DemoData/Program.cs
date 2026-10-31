@@ -38,8 +38,11 @@ builder.Services.AddHttpClient<GatewayClient>((services, http) =>
         var handler = new HttpClientHandler();
         if (services.GetRequiredService<IOptions<DemoDataOptions>>().Value.AllowUntrustedServerCertificate)
         {
-            // Local AppHost only: the gateway serves the ASP.NET Core development certificate (see DemoDataOptions).
-            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            // Local AppHost only: the gateway serves the ASP.NET Core development certificate. Options validation refuses the switch for a
+            // gateway that is not on loopback, and the check is only skipped for loopback hosts, whatever the request (GatewayCertificates).
+            handler.ServerCertificateCustomValidationCallback = (request, _, _, errors) =>
+                errors == System.Net.Security.SslPolicyErrors.None
+                || (request.RequestUri is { } uri && GatewayCertificates.AcceptsUntrusted(uri));
         }
 
         return handler;

@@ -53,19 +53,28 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
         var created = 0;
         var requests = new Dictionary<string, RequestView>();
 
-        // Created one by one, in file order: the request numbers follow the file.
-        try
+        // Created one by one, in file order: the request numbers follow the file. A request that cannot be created is reported (request and
+        // step named) and left out; the others still go ahead.
+        foreach (var request in scenario.Requests)
         {
-            foreach (var request in scenario.Requests)
+            try
             {
                 var (view, isNew) = await EnsureCreatedAsync(Of(scenario, request), cancellationToken);
                 requests[request.Key] = view;
                 created += isNew ? 1 : 0;
             }
-        }
-        catch (ScenarioFailedException e)
-        {
-            return new SeedResult(scenario.Tenant, created, requests.Count - created, [e]);
+            catch (ScenarioFailedException e)
+            {
+                failures.Enqueue(e);
+                logger.LogError("{Message}", e.Message);
+            }
+            catch (Exception e) when (e is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // Anything else (an unexpected answer, a bug) still ends with the request and the step named, not a crash.
+                var failure = new ScenarioFailedException(scenario.Tenant, request.Key, "create", e.Message, e);
+                failures.Enqueue(failure);
+                logger.LogError(e, "{Message}", failure.Message);
+            }
         }
 
         async Task DriveSafelyAsync(ScenarioRequest request, CancellationToken token)
@@ -93,46 +102,72 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
 
         // The first request that is ordered goes first and alone, so its order is the tenant's first.
         var first = scenario.Requests.FirstOrDefault(r => r.IsOrdered);
-        if (first is not null)
+        if (first is not null && requests.ContainsKey(first.Key))
         {
             await DriveSafelyAsync(first, cancellationToken);
         }
 
         await Parallel.ForEachAsync(
-            scenario.Requests.Where(r => r != first),
+            scenario.Requests.Where(r => r != first && requests.ContainsKey(r.Key)),
             new ParallelOptions { MaxDegreeOfParallelism = Settings.MaxParallel, CancellationToken = cancellationToken },
             async (request, token) => await DriveSafelyAsync(request, token));
 
         logger.LogInformation(
             "{Tenant}: {Count} requests in {Seconds:0} s ({Created} created, {Failed} failed)",
             scenario.Tenant, scenario.Requests.Count, clock.Elapsed.TotalSeconds, created, failures.Count);
-        return new SeedResult(scenario.Tenant, created, scenario.Requests.Count - created, [.. failures]);
+        return new SeedResult(scenario.Tenant, created, requests.Count - created, [.. failures]);
     }
 
     private static RequestContext Of(Scenario scenario, ScenarioRequest request) => new(scenario, request);
 
     // ---- Create and submit --------------------------------------------------------------------------------------------------
 
-    /// <summary>The request with this title by this requester, or a new draft.</summary>
+    /// <summary>
+    /// The request with this title by this requester, or a new draft. Lookup and create are retried like every other write: a transient
+    /// failure is waited out within the step timeout, and the lookup runs again before each attempt, so a create that went through but whose
+    /// answer was lost is found instead of made twice (its Idempotency-Key covers that too).
+    /// </summary>
     private async Task<(RequestView View, bool Created)> EnsureCreatedAsync(RequestContext c, CancellationToken ct)
     {
         const string step = "create";
-        if (await FindAsync(c, ct) is { } existing)
+        var r = c.Request;
+        RequestView? view = null;
+        var created = false;
+        await ActAsync(c, step, async () =>
         {
-            return (existing, false);
+            view = await FindAsync(c, ct);
+            if (view is not null)
+            {
+                return null;
+            }
+
+            var response = await SendAsync(c, step, HttpMethod.Post, c.Requester, "/api/v1/requests", new
+            {
+                title = r.Title,
+                costCenterCode = r.CostCenter,
+                supplierId = r.Supplier,
+                lines = r.Lines.Select(l => new { sku = l.Sku, quantity = l.Quantity }),
+            }, ct: ct);
+            if (response.Status is HttpStatusCode.Created or HttpStatusCode.OK)
+            {
+                view = Read<RequestView>(c, step, response, HttpStatusCode.Created, HttpStatusCode.OK);
+                created = true;
+            }
+
+            return response;
+        }, ct, HttpStatusCode.Created, HttpStatusCode.OK);
+
+        if (view is null)
+        {
+            throw Fail(c, step, c.LastConflict is { } conflict ? $"refused with {conflict}" : "the request was neither found nor created");
         }
 
-        var r = c.Request;
-        var response = await SendAsync(c, step, HttpMethod.Post, c.Requester, "/api/v1/requests", new
+        if (created)
         {
-            title = r.Title,
-            costCenterCode = r.CostCenter,
-            supplierId = r.Supplier,
-            lines = r.Lines.Select(l => new { sku = l.Sku, quantity = l.Quantity }),
-        }, ct: ct);
-        var view = Read<RequestView>(c, step, response, HttpStatusCode.Created, HttpStatusCode.OK);
-        logger.LogInformation("{Tenant}/{Key}: created {Number}", c.Tenant, r.Key, view.Number);
-        return (view, true);
+            logger.LogInformation("{Tenant}/{Key}: created {Number}", c.Tenant, r.Key, view.Number);
+        }
+
+        return (view, created);
     }
 
     private async Task<RequestView?> FindAsync(RequestContext c, CancellationToken ct)
@@ -505,7 +540,8 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
 
             if (clock.Elapsed > Settings.StepTimeout)
             {
-                throw Fail(c, what, $"timed out after {Settings.StepTimeout.TotalSeconds:0} s; last: {Shorten(last)}");
+                var refused = c.LastConflict is { } conflict ? $"; the last write was refused with {conflict}" : "";
+                throw Fail(c, what, $"timed out after {Settings.StepTimeout.TotalSeconds:0} s; last: {Shorten(last)}{refused}");
             }
 
             await Task.Delay(Settings.PollInterval, time, ct);
@@ -539,8 +575,17 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
                 continue;
             }
 
-            if (response is null || accepted.Contains(response.Status) || response.Status == HttpStatusCode.Conflict)
+            if (response is null || accepted.Contains(response.Status))
             {
+                return;
+            }
+
+            if (response.Status == HttpStatusCode.Conflict)
+            {
+                // The state moved on (approved by someone else, already cancelled) or a business rule refused the write. The caller's next
+                // wait tells which; if it times out, this reason is in its message.
+                c.LastConflict = $"{step}: 409 {Shorten(response.Body)}";
+                logger.LogWarning("{Tenant}/{Key}: {Step} answered 409 {Body}", c.Tenant, c.Request.Key, step, Shorten(response.Body));
                 return;
             }
 
@@ -591,5 +636,8 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
         public string Finance { get; } = UserId(scenario.Finance);
 
         public Guid Id { get; set; }
+
+        /// <summary>The last 409 a write of this request got, for the message of a step that then times out.</summary>
+        public string? LastConflict { get; set; }
     }
 }
