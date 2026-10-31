@@ -20,6 +20,7 @@
     <ProjectReference Include="../../Services/Assistant/ProcureAi.Assistant.Api/ProcureAi.Assistant.Api.csproj" />
     <ProjectReference Include="../../Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" />
     <ProjectReference Include="../../Gateway/ProcureAi.Gateway/ProcureAi.Gateway.csproj" />
+    <ProjectReference Include="../../../tools/ProcureAi.DemoData/ProcureAi.DemoData.csproj" />
   </ItemGroup>
 
   <ItemGroup>

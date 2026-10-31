@@ -136,15 +136,14 @@ public sealed class AssistantTests(AppFixture fixture)
     {
         fixture.RequireReady();
 
-        // Tom's two USB-C docks (R 4 830,00 incl. VAT) are approved by Maria and ordered.
-        var (requestId, _) = await fixture.SubmitRequestAsync("USB-C docks for the meeting rooms", "DOCK-C", 2);
-        await fixture.ApproveAsMariaAsync(requestId);
-        var (orderId, orderNumber) = await fixture.WaitForOrderAsync(requestId);
+        // The seeded PO-1001 (plan 06 ruling 3): Tom's docks and stands from Fabrikam, received, waiting for Fabrikam's paper invoice.
+        var orders = (await fixture.CallAsync(HttpMethod.Get, "/api/v1/purchasing/orders?pageSize=100", AppFixture.TomId)).Body.GetProperty("items");
+        var orderNumber = "PO-1001";
+        var orderId = orders.EnumerateArray().Single(o => o.GetProperty("number").GetString() == orderNumber).GetProperty("id").GetGuid();
 
-        // The supplier's invoice for that order, as a PDF.
-        var invoiceNumber = $"INV-E2E-{Random.Shared.Next(100_000, 999_999)}";
-        var pdf = InvoicePdf.Build(
-            "Contoso Hardware (Pty) Ltd", "4123456789", invoiceNumber, "2026-10-20", orderNumber, [new InvoicePdfLine(2, "USB-C dock", 2_100m)]);
+        // Fabrikam's invoice for it, as a PDF (the README's sample with a fresh invoice number).
+        var invoiceNumber = $"FAB-E2E-{Random.Shared.Next(100_000, 999_999)}";
+        var pdf = InvoicePdf.FabrikamPo1001(invoiceNumber);
 
         await using var context = await fixture.NewContextAsync();
         var page = await context.NewPageAsync();
@@ -158,7 +157,7 @@ public sealed class AssistantTests(AppFixture fixture)
 
         var summary = page.GetByTestId("scan-summary");
         await Assertions.Expect(summary).ToContainTextAsync(invoiceNumber, new() { Timeout = Pages.Timeout });
-        await Assertions.Expect(summary).ToContainTextAsync("Contoso Hardware");
+        await Assertions.Expect(summary).ToContainTextAsync("Fabrikam Office");
         await Assertions.Expect(summary).ToContainTextAsync("confidence high");
         await page.GetByTestId("review-scan").ClickAsync();
 
@@ -168,7 +167,8 @@ public sealed class AssistantTests(AppFixture fixture)
         await Assertions.Expect(page.Locator("#invoice-order")).ToHaveValueAsync(orderId.ToString(), new() { Timeout = Pages.Timeout });
         await Assertions.Expect(page.GetByTestId("scan-note")).Not.ToContainTextAsync("not among the orders you can see");
         await Assertions.Expect(page.Locator("#invoice-number")).ToHaveValueAsync(invoiceNumber);
-        await Assertions.Expect(page.GetByLabel("Quantity invoiced, USB-C dock")).ToHaveValueAsync("2");
+        await Assertions.Expect(page.GetByLabel("Quantity invoiced, USB-C Dock")).ToHaveValueAsync("2");
+        await Assertions.Expect(page.GetByLabel("Quantity invoiced, Laptop Stand")).ToHaveValueAsync("2");
 
         await page.GetByTestId("save-invoice").GetByRole(AriaRole.Button).ClickAsync();
 

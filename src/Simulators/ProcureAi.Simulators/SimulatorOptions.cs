@@ -54,6 +54,13 @@ public sealed class SimulatorOptions
 
         public bool AutoInvoice { get; set; } = true;
 
+        /// <summary>
+        /// Suppliers (the order's supplier code) that post PDF invoices instead of sending invoice webhooks: their orders are confirmed but
+        /// never invoiced by themselves (plan 06 ruling 3; the demo's PO-1001 waits for the scanned invoice). The default,
+        /// <c>["fabrikam-office"]</c>, is in appsettings.json, not here: the configuration binder appends to an array that already has items.
+        /// </summary>
+        public string[] ManualInvoiceSuppliers { get; set; } = [];
+
         /// <summary>An order with an article starting with this is declined.</summary>
         public string RejectPrefix { get; set; } = "DISC-";
 

@@ -53,7 +53,8 @@ public static class DemoSeeder
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static IEnumerable<Department> Departments() =>
+    /// <summary>The seeded departments (also read by the demo data scenario tests).</summary>
+    public static IEnumerable<Department> Departments() =>
     [
         Department.Create("acme", "IT", "Information Technology", DemoUsers.Dept),
         Department.Create("acme", "MK", "Marketing", DemoUsers.Dept),
@@ -61,7 +62,8 @@ public static class DemoSeeder
         Department.Create("demo", "SANDBOX", "Demo Sandbox"),
     ];
 
-    private static IEnumerable<CostCenter> CostCenters() =>
+    /// <summary>The seeded cost centers (also read by the demo data scenario tests).</summary>
+    public static IEnumerable<CostCenter> CostCenters() =>
     [
         CostCenter.Create("acme", "IT-200", "IT Operations", "IT", DemoUsers.Maria),
         CostCenter.Create("acme", "MK-110", "Brand and Campaigns", "MK", DemoUsers.Maria),
@@ -69,7 +71,8 @@ public static class DemoSeeder
         CostCenter.Create("demo", "DEMO-100", "Demo Sandbox", "SANDBOX", DemoUsers.DemoApprover),
     ];
 
-    private static IEnumerable<TenantUser> Users() =>
+    /// <summary>The seeded tenant users (also read by the demo data scenario tests).</summary>
+    public static IEnumerable<TenantUser> Users() =>
     [
         TenantUser.Create("acme", DemoUsers.Tom, "Tom Requester", "tom@acme.test", ["requester"], Money.Zero, false, ["IT-200"]),
         TenantUser.Create("acme", DemoUsers.Maria, "Maria Manager", "maria@acme.test", ["manager"], Money.Zar(200_000m), false, []),

@@ -30,6 +30,9 @@ var keycloakDemoLoginSecret = builder.AddParameter(
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
+// The admin API key itself, for the demo data seeder only (it calls the gateway with it, on behalf of the demo users; plan 06 ruling 1).
+// Its SHA-256 above is what the services compare against; both come from the AppHost user secrets.
+var adminApiKey = builder.AddParameter("admin-api-key", secret: true);
 // The simulated supplier and ERP: the key the services call them with, and the secret the supplier signs its webhooks with.
 var simulatorApiKey = builder.AddParameter("simulator-api-key", secret: true);
 var supplierWebhookSecret = builder.AddParameter("supplier-webhook-secret", secret: true);
@@ -337,6 +340,17 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
     .WaitFor(assistantApi)
     .WaitFor(web)
     .WithHttpHealthCheck("/health/ready", endpointName: "https")
+    .WithDotNetLimits(limits.DotNet);
+
+// The demo data (plan 06 rulings 1-3): once the gateway is healthy, `seed` drives the scenario requests of acme and globex to every state
+// through the gateway with the admin key, as the demo users. It ends when done (exit code 0) and is safe to run again: it resumes what is
+// there and creates nothing twice. The gateway serves the development certificate locally, hence the untrusted-certificate switch.
+builder.AddProject<Projects.ProcureAi_DemoData>(ResourceNames.DemoData)
+    .WithArgs("seed")
+    .WithEnvironment("DemoData__GatewayUrl", gateway.GetEndpoint("https"))
+    .WithEnvironment("DemoData__AdminApiKey", adminApiKey)
+    .WithEnvironment("DemoData__AllowUntrustedServerCertificate", "true")
+    .WaitFor(gateway)
     .WithDotNetLimits(limits.DotNet);
 
 // The app as users open it: the links in the notification emails. An endpoint reference only (the gateway waits for Notifications, not

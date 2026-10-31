@@ -1,0 +1,90 @@
+// Acme's demo requests (plan 06 rulings 2 and 3), created in this order. Prices come from the Suppliers seed (excl. VAT); thresholds are
+// incl. VAT: a department head above R 20 000, finance above R 200 000. Maria manages IT-200 and MK-110, Dept heads IT and MK, Thandi is
+// finance (limit R 2 000 000). Tom acts for IT-200 only.
+{
+  "tenant": "acme",
+  "finance": "thandi@acme.test",
+  "requests": [
+    // PO-1001 (ruling 3): Acme's first order. Fabrikam posts PDF invoices, so it stays received and not invoiced until a reviewer scans
+    // docs/samples/invoice-PO-1001.pdf. 2 x R 2 350 + 2 x R 690 = R 6 080,00, R 6 992,00 incl. VAT: Maria alone.
+    { "key": "po-1001-dock-and-stand", "title": "USB-C docks and laptop stands for the hot desks", "requester": "tom@acme.test",
+      "costCenter": "IT-200", "supplier": "fabrikam-office",
+      "lines": [ { "sku": "DOCK-USB", "quantity": 2 }, { "sku": "STAND-LP", "quantity": 2 } ],
+      "stopAt": "Received", "approvers": [ "maria@acme.test" ] },
+
+    // R 19 320,00 incl. VAT, not submitted yet.
+    { "key": "draft", "title": "Monitors for the training room", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "MON-27", "quantity": 4 } ], "stopAt": "Draft" },
+
+    // R 7 475,00: waits for Maria (manager step).
+    { "key": "submitted", "title": "Wireless keyboards for the support team", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "KB-WL", "quantity": 10 } ], "stopAt": "Submitted",
+      "approvers": [ "maria@acme.test" ] },
+
+    // R 57 960,00: Maria approved, waits for the department head.
+    { "key": "awaiting-department-head", "title": "Laptops for the new analysts", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "LAP-14", "quantity": 2 } ], "stopAt": "AwaitingDepartmentHead",
+      "approvers": [ "maria@acme.test" ] },
+
+    // R 231 840,00: above Maria's R 200 000 limit, so the manager step lands on Dept (merged with his own step); then finance.
+    { "key": "awaiting-finance", "title": "Laptop refresh for the engineering team", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "LAP-14", "quantity": 8 } ], "stopAt": "AwaitingFinance",
+      "approvers": [ "dept@acme.test" ] },
+
+    // R 14 283,00: Maria rejects it with a reason.
+    { "key": "rejected-by-manager", "title": "Ergonomic chairs for the break room", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "fabrikam-office", "lines": [ { "sku": "CHAIR-ERG", "quantity": 2 } ], "stopAt": "Rejected",
+      "approvers": [ "maria@acme.test" ], "rejectReason": "The break room keeps its current chairs; ergonomic chairs are for desks." },
+
+    // R 398 475,00 on MK-110 (budget R 360 000): Budgets cannot reserve it, so it is rejected over budget.
+    { "key": "rejected-over-budget", "title": "Sit-stand desks for the marketing floor", "requester": "maria@acme.test",
+      "costCenter": "MK-110", "supplier": "fabrikam-office", "lines": [ { "sku": "DESK-SS", "quantity": 35 } ], "stopAt": "Rejected" },
+
+    // R 11 902,50: Tom cancels it while it waits for Maria; the reservation is released.
+    { "key": "cancelled", "title": "Office suite licences for the interns", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "adatum-software", "lines": [ { "sku": "LIC-OFF", "quantity": 3 } ], "stopAt": "Cancelled",
+      "cancelReason": "The interns start next year." },
+
+    // R 5 175,00: ordered and confirmed by the supplier, nothing delivered yet.
+    { "key": "ordered", "title": "A4 paper for the print room", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "fabrikam-office", "lines": [ { "sku": "PAPER-A4", "quantity": 10 } ], "stopAt": "Ordered",
+      "approvers": [ "maria@acme.test" ] },
+
+    // R 14 283,00: one of two chairs delivered.
+    { "key": "partially-received", "title": "Ergonomic chairs for the help desk", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "fabrikam-office", "lines": [ { "sku": "CHAIR-ERG", "quantity": 2 } ], "stopAt": "PartiallyReceived",
+      "approvers": [ "maria@acme.test" ], "receive": [ { "sku": "CHAIR-ERG", "quantity": 1 } ] },
+
+    // R 7 820,00: received in full; the supplier's own invoice matches.
+    { "key": "invoiced", "title": "Keyboards and docks for the new starters", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "KB-WL", "quantity": 4 }, { "sku": "DOCK-C", "quantity": 2 } ],
+      "stopAt": "Invoiced", "approvers": [ "maria@acme.test" ] },
+
+    // R 22 770,00: received; Fabrikam's paper invoice charges R 250 more per desk, so it is held as a price mismatch.
+    { "key": "mismatched", "title": "Sit-stand desks for the project room", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "fabrikam-office", "lines": [ { "sku": "DESK-SS", "quantity": 2 } ], "stopAt": "Mismatched",
+      "approvers": [ "maria@acme.test", "dept@acme.test" ], "invoice": { "priceDelta": 250 } },
+
+    // R 14 490,00: received and invoiced; Thandi pays one of the three monitors.
+    { "key": "partially-paid", "title": "Monitors for the design team", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "MON-27", "quantity": 3 } ], "stopAt": "PartiallyPaid",
+      "approvers": [ "maria@acme.test" ], "pay": "Partial" },
+
+    // R 4 830,00: received, invoiced, paid: completed.
+    { "key": "completed", "title": "Monitor for the reception desk", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "MON-27", "quantity": 1 } ], "stopAt": "Completed",
+      "approvers": [ "maria@acme.test" ], "pay": "Full" },
+
+    // R 9 660,00: three of four docks arrive and are paid; the fourth is closed short, which completes the request.
+    { "key": "closed-short", "title": "Docking stations for the meeting rooms", "requester": "tom@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "DOCK-C", "quantity": 4 } ], "stopAt": "ClosedShort",
+      "approvers": [ "maria@acme.test" ], "receive": [ { "sku": "DOCK-C", "quantity": 3 } ], "pay": "Full",
+      "closeShortReason": "The fourth dock is no longer made; three are enough." },
+
+    // The separation-of-duties demo (wireframe 16): Maria's own request on IT-200, which she manages. She may not approve it, so the
+    // manager step moves up to Dept. R 9 660,00.
+    { "key": "maria-own-request", "title": "Monitors for the IT managers' desks", "requester": "maria@acme.test", "costCenter": "IT-200",
+      "supplier": "contoso-hardware", "lines": [ { "sku": "MON-27", "quantity": 2 } ], "stopAt": "Submitted",
+      "approvers": [ "dept@acme.test" ] }
+  ]
+}

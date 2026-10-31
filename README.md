@@ -316,9 +316,11 @@ Prerequisites: Docker, .NET 10 SDK, Node 24.
    $key = [Convert]::ToHexString((1..32 | % { Get-Random -Max 256 }) -as [byte[]])
    $sha = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($key)))
    dotnet user-secrets set "Parameters:admin-api-key-sha256" $sha --project $apphost
+   # the key itself, for the demo data seeder (it calls the gateway with it):
+   dotnet user-secrets set "Parameters:admin-api-key" $key --project $apphost
    ```
 
-   The end-to-end tests also read the key itself from the `DEMO_ADMIN_API_KEY` environment variable.
+   The end-to-end and system tests also read the key itself from the `DEMO_ADMIN_API_KEY` environment variable.
 2. Start everything: `dotnet run --project src/AppHost/ProcureAi.AppHost`
 3. Open the Aspire dashboard link printed in the console, then the `gateway` endpoint to use the app.
 
@@ -366,22 +368,33 @@ in OAuth 2.1, so it is used for these listed demo users only and is **off by def
 `/bff/demo-login` endpoints answer 404 and the welcome page shows no buttons. The AppHost switches it on and generates the demo
 client's secret on the first run (AppHost user secret `Parameters:keycloak-demo-login-secret`).
 
+### Demo data
+
+On every start the AppHost runs `demo-data` (`tools/ProcureAi.DemoData seed`) once the gateway is healthy. It drives purchase
+requests through every state in both companies through the **public APIs, via the gateway**: the admin API key acts on behalf of the
+demo users (`X-On-Behalf-Of-User`), so Tom raises and submits, Maria and Dept approve, Tom receives and Thandi pays, and every record
+has its saga, budget reservation, events, audit trail and data changes, exactly as if the people had clicked. The scenarios are data
+(`tools/ProcureAi.DemoData/Scenarios/acme.json`, `globex.json`, one request per state: draft, waiting for the manager, the department
+head or finance, rejected by the manager, rejected over budget, cancelled, ordered, partly received, received, invoiced and matched,
+price mismatch, partly paid, completed, closed short; Globex: waiting, ordered, completed, rejected). Maria's own request on IT-200
+shows separation of duties: the effective permissions screen answers that Maria may not approve it because she raised it.
+
+The seed is safe to run again: it finds each request by title and requester and resumes it from where it is, and every write carries the
+Idempotency-Key `demo:<tenant>:<key>:<step>`, so nothing is created twice. It ends with exit code 0, or 1 naming the request and the
+step that failed. It takes about two minutes on a fresh start (the simulated supplier confirms after 3 s and invoices after 20 s).
+
 ### Try the invoice scan
 
-No order is seeded: orders only come from the flow, and the first order of a fresh tenant is numbered PO-1001. The sample
-invoice [`docs/samples/invoice-PO-1001.pdf`](docs/samples/invoice-PO-1001.pdf) (Contoso Hardware, 2 × USB-C dock at
-R 2 100,00, R 4 830,00 incl. VAT) names that order, so on fresh data volumes:
+Acme's first order, **PO-1001**, is seeded from Fabrikam Office: 2 × USB-C Dock and 2 × Laptop Stand, received in full. Fabrikam posts
+PDF invoices instead of sending invoice webhooks (`Simulators:Supplier:ManualInvoiceSuppliers`), so PO-1001 waits for its invoice. The
+sample invoice [`docs/samples/invoice-PO-1001.pdf`](docs/samples/invoice-PO-1001.pdf) (Fabrikam Office, R 6 992,00 incl. VAT) names it:
 
-1. Sign in as tom@acme.test, open **Requests → New request**: cost center IT-200, supplier Contoso Hardware, 2 × USB-C dock.
-   Submit it.
-2. Sign in as maria@acme.test and approve it in **Approvals** (R 4 830,00 needs only the manager). The order PO-1001 is
-   created and sent to the simulated supplier within seconds.
-3. As Tom, open **Invoices** and drop the sample PDF on **Scan an invoice**, then **Review and save**: PO-1001 is chosen,
-   the invoice number, date, quantity and total are filled in, and nothing is saved until you press **Save invoice**.
+1. Sign in as tom@acme.test and open **Invoices**.
+2. Drop the sample PDF on **Scan an invoice**, then **Review and save**: PO-1001 is chosen, the invoice number, date, quantities and
+   total are filled in, and nothing is saved until you press **Save invoice**.
 
-If your order has another number (other orders were made first), the scan still fills in everything else and says the
-order it names is not among yours; choose the order yourself. The end-to-end test `Tom_scans_invoice_reviews_and_saves`
-writes its PDF for whatever order the flow made (`tests/ProcureAi.EndToEndTests/InvoicePdf.cs`).
+The end-to-end test `Tom_scans_invoice_reviews_and_saves` scans the same invoice (`tests/ProcureAi.EndToEndTests/InvoicePdf.cs`,
+`FabrikamPo1001`); `SampleInvoiceTests` keeps the committed PDF the same (`UPDATE_SAMPLES=1` writes it again).
 
 ## Tests and CI
 

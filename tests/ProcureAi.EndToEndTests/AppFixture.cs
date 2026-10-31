@@ -74,6 +74,15 @@ public sealed class AppFixture : IAsyncLifetime
 
             using var cts = new CancellationTokenSource(StartupTimeout);
             await _app.ResourceNotifications.WaitForResourceHealthyAsync("gateway", cts.Token);
+            // The demo data seed (plan 06 Task 15) runs once the gateway is up; the tests start after it, on the seeded data (the scan
+            // test needs its PO-1001), and nothing of the seed changes under a test.
+            var seeded = await _app.ResourceNotifications.WaitForResourceAsync(
+                "demo-data", e => KnownResourceStates.TerminalStates.Contains(e.Snapshot.State?.Text), cts.Token);
+            if (seeded.Snapshot.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"The demo data seed failed (exit code {seeded.Snapshot.ExitCode}): see the demo-data resource's log.");
+            }
+
             GatewayUrl = new Uri(_app.GetEndpoint("gateway", "https").ToString());
             KeycloakUrl = new Uri(_app.GetEndpoint("keycloak", "http").ToString());
         }

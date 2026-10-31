@@ -21,7 +21,7 @@ public sealed class SystemHealthTests(SystemFixture system)
             .Where(r => r.GetType().Name != "ProjectRebuilderResource" && !r.Annotations.OfType<ExplicitStartupAnnotation>().Any())
             .ToList();
         resources.Count(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal))
-            .ShouldBe(7, "requestsdb, accessdb, budgetsdb, approvalsdb, purchasingdb, invoicingdb, assistantdb");
+            .ShouldBe(8, "requestsdb, accessdb, budgetsdb, approvalsdb, purchasingdb, invoicingdb, assistantdb, and the one for MongoDB");
         foreach (var expected in new[] { "suppliers-api", "purchasing-api", "invoicing-api", "notifications-api", "assistant-api", "simulators" })
         {
             resources.ShouldContain(r => r.Name == expected);

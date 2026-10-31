@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../tools/ProcureAi.DemoData/ProcureAi.DemoData.csproj" />
+    <!-- The scenarios are checked against the seeds themselves (users, cost centers, catalogs, budgets) and the real approval routing. -->
+    <ProjectReference Include="../../src/Services/Access/ProcureAi.Access.Infrastructure/ProcureAi.Access.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Suppliers/ProcureAi.Suppliers.Infrastructure/ProcureAi.Suppliers.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Budgets/ProcureAi.Budgets.Infrastructure/ProcureAi.Budgets.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Services/Approvals/ProcureAi.Approvals.Domain/ProcureAi.Approvals.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

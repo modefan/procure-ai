@@ -1,0 +1,27 @@
+// Globex's demo requests (plan 06 ruling 2), created in this order. Ben manages GX-100 and raises every request, so he may not approve
+// them; Operations has no head, so every step lands on finance: Thandi (finance in Globex too since Task 14).
+{
+  "tenant": "globex",
+  "finance": "thandi@acme.test",
+  "requests": [
+    // R 9 522,00: waits for Thandi.
+    { "key": "submitted", "title": "Toner for the plant printers", "requester": "ben@globex.test", "costCenter": "GX-100",
+      "supplier": "northwind-traders", "lines": [ { "sku": "TONER-K", "quantity": 6 } ], "stopAt": "Submitted",
+      "approvers": [ "thandi@acme.test" ] },
+
+    // R 28 635,00: approved, ordered and confirmed by the supplier.
+    { "key": "ordered", "title": "Laptop for the shift supervisor", "requester": "ben@globex.test", "costCenter": "GX-100",
+      "supplier": "northwind-traders", "lines": [ { "sku": "LAP-14", "quantity": 1 } ], "stopAt": "Ordered",
+      "approvers": [ "thandi@acme.test" ] },
+
+    // R 6 348,00: received, invoiced by the supplier, paid: completed.
+    { "key": "completed", "title": "Toner for the control room", "requester": "ben@globex.test", "costCenter": "GX-100",
+      "supplier": "northwind-traders", "lines": [ { "sku": "TONER-K", "quantity": 4 } ], "stopAt": "Completed",
+      "approvers": [ "thandi@acme.test" ], "pay": "Full" },
+
+    // R 57 270,00: Thandi rejects it.
+    { "key": "rejected", "title": "Laptops for the canteen", "requester": "ben@globex.test", "costCenter": "GX-100",
+      "supplier": "northwind-traders", "lines": [ { "sku": "LAP-14", "quantity": 2 } ], "stopAt": "Rejected",
+      "approvers": [ "thandi@acme.test" ], "rejectReason": "The canteen has no use for laptops; use the shared terminal." }
+  ]
+}

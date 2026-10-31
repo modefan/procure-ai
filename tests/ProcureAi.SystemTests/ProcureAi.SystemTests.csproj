@@ -25,6 +25,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AppHost\ProcureAi.AppHost\ProcureAi.AppHost.csproj" />
     <ProjectReference Include="..\..\src\Contracts\ProcureAi.Contracts\ProcureAi.Contracts.csproj" />
+    <!-- Seed_twice_creates_nothing_new runs the seeder in-process a second time, with the scenario files it ships. -->
+    <ProjectReference Include="..\..\tools\ProcureAi.DemoData\ProcureAi.DemoData.csproj" />
   </ItemGroup>
 
   <ItemGroup>

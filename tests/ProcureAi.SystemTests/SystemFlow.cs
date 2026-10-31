@@ -252,4 +252,4 @@ public sealed record BudgetView(string CostCenterCode, string FiscalYear, decima
 public sealed record HistoryLine(string Type, string UserId, DateTimeOffset OccurredAt, string Summary);
 
 public sealed record DataChangeView(
-    string Id, string Database, string Table, string PrimaryKey, string Operation, long TransactionId, string Attribution, string? UserId, string? ActorId);
+    string Id, string Database, string Table, string PrimaryKey, string Operation, long? TransactionId, string Attribution, string? UserId, string? ActorId);

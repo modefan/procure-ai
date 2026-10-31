@@ -11,8 +11,7 @@ public sealed record InvoicePdfLine(int Quantity, string Description, decimal Un
 /// <summary>
 /// Writes a one-page supplier invoice PDF as text lines (Helvetica 11, one line every 20 points), the layout of the scan test files
 /// (<c>tests/ProcureAi.Assistant.Tests/Files/invoice-*.pdf</c>, made with this same code). Amounts are South African (<c>R 4 200,00</c>).
-/// The scan tests need the order number of an order the user really has, which only exists once the flow has made it, so the end-to-end
-/// test writes its invoice at run time. <paramref name="statedTotalInclVat"/> prints another total than the lines add up to (a wrong
+/// The scan tests need the order number of an order the user really has: the seeded PO-1001 (see <see cref="FabrikamPo1001"/>). <paramref name="statedTotalInclVat"/> prints another total than the lines add up to (a wrong
 /// invoice); <paramref name="extraLine"/> is printed last (an instruction, for a poisoned invoice).
 /// </summary>
 public static class InvoicePdf
@@ -55,6 +54,17 @@ public static class InvoicePdf
 
         return builder.Build();
     }
+
+    /// <summary>
+    /// Fabrikam Office's invoice for the seeded PO-1001 (plan 06 ruling 3): two USB-C docks at R 2 350,00 and two laptop stands at R 690,00,
+    /// R 6 992,00 incl. VAT. The README's sample <c>docs/samples/invoice-PO-1001.pdf</c> is this with <see cref="SampleInvoiceNumber"/>
+    /// (<c>SampleInvoiceTests</c> keeps them the same); the end-to-end scan test prints a fresh invoice number on it.
+    /// </summary>
+    public static byte[] FabrikamPo1001(string invoiceNumber = SampleInvoiceNumber) =>
+        Build("Fabrikam Office (Pty) Ltd", "4234567890", invoiceNumber, "2026-10-30", "PO-1001",
+            [new InvoicePdfLine(2, "USB-C Dock", 2_350m), new InvoicePdfLine(2, "Laptop Stand", 690m)]);
+
+    public const string SampleInvoiceNumber = "FAB-20417";
 
     /// <summary><c>R 4 200,00</c>: a space after the R and between thousands, a decimal comma.</summary>
     public static string Format(decimal amount) => "R " + amount.ToString("#,0.00", Rand);

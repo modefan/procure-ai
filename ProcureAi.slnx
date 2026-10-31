@@ -53,6 +53,9 @@
     <Project Path="src/Simulators/ProcureAi.Simulators/ProcureAi.Simulators.csproj" />
     <Project Path="src/ServiceDefaults/ProcureAi.ServiceDefaults/ProcureAi.ServiceDefaults.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/ProcureAi.DemoData/ProcureAi.DemoData.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ProcureAi.BuildingBlocks.Tests/ProcureAi.BuildingBlocks.Tests.csproj" />
     <Project Path="tests/ProcureAi.Testing/ProcureAi.Testing.csproj" />
@@ -78,6 +81,7 @@
     <Project Path="tests/ProcureAi.Assistant.IntegrationTests/ProcureAi.Assistant.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.Assistant.Evaluation/ProcureAi.Assistant.Evaluation.csproj" />
     <Project Path="tests/ProcureAi.Simulators.Tests/ProcureAi.Simulators.Tests.csproj" />
+    <Project Path="tests/ProcureAi.DemoData.Tests/ProcureAi.DemoData.Tests.csproj" />
     <Project Path="tests/ProcureAi.Gateway.IntegrationTests/ProcureAi.Gateway.IntegrationTests.csproj" />
     <Project Path="tests/ProcureAi.AppHost.Tests/ProcureAi.AppHost.Tests.csproj" />
     <Project Path="tests/ProcureAi.ArchitectureTests/ProcureAi.ArchitectureTests.csproj" />

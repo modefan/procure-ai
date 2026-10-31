@@ -685,6 +685,43 @@ public sealed class ServiceResourcesTests
         }
     }
 
+    /// <summary>
+    /// Plan 06 ruling 1: the demo data seeder runs `seed` once the gateway is healthy, calls the gateway with the admin API key (the key
+    /// itself, a secret parameter, which no other resource gets) and accepts the local development certificate.
+    /// </summary>
+    [Fact]
+    public async Task Demo_data_seeds_through_the_gateway_with_the_admin_key_after_the_gateway_is_healthy()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var demoData = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "demo-data");
+        var gateway = model.Resources.OfType<ProjectResource>().Single(r => r.Name == "gateway");
+
+        var env = await EnvironmentOfAsync(demoData);
+        var args = new List<object>();
+        foreach (var annotation in demoData.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(new CommandLineArgsCallbackContext(args));
+        }
+
+        args.ShouldBe(["seed"]);
+        env["DemoData__GatewayUrl"].ShouldBeOfType<EndpointReference>().Resource.ShouldBe(gateway);
+        var key = env["DemoData__AdminApiKey"].ShouldBeOfType<ParameterResource>();
+        key.Name.ShouldBe("admin-api-key");
+        key.Secret.ShouldBeTrue();
+        env.ShouldContainKeyAndValue("DemoData__AllowUntrustedServerCertificate", "true");
+        foreach (var cap in CapResources)
+        {
+            env.ShouldContainKey(cap);
+        }
+
+        demoData.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == gateway && w.WaitType == WaitType.WaitUntilHealthy);
+        foreach (var resource in model.Resources.OfType<ProjectResource>().Where(r => r != demoData))
+        {
+            (await EnvironmentOfAsync(resource)).Values.ShouldNotContain(v => ReferenceEquals(v, key), resource.Name);
+        }
+    }
+
     [Fact]
     public async Task Captured_database_gets_its_own_debezium_server_after_the_migration()
     {

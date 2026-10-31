@@ -37,11 +37,46 @@ public sealed class SystemFixture : IAsyncLifetime
     // A cold start pulls images, builds the Postgres image and runs npm install for the Angular app.
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(12);
 
+    // The AppHost's demo-data resource seeds both tenants once the gateway is healthy (plan 06 Task 15).
+    private static readonly TimeSpan SeedTimeout = TimeSpan.FromMinutes(10);
+
     private IDistributedApplicationTestingBuilder? _builder;
     private DistributedApplication? _app;
     private string? _adminApiKey;
     private string? _simulatorApiKey;
     private string? _skipReason;
+
+    public const string DemoDataResource = "demo-data";
+
+    /// <summary>How the AppHost's demo data seed ended (0 when every scenario request reached its state).</summary>
+    public int? SeedExitCode { get; private set; }
+
+    /// <summary>The demo-data resource's log (its last 300 lines), to explain a failed seed.</summary>
+    public string SeedLog => string.Join(Environment.NewLine, _seedLog);
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _seedLog = new();
+
+    private async Task WatchSeedLogAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var logs = App.Services.GetRequiredService<ResourceLoggerService>();
+            await foreach (var batch in logs.WatchAsync(DemoDataResource).WithCancellation(cancellationToken))
+            {
+                foreach (var line in batch)
+                {
+                    _seedLog.Enqueue(line.Content);
+                    while (_seedLog.Count > 300)
+                    {
+                        _seedLog.TryDequeue(out _);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
 
     /// <summary>The OTLP endpoint every service exports to during the run (the dashboard's stand-in).</summary>
     public OtlpReceiver Telemetry { get; private set; } = null!;
@@ -82,6 +117,16 @@ public sealed class SystemFixture : IAsyncLifetime
             using var cts = new CancellationTokenSource(StartupTimeout);
             // The gateway waits for every API, and every API for its migration, Debezium and the services it calls.
             await _app.ResourceNotifications.WaitForResourceHealthyAsync("gateway", cts.Token);
+
+            // Every test runs on the seeded demo data, after the seed: nothing of it changes under a test, and the first Acme order is
+            // the seed's PO-1001. The seed's outcome is checked by DemoDataTests, so a failed seed fails those, not every test.
+            using var seeding = new CancellationTokenSource(SeedTimeout);
+            var logs = WatchSeedLogAsync(seeding.Token);
+            var seeded = await _app.ResourceNotifications.WaitForResourceAsync(
+                DemoDataResource, e => KnownResourceStates.TerminalStates.Contains(e.Snapshot.State?.Text), seeding.Token);
+            SeedExitCode = seeded.Snapshot.ExitCode;
+            await seeding.CancelAsync();
+            await logs;
         }
         catch
         {

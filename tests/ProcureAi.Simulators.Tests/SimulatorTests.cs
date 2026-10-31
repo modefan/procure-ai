@@ -161,7 +161,7 @@ public sealed class SimulatorTests
         {
             externalReference = "order-named",
             buyerReference = "demo/PO-0002",
-            supplierCode = "fabrikam-office",
+            supplierCode = "contoso-hardware",
             currency = "ZAR",
             lines = new[] { new { lineNumber = 1, articleNumber = "PEN-01", quantity = 1, netPriceCents = 100L } },
         };
@@ -172,8 +172,40 @@ public sealed class SimulatorTests
         await factory.AdvanceUntilAsync(() => factory.Receiver.Received.Count(w => w.Type == "invoice.issued") == 2, TimeSpan.FromSeconds(1));
         var invoices = factory.Receiver.Received.Where(w => w.Type == "invoice.issued")
             .ToDictionary(w => w.Json.GetProperty("externalReference").GetString()!, w => w.Json.GetProperty("supplierCode").GetString());
-        invoices["order-named"].ShouldBe("fabrikam-office");
+        invoices["order-named"].ShouldBe("contoso-hardware");
         invoices["order-unnamed"].ShouldBe("SIMSUP", "no code given: the configured one");
+    }
+
+    /// <summary>
+    /// Plan 06 ruling 3: a supplier in <c>Simulators:Supplier:ManualInvoiceSuppliers</c> (Fabrikam Office by default) posts PDF invoices
+    /// instead of sending invoice webhooks: its orders are confirmed but never invoiced by themselves. Other suppliers still are.
+    /// </summary>
+    [Fact]
+    public async Task Manual_invoice_supplier_confirms_but_sends_no_invoice()
+    {
+        await using var factory = new SimulatorFactory();
+        using var client = factory.SupplierClient();
+        object Order(string reference, string supplier) => new
+        {
+            externalReference = reference,
+            buyerReference = "acme/PO-1001",
+            supplierCode = supplier,
+            currency = "ZAR",
+            lines = new[] { new { lineNumber = 1, articleNumber = "DOCK-USB", quantity = 2, netPriceCents = 235_000L } },
+        };
+        (await factory.WithClockAsync(client.PostAsJsonAsync("supplier/v1/orders", Order("order-fabrikam", "fabrikam-office")))).StatusCode
+            .ShouldBe(HttpStatusCode.Accepted);
+        (await factory.WithClockAsync(client.PostAsJsonAsync("supplier/v1/orders", Order("order-contoso", "contoso-hardware")))).StatusCode
+            .ShouldBe(HttpStatusCode.Accepted);
+
+        await factory.AdvanceUntilAsync(() => factory.Receiver.Received.Any(w => w.Type == "invoice.issued"), TimeSpan.FromSeconds(1));
+        factory.Time.Advance(TimeSpan.FromMinutes(5));
+        await SettleAsync();
+
+        var received = factory.Receiver.Received;
+        received.Count(w => w.Type == "order.acknowledged").ShouldBe(2, "both orders are confirmed");
+        received.Where(w => w.Type == "invoice.issued").Select(w => w.Json.GetProperty("externalReference").GetString())
+            .ShouldBe(["order-contoso"], "Fabrikam posts its invoices on paper");
     }
 
     [Fact]

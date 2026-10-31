@@ -86,7 +86,7 @@ public sealed class SupplierService(
         var acknowledged = new OrderWebhook(Guid.NewGuid(), AcknowledgedType, order.Id, order.ExternalReference, delivery, null);
         webhooks.Schedule(order.Id, WebhookTarget.Purchasing, AcknowledgedType, now + supplier.ConfirmDelay, acknowledged);
 
-        if (supplier.AutoInvoice)
+        if (supplier.AutoInvoice && !supplier.ManualInvoiceSuppliers.Contains(order.SupplierCode, StringComparer.OrdinalIgnoreCase))
         {
             webhooks.Schedule(
                 order.Id, WebhookTarget.Invoicing, InvoiceIssuedType, now + supplier.InvoiceDelay,

@@ -43,7 +43,8 @@ public static class DemoSeeder
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static readonly (string Tenant, string CostCenter, decimal Amount)[] DemoBudgets =
+    /// <summary>The seeded budget per cost center and fiscal year, in Rand incl. VAT (also read by the demo data scenario tests).</summary>
+    public static readonly IReadOnlyList<(string Tenant, string CostCenter, decimal Amount)> DemoBudgets =
     [
         ("acme", "IT-200", 900_000m),
         ("acme", "MK-110", 360_000m),

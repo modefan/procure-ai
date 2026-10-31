@@ -18,6 +18,7 @@ runs:
         echo "::add-mask::$api_key_sha"
         set_param DEMO_ADMIN_API_KEY "$api_key"
         set_param "Parameters__admin-api-key-sha256" "$api_key_sha"
+        set_param "Parameters__admin-api-key" "$api_key"
         set_param "Parameters__keycloak-admin-password" "$(gen)"
         set_param "Parameters__keycloak-demo-password" "$(gen)"
         set_param "Parameters__keycloak-gateway-secret" "$(gen)"

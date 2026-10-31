@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The demo data seeder (plan 06 ruling 1): drives purchase requests through every state through the public APIs, via the gateway,
+       with the admin API key acting on behalf of the demo users. `seed | reset | schedule`. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ServiceDefaults\ProcureAi.ServiceDefaults\ProcureAi.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\src\Contracts\ProcureAi.Contracts\ProcureAi.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Scenarios\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

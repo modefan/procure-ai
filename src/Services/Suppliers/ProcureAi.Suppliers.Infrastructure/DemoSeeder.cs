@@ -58,7 +58,8 @@ public static class DemoSeeder
     private static CatalogItem Item(string sku, string description, string unit, decimal price, bool active = true) =>
         new(sku, description, unit, Money.Zar(price), active);
 
-    private static IEnumerable<Supplier> DemoSuppliers()
+    /// <summary>The seeded suppliers and their catalogs (also read by the demo data scenario tests).</summary>
+    public static IEnumerable<Supplier> DemoSuppliers()
     {
         CatalogItem[] contosoItems =
         [
@@ -77,6 +78,9 @@ public static class DemoSeeder
                 Item("CHAIR-ERG", "Ergonomic chair", "each", 6_210m),
                 Item("DESK-SS", "Sit-stand desk", "each", 9_900m),
                 Item("PAPER-A4", "A4 paper, box of 5 reams", "box", 450m),
+                // The demo's PO-1001 (plan 06 ruling 3): a dock and a stand, received in full and waiting for the scanned invoice.
+                Item("DOCK-USB", "USB-C Dock", "each", 2_350m),
+                Item("STAND-LP", "Laptop Stand", "each", 690m),
             ]);
         yield return new Supplier(
             "acme", "adatum-software", "Adatum Software", "4345678901", "licences@adatum-software.test", true,
