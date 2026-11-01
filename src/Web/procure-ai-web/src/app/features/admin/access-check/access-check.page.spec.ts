@@ -119,6 +119,34 @@ describe('AccessCheckPage', () => {
     expect(text(el.querySelector('[data-testid="verdict"]'))).toContain('Denied');
   });
 
+  it('changing_an_input_clears_the_old_verdict (final review F8): no verdict stays next to inputs it was not for', async () => {
+    const { fixture, el } = await setup();
+    await fillAndCheck(fixture, 'Maria', 'approve', 'pr-1039');
+    expect(el.querySelector('[data-testid="verdict"]')).not.toBeNull();
+
+    const input = el.querySelector<HTMLInputElement>('#check-request')!;
+    input.value = 'PR-1040';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(el.querySelector('[data-testid="verdict"]')).toBeNull();
+
+    // Back to the checked request, then another action: the verdict is gone again until Check runs.
+    el.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await settle(fixture);
+    expect(el.querySelector('[data-testid="verdict"]')).not.toBeNull();
+    const select = el.querySelector<HTMLSelectElement>('#check-action')!;
+    select.value = 'view';
+    select.dispatchEvent(new Event('input'));
+    select.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(el.querySelector('[data-testid="verdict"]')).toBeNull();
+  });
+
+  it('request_placeholder_is_a_neutral_example (final review F13)', async () => {
+    const { el } = await setup();
+    expect(el.querySelector<HTMLInputElement>('#check-request')!.placeholder).toBe('e.g. PR-1001');
+  });
+
   it('missing_inputs_are_named_and_nothing_is_called', async () => {
     const { fixture, el } = await setup();
     el.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();

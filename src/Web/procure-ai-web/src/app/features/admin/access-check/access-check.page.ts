@@ -86,7 +86,7 @@ const ACTIONS: CheckAction[] = ['view', 'approve'];
             id="check-request"
             type="text"
             autocomplete="off"
-            placeholder="PR-1039"
+            placeholder="e.g. PR-1001"
             class="field-input font-mono"
             [formField]="checkForm.request"
             [attr.aria-invalid]="requestError() ? 'true' : null"
@@ -178,6 +178,8 @@ export class AccessCheckPage implements OnInit {
   protected readonly picked = signal<string[]>([]);
   private readonly selectedId = signal<string | null>(null);
   private readonly tried = signal(false);
+  /** The inputs the shown verdict is for (user, action, request number); null before the first check. */
+  private readonly checkedInputs = signal<string | null>(null);
 
   private readonly model = signal<{ action: string; request: string }>({ action: 'approve', request: '' });
   protected readonly checkForm = form(this.model);
@@ -207,6 +209,17 @@ export class AccessCheckPage implements OnInit {
           this.userText.set(user.displayName);
         }
         this.open.set(false);
+      }
+    });
+    // A verdict belongs to the inputs it was checked with: changing the user, the action or the request clears it (final review F8).
+    effect(() => {
+      const inputs = this.inputsKey(this.selectedId(), this.model().action, this.model().request);
+      const checked = this.checkedInputs();
+      if (checked !== null && inputs !== checked) {
+        untracked(() => {
+          this.checkedInputs.set(null);
+          this.store.clearOutcome();
+        });
       }
     });
     effect(() => {
@@ -242,6 +255,10 @@ export class AccessCheckPage implements OnInit {
     }
   }
 
+  private inputsKey(userId: string | null, action: string, request: string): string {
+    return JSON.stringify([userId, action, normaliseRequestNumber(request)]);
+  }
+
   protected gating(steps: CheckStepDto[]): CheckStepDto[] {
     return steps.filter((s) => s.gating);
   }
@@ -258,6 +275,7 @@ export class AccessCheckPage implements OnInit {
       return;
     }
     const action = this.model().action as CheckAction;
+    this.checkedInputs.set(this.inputsKey(user.userId, action, number));
     this.model.update((m) => ({ ...m, request: number }));
     this.router.navigate([], { queryParams: { user: user.userId, action, request: number }, replaceUrl: true });
     await this.store.check(user.userId, action, number);
