@@ -66,12 +66,28 @@ public sealed class ServiceResourcesTests
     /// (its own pool), Marten's <c>Connection(cs)</c> builds its own <c>NpgsqlDataSourceBuilder</c> data source (Audit's Wolverine outbox
     /// uses Marten's), and EF Core with <c>UseVector()</c> (Assistant) builds a data source of its own besides the shared one.
     /// </summary>
-    private static int PoolsOf(string service) => service switch
+    private static readonly Dictionary<string, int> PoolsPerService = new()
     {
-        "audit-api" => 2,      // plain connections + Marten (its Wolverine store is Marten's)
-        "assistant-api" => 3,  // plain + EF Core with UseVector + Wolverine
-        _ => 2,                // EF Core/plain + Wolverine
+        ["access-api"] = 2,      // plain/EF Core (one shared pool) + Wolverine's message store
+        ["approvals-api"] = 2,   // plain/EF Core + Wolverine
+        ["budgets-api"] = 2,     // plain/EF Core + Wolverine
+        ["purchasing-api"] = 2,  // plain/EF Core + Wolverine
+        ["invoicing-api"] = 2,   // plain/EF Core + Wolverine
+        ["requests-api"] = 2,    // plain/EF Core + Wolverine
+        ["audit-api"] = 2,       // plain connections + Marten (its Wolverine store is Marten's)
+        ["assistant-api"] = 3,   // plain + EF Core with UseVector() (own data source) + Wolverine
     };
+
+    /// <summary>
+    /// There is deliberately no default: a Postgres service missing from <see cref="PoolsPerService"/> fails the test, so a new service or
+    /// an added pool cannot leave the budget check green by accident.
+    /// </summary>
+    private static int PoolsOf(string service) =>
+        PoolsPerService.TryGetValue(service, out var pools)
+            ? pools
+            : throw new Xunit.Sdk.XunitException(
+                $"'{service}' uses Postgres but has no entry in PoolsPerService. Count its Npgsql pools (plain/EF Core, Wolverine's message store, " +
+                "Marten, an EF Core UseVector() data source), add them, and check that Pool_sizes_fit_max_connections still holds.");
 
     [Fact]
     public async Task Pool_sizes_fit_max_connections()
