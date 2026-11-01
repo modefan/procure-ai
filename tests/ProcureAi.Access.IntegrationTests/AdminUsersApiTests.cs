@@ -138,6 +138,23 @@ public sealed class AdminUsersApiTests(AccessInfraFixture infra) : IAsyncLifetim
         (await ReadAsync<UserDto>(cleared)).CostCenterCodes.ShouldBeEmpty();
     }
 
+    /// <summary>Final review F1: a code longer than any cost center code is refused as a bad request, and is not echoed back.</summary>
+    [Fact]
+    public async Task Set_cost_centers_with_an_overlong_code_is_400_without_echoing_it()
+    {
+        var tenant = await TenantWithCostCentersAsync();
+        var maria = await MariaAsync(tenant);
+        var overlong = "X" + new string('A', 5_000);
+
+        var put = await _client.SendAsync(
+            Request(HttpMethod.Put, $"{Base}/users/{DemoUsers.Maria}/cost-centers", AdminToken(tenant), ETag(maria.Version),
+                new { codes = new[] { "CC-1", overlong } }), Ct);
+
+        put.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await put.Content.ReadAsStringAsync(Ct)).ShouldNotContain(overlong[..200]);
+        (await MariaAsync(tenant)).CostCenterCodes.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Set_cost_centers_unknown_code_is_422()
     {
