@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ProcureAi.Simulators.Chaos;
 
 public enum ChaosMode
@@ -80,6 +82,11 @@ public sealed class ChaosRestoreOptions
 {
     public const string Section = SimulatorOptions.Section + ":Chaos";
 
+    /// <summary>
+    /// One second to one day (final review F6): the restore timer cannot wait longer than about 49 days, and a demo should not stay
+    /// broken for longer than a day anyway.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "1.00:00:00", ErrorMessage = "Simulators:Chaos:AutoRestoreAfter must be between 1 second and 1 day.")]
     public TimeSpan AutoRestoreAfter { get; set; } = TimeSpan.FromMinutes(5);
 }
 

@@ -20,7 +20,7 @@ builder.Services.AddOptions<SimulatorOptions>()
     .ValidateOnStart();
 builder.Services.AddOptions<ChaosRestoreOptions>()
     .BindConfiguration(ChaosRestoreOptions.Section)
-    .Validate(options => options.AutoRestoreAfter > TimeSpan.Zero, "Simulators:Chaos:AutoRestoreAfter must be positive.")
+    .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.AddOptions<AdminAuthOptions>()
     .BindConfiguration(AdminAuthOptions.Section)

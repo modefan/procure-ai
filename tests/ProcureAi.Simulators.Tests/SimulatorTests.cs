@@ -382,6 +382,21 @@ public sealed class SimulatorTests
         (await client.GetAsync("api/v1/simulators/supplier/orders?buyerReference=x")).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
+    /// <summary>
+    /// Final review F6: the restore timer cannot wait longer than about 49 days, so an unbounded <c>AutoRestoreAfter</c> threw on the first
+    /// chaos switch. The option is bounded and refused at startup.
+    /// </summary>
+    [Theory]
+    [InlineData("60.00:00:00")]
+    [InlineData("00:00:00")]
+    public async Task Chaos_auto_restore_out_of_range_fails_at_startup(string value)
+    {
+        await using var factory = new SimulatorFactory(new() { ["Simulators:Chaos:AutoRestoreAfter"] = value });
+
+        var error = Should.Throw<Microsoft.Extensions.Options.OptionsValidationException>(() => factory.AdminClient());
+        error.Message.ShouldContain("AutoRestoreAfter");
+    }
+
     [Fact]
     public async Task Chaos_restores_after_timeout()
     {
