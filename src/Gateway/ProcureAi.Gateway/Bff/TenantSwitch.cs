@@ -221,6 +221,7 @@ public static class TenantSwitchEndpoints
     {
         app.MapPost("/bff/switch-tenant", SwitchAsync)
             .RequireAuthorization(BffAuthSetup.SessionPolicy)
+            .RequireRateLimiting(DemoEntryRateLimit.PolicyName)
             .WithMetadata(new RequestSizeLimitAttribute(MaxBodyBytes));
         // A GET because the app opens it as a page (the OIDC challenge is a top-level redirect), but it changes nothing without the
         // single-use ticket the POST above issued to this very session.

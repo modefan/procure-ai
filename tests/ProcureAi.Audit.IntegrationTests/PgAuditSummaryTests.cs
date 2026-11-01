@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using ProcureAi.Audit.Application.Abstractions;
+using ProcureAi.Audit.Application.Status;
 using ProcureAi.Audit.Infrastructure.PgAudit;
 using ProcureAi.BuildingBlocks.Application.Status;
 using Shouldly;
@@ -46,7 +47,8 @@ public sealed class PgAuditSummaryTests(AuditApp app)
         var item = section.Items.Where(i => i.Text.Contains(table)).ShouldHaveSingleItem();
         item.Kind.ShouldBe("pgaudit");
         item.TenantId.ShouldBeNull();
-        item.Text.ShouldStartWith($"{Superuser} in auditdb: CREATE TABLE");
+        item.Text.ShouldBe($"{Superuser} in auditdb: CREATE TABLE {table}");
+        item.Text.ShouldNotContain("(id int)", Case.Sensitive, "the statement text stays out of the tenant-less item (plan 07 Task 0a)");
     }
 
     /// <summary>
@@ -86,6 +88,29 @@ public sealed class PgAuditSummaryTests(AuditApp app)
         {
             options.IgnoredDdlPattern().ShouldBe(@"\m(wolverine)\M");
         }
+    }
+
+    /// <summary>
+    /// The status item names the object, never the statement (plan 07 Task 0a): pgaudit's object name, or else the one identifier after the
+    /// command (session logging leaves the object fields empty for DDL). Values later in the statement (a default, a literal) never show.
+    /// </summary>
+    [Theory]
+    [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,\"CREATE TABLE IF NOT EXISTS public.x (id int)\",<not logged>", "public.x")]
+    [InlineData("SESSION,1,1,DDL,ALTER TABLE,,,ALTER TABLE budgets ALTER COLUMN amount SET DEFAULT 5000,<not logged>", "budgets")]
+    [InlineData("SESSION,1,1,DDL,CREATE INDEX,,,CREATE INDEX CONCURRENTLY ix_a ON t (a),<not logged>", "ix_a")]
+    [InlineData("SESSION,1,1,ROLE,CREATE ROLE,,,CREATE ROLE probe LOGIN PASSWORD <REDACTED>,<not logged>", "probe")]
+    [InlineData("SESSION,1,1,DDL,CREATE TABLE,TABLE,public.y,create table y (id int),<not logged>", "public.y")]
+    [InlineData("SESSION,1,1,FUNCTION,DO,,,DO $$ BEGIN PERFORM 5000; END $$,<not logged>", "")]
+    [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,/* note */ CREATE TABLE z (id int),<not logged>", "")]
+    public void Status_item_names_only_the_object(string message, string expected)
+    {
+        var fields = PgAuditMessage.Fields("AUDIT: " + message);
+
+        PgAuditMessage.ObjectOf(fields).ShouldBe(expected);
+        var text = PgAuditContributor.Text(new PgAuditStatement(
+            DateTimeOffset.UtcNow, "dale", "budgetsdb", fields[PgAuditMessage.Class], fields[PgAuditMessage.Command], "statement", expected));
+        text.ShouldNotContain("5000");
+        text.ShouldNotContain("secret");
     }
 
     [Fact]

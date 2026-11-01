@@ -18,8 +18,9 @@ public static class DemoResetEndpoints
     /// <summary>
     /// <c>POST {routePrefix}/internal/demo/reset</c> → 204: runs the service's <see cref="IDemoResetter"/>, then clears the service's whole
     /// FusionCache (memory and Redis, other instances through the backplane), which includes the stored <c>[Idempotent]</c> results: a
-    /// re-seed after a reset must not get the old answer for an Idempotency-Key whose resource no longer exists. Only for a service account or
-    /// the admin API key (<see cref="InternalPolicy"/>), never a user token, not even an admin's.
+    /// re-seed after a reset must not get the old answer for an Idempotency-Key whose resource no longer exists. Only for the admin API key
+    /// (<see cref="AdminApiKeyPolicy"/>, plan 07 Task 0a): it deletes every tenant's data, so neither a service account (which passes
+    /// <see cref="InternalPolicy"/>) nor a user token, not even an admin's, may run it. ProcureAi.DemoData calls it with the key.
     /// <para>
     /// Mapped only when <c>DemoReset:Enabled</c> is true: otherwise the route does not exist and every caller gets 404 (fail closed). Not in
     /// the OpenAPI document: it is an operations hook for ProcureAi.DemoData, not part of the API the app uses.
@@ -34,7 +35,7 @@ public static class DemoResetEndpoints
         }
 
         app.MapPost($"{routePrefix.TrimEnd('/')}/{Path}", ResetAsync)
-            .RequireAuthorization(InternalPolicy.Name)
+            .RequireAuthorization(AdminApiKeyPolicy.Name)
             .ExcludeFromDescription();
         return app;
     }
@@ -45,7 +46,8 @@ public static class DemoResetEndpoints
     {
         var logger = loggers.CreateLogger(typeof(DemoResetEndpoints).FullName!);
         var clock = Stopwatch.StartNew();
-        logger.LogWarning("Demo reset of {Service} started by {Caller}", service.Name, caller.IsAdminApiKey ? "the admin key" : caller.UserId);
+        logger.LogWarning(
+            "Demo reset of {Service} started with the admin key by {CallingService}", service.Name, caller.CallingService ?? "an unnamed caller");
         try
         {
             await resetter.ResetAsync(cancellationToken);

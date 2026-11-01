@@ -82,7 +82,8 @@ public sealed class PgAuditReader(string connectionString, PgAuditOptions option
                 reader.GetString(5),
                 Field(fields, PgAuditMessage.Class),
                 Field(fields, PgAuditMessage.Command),
-                PgAuditMessage.Shorten(Field(fields, PgAuditMessage.Statement), options.TextMaxLength)));
+                PgAuditMessage.Shorten(Field(fields, PgAuditMessage.Statement), options.TextMaxLength),
+                PgAuditMessage.ObjectOf(fields)));
         }
 
         latest.Sort((a, b) => b.At.CompareTo(a.At));
@@ -102,6 +103,7 @@ public static class PgAuditMessage
 {
     public const int Class = 3;
     public const int Command = 4;
+    public const int ObjectName = 6;
     public const int Statement = 7;
 
     private const string Prefix = "AUDIT: ";
@@ -148,6 +150,49 @@ public static class PgAuditMessage
 
         fields.Add(field.ToString());
         return fields;
+    }
+
+    /// <summary>The longest object name the summary shows: a schema-qualified Postgres identifier (63 bytes each) with quotes.</summary>
+    private const int MaxObjectName = 140;
+
+    private static readonly string[] Qualifiers = ["IF NOT EXISTS", "IF EXISTS", "ONLY", "CONCURRENTLY"];
+
+    /// <summary>
+    /// The object a statement names: pgaudit's object name when it gives one, otherwise the identifier right after the command at the
+    /// start of the statement (<c>CREATE TABLE IF NOT EXISTS public.x (…)</c> → <c>public.x</c>); session logging leaves the object fields
+    /// empty for most DDL. Only that one token, never the rest of the statement, and nothing with a string literal in it. Empty when
+    /// there is none.
+    /// </summary>
+    public static string ObjectOf(IReadOnlyList<string> fields)
+    {
+        if (fields.Count > ObjectName && fields[ObjectName].Length > 0)
+        {
+            return fields[ObjectName].Length <= MaxObjectName ? fields[ObjectName] : "";
+        }
+
+        if (fields.Count <= Statement || fields[Command].Length == 0)
+        {
+            return "";
+        }
+
+        var rest = string.Join(' ', fields[Statement].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (!rest.StartsWith(fields[Command] + " ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+
+        rest = rest[(fields[Command].Length + 1)..];
+        foreach (var qualifier in Qualifiers)
+        {
+            if (rest.StartsWith(qualifier + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                rest = rest[(qualifier.Length + 1)..];
+            }
+        }
+
+        var end = rest.IndexOfAny([' ', '(', ';', ',']);
+        var token = end < 0 ? rest : rest[..end];
+        return token.Length is > 0 and <= MaxObjectName && !token.Contains('\'') && !token.Contains('$') ? token : "";
     }
 
     /// <summary>Whitespace runs (line breaks, indentation) become one space; longer text is cut to <paramref name="max"/> characters, ending in "…".</summary>

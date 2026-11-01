@@ -84,10 +84,21 @@ public static class Extensions
                 .AddSource(builder.Environment.ApplicationName)
                 .AddSource(BusinessSources)
                 .AddAspNetCoreInstrumentation(options =>
+                {
                     // Health probes would otherwise flood the traces.
                     options.Filter = context =>
                         !context.Request.Path.StartsWithSegments(LivePath)
-                        && !context.Request.Path.StartsWithSegments(ReadyPath))
+                        && !context.Request.Path.StartsWithSegments(ReadyPath);
+                    // Query values may be credentials (the tenant switch ticket): only the names reach the trace. Same format as the
+                    // instrumentation's own redaction (with the leading ?), our mask.
+                    options.EnrichWithHttpRequest = (activity, request) =>
+                    {
+                        if (request.QueryString.HasValue)
+                        {
+                            activity.SetTag("url.query", QueryStringRedaction.Redact(request.QueryString.Value));
+                        }
+                    };
+                })
                 .AddHttpClientInstrumentation()
                 // Handled messages, outbox sends and transport hops, linked to the trace of the request that caused them.
                 .AddSource(WolverineTelemetryName)

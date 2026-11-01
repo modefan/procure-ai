@@ -81,6 +81,8 @@ public sealed class GatewayHost : IAsyncDisposable
             ["ConnectionStrings:Redis"] = redis.ConnectionString,
             ["Session:RedisKeyPrefix"] = keyPrefix,
             ["RateLimiting:PermitLimit"] = "100000",
+            // Tests sign in and switch many times from the one test client address; DemoEntryRateLimitTests use the real limit.
+            ["RateLimiting:DemoEntry:PermitLimit"] = "100000",
             ["ReverseProxy:Clusters:requests:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:budgets:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:approvals:Destinations:d1:Address"] = stub.Url,
@@ -97,9 +99,17 @@ public sealed class GatewayHost : IAsyncDisposable
             settings[key] = value;
         }
 
+        // A null value removes a test default, so the gateway's own configuration (appsettings.json) applies.
         foreach (var (key, value) in extra ?? [])
         {
-            settings[key] = value;
+            if (value is null)
+            {
+                settings.Remove(key);
+            }
+            else
+            {
+                settings[key] = value;
+            }
         }
 
         var app = GatewayApp.Build([], builder =>

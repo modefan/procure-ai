@@ -52,6 +52,9 @@ public static class GatewayApp
         services.AddProcureAiProblemDetails();
         // The gateway has no API key of its own to check, and has the client IP only: behind it every user is one IP.
         services.AddProcureAiRateLimiting(RateLimitPartitioning.ClientIp);
+        // Demo login and tenant switch: a much lower limit of their own, on top of the global one (each costs a Keycloak password grant).
+        services.AddValidatedOptions<DemoEntryRateLimitOptions>(configuration, DemoEntryRateLimitOptions.SectionName);
+        services.AddDemoEntryRateLimit();
         services.AddGatewaySwagger(configuration);
 
         AddRedis(builder);

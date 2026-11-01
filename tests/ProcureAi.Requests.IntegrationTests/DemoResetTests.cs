@@ -14,7 +14,7 @@ namespace ProcureAi.Requests.IntegrationTests;
 /// The nightly demo reset of Requests (plan 06 rulings 4 and 5): <c>POST api/v1/requests/internal/demo/reset</c> deletes every request of
 /// every tenant with ordinary deletes the audit interceptor records (one Delete row per deleted row, in the same transaction), restarts
 /// the numbering, clears the stored Idempotency-Key results, and is only there when <c>DemoReset:Enabled</c> is true and only for the admin
-/// key or a service account. Each test has a database of its own: the reset deletes every tenant's data.
+/// key (plan 07 Task 0a: no longer a service account). Each test has a database of its own: the reset deletes every tenant's data.
 /// </summary>
 [Collection(InfraCollection.Name)]
 public sealed class DemoResetTests(InfraFixture infra)
@@ -92,7 +92,7 @@ public sealed class DemoResetTests(InfraFixture infra)
     }
 
     [Fact]
-    public async Task Demo_reset_refuses_user_tokens_even_an_admins()
+    public async Task Demo_reset_refuses_user_and_service_tokens()
     {
         var (factory, _) = await StartAsync(enabled: true);
         await using var _ = factory;
@@ -108,8 +108,10 @@ public sealed class DemoResetTests(InfraFixture infra)
         (await client.SendAsync(anonymous, Ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         (await ListAsync(client, "acme")).Select(r => r.Id).ShouldBe([request.Id]);
 
-        // A service account (the internal client) may: InternalPolicy.
-        (await client.SendAsync(Post(Reset, bearer: TestAuth.CreateServiceToken(ServiceClientId)), Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        // Not even a service account (plan 07 Task 0a): the reset deletes every tenant's data, so only the admin key may run it.
+        (await client.SendAsync(Post(Reset, bearer: TestAuth.CreateServiceToken(ServiceClientId)), Ct)).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await ListAsync(client, "acme")).Select(r => r.Id).ShouldBe([request.Id]);
+        (await DemoResetProbe.ResetAsync(client, "requests")).ShouldBe(HttpStatusCode.NoContent);
         (await ListAsync(client, "acme")).ShouldBeEmpty();
     }
 

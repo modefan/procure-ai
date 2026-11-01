@@ -12,7 +12,7 @@ public static class SerilogSetup
 {
     /// <summary>
     /// Serilog configured from the <c>Serilog</c> section (levels, sinks incl. OpenTelemetry, enrichers).
-    /// Code adds only the context enricher and the header masking policy. Serilog replaces the logger factory,
+    /// Code adds only the context enricher, the query string redaction and the header masking policy. Serilog replaces the logger factory,
     /// so logs reach the Aspire dashboard through the configured OpenTelemetry sink, not twice.
     /// </summary>
     public static WebApplicationBuilder AddProcureAiSerilog(this WebApplicationBuilder builder, string serviceName)
@@ -29,6 +29,7 @@ public static class SerilogSetup
                 .Enrich.FromLogContext()
                 .Enrich.With(new LogContextEnricher(
                     serviceName, services.GetRequiredService<IHttpContextAccessor>(), services.GetRequiredService<IOptions<AuthOptions>>()))
+                .Enrich.With<QueryStringRedactionEnricher>()
                 .Destructure.With<HeaderMaskingPolicy>();
 
             // A service without a Serilog section must never log nothing at all.

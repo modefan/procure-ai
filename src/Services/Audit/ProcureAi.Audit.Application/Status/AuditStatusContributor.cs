@@ -1,4 +1,5 @@
 using ProcureAi.Audit.Application.Abstractions;
+using ProcureAi.Audit.Domain;
 using ProcureAi.BuildingBlocks.Application.Status;
 
 namespace ProcureAi.Audit.Application.Status;
@@ -26,13 +27,21 @@ public sealed class AuditStatusContributor(IDataChangeStore changes) : IStatusCo
         var items = open.Latest
             .Select(a => new StatusItem(
                 AlertKind,
-                $"{a.Table} ({a.Database}) changed outside the app, row {a.PrimaryKey}",
+                Text(a),
                 a.TenantId,
                 a.CommittedAt,
                 LinkFor(a.Table)))
             .ToList();
         return new StatusSection(SectionName, counters, items);
     }
+
+    /// <summary>
+    /// What the alert says: table, database, key and operation, never a value of the row (plan 07 Task 0a, plan 06 carry-over 10). An alert
+    /// without a tenant is listed for every tenant's admin; the values stay in the data change log, which is tenant-scoped.
+    /// </summary>
+    public static string Text(OutsideAppAlert alert) =>
+        $"{alert.Table} ({alert.Database}) changed outside the app, row {alert.PrimaryKey}"
+        + (string.IsNullOrEmpty(alert.Operation) ? "" : $" ({alert.Operation.ToLowerInvariant()})");
 
     /// <summary>The data change log (screen 24), outside-the-app changes of one table.</summary>
     public static string LinkFor(string table) => "/app/admin/data-changes?outside=true&table=" + Uri.EscapeDataString(table);

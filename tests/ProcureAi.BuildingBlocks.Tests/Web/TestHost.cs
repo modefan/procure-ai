@@ -27,7 +27,7 @@ public static class TestHost
 {
     public static async Task<WebApplication> StartAsync(
         Dictionary<string, string?>? config = null, CapturingSink? sink = null,
-        Action<WebApplicationBuilder>? configure = null)
+        Action<WebApplicationBuilder>? configure = null, Action<WebApplication>? map = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
@@ -92,6 +92,7 @@ public static class TestHost
             return next(context);
         });
         app.UseProcureAiWeb();
+        map?.Invoke(app);
         await app.StartAsync();
         return app;
     }

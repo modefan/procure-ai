@@ -22,6 +22,15 @@ public sealed class CollectingSink : ILogEventSink
         }
     }
 
+    /// <summary>Every entry so far.</summary>
+    public IReadOnlyList<LogEvent> All()
+    {
+        lock (_events)
+        {
+            return [.. _events];
+        }
+    }
+
     /// <summary>The entries that came from the browser.</summary>
     public IReadOnlyList<LogEvent> Browser()
     {

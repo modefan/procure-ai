@@ -574,6 +574,68 @@ public sealed class CdcTests(AuditApp app)
         await command.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Plan 06 carry-over 10 (plan 07 Task 0a): an alert without a tenant (here a request line: the table has no tenant column and the
+    /// change no interceptor row) is listed for every tenant's admin, so its text names the table, the operation and the key, never a
+    /// value of the row. The same holds for the pgaudit lines, which never have a tenant.
+    /// </summary>
+    [Fact]
+    public async Task Tenantless_alert_text_has_no_row_values()
+    {
+        await app.EnsureCdcAsync();
+        var tenant = AuditApp.NewTenant();
+        var (id, _) = await CreateRequestAsync(tenant);
+        await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Table == "request_lines" && c.SubjectId == id),
+            found => found.Count == 1 && found[0].Attribution.Kind == AttributionKind.App);
+        var oldPrice = await ScalarAsync<decimal>(
+            app.RequestsDbConnectionString, "SELECT unit_price_excl_vat FROM request_lines WHERE request_id = @id", ("id", id));
+        const decimal newPrice = 98765.43m;
+
+        await ExecuteAsync(
+            app.RequestsDbConnectionString, "UPDATE request_lines SET unit_price_excl_vat = @price WHERE request_id = @id", ("price", newPrice), ("id", id));
+
+        var key = $"{id},1";
+        var outside = (await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Table == "request_lines" && c.PrimaryKey == key && c.Operation == "Update"),
+            found => found.Count == 1 && found[0].Attribution.Kind == AttributionKind.OutsideApp,
+            AfterGrace)).Single();
+        outside.TenantId.ShouldBeNull("no tenant column and no interceptor row");
+
+        await using var scope = app.Services.CreateAsyncScope();
+        var contributors = scope.ServiceProvider.GetServices<ProcureAi.BuildingBlocks.Application.Status.IStatusContributor>().ToList();
+        var audit = await contributors.Single(c => c.Name == "audit").CollectAsync(Ct);
+        var item = audit.Items.Where(i => i.Text.Contains(key)).ShouldHaveSingleItem();
+        item.TenantId.ShouldBeNull();
+        item.Text.ShouldBe($"request_lines ({AuditApp.RequestsDb}) changed outside the app, row {key} (update)");
+
+        var pgaudit = await contributors.Single(c => c.Name == "pgaudit").CollectAsync(Ct);
+        oldPrice.ShouldNotBe(newPrice);
+        string[] values = [Format(oldPrice), Format(newPrice)];
+        foreach (var text in audit.Items.Concat(pgaudit.Items).Where(i => i.TenantId is null).Select(i => i.Text))
+        {
+            foreach (var value in values)
+            {
+                text.ShouldNotContain(value, Case.Sensitive, "a tenant-less alert never shows a row value");
+            }
+        }
+    }
+
+    private static string Format(decimal value) => value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static async Task<T> ScalarAsync<T>(string connectionString, string sql, params (string Name, object Value)[] parameters)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+
+        return (T)(await command.ExecuteScalarAsync())!;
+    }
+
     /// <summary>The Debezium messages about one request that the durable inbox has handled (Debezium gives them no message ID).</summary>
     private async Task<long> HandledCdcMessagesAsync()
     {

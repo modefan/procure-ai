@@ -48,10 +48,12 @@ internal static class AuthSetup
 
         services.AddAuthorizationBuilder()
             .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
-            .AddPolicy(InternalPolicy.Name, policy => policy.RequireAuthenticatedUser().AddRequirements(new InternalRequirement()));
+            .AddPolicy(InternalPolicy.Name, policy => policy.RequireAuthenticatedUser().AddRequirements(new InternalRequirement()))
+            .AddPolicy(AdminApiKeyPolicy.Name, policy => policy.RequireAuthenticatedUser().AddRequirements(new AdminApiKeyRequirement()));
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, InternalAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, AdminApiKeyAuthorizationHandler>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         return services;
     }

@@ -25,7 +25,7 @@ public static class DemoLoginEndpoints
     {
         var group = app.MapGroup("/bff/demo-login");
         group.MapGet("/users", ListUsers).AllowAnonymous();
-        group.MapPost("", LoginAsync).AllowAnonymous();
+        group.MapPost("", LoginAsync).AllowAnonymous().RequireRateLimiting(DemoEntryRateLimit.PolicyName);
         return app;
     }
 
