@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 using ProcureAi.BuildingBlocks.Application;
@@ -205,6 +206,36 @@ public sealed class TenantCollectionTests(MongoFixture mongo) : IClassFixture<Mo
         }
 
         replaced.Audit!.At.ShouldBeGreaterThanOrEqualTo(inserted.Audit!.At);
+    }
+
+    /// <summary>Final review I1: the stamp names who acted and the calling service, not only the user (as the EF Core interceptor rows do).</summary>
+    [Fact]
+    public void Stamp_of_an_admin_key_call_on_behalf_of_a_user_names_the_actor()
+    {
+        var stamp = AuditStamp.For(new AdminCaller(), "corr", DateTimeOffset.UtcNow);
+
+        stamp.UserId.ShouldBe("maria");
+        stamp.ActorId.ShouldBe("claude-admin");
+        stamp.CallingService.ShouldBe("demo-data");
+
+        var bson = stamp.ToBsonDocument();
+        bson["actorId"].AsString.ShouldBe("claude-admin");
+        bson["callingService"].AsString.ShouldBe("demo-data");
+        AuditStamp.For(new Caller("A"), null, DateTimeOffset.UtcNow).ToBsonDocument().Contains("callingService")
+            .ShouldBeFalse("no calling service: the element is left out");
+    }
+
+    private sealed class AdminCaller : ICallerContext
+    {
+        public string UserId => "maria";
+
+        public string ActorId => "claude-admin";
+
+        public string? TenantId => "A";
+
+        public string? CallingService => "demo-data";
+
+        public CallerKind Kind => CallerKind.AdminApiKey;
     }
 
     /// <summary>A delete event carries no document: the document is stamped "deleting" first, so Audit can tell the app's delete.</summary>

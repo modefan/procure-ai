@@ -214,6 +214,38 @@ public sealed class MongoChangeTests
         outside.Stamp.ShouldBe(updated.Stamp, "an update that leaves _audit alone keeps the document's stamp");
     }
 
+    /// <summary>
+    /// Final review I1: an admin-key write on behalf of a user stamps the actor and the calling service as well. The change shows the
+    /// user it was for and <c>claude-admin</c> as who acted, as the Postgres interceptor rows do.
+    /// </summary>
+    [Fact]
+    public void Admin_key_write_on_behalf_of_a_user_is_attributed_to_the_actor()
+    {
+        var inserted = Parse("supplier-insert").ToDataChange(null, Cdc);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Fixture("supplier-update.json")))!.AsObject();
+        body["updateDescription"]!["updatedFields"] =
+            "{\"Email\": \"sales@contoso-hardware.test\", \"_audit\": {\"userId\": \"maria\", \"actorId\": \"claude-admin\", "
+            + "\"callingService\": \"demo-data\", \"correlationId\": \"corr-admin\", \"at\": {\"$date\": \"2026-10-31T09:23:33.515Z\"}}}";
+        var change = MongoChangeParser.Parse(body.ToJsonString(), File.ReadAllText(Fixture("supplier-update.key")))!;
+
+        change.Stamp!.ActorId.ShouldBe("claude-admin");
+        change.Stamp.CallingService.ShouldBe("demo-data");
+        change.ToDataChange(inserted, Cdc).Attribution
+            .ShouldBe(new Attribution(AttributionKind.App, "maria", "claude-admin", "demo-data", "corr-admin", null));
+    }
+
+    /// <summary>A stamp written before the actor was stamped (no <c>actorId</c>) still names the user as the actor.</summary>
+    [Fact]
+    public void Stamp_without_actor_uses_the_user_as_actor()
+    {
+        var stamp = Parse("supplier-update").Stamp!;
+
+        stamp.ActorId.ShouldBeNull();
+        stamp.Actor.ShouldBe("tom");
+        Attribution.Stamped(stamp).ActorId.ShouldBe("tom");
+        Attribution.Stamped(stamp).CallingService.ShouldBeNull();
+    }
+
     /// <summary>Masking fails closed: without a masked collection the Audit service does not start (plan 06 ruling 16).</summary>
     [Fact]
     public void Masked_collections_must_not_be_empty()

@@ -296,10 +296,13 @@ public sealed record MongoChange(
             return null;
         }
 
-        var correlation = stamp.TryGetProperty("correlationId", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
         var deleting = stamp.TryGetProperty("deleting", out var d) && d.ValueKind == JsonValueKind.True;
-        return new DocumentStamp(user.GetString()!, correlation, when.ToUniversalTime(), deleting);
+        return new DocumentStamp(
+            user.GetString()!, StringOf(stamp, "correlationId"), when.ToUniversalTime(), deleting, StringOf(stamp, "actorId"), StringOf(stamp, "callingService"));
     }
+
+    private static string? StringOf(JsonElement stamp, string name) =>
+        stamp.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static string? TenantOf(JsonElement? document) =>
         document is { ValueKind: JsonValueKind.Object } row && row.TryGetProperty(TenantField, out var tenant) && tenant.ValueKind == JsonValueKind.String

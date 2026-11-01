@@ -6,7 +6,8 @@ using ProcureAi.BuildingBlocks.Application;
 namespace ProcureAi.BuildingBlocks.Persistence.Mongo;
 
 /// <summary>
-/// Who wrote a MongoDB document, stored in the document itself as <c>_audit: { userId, correlationId, at }</c> (plan 06 ruling 16):
+/// Who wrote a MongoDB document, stored in the document itself as <c>_audit: { userId, actorId, callingService, correlationId, at }</c>
+/// (plan 06 ruling 16; the actor and calling service since final review I1, as the EF Core interceptor rows have them):
 /// the MongoDB counterpart of the EF Core audit interceptor. MongoDB change events carry no transaction ID to match an audit row
 /// against, so every write the app makes carries a fresh stamp; Debezium publishes it with the change, and Audit attributes a change
 /// whose insert, replace or update includes a new <c>_audit.at</c> to that user. A change without one (mongosh, a script) is
@@ -28,6 +29,16 @@ public sealed class AuditStamp
     [BsonElement("userId")]
     public string UserId { get; set; } = null!;
 
+    /// <summary>Who performed the write (<see cref="ICallerContext.ActorId"/>: the user, <c>claude-admin</c> or <c>service:&lt;name&gt;</c>).</summary>
+    [BsonElement("actorId")]
+    [BsonIgnoreIfNull]
+    public string? ActorId { get; set; }
+
+    /// <summary>The service that made the call or sent the message, when known (<see cref="ICallerContext.CallingService"/>).</summary>
+    [BsonElement("callingService")]
+    [BsonIgnoreIfNull]
+    public string? CallingService { get; set; }
+
     /// <summary>The correlation ID of the request or message that caused the write, when there is one.</summary>
     [BsonElement("correlationId")]
     [BsonIgnoreIfNull]
@@ -47,7 +58,15 @@ public sealed class AuditStamp
     public static AuditStamp For(ICallerContext caller, string? correlationId, DateTimeOffset at, bool deleting = false)
     {
         ArgumentNullException.ThrowIfNull(caller);
-        return new AuditStamp { UserId = caller.UserId, CorrelationId = correlationId, At = at.UtcDateTime, Deleting = deleting };
+        return new AuditStamp
+        {
+            UserId = caller.UserId,
+            ActorId = caller.ActorId,
+            CallingService = caller.CallingService,
+            CorrelationId = correlationId,
+            At = at.UtcDateTime,
+            Deleting = deleting,
+        };
     }
 
     /// <summary>Adds the stamp to an update (<c>$set: { _audit: ... }</c>), for writes with update operators.</summary>

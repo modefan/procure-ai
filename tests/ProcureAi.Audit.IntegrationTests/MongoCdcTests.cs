@@ -54,6 +54,31 @@ public sealed class MongoCdcTests(AuditApp app)
         (await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.TenantId == tenant))).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// Final review I1: an admin-key write on behalf of a user (the demo seeder, or Claude) shows the user it was for and
+    /// <c>claude-admin</c> as who acted, as the same write to Postgres does.
+    /// </summary>
+    [Fact]
+    public async Task Admin_key_write_on_behalf_of_a_user_names_the_actor()
+    {
+        var mongo = await app.EnsureMongoCdcAsync();
+        var tenant = AuditApp.NewTenant();
+        var key = $"{tenant}:northwind-traders";
+        var suppliers = new TenantCollection<SupplierRow>(
+            mongo.Client.GetDatabase(SuppliersDb).GetCollection<SupplierRow>(Suppliers),
+            new Caller(tenant, "maria", "claude-admin", "demo-data", CallerKind.AdminApiKey));
+
+        await suppliers.InsertOneAsync(new SupplierRow { Id = key, TenantId = tenant, Name = "Northwind Traders", Email = "sales@northwind.test" }, Ct);
+
+        var change = (await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Database == SuppliersDb && c.PrimaryKey == key),
+            found => found.Count == 1)).Single();
+        change.Attribution.Kind.ShouldBe(AttributionKind.App);
+        change.Attribution.UserId.ShouldBe("maria");
+        change.Attribution.ActorId.ShouldBe("claude-admin");
+        change.Attribution.CallingService.ShouldBe("demo-data");
+    }
+
     [Fact]
     public async Task Mongosh_change_is_flagged_outside_app()
     {
@@ -168,16 +193,17 @@ public sealed class MongoCdcTests(AuditApp app)
         public AuditStamp? Audit { get; set; }
     }
 
-    private sealed class Caller(string tenant, string user) : ICallerContext
+    private sealed class Caller(string tenant, string user, string? actor = null, string? callingService = null, CallerKind kind = CallerKind.User)
+        : ICallerContext
     {
         public string UserId => user;
 
-        public string ActorId => user;
+        public string ActorId => actor ?? user;
 
         public string? TenantId => tenant;
 
-        public string? CallingService => null;
+        public string? CallingService => callingService;
 
-        public CallerKind Kind => CallerKind.User;
+        public CallerKind Kind => kind;
     }
 }
