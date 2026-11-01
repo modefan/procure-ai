@@ -63,8 +63,9 @@ export interface AuthState {
  *
  * When an admin changes the authorization matrix, Notifications pushes `access-matrix` to the tenant and the user's permissions are
  * read again, so menu links and guards follow without a reload: once at once and once more `cache.trailingReloadMs` later, because
- * the gateway keeps a user's permissions for `AccessClient:CacheDuration` (2 s, not longer than the trailing wait) and cannot hear
- * the change itself.
+ * the gateway keeps a user's permissions for `AccessClient:CacheDuration` (1 s) and cannot hear the change itself. The immediate read
+ * can refill that cache with the old permissions; the trailing read gets the new ones because the cache is clearly shorter than the
+ * trailing wait (pinned by PermissionRefreshSettingsTests in the AppHost tests).
  */
 export const AuthStore = signalStore(
   { providedIn: 'root' },

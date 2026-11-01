@@ -387,7 +387,9 @@ plus the working sets of the .NET processes):**
 
 So the system itself needs about 8.2 GB (the eighth Debezium Server, for MongoDB, adds about 0.3 GB); a deployment without the local
 tooling fits a 16 GB VM. Running it locally under Aspire takes about 11 GB. Postgres runs with `max_connections` 200 locally
-(`Resources:Postgres:MaxConnections`): ten services with a few connection pools each went past the default of 100 during the seed.
+(`Resources:Postgres:MaxConnections`): ten services with a few connection pools each went past the default of 100 during the seed. The
+figures above were measured just before that change, with 100; the extra idle connections add little (Postgres used 0.34 of its 0.75 GB
+cap with about 115 connections open).
 
 ## Demo users
 
@@ -460,7 +462,7 @@ Playwright end-to-end tests (live approval without reload, presence, conflict di
 the assistant's streamed answer and Stop, policy upload to Ready, invoice scan to a saved invoice, each demo role's menu, the full
 flow from request to payment through the UI only, a matrix change reaching a signed-in user within 10 s, the access check, the chaos
 switch opening and closing the breaker, an SQL change behind the app's back on the data changes and status screens, the company switch,
-and the dev panel's cache HIT and trace link), about 490 Vitest specs for the Angular app, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
+and the dev panel's cache HIT and trace link), about 770 Vitest specs for the Angular app, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
 whole AppHost and drives a request through approval, purchasing, invoicing and audit, and asks the assistant through the
 gateway. The assistant's retrieval is measured on every run (hit@6 on 34 questions); its model-judged evaluation
 (`tests/ProcureAi.Assistant.Evaluation`, groundedness and relevance) needs a real provider and is run by hand. GitHub Actions builds with warnings as errors and fails

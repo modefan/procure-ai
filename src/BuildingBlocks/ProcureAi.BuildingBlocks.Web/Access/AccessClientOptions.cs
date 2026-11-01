@@ -10,7 +10,8 @@ public sealed class AccessClientOptions : ServiceClientResilienceOptions
 
     /// <summary>
     /// How long an answer is served from the cache. Services also evict it when <c>AccessChanged</c> arrives, so 5 minutes
-    /// is only the worst case; the gateway has no message bus and uses 30 seconds.
+    /// is only the worst case; the gateway has no message bus and uses 1 second, shorter than the browser's trailing reload of
+    /// /bff/user after an <c>access-matrix</c> push (PermissionRefreshSettingsTests).
     /// </summary>
     [Range(typeof(TimeSpan), "00:00:01", "1.00:00:00")]
     public TimeSpan CacheDuration { get; set; } = TimeSpan.FromMinutes(5);

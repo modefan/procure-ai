@@ -58,9 +58,10 @@ public static class GatewayApp
         services.AddRedisReadiness();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
-        // Permissions come from Access, cached in memory for AccessClient:CacheDuration (2 s): the gateway has no message bus,
+        // Permissions come from Access, cached in memory for AccessClient:CacheDuration (1 s): the gateway has no message bus,
         // so it cannot hear AccessChanged and relies on the short cache instead. The browser reads /bff/user again on the
-        // access-matrix push and once more cache.trailingReloadMs (2 s) later, so a matrix change reaches the menu within seconds.
+        // access-matrix push and once more cache.trailingReloadMs (2 s) later; the cache must expire well before that second read
+        // (PermissionRefreshSettingsTests), so a matrix change reaches the menu within seconds.
         services.AddFusionCache();
         services.AddProcureAiAccessClient(configuration, ServiceName);
         services.AddBffAuthentication();
