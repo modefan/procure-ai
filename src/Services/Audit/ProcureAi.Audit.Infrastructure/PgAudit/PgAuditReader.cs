@@ -18,7 +18,8 @@ public sealed class PgAuditReader(string connectionString, PgAuditOptions option
     private const string WeekdaySql = "SELECT to_char(now() AT TIME ZONE current_setting('log_timezone'), 'Dy')";
 
     // One scan: 'c' rows are the counts per role and class, 'l' rows the newest audit lines. The first five fields of a pgaudit message
-    // (AUDIT: SESSION, statement ID, substatement ID, class, command) never hold a comma; the statement text is parsed in code.
+    // (AUDIT: SESSION, statement ID, substatement ID, class, command) never hold a comma; the statement text is parsed in code. DDL naming
+    // an ignored schema (@ignored, PgAuditOptions.IgnoredDdlSchemas) is counted but not listed.
     private const string SummarySql = """
         WITH audit AS MATERIALIZED (
             SELECT log_time, coalesce(user_name, '') AS role, coalesce(database_name, '') AS db, message
@@ -26,7 +27,9 @@ public sealed class PgAuditReader(string connectionString, PgAuditOptions option
             WHERE message LIKE 'AUDIT: %' AND log_time >= @from)
         SELECT 'c', role, split_part(message, ',', 4), count(*), NULL::timestamptz, NULL, NULL FROM audit GROUP BY role, split_part(message, ',', 4)
         UNION ALL
-        (SELECT 'l', role, NULL, NULL, log_time, db, message FROM audit ORDER BY log_time DESC LIMIT @latest)
+        (SELECT 'l', role, NULL, NULL, log_time, db, message FROM audit
+         WHERE @ignored::text IS NULL OR split_part(message, ',', 4) <> 'DDL' OR message !~* @ignored::text
+         ORDER BY log_time DESC LIMIT @latest)
         """;
 
     public async Task<PgAuditSummary> ReadAsync(CancellationToken cancellationToken)
@@ -61,6 +64,7 @@ public sealed class PgAuditReader(string connectionString, PgAuditOptions option
         await using var command = new NpgsqlCommand(string.Format(CultureInfo.InvariantCulture, SummarySql, table), connection);
         command.Parameters.AddWithValue("from", from);
         command.Parameters.AddWithValue("latest", options.LatestCount);
+        command.Parameters.Add(new NpgsqlParameter("ignored", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)options.IgnoredDdlPattern() ?? DBNull.Value });
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {

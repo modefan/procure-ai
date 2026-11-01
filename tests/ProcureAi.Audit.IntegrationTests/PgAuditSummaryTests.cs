@@ -49,6 +49,45 @@ public sealed class PgAuditSummaryTests(AuditApp app)
         item.Text.ShouldStartWith($"{Superuser} in auditdb: CREATE TABLE");
     }
 
+    /// <summary>
+    /// Final review F16: every service start runs Wolverine's <c>CREATE TABLE IF NOT EXISTS wolverine.…</c> DDL, which filled the newest
+    /// statements. DDL on the ignored schemas (<c>PgAudit:IgnoredDdlSchemas</c>) is left out of them (still counted), so a person's
+    /// <c>ALTER</c> shows up.
+    /// </summary>
+    [Fact]
+    public async Task Wolverine_schema_ddl_is_left_out_of_the_latest_statements()
+    {
+        var noise = $"wolverine_probe_{Guid.NewGuid():N}"[..30];
+        var table = $"pgaudit_alter_{Guid.NewGuid():N}"[..30];
+        await ExecuteAsSuperuserAsync($"CREATE TABLE {table} (id int)");
+        await ExecuteAsSuperuserAsync($"CREATE SCHEMA IF NOT EXISTS wolverine; CREATE TABLE IF NOT EXISTS wolverine.{noise} (id int)");
+        await ExecuteAsSuperuserAsync($"ALTER TABLE {table} ADD COLUMN note text");
+
+        var summary = await WaitForAsync(s => s.Latest.Any(l => l.Text.Contains($"ALTER TABLE {table}")));
+
+        summary.Latest.ShouldNotContain(l => l.Text.Contains(noise), "Wolverine's own DDL is noise");
+        summary.Latest.ShouldNotContain(l => l.Text.Contains("CREATE SCHEMA IF NOT EXISTS wolverine"));
+        summary.Latest.ShouldContain(l => l.Text.Contains($"CREATE TABLE {table}"), "DDL on other schemas stays");
+    }
+
+    [Theory]
+    [InlineData("wolverine", true)]
+    [InlineData("wolverine'); DROP TABLE x; --", false)]
+    [InlineData("Wolverine", false)]
+    public void Ignored_ddl_schemas_must_be_plain_identifiers(string schema, bool valid)
+    {
+        var options = ReaderOptions();
+        options.IgnoredDdlSchemas = [schema];
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+
+        System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+            options, new System.ComponentModel.DataAnnotations.ValidationContext(options), results, validateAllProperties: true).ShouldBe(valid);
+        if (valid)
+        {
+            options.IgnoredDdlPattern().ShouldBe(@"\m(wolverine)\M");
+        }
+    }
+
     [Fact]
     public async Task Role_change_appears_with_class_role()
     {
