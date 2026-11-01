@@ -215,12 +215,12 @@ public sealed class AppFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Calls an API through the gateway with the admin key in tenant acme, on behalf of <paramref name="onBehalfOf"/> when given (POSTs get
-    /// an Idempotency-Key); fails unless the status is <paramref name="expected"/>. Returns the JSON body (undefined when empty) and the ETag.
+    /// Calls an API through the gateway with the admin key, on behalf of <paramref name="onBehalfOf"/> when given (POSTs and PUTs get
+    /// an Idempotency-Key) in <paramref name="tenant"/>; fails unless the status is <paramref name="expected"/>. Returns the JSON body (undefined when empty) and the ETag.
     /// </summary>
     public async Task<(System.Text.Json.JsonElement Body, string? ETag)> CallAsync(
         HttpMethod method, string path, string? onBehalfOf, object? body = null, string? ifMatch = null,
-        System.Net.HttpStatusCode expected = System.Net.HttpStatusCode.OK)
+        System.Net.HttpStatusCode expected = System.Net.HttpStatusCode.OK, string tenant = TenantId)
     {
         using var http = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true })
         {
@@ -228,12 +228,12 @@ public sealed class AppFixture : IAsyncLifetime
         };
         using var message = new HttpRequestMessage(method, path);
         message.Headers.Add("X-Api-Key", _adminApiKey);
-        message.Headers.Add("X-Tenant-Id", TenantId);
+        message.Headers.Add("X-Tenant-Id", tenant);
         if (onBehalfOf is not null)
         {
             message.Headers.Add("X-On-Behalf-Of-User", onBehalfOf);
         }
-        if (method == HttpMethod.Post)
+        if (method == HttpMethod.Post || method == HttpMethod.Put)
         {
             message.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
         }
@@ -312,6 +312,59 @@ public sealed class AppFixture : IAsyncLifetime
             async () => (await CallAsync(HttpMethod.Get, $"/api/v1/purchasing/requests/{requestId}/order", TomId)).Body,
             "the request's purchase order", TimeSpan.FromSeconds(90));
         return (order.GetProperty("id").GetGuid(), order.GetProperty("number").GetString()!);
+    }
+
+    /// <summary>Signs <paramref name="page"/> in with the welcome page's demo button for <paramref name="key"/> (see <see cref="Pages.DemoRoles"/>).</summary>
+    public Task DemoLogInAsync(IPage page, string key, string? path = null) => Pages.DemoLogInAsync(this, page, key, path);
+
+    /// <summary>The demo data scenarios the AppHost seeded (the files the seeder ships), to find a seeded request by its scenario key.</summary>
+    public static IReadOnlyList<ProcureAi.DemoData.Scenario> Scenarios { get; } =
+        ProcureAi.DemoData.Scenarios.Load(Path.Combine(AppContext.BaseDirectory, "Scenarios"));
+
+    /// <summary>The seeded request of scenario <paramref name="key"/> in <paramref name="tenant"/>: its ID and number, found by its title.</summary>
+    public async Task<(Guid Id, string Number)> SeededRequestAsync(string key, string tenant = TenantId)
+    {
+        var title = Scenarios.Single(s => s.Tenant == tenant).Requests.Single(r => r.Key == key).Title;
+        var (body, _) = await CallAsync(HttpMethod.Get, "/api/v1/requests?pageSize=100", null, tenant: tenant);
+        var item = body.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("title").GetString() == title);
+        return (item.GetProperty("id").GetGuid(), item.GetProperty("number").GetString()!);
+    }
+
+    /// <summary>
+    /// Runs SQL in the system's Postgres container as the superuser, the way someone with database access changes data behind the app's
+    /// back (<c>docker exec ... psql</c>). Returns psql's output; fails on a non-zero exit code.
+    /// </summary>
+    public async Task<string> PsqlAsync(string database, string sql)
+    {
+        if (!_app!.ResourceNotifications.TryGetCurrentState("postgres", out var state)
+            || state.Snapshot.Properties.FirstOrDefault(p => p.Name == "container.id")?.Value is not string containerId)
+        {
+            throw new InvalidOperationException("The postgres container is not known yet.");
+        }
+        var start = new System.Diagnostics.ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        // The SQL goes in an environment variable (no shell quoting); the password is the container's own POSTGRES_PASSWORD.
+        foreach (var argument in new[]
+                 {
+                     "exec", "-e", $"PSQL_SQL={sql}", containerId, "sh", "-c",
+                     $"PGPASSWORD=\"$POSTGRES_PASSWORD\" psql -v ON_ERROR_STOP=1 -U postgres -d {database} -At -c \"$PSQL_SQL\"",
+                 })
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"psql failed ({process.ExitCode}): {await error}");
+        }
+        return (await output).Trim();
     }
 
     /// <summary>Stops a resource the way the dashboard's Stop command does, and waits until it has ended.</summary>

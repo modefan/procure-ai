@@ -27,11 +27,11 @@ public sealed class ConflictTests(AppFixture fixture)
         await Assertions.Expect(Pages.LiveIndicator(tabB)).Not.ToHaveTextAsync("Live");
 
         // Tab A approves; the row leaves its list.
-        await Pages.InboxRow(tabA, number).Locator("[data-action=approve] button").ClickAsync();
-        await Assertions.Expect(Pages.InboxRow(tabA, number)).ToHaveCountAsync(0, new() { Timeout = Pages.Timeout });
+        await Pages.ApproveInInboxAsync(tabA, number);
 
         // Tab B approves the same step: the server refuses, the dialog says why, and "Show the latest" reloads the inbox without the row.
         await rowB.Locator("[data-action=approve] button").ClickAsync();
+        await tabB.GetByRole(AriaRole.Dialog, new() { Name = $"Approve {number}?" }).GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
         var dialog = tabB.GetByRole(AriaRole.Dialog, new() { Name = "This was changed by someone else" });
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
         await Assertions.Expect(dialog).ToContainTextAsync(number);

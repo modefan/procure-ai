@@ -34,6 +34,37 @@ internal static class Pages
         await page.Locator("#kc-login").ClickAsync();
     }
 
+    /// <summary>
+    /// The button labels of the welcome page's "Try a demo role" section, by demo login key (the gateway's <c>DemoLogin:Users</c>).
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> DemoRoles = new Dictionary<string, string>
+    {
+        ["tom"] = "Requester (Tom)",
+        ["maria"] = "Manager (Maria)",
+        ["dept"] = "Department head",
+        ["thandi"] = "Finance (Thandi)",
+        ["admin"] = "Admin",
+        ["ben"] = "Globex manager (Ben)",
+    };
+
+    /// <summary>
+    /// Signs in the way a reviewer does: the welcome page's demo button for <paramref name="key"/> (no Keycloak page, so Thandi, who is in
+    /// two companies, gets no organization picker), then waits for the dashboard and, when <paramref name="path"/> is given, opens it.
+    /// </summary>
+    public static async Task DemoLogInAsync(AppFixture fixture, IPage page, string key, string? path = null)
+    {
+        await page.GotoAsync(fixture.GatewayUrl.ToString());
+        var section = page.GetByTestId("demo-login");
+        await section.GetByRole(AriaRole.Button).Filter(new() { Has = page.GetByTestId("demo-label").GetByText(DemoRoles[key], new() { Exact = true }) })
+            .ClickAsync(new() { Timeout = Timeout });
+        await page.WaitForURLAsync(new Regex(@"/app/dashboard$"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("user-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        if (path is not null)
+        {
+            await page.GotoAsync(new Uri(fixture.GatewayUrl, path).ToString());
+        }
+    }
+
     /// <summary>The header's connection indicator (Live / Reconnecting… / Offline).</summary>
     public static ILocator LiveIndicator(IPage page) => page.GetByTestId("live-indicator");
 
@@ -43,6 +74,20 @@ internal static class Pages
 
     /// <summary>A request's row in the inbox table (the wide layout; the tests use a 1280 px window).</summary>
     public static ILocator InboxRow(IPage page, string number) => page.Locator("tr[data-step]").Filter(new() { HasText = number });
+
+    /// <summary>
+    /// Approves the request's row in the inbox: the row's Approve button, then Approve in the confirm dialog (which asks for an optional
+    /// comment since plan 06 Task 0b), and waits until the row has left the inbox.
+    /// </summary>
+    public static async Task ApproveInInboxAsync(IPage page, string number)
+    {
+        var row = InboxRow(page, number);
+        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await row.Locator("[data-action=approve] button").ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = $"Approve {number}?" });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Approve", Exact = true }).ClickAsync();
+        await Assertions.Expect(row).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
 
     /// <summary>The request's status pill in the detail page's header.</summary>
     public static ILocator RequestStatus(IPage page) => page.Locator("main app-status-badge").First;

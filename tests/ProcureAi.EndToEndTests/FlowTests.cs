@@ -45,14 +45,11 @@ public sealed class FlowTests(AppFixture fixture)
         await using var mariaContext = await fixture.NewContextAsync("maria");
         var maria = await mariaContext.NewPageAsync();
         await Pages.LogInAsync(fixture, maria, "maria@acme.test", "/app/approvals");
-        var row = Pages.InboxRow(maria, number);
-        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
-        await row.Locator("[data-action=approve] button").ClickAsync();
-        await Assertions.Expect(row).ToHaveCountAsync(0, new() { Timeout = Pages.Timeout });
+        await Pages.ApproveInInboxAsync(maria, number);
 
         // Tom's page moves on by itself: approved (then ordered), and the audit trail grows with Maria's decision.
         await Assertions.Expect(Pages.RequestStatus(tom)).ToHaveTextAsync(new Regex("^(Approved|Ordered|Completed)$"), new() { Timeout = Pages.Timeout });
-        await Assertions.Expect(tom.GetByRole(AriaRole.Region, new() { Name = "Audit trail" })).ToContainTextAsync("Maria", new() { Timeout = Pages.Timeout });
+        await Assertions.Expect(tom.GetByRole(AriaRole.Table, new() { Name = "Audit trail" })).ToContainTextAsync("Maria", new() { Timeout = Pages.Timeout });
         (await tom.EvaluateAsync<bool>("window.__noReload === true")).ShouldBeTrue("the page was reloaded");
     }
 
@@ -77,10 +74,7 @@ public sealed class FlowTests(AppFixture fixture)
         await using var mariaContext = await fixture.NewContextAsync("maria");
         var maria = await mariaContext.NewPageAsync();
         await Pages.LogInAsync(fixture, maria, "maria@acme.test", "/app/approvals");
-        var row = Pages.InboxRow(maria, number);
-        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
-        await row.Locator("[data-action=approve] button").ClickAsync();
-        await Assertions.Expect(row).ToHaveCountAsync(0, new() { Timeout = Pages.Timeout });
+        await Pages.ApproveInInboxAsync(maria, number);
 
         await Assertions.Expect(rowTom.Locator("app-status-badge")).ToHaveTextAsync(new Regex("^(Approved|Ordered|Completed)$"), new() { Timeout = Pages.Timeout });
         (await tom.EvaluateAsync<bool>("window.__noReload === true")).ShouldBeTrue("the page was reloaded");

@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AppHost\ProcureAi.AppHost\ProcureAi.AppHost.csproj" />
+    <!-- The seeded scenarios (and their files), to find a seeded request by its scenario key. -->
+    <ProjectReference Include="..\..\tools\ProcureAi.DemoData\ProcureAi.DemoData.csproj" />
   </ItemGroup>
 
   <ItemGroup>

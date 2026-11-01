@@ -22,9 +22,9 @@ public sealed class ForbiddenTests(AppFixture fixture)
         await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^Approvals") })).ToHaveCountAsync(0);
         await page.GotoAsync(new Uri(fixture.GatewayUrl, "/app/approvals").ToString());
         await page.WaitForURLAsync(new Regex(@"/forbidden$"), new() { Timeout = Pages.Timeout });
-        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "You do not have access to this page" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "You don't have access" })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Approvals" })).ToHaveCountAsync(0);
-        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Go to dashboard" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Back to dashboard" })).ToBeVisibleAsync();
     }
 
     [Fact]
@@ -58,7 +58,9 @@ public sealed class ForbiddenTests(AppFixture fixture)
         await page.GotoAsync(new Uri(fixture.GatewayUrl, "/app/requests").ToString());
         await Assertions.Expect(page.GetByTestId("user-menu")).ToContainTextAsync("Ben", new() { Timeout = Pages.Timeout });
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Purchase requests" })).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
-        await Assertions.Expect(page.GetByText("No purchase requests yet")).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
+        // Globex's own (seeded) requests, never Acme's.
+        var globex = AppFixture.Scenarios.Single(s => s.Tenant == "globex").Requests[0].Title;
+        await Assertions.Expect(page.Locator("main table")).ToContainTextAsync(globex, new() { Timeout = Pages.Timeout });
         (await page.ContentAsync()).ShouldNotContain(title);
         (await page.ContentAsync()).ShouldNotContain(number);
 
