@@ -5,7 +5,7 @@ import { AuthStore } from '../../core/auth/auth.store';
 import { SessionExpired } from '../../core/auth/session-expired';
 import { AppConfigService } from '../../core/config/app-config';
 import { CORRELATION_HEADER } from '../../core/http/correlation.interceptor';
-import { DevPanelStore } from '../../core/dev-panel/dev-panel.store';
+import { DEV_PANEL_STORAGE_KEY, DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { XSRF_HEADER_NAME } from '../../core/http/xsrf';
 import { AnswerStream, FETCH, parseSse, SseEvent, StreamProblem } from './answer-stream';
 
@@ -76,6 +76,11 @@ describe('parseSse', () => {
 describe('AnswerStream', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   const sessionExpired = { show: vi.fn() };
+
+  // The dev panel keeps its open state in sessionStorage, which other specs (and the dev panel test below) leave behind: every test
+  // starts and ends with it closed, so none depends on the order the specs run in (final review F10).
+  beforeEach(() => sessionStorage.removeItem(DEV_PANEL_STORAGE_KEY));
+  afterEach(() => sessionStorage.removeItem(DEV_PANEL_STORAGE_KEY));
 
   beforeEach(() => {
     fetchMock = vi.fn();
