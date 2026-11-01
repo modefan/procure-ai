@@ -1,11 +1,13 @@
 import { computed, inject } from '@angular/core';
 import { HttpClient, HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { firstValueFrom } from 'rxjs';
 import { BrowserLocation } from '../browser/browser-location';
+import { AppConfigService } from '../config/app-config';
 import { LiveConnection } from '../live/live-connection';
 import { CacheRegistry } from '../state/cache-registry';
+import { createTrailingReload } from '../state/trailing-reload';
 import { SKIP_FORBIDDEN_REDIRECT } from '../http/skip-forbidden';
 
 /** What the gateway's GET /bff/user returns. */
@@ -58,6 +60,11 @@ export interface AuthState {
  * knows what /bff/user says. Signing in and registering are full page loads to the gateway, which sends the
  * browser to Keycloak and back. These are the gateway's own BFF endpoints, not service APIs, so they are
  * called by hand and not through a generated client.
+ *
+ * When an admin changes the authorization matrix, Notifications pushes `access-matrix` to the tenant and the user's permissions are
+ * read again, so menu links and guards follow without a reload: once at once and once more `cache.trailingReloadMs` later, because
+ * the gateway keeps a user's permissions for `AccessClient:CacheDuration` (2 s, not longer than the trailing wait) and cannot hear
+ * the change itself.
  */
 export const AuthStore = signalStore(
   { providedIn: 'root' },
@@ -193,6 +200,47 @@ export const AuthStore = signalStore(
 
       hasPermission(permission: string): boolean {
         return store.permissions().has(permission);
+      },
+
+      /**
+       * Reads /bff/user again for the signed-in user and takes the new permissions (and names). Only the same user in the same company
+       * is updated: an answer for someone else (a logout or switch meanwhile) or a failure changes nothing; the next push or page load
+       * tries again.
+       */
+      async refreshUser(): Promise<void> {
+        const current = store.user();
+        if (!current) {
+          return;
+        }
+        try {
+          const user = await firstValueFrom(http.get<BffUser>('/bff/user'));
+          const now = store.user();
+          if (now && user && user.userId === now.userId && user.tenantId === now.tenantId) {
+            patchState(store, { user });
+          }
+        } catch {
+          // Keep what we have: a failed refresh must not sign anybody out.
+        }
+      },
+    };
+  }),
+  withHooks((store) => {
+    let off: (() => void) | null = null;
+    return {
+      onInit() {
+        const config = inject(AppConfigService);
+        const trailing = createTrailingReload(() => void store.refreshUser(), () => config.config().cache.trailingReloadMs);
+        const listener = inject(LiveConnection).onEntityChanged('access-matrix', () => {
+          void store.refreshUser();
+          trailing.schedule();
+        });
+        off = () => {
+          listener();
+          trailing.cancel();
+        };
+      },
+      onDestroy() {
+        off?.();
       },
     };
   }),

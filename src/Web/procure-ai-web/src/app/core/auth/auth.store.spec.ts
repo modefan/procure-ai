@@ -6,6 +6,8 @@ import { AuthStore } from './auth.store';
 import { BrowserLocation } from '../browser/browser-location';
 import { CacheRegistry } from '../state/cache-registry';
 import { LiveConnection } from '../live/live-connection';
+import { fakeHubFactory } from '../live/fake-hub.testing';
+import { LIVE_HUB_FACTORY } from '../live/hub-connection';
 import { SKIP_FORBIDDEN_REDIRECT } from '../http/skip-forbidden';
 
 describe('AuthStore', () => {
@@ -292,5 +294,81 @@ describe('AuthStore', () => {
     const stop = vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
     store.endSession();
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AuthStore, permissions after an access-matrix push', () => {
+  let http: HttpTestingController;
+  let fake: ReturnType<typeof fakeHubFactory>;
+  let store: InstanceType<typeof AuthStore>;
+
+  const tom = { userId: 'u1', name: 'Tom', tenantId: 'acme', roles: ['requester'], permissions: ['requests.read', 'assistant.use'] };
+  const pushed = { entity: 'access-matrix', id: 'acme', requestId: null, eventType: 'AccessChanged', occurredAt: '2026-11-01T10:00:00Z' };
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fake = fakeHubFactory();
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        { provide: BrowserLocation, useValue: { assign: vi.fn() } },
+        { provide: LIVE_HUB_FACTORY, useValue: fake.factory },
+      ],
+    });
+    http = TestBed.inject(HttpTestingController);
+    store = TestBed.inject(AuthStore);
+    const loading = store.load();
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush(tom);
+    await loading;
+    const live = TestBed.inject(LiveConnection);
+    live.start();
+    await vi.waitFor(() => expect(live.state()).toBe('connected'));
+  });
+
+  afterEach(() => {
+    void TestBed.inject(LiveConnection).stop();
+    vi.useRealTimers();
+  });
+
+  it('matrix_push_reloads_permissions_now_and_once_more_after_the_trailing_wait', async () => {
+    fake.hubs[0].emit('EntityChanged', pushed);
+
+    // At once: the gateway may still answer from its short cache (the old permissions).
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush(tom);
+    await vi.waitFor(() => expect(store.hasPermission('assistant.use')).toBe(true));
+
+    // After the trailing wait (cache.trailingReloadMs, 2 s by default): the new permissions.
+    await vi.advanceTimersByTimeAsync(2000);
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush({ ...tom, permissions: ['requests.read'] });
+    await vi.waitFor(() => expect(store.hasPermission('assistant.use')).toBe(false));
+    expect(store.isLoggedIn()).toBe(true);
+  });
+
+  it('a failed refresh keeps the user signed in with what they had', async () => {
+    fake.hubs[0].emit('EntityChanged', pushed);
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush(null, { status: 503, statusText: 'Unavailable' });
+    await vi.advanceTimersByTimeAsync(2000);
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush(null, { status: 401, statusText: 'Unauthorized' });
+
+    expect(store.isLoggedIn()).toBe(true);
+    expect(store.hasPermission('assistant.use')).toBe(true);
+  });
+
+  it('an answer for another user is ignored', async () => {
+    fake.hubs[0].emit('EntityChanged', pushed);
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush({ ...tom, userId: 'u2', permissions: [] });
+    await vi.advanceTimersByTimeAsync(2000);
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush({ ...tom, tenantId: 'globex', permissions: [] });
+
+    expect(store.user()?.userId).toBe('u1');
+    expect(store.hasPermission('assistant.use')).toBe(true);
+  });
+
+  it('other pushes do not reload the user', async () => {
+    fake.hubs[0].emit('EntityChanged', { ...pushed, entity: 'request', id: 'r1' });
+    await vi.advanceTimersByTimeAsync(2500);
+    http.expectNone('/bff/user');
   });
 });
