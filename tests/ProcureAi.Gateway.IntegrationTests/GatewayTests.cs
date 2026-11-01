@@ -212,6 +212,17 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Swagger_ui_requests_organization_scope()
+    {
+        // A user of several companies gets a tenant in the token only when the login asks for the organization scope.
+        using var initializer = await Browser().GetAsync("/swagger/index.js", Ct);
+        var config = await initializer.Content.ReadAsStringAsync(Ct);
+
+        System.Text.RegularExpressions.Regex.IsMatch(config, @"(?s)""scopes""\s*:\s*\[[^\]]*""organization""").ShouldBeTrue(config);
+        config.ShouldContain("\"openid\"");
+    }
+
+    [Fact]
     public async Task Swagger_ui_lists_the_budgets_definition_and_the_gateway_serves_its_document_and_api()
     {
         var browser = Browser();

@@ -54,6 +54,15 @@ public sealed class PostgresLimits : ContainerLimits
     /// Marten), and the seed's burst took more than Postgres's default of 100 (53300 "too many clients"). A deployment uses its own value.
     /// </summary>
     [Range(20, 1000)] public int MaxConnections { get; set; } = 100;
+
+    /// <summary>
+    /// <c>Database__MaxPoolSize</c> of every service with a Postgres database. Services times this value, plus the Debezium servers (one
+    /// connection each), Keycloak and <see cref="ReservedConnections"/>, must fit <see cref="MaxConnections"/> (a test checks it).
+    /// </summary>
+    [Range(1, 100)] public int PoolSizePerService { get; set; } = 10;
+
+    /// <summary>Connections kept free for operators, migrations, pgaudit reads and the Debezium snapshots.</summary>
+    [Range(0, 200)] public int ReservedConnections { get; set; } = 30;
 }
 
 public sealed class MongoLimits : ContainerLimits

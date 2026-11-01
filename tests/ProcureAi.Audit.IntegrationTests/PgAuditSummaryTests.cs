@@ -166,6 +166,21 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     }
 
     [Fact]
+    public async Task Migration_fails_when_audit_log_reader_equals_migration_user()
+    {
+        var migrationUser = new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString);
+        var reader = new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString) { Username = migrationUser.Username!.ToUpperInvariant(), Password = "other" };
+        var options = ReaderOptions();
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(() => PgAuditLogSetup.EnsureAsync(
+            app.Infra.DbConnectionString, reader.ConnectionString, options.Schema, options.LogFileTemplate, TestContext.Current.CancellationToken));
+
+        failure.Message.ShouldContain("migration");
+        // The migration user's password and rights are untouched.
+        (await ScalarAsync(app.Infra.DbConnectionString, "SELECT 1")).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Setup_runs_again_with_an_existing_role_and_tables_and_a_new_password()
     {
         // A reader role and schema of its own, so the real reader keeps its password.

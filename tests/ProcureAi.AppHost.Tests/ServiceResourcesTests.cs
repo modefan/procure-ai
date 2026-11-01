@@ -56,6 +56,37 @@ public sealed class ServiceResourcesTests
         api.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
     }
 
+    /// <summary>Keycloak's own pool to the Postgres server connections are budgeted at 20 to be safe.</summary>
+    private const int KeycloakConnections = 20;
+
+    /// <summary>One Debezium Server per captured database (one replication connection each, budgeted generously).</summary>
+    private const int DebeziumConnections = 8;
+
+    [Fact]
+    public async Task Pool_sizes_fit_max_connections()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var postgres = ResourcesOptions.Load(new ConfigurationBuilder().AddJsonFile("apphost.appsettings.json").Build()).Postgres;
+        var postgresApis = new List<(string Name, Dictionary<string, object> Env)>();
+        foreach (var api in scope.Model.Resources.OfType<ProjectResource>().Where(r => r.Name.EndsWith("-api", StringComparison.Ordinal)))
+        {
+            var env = await EnvironmentOfAsync(api);
+            if (env.TryGetValue("Service__Store", out var store) && store.ToString() == "Postgres")
+            {
+                postgresApis.Add((api.Name, env));
+            }
+        }
+
+        postgresApis.ShouldNotBeEmpty();
+        foreach (var (name, env) in postgresApis)
+        {
+            env.ShouldContainKeyAndValue("Database__MaxPoolSize", postgres.PoolSizePerService.ToString(System.Globalization.CultureInfo.InvariantCulture), name);
+        }
+
+        var needed = postgresApis.Count * postgres.PoolSizePerService + DebeziumConnections + KeycloakConnections + postgres.ReservedConnections;
+        needed.ShouldBeLessThanOrEqualTo(postgres.MaxConnections);
+    }
+
     [Fact]
     public async Task Access_service_gets_its_database_migrate_api_and_debezium()
     {

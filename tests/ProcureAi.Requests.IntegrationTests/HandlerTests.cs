@@ -245,6 +245,52 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         // Page and size limits are validated by PagingQuery at the controller (PagingQueryTests, ApiTests), not in the handler.
     }
 
+    private async Task<(RequestDto Alice, RequestDto Tom, RequestDto Own)> SeedAllListAsync()
+    {
+        _app.Caller.TenantId = $"all-{Guid.NewGuid():N}";
+        _app.Access.SetCostCenters(_app.Caller.TenantId, "alice", "CC-100");
+        _app.Access.SetCostCenters(_app.Caller.TenantId, "tom", "IT-200");
+        _app.Caller.UserId = "alice";
+        var alice = await Create(new CreateRequest("Alice's chairs", "CC-100", "contoso-hardware", [new LineInput("LAP-1", 1)]));
+        _app.Caller.UserId = "tom";
+        var tom = await Create(new CreateRequest("Tom's laptops", "IT-200", "contoso-hardware", [new LineInput("LAP-1", 1)]));
+        // Tom made this one when he still acted for CC-100: his own request stays visible to him.
+        _app.Access.SetCostCenters(_app.Caller.TenantId, "tom", "CC-100", "IT-200");
+        var own = await Create(new CreateRequest("Tom's old", "CC-100", "contoso-hardware", [new LineInput("LAP-1", 1)]));
+        _app.Access.SetCostCenters(_app.Caller.TenantId, "tom", "IT-200");
+        return (alice, tom, own);
+    }
+
+    [Fact]
+    public async Task All_list_shows_only_own_cost_centers_for_requester()
+    {
+        var (alice, tom, own) = await SeedAllListAsync();
+
+        _app.Caller.UserId = "tom";
+        var page = await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null));
+
+        // Tom's cost center and his own request, never another cost center's request (spec 4.2).
+        page.Items.Select(i => i.Id).ShouldBe([own.Id, tom.Id], ignoreOrder: true);
+        page.Total.ShouldBe(2);
+        page.Items.ShouldNotContain(i => i.Id == alice.Id);
+    }
+
+    [Fact]
+    public async Task All_list_shows_every_cost_center_with_requests_read_all()
+    {
+        // Whoever Access gives every cost center (finance approvers) and the admin key see all of the tenant's requests.
+        var (alice, tom, own) = await SeedAllListAsync();
+
+        _app.Caller.UserId = "finance";
+        _app.Access.SetCostCenters(_app.Caller.TenantId!, "finance", "CC-100", "IT-200");
+        (await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null))).Items.Select(i => i.Id)
+            .ShouldBe([own.Id, tom.Id, alice.Id], ignoreOrder: true);
+
+        _app.Caller.UserId = "claude-admin";
+        _app.Caller.Kind = CallerKind.AdminApiKey;
+        (await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null))).Total.ShouldBe(3);
+    }
+
     [Fact]
     public async Task Concurrent_creates_in_one_tenant_get_distinct_sequential_numbers()
     {

@@ -232,8 +232,10 @@ public static class TenantSwitchEndpoints
     private static async Task<IResult> SwitchAsync(
         HttpContext http, [FromBody] SwitchTenantRequest request, ICurrentUser user, IUserTenantsClient tenants,
         IOptionsMonitor<CookieAuthenticationOptions> cookies, IOptions<DemoLoginOptions> demoLogin, DemoSignIn demoSignIn,
-        TokenRefresher refresher, SwitchTicketStore tickets, ILogger<UserTenantsClient> logger)
+        TokenRefresher refresher, SwitchTicketStore tickets, ILoggerFactory loggers)
     {
+        // Logged under this class, not under the Access client (a static class cannot be a logger's type argument).
+        var logger = loggers.CreateLogger(typeof(TenantSwitchEndpoints).FullName!);
         http.Response.Headers.CacheControl = "no-store";
         var tenant = request.Tenant;
         var target = BffEndpoints.SafeReturnUrl(request.ReturnUrl);

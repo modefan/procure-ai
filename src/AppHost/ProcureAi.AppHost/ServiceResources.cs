@@ -1,3 +1,4 @@
+using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
 
 namespace ProcureAi.AppHost;
@@ -127,6 +128,10 @@ public static class ServiceResources
                 .WithReference(shared.Redis)
                 .WaitFor(database)
                 .WithDotNetLimits(shared.Limits.DotNet);
+            if (spec.Store == ServiceStore.Postgres)
+            {
+                migrate.WithEnvironment("Database__MaxPoolSize", shared.Limits.Postgres.PoolSizePerService.ToString(CultureInfo.InvariantCulture));
+            }
         }
 
         var api = builder.AddProject<TProject>(spec.Name + ApiSuffix)
@@ -160,6 +165,12 @@ public static class ServiceResources
         if (database is not null && migrate is not null)
         {
             api.WithReference(database).WaitForCompletion(migrate);
+        }
+
+        if (spec.Store == ServiceStore.Postgres)
+        {
+            // Each service's Npgsql pool is capped so all of them fit the server's max_connections (Resources:Postgres).
+            api.WithEnvironment("Database__MaxPoolSize", shared.Limits.Postgres.PoolSizePerService.ToString(CultureInfo.InvariantCulture));
         }
 
         if (spec.SecondaryMongoDatabase is not null && migrate is not null)

@@ -51,9 +51,9 @@ public sealed record ListRequests(int Page, int PageSize, RequestStatusFilter? S
 
 public static class ListRequestsHandler
 {
-    /// <summary>Newest first (highest request number), optionally filtered by status (or group) and requester.</summary>
+    /// <summary>Newest first (highest request number), limited to the caller's scope, optionally filtered by status (or group) and requester.</summary>
     public static async Task<PagedResult<RequestDto>> Handle(
-        ListRequests query, IRequestsDbContext db, CancellationToken cancellationToken)
+        ListRequests query, IRequestsDbContext db, ICallerScope scope, CancellationToken cancellationToken)
     {
         var requests = db.PurchaseRequests.AsNoTracking();
         if (query.Status is { } filter)
@@ -65,6 +65,16 @@ public static class ListRequestsHandler
         if (query.RequesterId is { } requester)
         {
             requests = requests.Where(r => r.RequesterId == requester);
+        }
+
+        // Spec 4.2: the list holds the caller's own requests and those of the cost centers Access assigns to them (finance gets every
+        // cost center there). The admin key and services acting for nobody see all of the tenant's requests. No extra permission.
+        var callerScope = await scope.GetAsync(cancellationToken);
+        if (!callerScope.All)
+        {
+            var userId = callerScope.UserId;
+            var codes = callerScope.CostCenterCodes.ToArray();
+            requests = requests.Where(r => r.RequesterId == userId || codes.Contains(r.CostCenterCode));
         }
 
         var total = await requests.CountAsync(cancellationToken);

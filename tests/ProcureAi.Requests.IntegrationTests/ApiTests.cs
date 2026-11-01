@@ -906,7 +906,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         flow.GetProperty("authorizationUrl").GetString().ShouldBe(ApiFactory.OpenApiAuthorizationUrl);
         flow.GetProperty("tokenUrl").GetString().ShouldBe(ApiFactory.OpenApiTokenUrl);
         // "email" exists only in the test configuration; "openid" and "profile" come from appsettings.json, so the scopes are configuration.
-        flow.GetProperty("scopes").EnumerateObject().Select(o => o.Name).Order().ShouldBe(["email", "openid", "profile"]);
+        flow.GetProperty("scopes").EnumerateObject().Select(o => o.Name).Order().ShouldBe(["email", "openid", "organization", "profile"]);
         doc.GetProperty("security").GetArrayLength().ShouldBe(2);
         // Enums are documented as names.
         doc.GetProperty("components").GetProperty("schemas").GetProperty("RequestStatus").GetProperty("enum")

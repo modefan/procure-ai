@@ -27,6 +27,7 @@ public static class SwaggerAggregation
             }
 
             ui.OAuthClientId(options.OAuthClientId);
+            ui.OAuthScopes(options.OAuthScopes);
             ui.OAuthUsePkce();
         });
         return app;

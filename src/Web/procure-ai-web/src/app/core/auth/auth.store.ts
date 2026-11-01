@@ -105,6 +105,35 @@ export const AuthStore = signalStore(
       }
     };
 
+    /**
+     * After a switch that failed with something other than a refusal: asks the gateway who is signed in. When it is the same user in
+     * another company, the switch did happen (the POST's answer was lost), so this page must not stay on the old company: take the new
+     * user, clear everything of the old company and open the return url, as after a switch that answered. Any other answer, or a failed
+     * read, changes nothing (the error message stays).
+     */
+    const adoptSwitchDoneMeanwhile = async (returnUrl: string): Promise<void> => {
+      const before = store.user();
+      if (!before) {
+        return;
+      }
+      try {
+        const user = await firstValueFrom(http.get<BffUser>('/bff/user'));
+        const now = store.user();
+        if (!user || !now || user.userId !== now.userId || user.tenantId === now.tenantId) {
+          return;
+        }
+        patchState(store, { user, switchError: null });
+        caches.clearAll();
+        try {
+          await live.stop();
+        } finally {
+          location.assign(localPath(returnUrl));
+        }
+      } catch {
+        // Keep what we have: the message already says the switch is unavailable.
+      }
+    };
+
     return {
       /**
        * Asks the gateway who is signed in (once; later calls return at once, concurrent calls share one request).
@@ -182,6 +211,10 @@ export const AuthStore = signalStore(
         } catch (error) {
           const refused = error instanceof HttpErrorResponse && error.status === 403;
           patchState(store, { switching: false, switchError: refused ? SWITCH_REFUSED : SWITCH_UNAVAILABLE });
+          if (!refused) {
+            // The answer may have been lost after the gateway had switched (a demo session switches on the POST itself).
+            void adoptSwitchDoneMeanwhile(returnUrl);
+          }
           return;
         }
 

@@ -92,6 +92,14 @@ public static class ServiceHost
         services.AddSingleton<IWolverineCounts, WolverineCounts>();
         services.AddProcureAiStatus(builder.Configuration, publish: !IsWritingOpenApiDocument());
 
+        // Every Postgres consumer of the service (EF Core, Wolverine's store, readiness) shares one pool of Database:MaxPoolSize connections.
+        services.AddValidatedOptions<DatabaseOptions>(builder.Configuration, DatabaseOptions.SectionName);
+        var storeOptions = builder.Configuration.GetSection(ServiceOptions.SectionName).Get<ServiceOptions>() ?? new ServiceOptions();
+        if (storeOptions.Store == ServiceStore.Postgres && !string.IsNullOrWhiteSpace(storeOptions.DatabaseConnectionName))
+        {
+            PostgresPooling.ApplyMaxPoolSize(builder.Configuration, builder.Configuration, storeOptions.DatabaseConnectionName);
+        }
+
         configure(builder);
 
         // Ready only while the dependencies the API cannot serve without are reachable.

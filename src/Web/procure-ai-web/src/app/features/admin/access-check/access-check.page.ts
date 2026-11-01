@@ -275,9 +275,16 @@ export class AccessCheckPage implements OnInit {
       return;
     }
     const action = this.model().action as CheckAction;
-    this.checkedInputs.set(this.inputsKey(user.userId, action, number));
+    const key = this.inputsKey(user.userId, action, number);
+    this.checkedInputs.set(key);
     this.model.update((m) => ({ ...m, request: number }));
     this.router.navigate([], { queryParams: { user: user.userId, action, request: number }, replaceUrl: true });
     await this.store.check(user.userId, action, number);
+    // The answer is for `key`. If the inputs changed while it was on its way, it must not stay on screen, whether or not the
+    // clearing effect has run yet.
+    if (this.inputsKey(this.selectedId(), this.model().action, this.model().request) !== key) {
+      this.checkedInputs.set(null);
+      this.store.clearOutcome();
+    }
   }
 }

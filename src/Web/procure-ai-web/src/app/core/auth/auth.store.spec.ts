@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter, Router } from '@angular/router';
-import { AuthStore } from './auth.store';
+import { AuthStore, SWITCH_UNAVAILABLE } from './auth.store';
 import { BrowserLocation } from '../browser/browser-location';
 import { CacheRegistry } from '../state/cache-registry';
 import { LiveConnection } from '../live/live-connection';
@@ -235,6 +235,40 @@ describe('AuthStore', () => {
 
       store.dismissSwitchError();
       expect(store.switchError()).toBeNull();
+    });
+
+    it('switch reloads user after non-403 failure', async () => {
+      await signedIn();
+      vi.spyOn(TestBed.inject(LiveConnection), 'stop').mockResolvedValue();
+      const clearCache = vi.fn();
+      TestBed.inject(CacheRegistry).register({ clearCache });
+
+      const switching = store.switchTenant('globex');
+      (await switchRequest()).flush(null, { status: 0, statusText: 'Lost' });
+      await switching;
+
+      // The gateway had switched before the answer got lost: the page asks who is signed in and follows.
+      (await userRequest()).flush({ ...tom, tenantId: 'globex', tenants: [{ id: 'acme', name: 'Acme Corp' }, { id: 'globex', name: 'Globex' }] });
+      await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/app/dashboard'));
+      expect(store.user()?.tenantId).toBe('globex');
+      expect(clearCache).toHaveBeenCalledTimes(1);
+      expect(store.switchError()).toBeNull();
+    });
+
+    it('switch keeps the old company when the reload says the switch did not happen', async () => {
+      await signedIn();
+      const clearCache = vi.fn();
+      TestBed.inject(CacheRegistry).register({ clearCache });
+
+      const switching = store.switchTenant('globex');
+      (await switchRequest()).flush(null, { status: 503, statusText: 'Down' });
+      await switching;
+      (await userRequest()).flush({ ...tom, tenants: [{ id: 'acme', name: 'Acme Corp' }, { id: 'globex', name: 'Globex' }] });
+
+      await vi.waitFor(() => expect(store.switchError()).toBe(SWITCH_UNAVAILABLE));
+      expect(store.user()?.tenantId).toBe('acme');
+      expect(clearCache).not.toHaveBeenCalled();
+      expect(assign).not.toHaveBeenCalled();
     });
 
     it('switchTenant navigates even when stopping the live connection fails', async () => {

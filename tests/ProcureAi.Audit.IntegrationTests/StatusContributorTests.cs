@@ -1,4 +1,8 @@
 using Marten;
+using Marten.Services;
+using Npgsql;
+using ProcureAi.Audit.Application.Abstractions;
+using ProcureAi.Audit.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using ProcureAi.Audit.Domain;
 using ProcureAi.BuildingBlocks.Application.Status;
@@ -47,6 +51,74 @@ public sealed class StatusContributorTests(AuditApp app)
         section.Items.Where(i => i.TenantId == globex).ShouldHaveSingleItem().Text.ShouldContain("globex-row");
     }
 
+    [Fact]
+    public async Task Open_alert_counts_are_grouped_in_sql()
+    {
+        var tenant = AuditApp.NewTenant();
+        var store = app.Services.GetRequiredService<IDocumentStore>();
+        await using (var session = store.LightweightSession())
+        {
+            session.Store(Alert(tenant, "grouped-1", DateTimeOffset.UtcNow));
+            session.Store(Alert(tenant, "grouped-2", DateTimeOffset.UtcNow));
+            await session.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var log = new SqlLog();
+        var original = store.Options.Logger();
+        ((StoreOptions)store.Options).Logger(log);
+        OpenOutsideAppAlerts open;
+        try
+        {
+            open = await new MartenDataChangeStore(store, TimeProvider.System).OpenOutsideAppAlertsAsync(1, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            ((StoreOptions)store.Options).Logger(original);
+        }
+
+        open.Counts.Single(c => c.TenantId == tenant).Count.ShouldBe(2);
+        // The counts come from one GROUP BY command; the alerts themselves are only read for the newest per tenant (Take).
+        var groupBy = log.Commands.Where(c => c.Contains("group by", StringComparison.OrdinalIgnoreCase)).ToList();
+        groupBy.ShouldHaveSingleItem();
+        groupBy[0].ShouldContain("count(", Case.Insensitive);
+        log.Commands.Where(c => !c.Contains("group by", StringComparison.OrdinalIgnoreCase))
+            .ShouldAllBe(c => c.Contains("limit", StringComparison.OrdinalIgnoreCase), "no unbounded read of the alerts");
+    }
+
     private static OutsideAppAlert Alert(string tenant, string key, DateTimeOffset committedAt) =>
         new($"test-{Guid.NewGuid():N}", "purchasingdb", "purchase_orders", key, tenant, 4711, committedAt, committedAt, null);
+
+    /// <summary>Records the text of every command Marten runs while it is the store's logger.</summary>
+    private sealed class SqlLog : IMartenLogger, IMartenSessionLogger
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _commands = new();
+
+        public IReadOnlyList<string> Commands => [.. _commands];
+
+        public IMartenSessionLogger StartSession(IQuerySession session) => this;
+
+        public void SchemaChange(string sql) { }
+
+        public void LogSuccess(NpgsqlCommand command) => _commands.Enqueue(command.CommandText);
+
+        public void LogSuccess(NpgsqlBatch batch)
+        {
+            foreach (var c in batch.BatchCommands)
+            {
+                _commands.Enqueue(c.CommandText);
+            }
+        }
+
+        public void LogFailure(NpgsqlCommand command, Exception ex) { }
+
+        public void LogFailure(NpgsqlBatch batch, Exception ex) { }
+
+        public void LogFailure(Exception ex, string message) { }
+
+        public void RecordSavedChanges(IDocumentSession session, IChangeSet commit) { }
+
+        public void OnBeforeExecute(NpgsqlCommand command) { }
+
+        public void OnBeforeExecute(NpgsqlBatch batch) { }
+    }
 }

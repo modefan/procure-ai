@@ -46,6 +46,15 @@ public static class PgAuditLogSetup
             throw new InvalidOperationException("The audit log connection string needs a user name and a password.");
         }
 
+        // The setup resets the reader's password and takes pg_read_server_files from its role. Run against the migration user itself, that
+        // would change the password the migration (and the app) log in with and strip its own rights. Refuse before touching anything.
+        var migrationUser = new NpgsqlConnectionStringBuilder(superuserConnectionString).Username;
+        if (string.Equals(migrationUser, reader.Username, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The audit log reader must be a role of its own: its user name equals the user the migration connects as.");
+        }
+
         await using var connection = new NpgsqlConnection(superuserConnectionString);
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);

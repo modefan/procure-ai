@@ -1994,6 +1994,7 @@
             "scopes": {
               "email": "Email address",
               "openid": "OpenID Connect",
+              "organization": "Company (tenant) of the user",
               "profile": "Profile"
             }
           }
@@ -2009,6 +2010,7 @@
       "OAuth2": [
         "email",
         "openid",
+        "organization",
         "profile"
       ]
     }

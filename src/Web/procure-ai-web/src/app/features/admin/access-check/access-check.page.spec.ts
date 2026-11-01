@@ -60,10 +60,11 @@ describe('AccessCheckPage', () => {
     await settle(fixture);
     const select = el.querySelector<HTMLSelectElement>('#check-action')!;
     select.value = action;
-    select.dispatchEvent(new Event('change'));
+    // Signal Forms listens to `input`; a `change` alone leaves the model on its default.
+    select.dispatchEvent(new Event('input', { bubbles: true }));
     const input = el.querySelector<HTMLInputElement>('#check-request')!;
     input.value = request;
-    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
     await settle(fixture);
@@ -140,6 +141,31 @@ describe('AccessCheckPage', () => {
     select.dispatchEvent(new Event('change'));
     await settle(fixture);
     expect(el.querySelector('[data-testid="verdict"]')).toBeNull();
+  });
+
+  it('fillAndCheck changes the action: the action the helper sets is the one that is checked', async () => {
+    const { fixture } = await setup();
+    await fillAndCheck(fixture, 'Maria', 'view', 'pr-1039');
+    expect(approvals.checkAuthorization).toHaveBeenCalledWith({ userId: 'maria', requestId: 'req-1039', action: 'view' });
+  });
+
+  it('access check ignores reply for outdated inputs: a slow answer never shows next to inputs it was not for', async () => {
+    const { fixture, el } = await setup();
+    let answer!: (value: unknown) => void;
+    approvals.checkAuthorization.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    await fillAndCheck(fixture, 'Maria', 'approve', 'pr-1039');
+    expect(approvals.checkAuthorization).toHaveBeenCalledTimes(1);
+
+    // The request number changes while the check is still running; then the old answer arrives.
+    const input = el.querySelector<HTMLInputElement>('#check-request')!;
+    input.value = 'PR-1040';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(fixture);
+    answer(checkDto());
+    await settle(fixture);
+
+    expect(el.querySelector('[data-testid="verdict"]')).toBeNull();
+    expect(el.querySelector('[data-testid="result"]')).toBeNull();
   });
 
   it('request_placeholder_is_a_neutral_example (final review F13)', async () => {

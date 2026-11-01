@@ -139,9 +139,12 @@ public sealed class MartenDataChangeStore(IDocumentStore store, TimeProvider clo
     public async Task<OpenOutsideAppAlerts> OpenOutsideAppAlertsAsync(int latestPerTenant, CancellationToken cancellationToken)
     {
         await using var session = store.QuerySession();
-        // Alerts are kept only for the data change retention period, so the open ones are few: their tenants are read and grouped here.
-        var tenants = await session.Query<OutsideAppAlert>().Where(a => a.WithdrawnAt == null).Select(a => a.TenantId!).ToListAsync(cancellationToken);
-        var counts = tenants.GroupBy(t => (string?)t).Select(g => (g.Key, (long)g.Count())).ToList();
+        // One GROUP BY in SQL, run every 10 s by the status snapshot: no alert and no tenant list is loaded to be counted here.
+        var groups = await session.Query<OutsideAppAlert>().Where(a => a.WithdrawnAt == null)
+            .GroupBy(a => a.TenantId)
+            .Select(g => new { Tenant = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var counts = groups.Select(g => (g.Tenant, (long)g.Count)).ToList();
         var latest = new List<OutsideAppAlert>();
         foreach (var (tenant, _) in counts)
         {

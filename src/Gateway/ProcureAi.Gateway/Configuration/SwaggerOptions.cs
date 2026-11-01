@@ -14,6 +14,13 @@ public sealed class SwaggerOptions : IValidatableObject
     [Required(AllowEmptyStrings = false)]
     public string OAuthClientId { get; set; } = "procure-swagger";
 
+    /// <summary>
+    /// The scopes Swagger UI's login asks for. <c>organization</c> makes Keycloak put the chosen company in the token: without it a
+    /// user of several companies gets no tenant.
+    /// </summary>
+    [Required, MinLength(1)]
+    public string[] OAuthScopes { get; set; } = ["openid", "profile", "organization"];
+
     [Required, MinLength(1)]
     public SwaggerDefinition[] Definitions { get; set; } = [];
 
