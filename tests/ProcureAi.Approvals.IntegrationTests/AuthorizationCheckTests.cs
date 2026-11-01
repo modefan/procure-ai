@@ -218,6 +218,28 @@ public sealed class AuthorizationCheckTests(ApprovalsApp app)
         ]);
     }
 
+    /// <summary>
+    /// Final review F3: a saga without a request number and without steps (stored before the chain existed) used to throw a 500 on
+    /// <c>steps[0]</c>. The check now answers, with the request ID as the number and "no open approval step".
+    /// </summary>
+    [Fact]
+    public async Task Check_on_a_request_without_steps_or_number_reports_no_open_step()
+    {
+        var tenant = Acme();
+        var id = Guid.NewGuid();
+        await using (var db = Main.NewDbContext())
+        {
+            db.Sagas.Add(new ApprovalSaga { Id = id, TenantId = tenant, RequesterId = DemoUsers.Tom, State = ApprovalState.AwaitingBudget });
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var check = await CheckAsync(tenant, DemoUsers.Maria, id, "approve");
+
+        check.Allowed.ShouldBeFalse();
+        check.RequestNumber.ShouldBe(id.ToString());
+        check.Steps.Single(s => s.Code == "open-step").Text.ShouldBe("The request has no open approval step");
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------------------------------
 
     private async Task<(Guid Id, List<ApprovalStep> Steps)> OpenAsync(string tenant, string requester, decimal total)

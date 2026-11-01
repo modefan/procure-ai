@@ -54,7 +54,9 @@ public static class CheckAuthorizationHandler
             ?? throw new NotFoundException($"User {query.UserId} was not found.");
         var tenantName = (await access.GetUserAsync(query.UserId, tenant, cancellationToken))?.TenantName;
         var name = string.IsNullOrWhiteSpace(explanation.DisplayName) ? explanation.UserId : explanation.DisplayName;
-        var number = saga is { RequestNumber.Length: > 0 } ? saga.RequestNumber : steps[0].RequestNumber;
+        // A saga stored before its chain existed may have neither a number nor steps (final review F3): fall back to the ID.
+        var number = saga is { RequestNumber.Length: > 0 } ? saga.RequestNumber
+            : steps.FirstOrDefault(s => s.RequestNumber.Length > 0)?.RequestNumber ?? query.RequestId.ToString();
 
         var permission = query.Action == View ? Permissions.RequestsRead : Permissions.RequestsApprove;
         var result = new List<CheckStepDto>
