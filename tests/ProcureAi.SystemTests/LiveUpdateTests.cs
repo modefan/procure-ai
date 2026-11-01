@@ -70,14 +70,15 @@ public sealed class LiveUpdateTests(SystemFixture system)
         using var tomBell = system.Service("notifications", SystemFixture.Tom);
         (await tomBell.GetAsync<BellListView>("/api/v1/notifications")).Body.Items.ShouldNotContain(i => i.RequestId == request.Id);
 
-        // The email: exactly one to Maria, with the request's link.
-        var email = await mailpit.WaitForAsync(MariaEmail, subject);
+        // The email: exactly one to Maria, with the request's link. Only emails about this request count: a demo reset earlier in the run
+        // restarts the request numbers, so an email of an older request can have the same subject (Mailpit keeps everything).
+        var email = await mailpit.WaitForAsync(MariaEmail, subject, request.Id);
         (await mailpit.TextAsync(email)).ShouldContain($"/requests/{request.Id}");
 
         // Approving sends more events (the decision, the order); the approver is not emailed again for this request.
         await _flow.ApproveAsync(SystemFixture.Maria, request.Id, expectedStep: 1, expectedLevel: "Manager", "R 4 830,00");
         await _flow.RequestWhenAsync(request.Id, r => r.Status is "Approved" or "Ordered", "request approved");
-        (await mailpit.MessagesToAsync(MariaEmail, subject)).Count.ShouldBe(1);
+        (await mailpit.MessagesToAsync(MariaEmail, subject, request.Id)).Count.ShouldBe(1);
     }
 
     /// <summary>A SignalR client of the gateway (WebSockets, the dev certificate) as the admin key in tenant acme; keeps every EntityChanged.</summary>
@@ -154,14 +155,24 @@ public sealed class LiveUpdateTests(SystemFixture system)
     {
         private readonly HttpClient _http = new() { BaseAddress = new Uri(system.App.GetEndpoint("mailpit", "http").ToString()) };
 
-        public async Task<IReadOnlyList<MailView>> MessagesToAsync(string address, string subject)
+        /// <summary>The emails to <paramref name="address"/> with <paramref name="subject"/> whose text links to <paramref name="requestId"/>.</summary>
+        public async Task<IReadOnlyList<MailView>> MessagesToAsync(string address, string subject, Guid requestId)
         {
             var page = await _http.GetFromJsonAsync<MailPage>("/api/v1/messages?limit=1000", TestContext.Current.CancellationToken);
-            return [.. page!.Messages.Where(m => m.Subject == subject && m.To.Any(t => string.Equals(t.Address, address, StringComparison.OrdinalIgnoreCase)))];
+            var candidates = page!.Messages.Where(m => m.Subject == subject && m.To.Any(t => string.Equals(t.Address, address, StringComparison.OrdinalIgnoreCase)));
+            var about = new List<MailView>();
+            foreach (var message in candidates)
+            {
+                if ((await TextAsync(message)).Contains($"/requests/{requestId}", StringComparison.Ordinal))
+                {
+                    about.Add(message);
+                }
+            }
+            return about;
         }
 
-        public async Task<MailView> WaitForAsync(string address, string subject) =>
-            (await SystemFlow.EventuallyAsync(() => MessagesToAsync(address, subject), m => m.Count > 0, $"email '{subject}' to {address}")).Single();
+        public async Task<MailView> WaitForAsync(string address, string subject, Guid requestId) =>
+            (await SystemFlow.EventuallyAsync(() => MessagesToAsync(address, subject, requestId), m => m.Count > 0, $"email '{subject}' to {address}")).Single();
 
         public async Task<string> TextAsync(MailView message)
         {
