@@ -1,0 +1,10 @@
+.env*
+*.secrets.json
+secrets/
+*.pem
+*.key
+.playwright-cli
+.superpowers
+.mcp.json
+bin
+obj

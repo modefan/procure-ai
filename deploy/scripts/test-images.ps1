@@ -6,13 +6,19 @@
   limit. Throwaway passwords are generated per run and never written anywhere. Run: deploy/scripts/test-images.ps1 -Tag local-test
 #>
 param(
-    [Parameter(Mandatory)][string]$Tag
+    [Parameter(Mandatory)][string]$Tag,
+    # Only some images, by name without the procure-ai- prefix (e.g. -Only requests-api,web). Default: all.
+    [string[]]$Only = @()
 )
+$Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $ErrorActionPreference = 'Continue'
 
 $dotnetImages = 'access-api', 'approvals-api', 'assistant-api', 'audit-api', 'budgets-api', 'invoicing-api', 'notifications-api',
     'purchasing-api', 'requests-api', 'suppliers-api', 'gateway', 'simulators', 'demo-data'
 $otherImages = 'web', 'postgres', 'keycloak', 'debezium'
+function Wanted([string]$name) { $Only.Count -eq 0 -or $Only -contains $name }
+$dotnetImages = @($dotnetImages | Where-Object { Wanted $_ })
+$otherImages = @($otherImages | Where-Object { Wanted $_ })
 $allImages = $dotnetImages + $otherImages
 
 $failures = [System.Collections.Generic.List[string]]::new()
@@ -57,10 +63,11 @@ try {
         if ($n -eq 'demo-data') { $appArgs = @('seed') } elseif ($n -like '*-api') { $appArgs = @('--migrate') }
         $out = (docker run --rm --name "$prefix-$n" --memory 512m --cpus 1 (Image $n) @appArgs 2>&1 | Out-String)
         $code = $LASTEXITCODE
-        Check ($code -ne 0 -and $out -match '(?i)(validation|failed|required|must be|missing|not configured|Authority|ConnectionStrings)') `
+        Check ($code -ne 0 -and $out -cmatch "Connection string '[A-Za-z]+' is required|OptionsValidationException: DataAnnotation validation failed") `
             "$n exits non-zero with a configuration message" "(exit $code) $(Head $out)"
     }
 
+    if (Wanted 'web') {
     Write-Host 'web: SPA fallback, cache headers, mounted config.json'
     $cfgDir = Join-Path ([IO.Path]::GetTempPath()) "$prefix-web-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $cfgDir | Out-Null
@@ -94,8 +101,9 @@ try {
             Check ($cc -match 'max-age=31536000' -and $cc -match 'immutable' -and $cc -match 'public') "hashed asset $asset is immutable" $cc
         }
     }
-    Remove-Item -Recurse -Force $cfgDir
 
+    }
+    if ((Wanted 'postgres') -and (Wanted 'keycloak')) {
     Write-Host 'postgres + keycloak: optimized start against a throwaway Postgres, realm discovery document'
     docker network create $network *> $null
     $pgPassword = RandomSecret
@@ -144,6 +152,8 @@ try {
     Check $discovered 'keycloak (start --optimized) serves the procure realm discovery document'
     if (-not $discovered) { docker logs --tail 30 "$prefix-kc" 2>&1 | Out-Host }
 
+    }
+    if (Wanted 'debezium') {
     Write-Host 'debezium: both properties files'
     foreach ($f in 'application.properties', 'application-mongo.properties') {
         $out = (docker run --rm --entrypoint cat --memory 64m (Image 'debezium') "/debezium/config/$f" 2>&1 | Out-String)
@@ -151,12 +161,14 @@ try {
     }
     $mongo = (docker run --rm --entrypoint cat --memory 64m (Image 'debezium') '/debezium/config/application-mongo.properties' 2>&1 | Out-String)
     Check ($mongo -match 'MongoDbConnector') 'application-mongo.properties is the MongoDB one'
+    }
 }
 catch {
     Fail 'the test script itself failed' "$_"
 }
 finally {
     Cleanup
+    if ($cfgDir -and (Test-Path $cfgDir)) { Remove-Item -Recurse -Force $cfgDir }
 }
 
 if ($failures.Count -gt 0) {
