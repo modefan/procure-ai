@@ -555,6 +555,8 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
     /// </summary>
     private async Task ActAsync(RequestContext c, string step, Func<Task<GatewayResponse?>> send, CancellationToken ct, params HttpStatusCode[] accepted)
     {
+        // A 409 belongs to the write that got it: a later write starts without one, so its wait never names an old refusal (final review F11).
+        c.LastConflict = null;
         var clock = Stopwatch.StartNew();
         while (true)
         {
@@ -637,7 +639,7 @@ public sealed class ScenarioRunner(GatewayClient gateway, IOptions<DemoDataOptio
 
         public Guid Id { get; set; }
 
-        /// <summary>The last 409 a write of this request got, for the message of a step that then times out.</summary>
+        /// <summary>The 409 the latest write of this request got (cleared when the next write starts), for the message of a step that then times out.</summary>
         public string? LastConflict { get; set; }
     }
 }

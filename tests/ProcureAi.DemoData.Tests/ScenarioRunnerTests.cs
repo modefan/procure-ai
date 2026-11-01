@@ -92,6 +92,50 @@ public sealed class ScenarioRunnerTests
         failure.Message.ShouldContain("409");
     }
 
+    /// <summary>
+    /// Final review F11: a 409 belongs to the write that got it. A later step's write that is accepted and whose wait then times out must
+    /// not report the earlier refusal as its reason.
+    /// </summary>
+    [Fact]
+    public async Task A_timeout_after_an_accepted_write_does_not_carry_an_earlier_conflict()
+    {
+        var submitted = false;
+        var gateway = new FakeGateway(request => request switch
+        {
+            { Method.Method: "GET" } when request.RequestUri!.PathAndQuery.StartsWith("/api/v1/requests?mine=true", StringComparison.Ordinal) =>
+                FakeGateway.Json(HttpStatusCode.OK, $"{{\"items\":[{Request("Draft")}],\"page\":1,\"pageSize\":100,\"total\":1}}"),
+            { Method.Method: "GET" } when request.RequestUri!.AbsolutePath == $"/api/v1/requests/{RequestId}" =>
+                FakeGateway.Json(HttpStatusCode.OK, Request(submitted ? "Submitted" : "Draft")),
+            { Method.Method: "GET" } when request.RequestUri!.AbsolutePath == $"/api/v1/approvals/requests/{RequestId}" =>
+                FakeGateway.Json(HttpStatusCode.OK, $"{{\"requestId\":\"{RequestId}\",\"state\":\"AwaitingApproval\",\"steps\":[{{\"id\":\"{Guid.NewGuid()}\",\"stepNo\":1,\"level\":\"Manager\",\"status\":\"Pending\",\"canAct\":false,\"cannotActReason\":null,\"version\":1}}]}}"),
+            // Someone else submitted it a moment earlier: this submit is refused, but the request moved on as wanted.
+            { Method.Method: "POST" } when request.RequestUri!.AbsolutePath.EndsWith("/submit", StringComparison.Ordinal) =>
+                Submit(),
+            // The cancel is accepted, but the request never shows Cancelled: the step times out.
+            { Method.Method: "POST" } when request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal) =>
+                FakeGateway.Json(HttpStatusCode.OK, Request("Cancelling")),
+            _ => FakeGateway.Status(HttpStatusCode.NotFound),
+        });
+
+        HttpResponseMessage Submit()
+        {
+            submitted = true;
+            return FakeGateway.Json(HttpStatusCode.Conflict, "{\"title\":\"Conflict\",\"detail\":\"The request is already submitted.\"}");
+        }
+
+        var scenario = new Scenario(Tenant, "thandi@acme.test",
+        [
+            new ScenarioRequest("a-key", "A title", "tom@acme.test", "IT-200", "contoso-hardware", [new ScenarioLine("MON-27", 1)], StopAt.Cancelled,
+                CancelReason: "Not needed"),
+        ]);
+        var result = await Runner(gateway).RunAsync(scenario, TestContext.Current.CancellationToken);
+
+        var failure = result.Failures.ShouldHaveSingleItem();
+        failure.Step.ShouldBe("request cancelled");
+        failure.Message.ShouldContain("timed out");
+        failure.Message.ShouldNotContain("already submitted", Case.Insensitive);
+    }
+
     [Theory]
     [InlineData("https://localhost:7001", true, true)]
     [InlineData("https://127.0.0.1:7001", true, true)]
