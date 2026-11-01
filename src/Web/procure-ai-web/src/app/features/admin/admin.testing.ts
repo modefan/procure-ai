@@ -43,7 +43,7 @@ export const matrixDto = (o: Partial<MatrixDto> = {}): MatrixDto => ({
 /** A user of the Users screen as the Access service lists them. */
 export const userDto = (userId: string, o: Partial<UserDto> = {}): UserDto => ({
   userId,
-  displayName: 'Maria Manager',
+  displayName: 'Maria Naidoo',
   email: 'maria@acme.test',
   roles: ['manager'],
   costCenterCodes: ['IT-200'],
@@ -59,7 +59,7 @@ export const costCenterAdminDto = (code: string, o: Partial<CostCenterAdminDto> 
   departmentCode: 'IT',
   departmentName: 'Information Technology',
   managerId: 'maria',
-  managerName: 'Maria Manager',
+  managerName: 'Maria Naidoo',
   departmentHeadId: 'hendrik',
   departmentHeadName: 'Hendrik Head',
   ...o,
@@ -69,7 +69,7 @@ export const costCenterAdminDto = (code: string, o: Partial<CostCenterAdminDto> 
 export const checkDto = (o: Partial<AuthorizationCheckDto> = {}): AuthorizationCheckDto => ({
   allowed: false,
   action: 'approve',
-  userName: 'Maria Manager',
+  userName: 'Maria Naidoo',
   requestNumber: 'PR-1039',
   steps: [
     { code: 'permission', passed: true, text: 'Has permission requests.approve', gating: true },

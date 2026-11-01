@@ -97,7 +97,7 @@ public sealed class PresenceStoreTests(NotificationsApp app) : IAsyncLifetime
         (await db.SetContainsAsync("presence:tenants", tenant)).ShouldBeTrue();
 
         // A connection arrives just before the clean-up: the tenant stays.
-        var maria = new PresenceConnection($"conn-{Guid.NewGuid():N}", tenant, "maria", "Maria Manager");
+        var maria = new PresenceConnection($"conn-{Guid.NewGuid():N}", tenant, "maria", "Maria Naidoo");
         await _presence.ConnectedAsync(maria, Ct);
         await _presence.SweepAsync(Ct);
         (await db.SetContainsAsync("presence:tenants", tenant)).ShouldBeTrue();

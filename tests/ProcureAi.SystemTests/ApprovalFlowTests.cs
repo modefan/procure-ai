@@ -60,9 +60,9 @@ public sealed class ApprovalFlowTests(SystemFixture system)
         string[] approvalEvents = ["RequestSubmitted", "BudgetReserved", "ApprovalRequested", "ApprovalStepApproved", "RequestApproved"];
         history.Where(e => approvalEvents.Contains(e.Type)).Select(e => e.Type).Order().ShouldBe(
             new[] { "RequestSubmitted", "BudgetReserved", "ApprovalRequested", "ApprovalRequested", "ApprovalStepApproved", "ApprovalStepApproved", "RequestApproved" }.Order());
-        history.ShouldContain(e => e.Type == "RequestSubmitted" && e.Summary.StartsWith("Submitted by Tom Requester: Developer laptop (R 28 980,00 incl. VAT"));
+        history.ShouldContain(e => e.Type == "RequestSubmitted" && e.Summary.StartsWith("Submitted by Tom Mokoena: Developer laptop (R 28 980,00 incl. VAT"));
         history.ShouldContain(e => e.Type == "BudgetReserved" && e.Summary.StartsWith("R 28 980,00 reserved on IT-200"));
-        history.ShouldContain(e => e.Type == "ApprovalStepApproved" && e.UserId == SystemFixture.Maria && e.Summary == "Approved by Maria Manager (step 1, Manager)");
+        history.ShouldContain(e => e.Type == "ApprovalStepApproved" && e.UserId == SystemFixture.Maria && e.Summary == "Approved by Maria Naidoo (step 1, Manager)");
         history.ShouldContain(e => e.Type == "ApprovalStepApproved" && e.UserId == SystemFixture.Dept && e.Summary == "Approved by Dept Head (step 2, Department head)");
         history.ShouldContain(e => e.Type == "RequestApproved" && e.Summary == "Request approved (R 28 980,00 incl. VAT)");
 
@@ -99,7 +99,7 @@ public sealed class ApprovalFlowTests(SystemFixture system)
 
         var history = await _flow.HistoryWhenAsync(
             request.Id, h => h.Any(e => e.Type == "BudgetReleased") && h.Any(e => e.Type == "RequestRejected"), "history");
-        history.ShouldContain(e => e.Type == "RequestRejected" && e.UserId == SystemFixture.Maria && e.Summary == "Rejected by Maria Manager: Not in this year's plan");
+        history.ShouldContain(e => e.Type == "RequestRejected" && e.UserId == SystemFixture.Maria && e.Summary == "Rejected by Maria Naidoo: Not in this year's plan");
         history.ShouldContain(e => e.Type == "BudgetReleased" && e.Summary.StartsWith("R 28 980,00 released on IT-200"));
         history.ShouldNotContain(e => e.Type == "RequestApproved");
         history.ShouldNotContain(e => e.Type == "PurchaseOrderCreated");

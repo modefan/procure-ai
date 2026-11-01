@@ -17,7 +17,7 @@ namespace ProcureAi.Audit.Application.Queries;
 public sealed record ReadEvent(BusinessEvent Stored, IIntegrationEvent? Contract);
 
 /// <summary>
-/// Turns the stored events of one request into sentences, e.g. "Approved by Maria Manager (step 1, Manager)". The step number
+/// Turns the stored events of one request into sentences, e.g. "Approved by Maria Naidoo (step 1, Manager)". The step number
 /// and level of a step come from its <c>ApprovalRequested</c> in the same history. Amounts in Rand (<c>R 30 000,00</c>).
 /// </summary>
 public sealed class BusinessEventSummaries

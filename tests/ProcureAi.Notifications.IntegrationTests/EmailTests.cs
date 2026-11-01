@@ -68,7 +68,7 @@ public sealed class EmailTests(NotificationsApp app)
         var tenant = NewTenant();
         var requestId = Guid.NewGuid();
         var maria = $"maria-{tenant}@acme.test";
-        app.Access.SetDisplayName(tenant, "maria", "Maria Manager", maria);
+        app.Access.SetDisplayName(tenant, "maria", "Maria Naidoo", maria);
         var captured = await app.Probe.BindQueueAsync(Exchanges.Approvals);
 
         await app.PublishAsync(new ApprovalRequested(
@@ -100,7 +100,7 @@ public sealed class EmailTests(NotificationsApp app)
         var tenant = NewTenant();
         var maria = $"maria-{tenant}@acme.test";
         var fin = $"fin-{tenant}@acme.test";
-        app.Access.SetDisplayName(tenant, "maria", "Maria Manager", maria);
+        app.Access.SetDisplayName(tenant, "maria", "Maria Naidoo", maria);
         app.Access.SetDisplayName(tenant, "fin", "Fiona Finance", fin);
         app.Access.SetDisplayName(tenant, "nomail", "No Mail");
 

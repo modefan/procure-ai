@@ -72,7 +72,7 @@ describe('UsersPage', () => {
   it('users_table_shows_limit_in_rand: users with roles, cost centers, limit and the Finance badge; cost centers below', async () => {
     const { el } = await setup();
     const maria = text(row(el, 'maria'));
-    expect(maria).toContain('Maria Manager');
+    expect(maria).toContain('Maria Naidoo');
     expect(maria).toContain('maria@acme.test');
     expect(maria).toContain('Manager');
     expect(maria).toContain('IT-200');
@@ -82,7 +82,7 @@ describe('UsersPage', () => {
     expect(text(row(el, 'maria'))).not.toContain('Finance approver');
     expect(text(el)).toContain('managed in Keycloak');
     expect(text(el.querySelector('[data-testid="cost-centers"]'))).toContain('Marketing');
-    expect(text(el.querySelector('[data-testid="cost-centers"]'))).toContain('Maria Manager');
+    expect(text(el.querySelector('[data-testid="cost-centers"]'))).toContain('Maria Naidoo');
   });
 
   it('edit_saves_cost_centers_with_if_match: ticking a cost center and saving', async () => {

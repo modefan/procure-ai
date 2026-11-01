@@ -12,7 +12,7 @@ export const invoiceLine = (lineNo: number, o: Partial<InvoiceLineDto> = {}): In
 
 export const payment = (o: Partial<PaymentDto> = {}): PaymentDto => ({
   id: 'p1', number: 'PAY-0001', lines: [{ lineNo: 1, sku: 'SKU-1', quantity: 2, amountExclVat: 50400, amountText: 'R 50 400,00' }], totalExclVat: 50400, vat: 7560,
-  totalInclVat: 57960, totalInclVatText: 'R 57 960,00', releasedBy: 'Thandi Finance', releasedAt: '2026-10-29T09:00:00Z', exportStatus: 'Exported',
+  totalInclVat: 57960, totalInclVatText: 'R 57 960,00', releasedBy: 'Thandi Dlamini', releasedAt: '2026-10-29T09:00:00Z', exportStatus: 'Exported',
   erpReference: 'ERP-5521', exportAttempts: 1, lastExportError: null, ...o,
 });
 

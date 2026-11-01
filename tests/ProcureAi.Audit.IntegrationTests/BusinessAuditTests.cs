@@ -119,8 +119,8 @@ public sealed class BusinessAuditTests(AuditApp app)
         var requestId = Guid.NewGuid();
         var stepId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        app.Access.SetDisplayName(tenant, Tom, "Tom Requester");
-        app.Access.SetDisplayName(tenant, Maria, "Maria Manager");
+        app.Access.SetDisplayName(tenant, Tom, "Tom Mokoena");
+        app.Access.SetDisplayName(tenant, Maria, "Maria Naidoo");
         await app.PublishAsync(Submitted(requestId, tenant, now.AddMinutes(-3)), Exchanges.Requests, tenant, Tom);
         await app.PublishAsync(
             new ApprovalRequested(requestId, tenant, "PR-1", stepId, 1, "Manager", [Maria], now.AddDays(2), now.AddMinutes(-2)),
@@ -131,7 +131,7 @@ public sealed class BusinessAuditTests(AuditApp app)
         using var response = await app.Client.SendAsync(AuditApp.Get(History(requestId), TestAuth.CreateToken(Tom, tenant, "requester")), Ct);
 
         var history = (await response.Content.ReadFromJsonAsync<List<BusinessEventDto>>(Ct)).ShouldNotBeNull();
-        history[2].Summary.ShouldBe("Approved by Maria Manager (step 1, Manager): Within budget");
+        history[2].Summary.ShouldBe("Approved by Maria Naidoo (step 1, Manager): Within budget");
     }
 
     [Fact]
@@ -141,8 +141,8 @@ public sealed class BusinessAuditTests(AuditApp app)
         var requestId = Guid.NewGuid();
         var stepId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        app.Access.SetDisplayName(tenant, Tom, "Tom Requester");
-        app.Access.SetDisplayName(tenant, Maria, "Maria Manager");
+        app.Access.SetDisplayName(tenant, Tom, "Tom Mokoena");
+        app.Access.SetDisplayName(tenant, Maria, "Maria Naidoo");
 
         await app.PublishAsync(Submitted(requestId, tenant, now.AddMinutes(-3)), Exchanges.Requests, tenant, Tom);
         await app.PublishAsync(
@@ -158,14 +158,14 @@ public sealed class BusinessAuditTests(AuditApp app)
         var history = (await response.Content.ReadFromJsonAsync<List<BusinessEventDto>>(Ct)).ShouldNotBeNull();
         history.Select(h => h.Type).ShouldBe(["RequestSubmitted", "ApprovalRequested", "ApprovalStepApproved"], "oldest first");
         history[0].UserId.ShouldBe(Tom);
-        history[0].Summary.ShouldBe("Submitted by Tom Requester: Laptop (R 30 000,00 incl. VAT, IT-200)");
-        history[1].Summary.ShouldBe("Approval requested from Maria Manager (step 1, Manager)");
+        history[0].Summary.ShouldBe("Submitted by Tom Mokoena: Laptop (R 30 000,00 incl. VAT, IT-200)");
+        history[1].Summary.ShouldBe("Approval requested from Maria Naidoo (step 1, Manager)");
         history[2].UserId.ShouldBe(Maria, "the initiating user of the headers, not the service that published it");
-        history[2].Summary.ShouldBe("Approved by Maria Manager (step 1, Manager)");
+        history[2].Summary.ShouldBe("Approved by Maria Naidoo (step 1, Manager)");
 
         // The request detail page reads these instead of parsing the sentences above (workflow-timeline.ts).
         history.Select(h => h.StepNo).ShouldBe([null, 1, 1], "the approval events say which step they are about");
-        history.Select(h => h.ActorName).ShouldBe(["Tom Requester", "Tom Requester", "Maria Manager"], "the display name of the user in the headers");
+        history.Select(h => h.ActorName).ShouldBe(["Tom Mokoena", "Tom Mokoena", "Maria Naidoo"], "the display name of the user in the headers");
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public sealed class BusinessAuditTests(AuditApp app)
     {
         var tenant = AuditApp.NewTenant();
         var requestId = Guid.NewGuid();
-        app.Access.SetDisplayName(tenant, Tom, "Tom Requester");
+        app.Access.SetDisplayName(tenant, Tom, "Tom Mokoena");
         await app.PublishAsync(Submitted(requestId, tenant), Exchanges.Requests, tenant, Tom);
         await app.WaitForStoredAsync(tenant, s => s.Count == 1);
 
@@ -199,7 +199,7 @@ public sealed class BusinessAuditTests(AuditApp app)
         var tenant = AuditApp.NewTenant();
         var requestId = Guid.NewGuid();
         var timeout = app.Services.GetRequiredService<IOptions<AuditOptions>>().Value.DisplayNameTimeout;
-        app.Access.SetDisplayName(tenant, Tom, "Tom Requester");
+        app.Access.SetDisplayName(tenant, Tom, "Tom Mokoena");
         app.Access.SetNameDelay(tenant, TimeSpan.FromSeconds(20));
         await app.PublishAsync(Submitted(requestId, tenant), Exchanges.Requests, tenant, Tom);
         await app.WaitForStoredAsync(tenant, s => s.Count == 1);

@@ -261,14 +261,14 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
         var host = await StartAsync();
         var tenant = NewTenant();
         var other = NewTenant();
-        _access.SetDisplayName(tenant, "maria", "Maria Manager");
+        _access.SetDisplayName(tenant, "maria", "Maria Naidoo");
         var access = host.Services.GetRequiredService<IAccessDirectory>();
 
         var first = await access.GetDisplayNameAsync("maria", tenant, Ct);
         var second = await access.GetDisplayNameAsync("maria", tenant, Ct);
         var elsewhere = await access.GetDisplayNameAsync("maria", other, Ct);
 
-        first.ShouldBe("Maria Manager");
+        first.ShouldBe("Maria Naidoo");
         second.ShouldBe(first);
         elsewhere.ShouldBeNull("the user is not in the other tenant");
         _access.Calls.Count(c => c.Tenant == tenant).ShouldBe(1);
@@ -280,7 +280,7 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
     {
         var host = await StartAsync();
         var tenant = NewTenant();
-        _access.SetDisplayName(tenant, "maria", "Maria Manager", "maria@acme.test");
+        _access.SetDisplayName(tenant, "maria", "Maria Naidoo", "maria@acme.test");
         _access.SetDisplayName(tenant, "ben", "Ben Buyer");
         var access = host.Services.GetRequiredService<IAccessDirectory>();
 
@@ -289,8 +289,8 @@ public sealed class AccessClientTests(RedisFixture redis) : IAsyncLifetime
         var ben = await access.GetUserAsync("ben", tenant, Ct);
         var nobody = await access.GetUserAsync("nobody", tenant, Ct);
 
-        maria.ShouldBe(new DirectoryUser("maria", "Maria Manager", "maria@acme.test"));
-        name.ShouldBe("Maria Manager");
+        maria.ShouldBe(new DirectoryUser("maria", "Maria Naidoo", "maria@acme.test"));
+        name.ShouldBe("Maria Naidoo");
         ben.ShouldNotBeNull().Email.ShouldBe("", "Access had no address for him");
         nobody.ShouldBeNull();
         _access.Calls.Count(c => c.Path == "/api/v1/access/internal/users/maria").ShouldBe(1, "one lookup serves both");

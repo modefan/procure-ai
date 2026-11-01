@@ -36,7 +36,7 @@ public sealed class PresenceTests
     [Fact]
     public async Task Watch_broadcasts_distinct_viewers()
     {
-        var maria = Conn("c1", "maria", "Maria Manager");
+        var maria = Conn("c1", "maria", "Maria Naidoo");
         var ben = Conn("c2", "ben", "Ben Buyer");
         await _presence.ConnectedAsync(maria, Ct);
         await _presence.ConnectedAsync(ben, Ct);
@@ -47,33 +47,33 @@ public sealed class PresenceTests
         var last = _pushes.Viewers.Last();
         last.Tenant.ShouldBe(Acme);
         last.Target.ShouldBe(Pr1043);
-        last.Viewers.ShouldBe([new Viewer("ben", "Ben Buyer"), new Viewer("maria", "Maria Manager")]);
+        last.Viewers.ShouldBe([new Viewer("ben", "Ben Buyer"), new Viewer("maria", "Maria Naidoo")]);
         returned.ShouldBe(last.Viewers);
     }
 
     [Fact]
     public async Task Second_tab_of_same_user_counts_once()
     {
-        var tab1 = Conn("c1", "maria", "Maria Manager");
-        var tab2 = Conn("c2", "maria", "Maria Manager");
+        var tab1 = Conn("c1", "maria", "Maria Naidoo");
+        var tab2 = Conn("c2", "maria", "Maria Naidoo");
         await _presence.ConnectedAsync(tab1, Ct);
         await _presence.ConnectedAsync(tab2, Ct);
         await _presence.WatchAsync(tab1, Pr1043, Ct);
         await _presence.WatchAsync(tab2, Pr1043, Ct);
 
-        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Manager")]);
-        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Manager")]);
+        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
+        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
 
         // Closing one tab leaves her viewing and online.
         await _presence.DisconnectedAsync("c1", Ct);
-        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Manager")]);
-        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Manager")]);
+        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
+        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
     }
 
     [Fact]
     public async Task Disconnect_removes_viewer_and_online_user()
     {
-        var maria = Conn("c1", "maria", "Maria Manager");
+        var maria = Conn("c1", "maria", "Maria Naidoo");
         var ben = Conn("c2", "ben", "Ben Buyer");
         await _presence.ConnectedAsync(maria, Ct);
         await _presence.ConnectedAsync(ben, Ct);
@@ -82,14 +82,14 @@ public sealed class PresenceTests
 
         await _presence.DisconnectedAsync("c2", Ct);
 
-        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Manager")]);
-        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Manager")]);
+        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
+        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
     }
 
     [Fact]
     public async Task Missed_heartbeats_drop_the_connection_after_the_ttl_and_not_before()
     {
-        var maria = Conn("c1", "maria", "Maria Manager");
+        var maria = Conn("c1", "maria", "Maria Naidoo");
         var ben = Conn("c2", "ben", "Ben Buyer");
         await _presence.ConnectedAsync(maria, Ct);
         await _presence.ConnectedAsync(ben, Ct);
@@ -111,8 +111,8 @@ public sealed class PresenceTests
         (await _presence.OnlineAsync(Acme, Ct)).Select(v => v.UserId).ShouldBe(["maria"]);
         // ...and the sweep removes him and tells the others.
         (await _presence.SweepAsync(Ct)).ShouldBe(1);
-        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Manager")]);
-        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Manager")]);
+        _pushes.Viewers.Last().Viewers.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
+        _pushes.Online.Last().Online.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
         _store.Known("c2").ShouldBeFalse();
     }
 
@@ -167,7 +167,7 @@ public sealed class PresenceTests
     [Fact]
     public async Task Watch_never_crosses_tenants()
     {
-        var acme = Conn("c1", "maria", "Maria Manager");
+        var acme = Conn("c1", "maria", "Maria Naidoo");
         var globex = Conn("c2", "gina", "Gina Globex", Globex);
         await _presence.ConnectedAsync(acme, Ct);
         await _presence.ConnectedAsync(globex, Ct);
@@ -175,9 +175,9 @@ public sealed class PresenceTests
         await _presence.WatchAsync(acme, Pr1043, Ct);
         await _presence.WatchAsync(globex, Pr1043, Ct);
 
-        _pushes.Viewers.Where(v => v.Tenant == Acme).Last().Viewers.ShouldBe([new Viewer("maria", "Maria Manager")]);
+        _pushes.Viewers.Where(v => v.Tenant == Acme).Last().Viewers.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
         _pushes.Viewers.Where(v => v.Tenant == Globex).Last().Viewers.ShouldBe([new Viewer("gina", "Gina Globex")]);
-        _pushes.Online.Where(o => o.Tenant == Acme).Last().Online.ShouldBe([new Viewer("maria", "Maria Manager")]);
+        _pushes.Online.Where(o => o.Tenant == Acme).Last().Online.ShouldBe([new Viewer("maria", "Maria Naidoo")]);
         // The groups the pushes go to carry the tenant of the connection.
         LiveGroups.Viewers(Acme, Pr1043.Entity, Pr1043.Id).ShouldBe($"v:acme:request:{Pr1043.Id}");
     }
@@ -187,7 +187,7 @@ public sealed class PresenceTests
     {
         var presence = new PresenceService(
             _store, _pushes, Options.Create(new PresenceOptions { MaxWatchesPerConnection = 2 }), _clock, NullLogger<PresenceService>.Instance);
-        var maria = Conn("c1", "maria", "Maria Manager");
+        var maria = Conn("c1", "maria", "Maria Naidoo");
         await presence.ConnectedAsync(maria, Ct);
 
         (await presence.WatchAsync(maria, new PresenceTarget(LiveEntities.Request, "a"), Ct)).ShouldNotBeNull();
@@ -220,14 +220,14 @@ public sealed class PresenceTests
         var now = _clock.GetUtcNow();
         PresenceEntry[] entries =
         [
-            new("c1", "maria", "Maria Manager", now),
-            new("c2", "maria", "Maria Manager", now.AddSeconds(-10)),
+            new("c1", "maria", "Maria Naidoo", now),
+            new("c2", "maria", "Maria Naidoo", now.AddSeconds(-10)),
             new("c3", "ben", "Ben Buyer", now.AddSeconds(-45)),
             new("c4", "old", "Olaf Old", now.AddSeconds(-46)),
         ];
 
         PresenceView.Viewers(entries, now, TimeSpan.FromSeconds(45))
-            .ShouldBe([new Viewer("ben", "Ben Buyer"), new Viewer("maria", "Maria Manager")]);
+            .ShouldBe([new Viewer("ben", "Ben Buyer"), new Viewer("maria", "Maria Naidoo")]);
     }
 
     [Theory]

@@ -43,17 +43,17 @@ public sealed class PresenceTests(NotificationsApp app)
     {
         var tenant = NewTenant();
         var id = Guid.NewGuid().ToString();
-        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Manager");
+        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Naidoo");
         await using var ben = await ConnectAsync(app.B.Server, tenant, "ben", "Ben Buyer");
 
-        (await WatchAsync(maria, id)).ShouldBe([new Viewer("maria", "Maria Manager")]);
+        (await WatchAsync(maria, id)).ShouldBe([new Viewer("maria", "Maria Naidoo")]);
         var returned = await WatchAsync(ben, id);
 
         // Maria (instance A) hears that Ben (instance B) joined; the list is sorted by name; the wire format is { userId, name }.
         var push = await maria.WaitForPushAsync(p => ViewersOf(p, id, "ben", "maria"), Arrival);
         push.Payload[0].EnumerateObject().Select(p => p.Name).ShouldBe(["userId", "name"]);
         push.Payload[0].GetProperty("name").GetString().ShouldBe("Ben Buyer");
-        returned.ShouldBe([new Viewer("ben", "Ben Buyer"), new Viewer("maria", "Maria Manager")]);
+        returned.ShouldBe([new Viewer("ben", "Ben Buyer"), new Viewer("maria", "Maria Naidoo")]);
         await maria.WaitForPushAsync(p => Online(p, "ben", "maria"), Arrival);
     }
 
@@ -62,8 +62,8 @@ public sealed class PresenceTests(NotificationsApp app)
     {
         var tenant = NewTenant();
         var id = Guid.NewGuid().ToString();
-        await using var tab1 = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Manager");
-        await using var tab2 = await ConnectAsync(app.B.Server, tenant, "maria", "Maria Manager");
+        await using var tab1 = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Naidoo");
+        await using var tab2 = await ConnectAsync(app.B.Server, tenant, "maria", "Maria Naidoo");
         // No name claim: shown under the user ID.
         await using var ben = await ConnectAsync(app.A.Server, tenant, "ben", name: null);
 
@@ -71,7 +71,7 @@ public sealed class PresenceTests(NotificationsApp app)
         await WatchAsync(tab2, id);
         var viewers = await WatchAsync(ben, id);
 
-        viewers.ShouldBe([new Viewer("ben", "ben"), new Viewer("maria", "Maria Manager")]);
+        viewers.ShouldBe([new Viewer("ben", "ben"), new Viewer("maria", "Maria Naidoo")]);
         await ben.WaitForPushAsync(p => ViewersOf(p, id, "ben", "maria"), Arrival);
         await ben.WaitForPushAsync(p => Online(p, "ben", "maria"), Arrival);
 
@@ -89,7 +89,7 @@ public sealed class PresenceTests(NotificationsApp app)
     {
         var tenant = NewTenant();
         var id = Guid.NewGuid().ToString();
-        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Manager");
+        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Naidoo");
         var ben = await ConnectAsync(app.B.Server, tenant, "ben", "Ben Buyer");
         await WatchAsync(maria, id);
         await WatchAsync(ben, id);
@@ -108,7 +108,7 @@ public sealed class PresenceTests(NotificationsApp app)
     {
         var tenant = NewTenant();
         var id = Guid.NewGuid().ToString();
-        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Manager");
+        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Naidoo");
         await using var ben = await ConnectAsync(app.B.Server, tenant, "ben", "Ben Buyer");
         await WatchAsync(maria, id);
         await WatchAsync(ben, id);
@@ -136,7 +136,7 @@ public sealed class PresenceTests(NotificationsApp app)
         var tenant = NewTenant();
         var id = Guid.NewGuid().ToString();
         await using var ben = await ConnectAsync(p.Server, tenant, "ben", "Ben Buyer");
-        await using var maria = await ConnectAsync(q.Server, tenant, "maria", "Maria Manager");
+        await using var maria = await ConnectAsync(q.Server, tenant, "maria", "Maria Naidoo");
         await WatchAsync(ben, id);
         await WatchAsync(maria, id);
         await maria.WaitForPushAsync(push => ViewersOf(push, id, "ben", "maria"), Arrival);
@@ -159,7 +159,7 @@ public sealed class PresenceTests(NotificationsApp app)
         var acme = NewTenant();
         var globex = NewTenant();
         var id = Guid.NewGuid().ToString();
-        await using var maria = await ConnectAsync(app.A.Server, acme, "maria", "Maria Manager");
+        await using var maria = await ConnectAsync(app.A.Server, acme, "maria", "Maria Naidoo");
         await using var gina = await ConnectAsync(app.B.Server, globex, "gina", "Gina Globex");
         // A user token cannot pick a tenant: X-Tenant-Id counts only with the admin key.
         await using var sneaky = await LiveClient.ConnectAsync(
@@ -209,7 +209,7 @@ public sealed class PresenceTests(NotificationsApp app)
     public async Task Watch_refuses_unknown_entities_and_ids_that_are_not_plain(string entity, string id)
     {
         var tenant = NewTenant();
-        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Manager");
+        await using var maria = await ConnectAsync(app.A.Server, tenant, "maria", "Maria Naidoo");
 
         await Should.ThrowAsync<HubException>(() => maria.Connection.InvokeAsync<Viewer[]>(LiveHubContract.WatchMethod, entity, id));
     }

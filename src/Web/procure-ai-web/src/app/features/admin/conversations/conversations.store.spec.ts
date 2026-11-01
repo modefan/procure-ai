@@ -15,7 +15,7 @@ describe('ConversationsStore', () => {
       adminListConversations: vi.fn().mockResolvedValue({ items: [conversationItem('c1'), conversationItem('c2', { userId: 'ben' })], page: 1, pageSize: 25, total: 2 }),
       adminGetConversation: vi.fn().mockResolvedValue(conversationDto('c1')),
     };
-    access = { listUsers: vi.fn().mockResolvedValue([userDto('tom', { displayName: 'Tom Requester' })]) };
+    access = { listUsers: vi.fn().mockResolvedValue([userDto('tom', { displayName: 'Tom Mokoena' })]) };
     TestBed.configureTestingModule({
       providers: [
         { provide: AdminConversationsService, useValue: api },
@@ -40,7 +40,7 @@ describe('ConversationsStore', () => {
 
   it('maps user ids to display names, and keeps the id when Access fails', async () => {
     await store().loadUsers();
-    expect(store().names().get('tom')).toBe('Tom Requester');
+    expect(store().names().get('tom')).toBe('Tom Mokoena');
     expect(store().names().get('ben')).toBeUndefined();
   });
 

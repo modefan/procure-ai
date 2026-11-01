@@ -191,7 +191,7 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
 
         var name = await ReadAsync<UserNameDto>(maria);
         name.UserId.ShouldBe(DemoUsers.Maria);
-        name.DisplayName.ShouldBe("Maria Manager");
+        name.DisplayName.ShouldBe("Maria Naidoo");
         // The address the Notifications service emails her at (plan 04 ruling 9).
         name.Email.ShouldBe("maria@acme.test");
         name.TenantName.ShouldBe("Acme Corp");
@@ -277,9 +277,9 @@ public sealed class AccessApiTests(AccessInfraFixture infra) : IAsyncLifetime
         var effectivePath = $"/internal/effective?userId={DemoUsers.Maria}&roles=manager";
         (await ReadAsync<EffectiveAccessDto>(await client.SendAsync(Internal(effectivePath, tenant), Ct))).ApprovalLimit.ShouldBe(200_000m);
         (await ReadAsync<CostCenterApproversDto>(await client.SendAsync(Internal("/internal/cost-centers/CC-1/approvers", tenant), Ct)))
-            .Manager.ShouldNotBeNull().DisplayName.ShouldBe("Maria Manager");
+            .Manager.ShouldNotBeNull().DisplayName.ShouldBe("Maria Naidoo");
         (await ReadAsync<UserNameDto>(await client.SendAsync(Internal($"/internal/users/{DemoUsers.Maria}", tenant), Ct)))
-            .DisplayName.ShouldBe("Maria Manager");
+            .DisplayName.ShouldBe("Maria Naidoo");
 
         await using (var connection = new NpgsqlConnection(infra.DbConnectionString))
         {

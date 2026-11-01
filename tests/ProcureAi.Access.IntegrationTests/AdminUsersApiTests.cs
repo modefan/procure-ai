@@ -93,7 +93,7 @@ public sealed class AdminUsersApiTests(AccessInfraFixture infra) : IAsyncLifetim
         it.DepartmentCode.ShouldBe("IT");
         it.DepartmentName.ShouldBe("Information Technology");
         it.ManagerId.ShouldBe(DemoUsers.Maria);
-        it.ManagerName.ShouldBe("Maria Manager");
+        it.ManagerName.ShouldBe("Maria Naidoo");
         it.DepartmentHeadId.ShouldBe(DemoUsers.Dept);
         it.DepartmentHeadName.ShouldBe("Dept Head");
     }

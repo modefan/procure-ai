@@ -55,7 +55,7 @@ describe('BudgetsPage', () => {
     const { el } = await setup([budgetDto('IT-200', { available: 123456 }), budgetDto('MK-110', { amount: 360000, spent: 160200, reserved: 0, available: 199800, ownerName: 'Ben Marketing' })]);
     const it = text(row(el, 'IT-200'));
     expect(it).toContain('IT-200');
-    expect(it).toContain('Maria Manager');
+    expect(it).toContain('Maria Naidoo');
     expect(it).toContain('R 900 000,00');
     expect(it).toContain('R 558 000,00');
     expect(it).toContain('R 75 600,00');

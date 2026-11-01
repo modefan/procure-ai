@@ -237,7 +237,7 @@ describe('InvoiceDetailPage', () => {
     expect(text(named.el.querySelector('[data-section="payments"]'))).toContain('released by Ben Finance');
     expect(text(named.el.querySelector('[data-section="payments"]'))).not.toContain('00000000');
     TestBed.resetTestingModule();
-    const mine = await setup(mismatched({ payments: [payment({ releasedBy: 'thandi', releasedByName: 'Thandi Finance' })] }));
+    const mine = await setup(mismatched({ payments: [payment({ releasedBy: 'thandi', releasedByName: 'Thandi Dlamini' })] }));
     expect(text(mine.el.querySelector('[data-section="payments"]'))).toContain('released by you');
     TestBed.resetTestingModule();
     const unknown = await setup(mismatched({ payments: [payment({ releasedBy: uuid, releasedByName: null })] }));

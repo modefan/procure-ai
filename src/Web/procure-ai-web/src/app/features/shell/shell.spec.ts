@@ -36,7 +36,7 @@ describe('Shell header', () => {
   const dismissSwitchError = vi.fn(() => switchError.set(null));
 
   const signIn = (permissions: string[], roles = ['requester']) =>
-    user.set({ userId: 'u1', name: 'Tom Requester', tenantId: 'acme', roles, permissions });
+    user.set({ userId: 'u1', name: 'Tom Mokoena', tenantId: 'acme', roles, permissions });
 
   beforeEach(() => {
     user.set(null);
@@ -245,9 +245,9 @@ describe('Shell header', () => {
 
   it('online users: names in the label, none when I am alone', async () => {
     signIn(['requests.read']);
-    online.set([{ userId: 'b', name: 'Ben Builder' }, { userId: 'm', name: 'Maria Manager' }]);
+    online.set([{ userId: 'b', name: 'Ben Builder' }, { userId: 'm', name: 'Maria Naidoo' }]);
     const el = await render();
-    expect(el.querySelector('[data-testid=online-users]')?.getAttribute('aria-label')).toBe('Online now: Ben Builder, Maria Manager');
+    expect(el.querySelector('[data-testid=online-users]')?.getAttribute('aria-label')).toBe('Online now: Ben Builder, Maria Naidoo');
 
     online.set([]);
     const fixture = TestBed.createComponent(Shell);
@@ -259,7 +259,7 @@ describe('Shell header', () => {
     signIn(['requests.read'], ['manager']);
     const el = await render();
     const trigger = text(el.querySelector('[data-testid=user-menu]'));
-    expect(trigger).toContain('Tom Requester');
+    expect(trigger).toContain('Tom Mokoena');
     expect(trigger).toContain('Manager');
     expect(trigger).toContain('Acme');
   });

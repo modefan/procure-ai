@@ -50,7 +50,7 @@ public sealed class ApiTests(ApprovalsApp app)
         var otherTenant = NewTenant();
         app.UseAcme(tenant);
         app.UseAcme(otherTenant);
-        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Requester");
+        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Mokoena");
         // A: R 30 000, step 1 maria (open), step 2 the department head (not open yet).
         var (a, aSteps) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
         // B: maria's step, already approved.
@@ -75,7 +75,7 @@ public sealed class ApiTests(ApprovalsApp app)
         item.Level.ShouldBe("Manager");
         item.Status.ShouldBe("Pending");
         item.DueAt.ShouldNotBeNull();
-        item.RequesterName.ShouldBe("Tom Requester");
+        item.RequesterName.ShouldBe("Tom Mokoena");
         item.OpenedAt.ShouldNotBeNull();
         item.OpenedAt.Value.ShouldBeGreaterThan(DateTimeOffset.UtcNow.AddMinutes(-5));
         item.OpenedAt.Value.ShouldBeLessThan(item.DueAt.Value);
@@ -309,13 +309,13 @@ public sealed class ApiTests(ApprovalsApp app)
     {
         var tenant = NewTenant();
         app.UseAcme(tenant);
-        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Requester");
+        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Mokoena");
         var (id, _) = await OpenAsync(Main, tenant, DemoUsers.Tom, 30_000m);
         using var client = Main.CreateClient();
 
         var chain = await ReadAsync<ApprovalChainDto>(await client.SendAsync(Get($"requests/{id}", User(tenant, DemoUsers.Maria, "manager")), Ct));
 
-        chain.RequesterName.ShouldBe("Tom Requester");
+        chain.RequesterName.ShouldBe("Tom Mokoena");
     }
 
     [Fact]

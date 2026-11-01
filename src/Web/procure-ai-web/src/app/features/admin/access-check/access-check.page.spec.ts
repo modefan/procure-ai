@@ -26,7 +26,7 @@ describe('AccessCheckPage', () => {
   }
 
   async function setup(params: Record<string, string> = {}) {
-    access = { listUsers: vi.fn().mockResolvedValue([userDto('maria'), userDto('tom', { displayName: 'Tom Requester', email: 'tom@acme.test', roles: ['requester'] })]) };
+    access = { listUsers: vi.fn().mockResolvedValue([userDto('maria'), userDto('tom', { displayName: 'Tom Mokoena', email: 'tom@acme.test', roles: ['requester'] })]) };
     approvals = { checkAuthorization: vi.fn().mockResolvedValue(checkDto()) };
     requests = { getRequestByNumber: vi.fn().mockResolvedValue({ id: 'req-1039', number: 'PR-1039' }) };
     router = { navigate: vi.fn().mockResolvedValue(true) };
@@ -113,7 +113,7 @@ describe('AccessCheckPage', () => {
   it('query_params_prefill_and_run: a link reproduces the check', async () => {
     const { el } = await setup({ user: 'tom', action: 'view', request: 'PR-1039' });
     expect(approvals.checkAuthorization).toHaveBeenCalledWith({ userId: 'tom', requestId: 'req-1039', action: 'view' });
-    expect(el.querySelector<HTMLInputElement>('#check-user')!.value).toBe('Tom Requester');
+    expect(el.querySelector<HTMLInputElement>('#check-user')!.value).toBe('Tom Mokoena');
     expect(el.querySelector<HTMLSelectElement>('#check-action')!.value).toBe('view');
     expect(el.querySelector<HTMLInputElement>('#check-request')!.value).toBe('PR-1039');
     expect(text(el.querySelector('[data-testid="verdict"]'))).toContain('Denied');

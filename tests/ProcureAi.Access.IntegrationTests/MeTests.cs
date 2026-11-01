@@ -59,7 +59,7 @@ public sealed class MeTests(AccessInfraFixture infra) : IAsyncLifetime
         var tom = await MeAsync(DemoUsers.Tom, "acme", "requester");
 
         maria.UserId.ShouldBe(DemoUsers.Maria);
-        maria.Name.ShouldBe("Maria Manager");
+        maria.Name.ShouldBe("Maria Naidoo");
         maria.Roles.ShouldBe(["manager"]);
         maria.CostCenters.ShouldContain(c => c.Code == "IT-200" && c.Name == "IT Operations" && c.DepartmentCode == "IT");
         maria.ApprovalLimit.ShouldBe(200_000m);
@@ -77,7 +77,7 @@ public sealed class MeTests(AccessInfraFixture infra) : IAsyncLifetime
         var impostor = await MeAsync(DemoUsers.Maria, "globex", "manager");
 
         ben.CostCenters.Select(c => c.Code).ShouldBe(["GX-100"]);
-        ben.Name.ShouldBe("Ben Manager");
+        ben.Name.ShouldBe("Ben Smit");
         impostor.CostCenters.ShouldBeEmpty();
         impostor.ApprovalLimit.ShouldBeNull();
         impostor.Name.ShouldBe(DemoUsers.Maria, "an unknown user is shown by ID");

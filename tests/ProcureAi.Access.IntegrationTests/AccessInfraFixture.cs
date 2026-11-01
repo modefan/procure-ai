@@ -20,7 +20,7 @@ public sealed class AccessInfraFixture()
         await using var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(DbConnectionString).Options);
         db.PermissionMatrices.Add(DefaultPermissionMatrix.CreateFor(tenant, DateTimeOffset.UtcNow));
         db.TenantUsers.Add(TenantUser.Create(
-            tenant, DemoUsers.Maria, "Maria Manager", "maria@" + tenant + ".test", ["manager"], Money.Zar(200_000m), false, []));
+            tenant, DemoUsers.Maria, "Maria Naidoo", "maria@" + tenant + ".test", ["manager"], Money.Zar(200_000m), false, []));
         await db.SaveChangesAsync();
         return tenant;
     }

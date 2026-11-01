@@ -92,7 +92,7 @@ public sealed class RegistrationTests(AccessInfraFixture infra, LazyKeycloak laz
         var queue = await probe.BindQueueAsync(Exchanges.Access);
 
         // The body's email and name are ignored: they come from the identity provider (Keycloak: "New Person").
-        using var response = await RegisterAsync(userId, "forged@elsewhere.test", "Thandi Finance");
+        using var response = await RegisterAsync(userId, "forged@elsewhere.test", "Thandi Dlamini");
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync(Ct));
         (await _keycloak.IsOrganizationMemberAsync(_organizationId, userId)).ShouldBeTrue();
