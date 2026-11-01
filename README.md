@@ -9,15 +9,16 @@ past purchases, with cited sources and read-only tools) answers questions, and i
 Built as a portfolio demo of enterprise .NET and Angular practice: microservices, Clean Architecture, messaging, GitOps-style
 delivery.
 
-**Status: plan 05 (the AI Assistant) in final review.** What runs today: ten services (Requests, Access, Budgets,
+**Status: plan 06 (admin screens, system status, demo polish) complete; the deployment comes next.** What runs today: ten services (Requests, Access, Budgets,
 Approvals, Audit, Suppliers, Purchasing, Invoicing, Notifications, Assistant), two simulators (supplier and ERP), the BFF
 gateway with Keycloak login, the Angular app, and per-database change data capture. A request is submitted, its budget
 reserved, approved through a rules-driven chain, turned into a purchase order, delivered, invoiced, three-way matched and
 paid (for example a R 86 940,00 order), with cancellation and rejection returning the budget, all audited end to end and
 all visible in the app, which updates live as other people act. The assistant answers policy questions with sources and
 looks things up as the user; invoice PDFs are scanned and checked before anyone saves them. **No real AI model is connected
-yet:** the assistant runs on a built-in, keyless demo model (see [The AI assistant](#the-ai-assistant)). The remaining admin
-screens and the deployment come in later plans.
+yet:** the assistant runs on a built-in, keyless demo model (see [The AI assistant](#the-ai-assistant)). The admin
+screens (authorization matrix, users and limits, access check, system status with a chaos switch, data changes), a "behind the scenes"
+panel, one-click demo roles, seed data in every state and a nightly reset are in; the deployment comes in a later plan.
 
 ## Architecture at a glance
 
@@ -83,6 +84,7 @@ South African way (`R 86 940,00`). What each role sees comes from permissions, n
 | Assistant | everyone with `assistant.use` | conversations; the answer streams with its sources, the tools it used and Markdown tables; Stop, regenerate, edit |
 | Policy documents | admins | upload, replace and remove the documents the assistant answers from, with live ingestion progress |
 | Invoice scan | everyone with `invoices.create` | drop a PDF on the invoices screen; the scan prefills the entry form, the order it names is chosen |
+| Admin screens | admins | see [Admin, system status and behind the scenes](#admin-system-status-and-behind-the-scenes) |
 
 | Dashboard (live) | Request detail with presence |
 |---|---|
@@ -301,6 +303,47 @@ Every chunk stores the model that embedded it, and embeddings are only reused fo
 each policy document once (Replace on the policy documents screen) so it is embedded by the new model; the dimensions stay
 1 536, so the vector index does not change.
 
+## Admin, system status and behind the scenes
+
+The admin menu (only for users with an `admin.*` permission) holds the screens a reviewer uses to see how the system decides and how it
+is doing. Everything is tenant-scoped: an admin of Acme sees and changes only Acme.
+
+| Screen | Permission | What it does |
+|---|---|---|
+| Authorization matrix | `admin.authorization` | which role has which permission (permissions are defined in code, the mapping is data in Access). A change takes effect for signed-in users within seconds: Access publishes `AccessChanged`, every service drops its cached permissions, and the browser reloads the user's permissions on the live push, so a link disappears from the menu without a reload |
+| Access check | `admin.authorization` | "may Maria approve PR-0016?" runs the same rules the APIs run and lists them one by one: the permission and the role that grants it, tenant, open step, separation of duties, current approver; routing reasons are shown apart, as an explanation only. The inputs are in the address, so a link reproduces a check |
+| Users and limits | `admin.users` | cost centers and approval limits per user (roles stay in Keycloak); changes are audited and reach the approval routing at once |
+| Policy documents | `admin.policies` | the documents the assistant answers from |
+| System status | `admin.system` | every service with its health, instances and circuit breakers (Supplier API, ERP, the AI model's four), sagas running, timeouts due, outbox backlog, dead letters, duplicates coalesced, guard blocks, alerts (finance step overdue, changed outside the app), a pgaudit summary of DDL and role statements, and a link to the Aspire dashboard. Refreshes every 5 s |
+| Supplier chaos | `admin.system` | on the status screen: **Break the supplier API** makes the simulated supplier fail every call; orders keep being retried with backoff, the breaker opens (`Supplier API: OPEN (retry in 18 s)`), and **Restore now** (or the automatic restore after 5 minutes) lets the next trial call through and the breaker closes |
+| Assistant conversations | `admin.system` | every conversation of the tenant, with blocked questions marked |
+| Data changes | `admin.system` | every row change in every service's database, with old and new values per column and who made it |
+
+**How the status screen works without calling every service:** each service writes a small snapshot (health, breakers, Wolverine counts,
+its business counters) to Redis every 10 s with a 30 s TTL, and Notifications merges them. A service without a fresh snapshot shows as Down;
+across instances the worst breaker wins.
+
+**Data change audit, including MongoDB.** Every captured table and collection is read by Debezium from the Postgres WAL or the MongoDB
+change stream and stored by Audit. Postgres changes are matched by transaction ID to the row the app's EF Core interceptor wrote in the
+same transaction; MongoDB writes carry an audit stamp (user, tenant, correlation ID) that Audit matches the change to. A change nobody
+made through the app (manual SQL, a script, `mongosh`) is flagged **outside the app**, raises an alert on the status screen and links to
+the change. Each request also has a **Data changes** tab next to its history: the field-level story of the request, its lines, its
+budget reservation, approval steps, order and invoice, with who made each change.
+
+**Behind the scenes (dev panel).** The user menu's **Behind the scenes** (or Alt+Shift+D) opens a bottom sheet with the app's last API
+calls and what the server did with each: cache HIT or MISS with the cached answer's age (the 1-second micro-cache), a joined duplicate,
+an idempotent replay, the policy that allowed it, the tenant, the instance, the ETag and a link to the call's trace in the Aspire
+dashboard. The services send these headers only when asked and only when `DevPanel:Enabled` is on (the AppHost switches it on; off by
+default, like every demo-only feature).
+
+| Authorization matrix | Access check: separation of duties |
+|---|---|
+| ![Authorization matrix](docs/screenshots/admin-matrix.png) | ![Access check](docs/screenshots/admin-access-check.png) |
+| **System status** | **Behind the scenes** |
+| ![System status](docs/screenshots/admin-system-status.png) | ![Behind the scenes](docs/screenshots/dev-panel.png) |
+| **Data changes, one made outside the app** | |
+| ![Data changes](docs/screenshots/admin-data-changes.png) | |
+
 ## Run it locally
 
 Prerequisites: Docker, .NET 10 SDK, Node 24.
@@ -329,20 +372,22 @@ volume keeps old rows (for example the sandbox cost center DEMO-100 without its 
 
 Memory and CPU caps for every container come from the `Resources` section of the AppHost `appsettings.json`.
 
-**Resource needs (measured 2026-10-30 with the Assistant, after a few questions, a policy upload and an invoice scan):**
+**Resource needs (measured 2026-11-01 with plan 06 complete: the whole system idle after the demo data seed, `docker stats --no-stream`
+plus the working sets of the .NET processes):**
 
 | Part | Memory |
 |---|---|
-| Containers: seven Debezium Servers (about 0.29 GB each, one per captured database incl. assistantdb) | 2.0 GB |
-| Containers: Keycloak 0.69, Postgres with pgvector 0.29, MongoDB 0.25, RabbitMQ 0.13, Redis and Mailpit 0.02 | 1.4 GB |
-| **All containers** | **3.4 GB** |
-| Ten services (Approvals 0.70, Notifications 0.55, Assistant 0.51, Invoicing 0.45, Requests 0.45, Access 0.43, Suppliers 0.37, Audit 0.34, Purchasing 0.33, Budgets 0.29) | 4.4 GB |
-| Gateway 0.15, simulators 0.10, AppHost 0.19 | 0.4 GB |
-| **All .NET processes of the system** | **4.9 GB** |
-| Local development only: Aspire's DCP and its proxies (1.7), the `dotnet run` launchers (1.2), the Angular dev server (0.9) | 3.8 GB |
+| Containers: eight Debezium Servers (0.28 to 0.31 GB each: seven Postgres databases and MongoDB) | 2.4 GB |
+| Containers: Keycloak 0.67, MongoDB 0.40, Postgres with pgvector and pgaudit 0.34, RabbitMQ 0.15, Mailpit and Redis 0.04 | 1.6 GB |
+| **All containers** | **3.9 GB** |
+| Ten services (Requests 0.48, Invoicing 0.48, Purchasing 0.48, Notifications 0.44, Approvals 0.38, Suppliers 0.38, Assistant 0.35, Access 0.33, Budgets 0.32, Audit 0.31) | 3.9 GB |
+| Gateway 0.17, simulators 0.11, AppHost 0.20 | 0.5 GB |
+| **All .NET processes of the system** | **4.3 GB** |
+| Local development only: Aspire's DCP and its proxies (1.7), the `dotnet run` launchers and the Angular dev server | about 3 GB |
 
-So the system itself needs about 8.3 GB (about 1 GB more than before the Assistant, mostly its API and its Debezium Server); a
-deployment without the local tooling fits a 16 GB VM with room to spare. Running it locally under Aspire takes about 12 GB.
+So the system itself needs about 8.2 GB (the eighth Debezium Server, for MongoDB, adds about 0.3 GB); a deployment without the local
+tooling fits a 16 GB VM. Running it locally under Aspire takes about 11 GB. Postgres runs with `max_connections` 200 locally
+(`Resources:Postgres:MaxConnections`): ten services with a few connection pools each went past the default of 100 during the seed.
 
 ## Demo users
 
@@ -354,7 +399,7 @@ Or sign in through Keycloak as usual; the demo password is the `keycloak-demo-pa
 | Requester (Tom) | tom@acme.test | Acme | requester |
 | Manager (Maria) | maria@acme.test | Acme | manager |
 | Department head | dept@acme.test | Acme | department-head |
-| Finance (Thandi) | thandi@acme.test | Acme | finance |
+| Finance (Thandi) | thandi@acme.test | Acme and Globex | finance in both (**Switch company** in her user menu) |
 | Admin | admin@acme.test | Acme | admin |
 | Globex manager (Ben) | ben@globex.test | Globex | manager |
 | (Keycloak login only) | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
@@ -377,7 +422,8 @@ has its saga, budget reservation, events, audit trail and data changes, exactly 
 (`tools/ProcureAi.DemoData/Scenarios/acme.json`, `globex.json`, one request per state: draft, waiting for the manager, the department
 head or finance, rejected by the manager, rejected over budget, cancelled, ordered, partly received, received, invoiced and matched,
 price mismatch, partly paid, completed, closed short; Globex: waiting, ordered, completed, rejected). Maria's own request on IT-200
-shows separation of duties: the effective permissions screen answers that Maria may not approve it because she raised it.
+("Monitors for the IT managers' desks", PR-0016 on fresh data) shows separation of duties: the **Access check** answers that Maria may
+not approve it because she raised it, so it waits for the department head.
 
 The seed is safe to run again: it finds each request by title and requester and resumes it from where it is, and every write carries the
 Idempotency-Key `demo:<tenant>:<key>:<step>`, so nothing is created twice. It ends with exit code 0, or 1 naming the request and the
@@ -411,7 +457,10 @@ The end-to-end test `Tom_scans_invoice_reviews_and_saves` scans the same invoice
 `dotnet test --project tests/<project>` per project (xUnit v3 on Microsoft.Testing.Platform). Unit, architecture
 (layer rules), Testcontainers integration tests (Postgres, Redis, Keycloak, RabbitMQ), an Aspire AppHost test, and
 Playwright end-to-end tests (live approval without reload, presence, conflict dialog, forbidden pages, logout isolation, reconnect,
-the assistant's streamed answer and Stop, policy upload to Ready, invoice scan to a saved invoice), about 490 Vitest specs for the Angular app, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
+the assistant's streamed answer and Stop, policy upload to Ready, invoice scan to a saved invoice, each demo role's menu, the full
+flow from request to payment through the UI only, a matrix change reaching a signed-in user within 10 s, the access check, the chaos
+switch opening and closing the breaker, an SQL change behind the app's back on the data changes and status screens, the company switch,
+and the dev panel's cache HIT and trace link), about 490 Vitest specs for the Angular app, plus a system test (`dotnet run --project tests/ProcureAi.SystemTests`) that starts the
 whole AppHost and drives a request through approval, purchasing, invoicing and audit, and asks the assistant through the
 gateway. The assistant's retrieval is measured on every run (hit@6 on 34 questions); its model-judged evaluation
 (`tests/ProcureAi.Assistant.Evaluation`, groundedness and relevance) needs a real provider and is run by hand. GitHub Actions builds with warnings as errors and fails
