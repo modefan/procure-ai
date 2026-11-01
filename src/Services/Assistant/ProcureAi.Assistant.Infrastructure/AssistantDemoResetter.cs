@@ -33,9 +33,9 @@ public sealed class AssistantDemoResetter(
         await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
         var rows = await EfDemoReset.DeleteAllRowsAsync(db, cancellationToken: cancellationToken);
         var conversations = await MongoDemoReset.DeleteAllAsync(
-            chat.GetCollection<ConversationDocument>(MongoConversationStore.CollectionName), time, cancellationToken);
+            chat.GetCollection<ConversationDocument>(MongoConversationStore.CollectionName), logger, time, cancellationToken);
         var scans = await MongoDemoReset.DeleteAllAsync(
-            chat.GetCollection<InvoiceScanDocument>(MongoScanStore.CollectionName), time, cancellationToken);
+            chat.GetCollection<InvoiceScanDocument>(MongoScanStore.CollectionName), logger, time, cancellationToken);
         var quotas = await RedisDemoReset.DeleteKeysAsync(redis, RedisQuestionQuota.KeyPattern);
         await services.SeedDemoDataAsync(cancellationToken);
         logger.LogInformation(

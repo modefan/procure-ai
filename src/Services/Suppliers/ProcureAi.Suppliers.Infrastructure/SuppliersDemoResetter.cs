@@ -16,7 +16,7 @@ public sealed class SuppliersDemoResetter(IMongoDatabase database, IServiceProvi
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
         var deleted = await MongoDemoReset.DeleteAllAsync(
-            database.GetCollection<SupplierDocument>(DependencyInjection.SuppliersCollection), time, cancellationToken);
+            database.GetCollection<SupplierDocument>(DependencyInjection.SuppliersCollection), logger, time, cancellationToken);
         await services.SeedDemoDataAsync(cancellationToken);
         logger.LogInformation("Demo reset deleted {Count} suppliers and seeded the catalogs again", deleted);
     }
