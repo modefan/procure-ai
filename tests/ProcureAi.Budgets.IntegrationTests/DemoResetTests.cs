@@ -58,4 +58,25 @@ public sealed class DemoResetTests(BudgetsApp app)
 
     private static BudgetsDbContext NewDbContext(string database) =>
         new(new DbContextOptionsBuilder<BudgetsDbContext>().UseNpgsql(database).Options);
+
+    /// <summary>
+    /// The service's own <c>audit_entries</c> are demo audit data too (spec 5.1, plan 07 Task 0b): the reset empties them first, so afterwards
+    /// the table holds only the reset's own Delete rows (ruling 5) and what came after.
+    /// </summary>
+    [Fact]
+    public async Task Demo_reset_clears_audit_entries()
+    {
+        var database = await app.Infra.CreateSeededDatabaseAsync($"reset_{Guid.NewGuid():N}");
+        await using var factory = new BudgetsApiFactory(
+            app.Infra, app.Access, app.Faults, database, new Dictionary<string, string?> { ["DemoReset:Enabled"] = "true" });
+        var earlier = await DemoResetProbe.InsertEarlierAuditEntryAsync(database);
+        var started = DateTimeOffset.UtcNow;
+        using var client = factory.CreateClient();
+
+        (await DemoResetProbe.ResetAsync(client, "budgets")).ShouldBe(HttpStatusCode.NoContent);
+
+        (await DemoResetProbe.CountAsync(database, $"select count(*) from audit_entries where id = '{earlier}'")).ShouldBe(0, "yesterday's interceptor row");
+        (await DemoResetProbe.AuditEntriesBeforeAsync(database, started)).ShouldBe(0, "every audit_entries row from before the reset is gone (carry-over 5)");
+        (await DemoResetProbe.DeleteEntriesAsync(database, "budgets")).ShouldNotBeEmpty("the reset's own Delete rows stay");
+    }
 }

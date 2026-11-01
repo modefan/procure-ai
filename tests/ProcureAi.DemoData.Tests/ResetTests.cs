@@ -30,7 +30,13 @@ public sealed class ResetTests
         // First the preflight: one GET probe per target, before any reset.
         var probes = fake.Requests.TakeWhile(r => r.Method == HttpMethod.Get).ToList();
         probes.Select(Name).ShouldBe(["simulators", .. ResetRunner.ParallelServices, "audit"], ignoreOrder: true);
-        fake.Requests.Skip(probes.Count).ShouldAllBe(r => r.Method == HttpMethod.Post);
+        // Then the maintenance flag (plan 07 Task 0b), the resets, and the flag lifted again at the very end.
+        var afterProbes = fake.Requests.Skip(probes.Count).ToList();
+        afterProbes.First().Method.ShouldBe(HttpMethod.Put);
+        afterProbes.First().RequestUri!.ToString().ShouldBe("https://gateway.test/api/v1/gateway/maintenance");
+        afterProbes.Last().Method.ShouldBe(HttpMethod.Delete);
+        afterProbes.Last().RequestUri!.ToString().ShouldBe("https://gateway.test/api/v1/gateway/maintenance");
+        afterProbes.Skip(1).SkipLast(1).ShouldAllBe(r => r.Method == HttpMethod.Post);
         fake.Requests.ShouldAllBe(r => r.Headers.GetValues("X-Api-Key").Single() == ApiKey);
 
         var order = fake.Posts.Select(Name).ToList();
@@ -108,7 +114,38 @@ public sealed class ResetTests
         (await Runner(fake, logs).RunAsync(TestContext.Current.CancellationToken)).ShouldBeFalse();
 
         fake.Posts.ShouldBeEmpty();
+        fake.Requests.ShouldNotContain(r => r.Method == HttpMethod.Put, "nothing is reset, so no maintenance window either");
         logs.ShouldContain(l => l.Contains(off) && l.Contains("404"));
+    }
+
+    [Fact]
+    public async Task Reset_lifts_the_maintenance_flag_after_a_failed_call()
+    {
+        // Purchasing fails every attempt: the reset stops before Audit, but users must not be locked out until the flag's TTL.
+        var fake = new FakeServices(request => Name(request) == "purchasing" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NoContent);
+
+        (await Runner(fake).RunAsync(TestContext.Current.CancellationToken)).ShouldBeFalse();
+
+        fake.Requests.Count(r => r.Method == HttpMethod.Put && Name(r) == "gateway").ShouldBe(1);
+        fake.Requests.Last().Method.ShouldBe(HttpMethod.Delete);
+        Name(fake.Requests.Last()).ShouldBe("gateway");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task Reset_stops_when_the_maintenance_flag_cannot_be_set(HttpStatusCode answer)
+    {
+        // A gateway that does not take the flag (an older gateway, a wrong key: 404; Redis down: 5xx after the retries): no reset runs
+        // without its window, so users never write into half-reset data.
+        var fake = new FakeServices(request => request.Method == HttpMethod.Put ? answer : HttpStatusCode.NoContent);
+        var logs = new ConcurrentQueue<string>();
+
+        (await Runner(fake, logs).RunAsync(TestContext.Current.CancellationToken)).ShouldBeFalse();
+
+        fake.Posts.ShouldBeEmpty();
+        fake.Requests.ShouldNotContain(r => r.Method == HttpMethod.Delete);
+        logs.ShouldContain(l => l.Contains("maintenance") && l.Contains(((int)answer).ToString(CultureInfo.InvariantCulture)));
     }
 
     [Fact]

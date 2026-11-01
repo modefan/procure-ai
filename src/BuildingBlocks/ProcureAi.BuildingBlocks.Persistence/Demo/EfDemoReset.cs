@@ -10,9 +10,10 @@ namespace ProcureAi.BuildingBlocks.Persistence;
 /// deleted row in the same transaction, so Audit matches each Debezium delete to the app (never "changed outside the app"). EF orders the
 /// deletes by the foreign keys; owned types go with their owner.
 /// <para>
-/// Not deleted: the interceptor's own <c>audit_entries</c> (a delete of one would be a captured change without an interceptor row of its
-/// own, so an outside-the-app alert) and Wolverine's tables (cleared through its message store). The per-tenant counters
-/// (<c>tenant_sequences</c>, not captured) are emptied with one statement, so request and order numbers start again at the first one.
+/// Not deleted here: the interceptor's own <c>audit_entries</c> (a tracked delete of one would be a captured change without an interceptor
+/// row of its own, so an outside-the-app alert; <see cref="ClearAuditEntriesAsync"/> empties them instead, first) and Wolverine's tables
+/// (cleared through its message store). The per-tenant counters (<c>tenant_sequences</c>, not captured) are emptied with one statement, so
+/// request and order numbers start again at the first one.
 /// </para>
 /// </summary>
 public static class EfDemoReset
@@ -51,6 +52,30 @@ public static class EfDemoReset
         }
 
         return deleted;
+    }
+
+    /// <summary>The interceptor's table, as <see cref="ModelBuilderExtensions.AddAuditEntries"/> maps it.</summary>
+    public const string AuditEntriesTable = "audit_entries";
+
+    private const string TruncateAuditEntriesSql = "TRUNCATE TABLE " + AuditEntriesTable;
+
+    /// <summary>
+    /// Empties the service's <c>audit_entries</c> (spec 5.1: the reset clears demo audit data too; plan 07 Task 0b, carry-over 5). Called
+    /// first, before <see cref="DeleteAllRowsAsync"/>, so the table afterwards holds only the reset's own Delete rows (ruling 5) and what came
+    /// after; Audit's copy of everything is cleared after the grace period anyway. <c>TRUNCATE</c>, not row deletes: Debezium skips truncates
+    /// (<c>skipped.operations</c> defaults to <c>t</c>) and Audit ignores a change without a row, so no captured delete of an interceptor row
+    /// ever looks like tampering. Its own statement, outside the reset's transaction, so the table's exclusive lock is held only for the
+    /// truncate. Returns false when the model has no audit table.
+    /// </summary>
+    public static async Task<bool> ClearAuditEntriesAsync(DbContext db, CancellationToken cancellationToken = default)
+    {
+        if (db.Model.FindEntityType(typeof(AuditEntry))?.GetTableName() != AuditEntriesTable)
+        {
+            return false;
+        }
+
+        await db.Database.ExecuteSqlRawAsync(TruncateAuditEntriesSql, cancellationToken);
+        return true;
     }
 
     /// <summary>The root entity types a reset deletes: the service's own tables, no owned or derived types, no audit rows, no Wolverine tables.</summary>

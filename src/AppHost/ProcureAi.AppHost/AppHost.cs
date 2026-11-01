@@ -317,6 +317,9 @@ var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gatew
     .WithEnvironment("Auth__Internal__ClientId", ServiceResources.InternalClientId)
     .WithEnvironment("Auth__Internal__ClientSecret", keycloakInternalSecret)
     .WithEnvironment("Auth__Internal__TokenUrl", ReferenceExpression.Create($"{keycloakAuthority}/protocol/openid-connect/token"))
+    // The admin key's SHA-256, like every service: during the demo reset's maintenance window only calls with the valid key write
+    // (ProcureAi.DemoData's reset and seed), and only they may set or lift the window (plan 07 Task 0b).
+    .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
     .WithEnvironment("ReverseProxy__Clusters__requests__Destinations__d1__Address", requestsApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__access__Destinations__d1__Address", accessApi.GetEndpoint("http"))
     .WithEnvironment("ReverseProxy__Clusters__budgets__Destinations__d1__Address", budgetsApi.GetEndpoint("http"))

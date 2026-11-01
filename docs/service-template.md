@@ -355,8 +355,8 @@ The public demo is reset every night at 02:00 Africa/Johannesburg. Every service
 - **Options**: `DemoResetOptions` (section `DemoReset`) is bound and validated at startup by `AddProcureAiWeb` (`AddProcureAiDemoResetOptions`); inject `IOptions<DemoResetOptions>`.
 - **Endpoint**: `app.MapProcureAiDemoReset("api/v1/<name>")` in `<Name>Api.Build` (BuildingBlocks.Web `Demo/`) maps
   `POST api/v1/<name>/internal/demo/reset` → 204. Only when `DemoReset:Enabled` is true (off by default; the AppHost sets
-  `DemoReset__Enabled=true` on every api): otherwise the route does not exist and every caller gets 404. `InternalPolicy` (a service
-  account or the admin key), never a user token, not even an admin's. Not in the OpenAPI document. It runs the service's `IDemoResetter`,
+  `DemoReset__Enabled=true` on every api): otherwise the route does not exist and every caller gets 404. `AdminApiKeyPolicy`: the admin
+  key only (plan 07 Task 0a), never a service account or a user token, not even an admin's. Not in the OpenAPI document. It runs the service's `IDemoResetter`,
   then clears the service's whole FusionCache (`ClearAsync(allowFailSafe: false)`: memory, Redis and the other instances through the
   backplane), which also removes the stored `[Idempotent]` results (else a re-seed with the same Idempotency-Keys would get the old 201 of a
   request that no longer exists).
@@ -368,7 +368,13 @@ The public demo is reset every night at 02:00 Africa/Johannesburg. Every service
     tracked deletes in one `SaveChanges`, so the audit interceptor writes one Delete row per deleted row in the same transaction and Audit
     matches every Debezium delete to the app (ruling 5: a reset is never "changed outside the app"). Owned types go with their owner. It
     keeps `audit_entries` (deleting one would be a captured change without an interceptor row) and Wolverine's tables, and empties
-    `tenant_sequences` (not captured), so numbers start again at PR-0001 and PO-1001. Never use `ExecuteDelete` or `TRUNCATE` on a captured table.
+    `tenant_sequences` (not captured), so numbers start again at PR-0001 and PO-1001. Never use `ExecuteDelete` or `TRUNCATE` on a captured
+    business table.
+  - `EfDemoReset.ClearAuditEntriesAsync(db)`, called first (right after the envelopes, outside the reset's transaction): empties the
+    service's own `audit_entries` with `TRUNCATE` (spec 5.1: the reset clears demo audit data; plan 07 Task 0b). The one exception to the
+    rule above: Debezium skips truncates (`skipped.operations` defaults to `t`) and Audit ignores a change without a row, so nothing about
+    it reaches the audit, whereas a row delete of an interceptor row would look like tampering. Afterwards the table holds only the reset's
+    own Delete rows and what came after them. Tested by each service's `Demo_reset_clears_audit_entries`.
   - `MongoDemoReset.DeleteAllAsync(collection)`: tenant by tenant through `TenantCollection`, so each delete is stamped "deleting" first.
     Never `deleteMany` on the raw collection or drop it.
   - `RedisDemoReset.DeleteKeysAsync(redis, "prefix:*")`: plain Redis state (Notifications' bell, the Assistant's question quotas).
@@ -381,9 +387,26 @@ The public demo is reset every night at 02:00 Africa/Johannesburg. Every service
   after `DemoData:AuditGrace`, then `seed`; each call retried `ResetRetries` times; a failure exits 1 before Audit, and the next run starts
   from the beginning). `schedule` runs it at `DemoReset:TimeOfDay` in `DemoReset:TimeZone`; a failed or throwing night is logged and the next night still runs. Locally the dashboard command "Reset demo data"
   on `demo-data` starts the resource once with `reset`.
+- **Maintenance window** (plan 07 Task 0b): after its preflight, `reset` opens the gateway's maintenance window
+  (`PUT api/v1/gateway/maintenance`, admin key only; anyone else gets 404) and lifts it (`DELETE`) after Audit, in a `finally`, so also
+  after a failed call; a run that cannot open it resets nothing. The flag is the Redis key `DemoReset:MaintenanceKey`
+  (`procure:maintenance`, value: the ISO time it was set) with TTL `DemoReset:MaintenanceTtl` (10 min), so a killed reset never locks the
+  app for longer. While it is set, the gateway's `MaintenanceMiddleware` answers every write (not GET, HEAD, OPTIONS, TRACE) to `/api/**`
+  and `/bff/**` except `/bff/logout` with 503 ProblemDetails "The demo is being reset" and `Retry-After` `DemoReset:MaintenanceRetryAfter`
+  (30 s), before authentication and the proxy. Calls with the valid admin key pass (checked against `Auth:AdminApiKeySha256`, which the
+  gateway now gets too; a forged `X-Api-Key` header does not). Reads pass. The Angular app shows the ProblemDetails text like any 503. The
+  seed after the reset runs outside the window (it writes with the admin key; a user writing during the seed only races the seed's own
+  idempotent steps).
 - **A new service**: add its resetter, map the endpoint, add its name to `ResetRunner.ParallelServices`, and a
-  `Demo_reset_clears_business_rows_and_reseeds` test (on a database of its own: the reset deletes every tenant's data).
+  `Demo_reset_clears_business_rows_and_reseeds` and a `Demo_reset_clears_audit_entries` test (on a database of its own: the reset
+  deletes every tenant's data).
 - **Accepted limit**: a message still on the broker at 02:00 that refers to deleted rows fails and is dead-lettered.
+- **Accepted limit, late change data capture** (plan 06 carry-over 20): Audit is cleared `DemoData:AuditGrace` (10 s) after the other
+  services' resets, and only once its CDC and event queues and its inbox have been quiet for `DemoReset:QuietPeriod`. There is no check
+  of the replication slots' lag: a change Debezium publishes only after that (a Debezium server that was down or far behind) lands in the
+  freshly cleared audit. If both halves of such a change come late they match and show as an app delete of the old data; if only the
+  interceptor half was before the clear, the change shows as "changed outside the app" after the matching grace. Both are rare at 02:00,
+  visible, and gone at the next reset; we accept them rather than block the reset on every slot's `confirmed_flush_lsn`.
 
 ## Memory of the whole system (measured 2026-10-28, plan 03 Task 12)
 

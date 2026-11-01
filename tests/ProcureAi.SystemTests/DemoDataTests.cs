@@ -128,6 +128,130 @@ public sealed class DemoDataTests(SystemFixture system)
         (await GetAsync<Paged<SeededRequest>>("acme", null, "/api/v1/requests?pageSize=100")).Items.Min(r => r.Number).ShouldBe("PR-0001");
     }
 
+    /// <summary>
+    /// The maintenance window (plan 07 Task 0b, carry-over 6): <c>ProcureAi.DemoData reset</c> sets the gateway's flag after its preflight and
+    /// lifts it once Audit is reset; the seed after it writes with the admin key.
+    /// </summary>
+    [Fact]
+    public async Task Reset_sets_and_clears_maintenance_flag()
+    {
+        system.RequireReady();
+        (await MaintenanceActiveAsync()).ShouldBeFalse();
+
+        var run = Resetter().RunAsync(TestContext.Current.CancellationToken);
+        // The window lasts at least the grace before Audit (10 s), so a 1 s poll sees it.
+        await SystemFlow.EventuallyAsync(MaintenanceActiveAsync, active => active || run.IsCompleted, "the maintenance flag set", TimeSpan.FromMinutes(2));
+        (await MaintenanceActiveAsync()).ShouldBeTrue("the flag is held while the reset runs");
+        (await run).ShouldBeTrue("the reset failed");
+
+        (await MaintenanceActiveAsync()).ShouldBeFalse("the reset lifts the flag at its end");
+        await SeedAsync();
+    }
+
+    /// <summary>
+    /// The drain test (carry-over 20): a signed-in user (demo login, session cookie) who writes in the middle of the reset gets the gateway's
+    /// 503 with Retry-After, which the app shows as its busy message; the same write after the reset and seed succeeds.
+    /// </summary>
+    [Fact]
+    public async Task User_write_during_reset_gets_503_then_succeeds_after()
+    {
+        system.RequireReady();
+        var (tom, cookies) = Browser();
+        using var _ = tom;
+        await DemoLoginAsync(tom, cookies, "tom");
+        var xsrf = await SessionXsrfAsync(tom, cookies);
+
+        var run = Resetter().RunAsync(TestContext.Current.CancellationToken);
+        await SystemFlow.EventuallyAsync(MaintenanceActiveAsync, active => active || run.IsCompleted, "the maintenance flag set", TimeSpan.FromMinutes(2));
+        using (var during = await tom.SendAsync(UserWrite(xsrf, "A chair Tom wanted during the reset"), TestContext.Current.CancellationToken))
+        {
+            var body = await during.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            during.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, body);
+            during.Headers.RetryAfter.ShouldNotBeNull().Delta.ShouldBe(TimeSpan.FromSeconds(30));
+            System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("title").GetString().ShouldBe("The demo is being reset");
+        }
+
+        (await run).ShouldBeTrue("the reset failed");
+        await SeedAsync();
+
+        using var after = await tom.SendAsync(UserWrite(xsrf, "A chair Tom wanted during the reset"), TestContext.Current.CancellationToken);
+        after.StatusCode.ShouldBe(HttpStatusCode.Created, await after.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    private async Task<bool> MaintenanceActiveAsync()
+    {
+        using var http = system.Gateway();
+        using var message = new HttpRequestMessage(HttpMethod.Get, "/api/v1/gateway/maintenance");
+        message.Headers.Add("X-Api-Key", system.AdminApiKey);
+        using var response = await http.SendAsync(message, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        return System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("active").GetBoolean();
+    }
+
+    /// <summary>The seed after a reset, as <c>ProcureAi.DemoData reset</c> runs it, so the other tests find the demo data again.</summary>
+    private async Task SeedAsync()
+    {
+        var results = await Task.WhenAll(AllScenarios.Select(s => Runner().RunAsync(s, TestContext.Current.CancellationToken)));
+        results.SelectMany(r => r.Failures).Select(f => f.Message).ShouldBeEmpty();
+    }
+
+    /// <summary>A browser: cookies kept (the <c>__Host-</c> session cookie needs https, which the gateway serves).</summary>
+    private (HttpClient Http, CookieContainer Cookies) Browser()
+    {
+        var cookies = new CookieContainer();
+        var handler = new HttpClientHandler
+        {
+            CookieContainer = cookies,
+            AllowAutoRedirect = false,
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+        };
+        return (new HttpClient(handler) { BaseAddress = system.Gateway().BaseAddress }, cookies);
+    }
+
+    /// <summary>What the welcome page does: list the demo users (hands out the XSRF token), then the one-click login.</summary>
+    private static async Task DemoLoginAsync(HttpClient browser, CookieContainer cookies, string user)
+    {
+        using (var users = await browser.GetAsync("/bff/demo-login/users", TestContext.Current.CancellationToken))
+        {
+            users.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/bff/demo-login") { Content = JsonContent.Create(new { user }) };
+        login.Headers.Add("X-XSRF-TOKEN", Xsrf(browser, cookies));
+        using var response = await browser.SendAsync(login, TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>What the app does after login: <c>/bff/user</c>, which hands out the session's XSRF token.</summary>
+    private static async Task<string> SessionXsrfAsync(HttpClient browser, CookieContainer cookies)
+    {
+        using var response = await browser.GetAsync("/bff/user", TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        return Xsrf(browser, cookies);
+    }
+
+    private static string Xsrf(HttpClient browser, CookieContainer cookies) =>
+        Uri.UnescapeDataString(cookies.GetCookies(browser.BaseAddress!)["XSRF-TOKEN"].ShouldNotBeNull().Value);
+
+    /// <summary>Tom's new request, as the request form posts it (session cookie, XSRF header, a fresh Idempotency-Key).</summary>
+    private static HttpRequestMessage UserWrite(string xsrf, string title)
+    {
+        var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/requests")
+        {
+            Content = JsonContent.Create(new
+            {
+                title,
+                costCenterCode = "IT-200",
+                supplierId = "contoso-hardware",
+                lines = new[] { new { sku = "MON-27", quantity = 1 } },
+            }),
+        };
+        message.Headers.Add("X-XSRF-TOKEN", xsrf);
+        message.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        return message;
+    }
+
     private async Task<SeededRequest> CreateExtraRequestAsync(string title)
     {
         using var http = system.Gateway();

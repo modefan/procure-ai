@@ -14,7 +14,7 @@ using Wolverine.Runtime;
 namespace ProcureAi.Assistant.Infrastructure;
 
 /// <summary>
-/// The Assistant part of the nightly demo reset (plan 06 ruling 4): Wolverine's envelopes (also ingestion jobs), every policy document,
+/// The Assistant part of the nightly demo reset (plan 06 ruling 4): Wolverine's envelopes (also ingestion jobs), the service's own <c>audit_entries</c>, every policy document,
 /// file, chunk and past purchase of every tenant (Postgres, tracked deletes), the conversations and invoice scans (MongoDB, through
 /// <see cref="TenantCollection{T}"/> so the deletes are stamped as the app's) and today's question quotas; then
 /// <see cref="DemoSeeder"/> seeds the procurement policy again and queues its ingestion. The past purchases come back from the events
@@ -31,6 +31,8 @@ public sealed class AssistantDemoResetter(
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
         await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
+        // Yesterday's interceptor rows go first (carry-over 5); the deletes below write the reset's own.
+        await EfDemoReset.ClearAuditEntriesAsync(db, cancellationToken);
         var rows = await EfDemoReset.DeleteAllRowsAsync(db, cancellationToken: cancellationToken);
         var conversations = await MongoDemoReset.DeleteAllAsync(
             chat.GetCollection<ConversationDocument>(MongoConversationStore.CollectionName), logger, time, cancellationToken);

@@ -55,6 +55,8 @@ public static class GatewayApp
         // Demo login and tenant switch: a much lower limit of their own, on top of the global one (each costs a Keycloak password grant).
         services.AddValidatedOptions<DemoEntryRateLimitOptions>(configuration, DemoEntryRateLimitOptions.SectionName);
         services.AddDemoEntryRateLimit();
+        // The nightly demo reset's maintenance window: users' writes get 503 while ProcureAi.DemoData holds the flag (plan 07 Task 0b).
+        services.AddMaintenanceWindow(configuration);
         services.AddGatewaySwagger(configuration);
 
         AddRedis(builder);
@@ -86,6 +88,8 @@ public static class GatewayApp
         app.UseStatusCodePages();
         // By client IP, before authentication: it also protects the login endpoints.
         app.UseRateLimiter();
+        // Before authentication and the proxy: a write during the demo reset never reaches a service or the session store.
+        app.UseMiddleware<MaintenanceMiddleware>();
         app.UseGatewaySwagger();
         app.UseAuthentication();
         // WebSockets to /hubs: the Origin check stands in for the anti-forgery header a GET upgrade cannot carry.
@@ -97,6 +101,7 @@ public static class GatewayApp
         app.MapDemoLogin();
         app.MapTenantSwitch();
         app.MapClientLogs();
+        app.MapMaintenance();
         app.MapDefaultEndpoints();
         // An unknown /api path is a 404, not the web app's index page. Order: after the proxied API routes (10).
         app.Map("/api/{**rest}", () => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found"))

@@ -57,6 +57,28 @@ public sealed class DemoResetTests(AssistantApp app)
         (await DemoResetProbe.ResetAsync(client, "assistant")).ShouldBe(HttpStatusCode.NoContent, "twice is safe");
     }
 
+    /// <summary>
+    /// The service's own <c>audit_entries</c> are demo audit data too (spec 5.1, plan 07 Task 0b): the reset empties them first, so afterwards
+    /// the table holds only the reset's own Delete rows (ruling 5) and what came after.
+    /// </summary>
+    [Fact]
+    public async Task Demo_reset_clears_audit_entries()
+    {
+        var name = $"reset_{Guid.NewGuid():N}"[..20];
+        var databases = await app.Infra.CreateSeededDatabasesAsync(name);
+        await using var factory = app.CreateInstance(databases, new Dictionary<string, string?> { ["DemoReset:Enabled"] = "true" });
+        using var client = factory.CreateClient();
+        await WaitForAsync(() => CountAsync(databases.Database, ReadyDocuments), n => n == DemoSeeder.Documents.Count, "the seeded policy ingested");
+        var earlier = await DemoResetProbe.InsertEarlierAuditEntryAsync(databases.Database);
+        var started = DateTimeOffset.UtcNow;
+
+        (await DemoResetProbe.ResetAsync(client, "assistant")).ShouldBe(HttpStatusCode.NoContent);
+
+        (await DemoResetProbe.CountAsync(databases.Database, $"select count(*) from audit_entries where id = '{earlier}'")).ShouldBe(0, "yesterday's interceptor row");
+        (await DemoResetProbe.AuditEntriesBeforeAsync(databases.Database, started)).ShouldBe(0, "every audit_entries row from before the reset is gone (carry-over 5)");
+        (await DemoResetProbe.DeleteEntriesAsync(databases.Database, "policy_documents")).ShouldNotBeEmpty("the reset's own Delete rows stay");
+    }
+
     private const string ReadyDocuments = "select count(*) from policy_documents where status = 'Ready'";
 
     private static Task<long> CountAsync(string database, string sql) => DemoResetProbe.CountAsync(database, sql);

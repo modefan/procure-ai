@@ -48,6 +48,36 @@ public static class DemoResetProbe
         return rows;
     }
 
+    /// <summary>
+    /// Writes one <c>audit_entries</c> row as the day's activity before a reset leaves them (an interceptor row from yesterday) and returns its
+    /// ID: the reset must clear it (plan 07 Task 0b, carry-over 5).
+    /// </summary>
+    public static async Task<Guid> InsertEarlierAuditEntryAsync(string database)
+    {
+        var id = Guid.NewGuid();
+        await using var connection = new NpgsqlConnection(database);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            insert into audit_entries (id, tenant_id, user_id, actor_id, table_name, primary_key, operation, changes, occurred_at)
+            values (@id, 'acme', 'earlier-user', 'earlier-user', 'earlier_activity', @key, 'Insert', '{}'::jsonb, now() - interval '1 day')
+            """, connection);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("key", id.ToString());
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        return id;
+    }
+
+    /// <summary>The <c>audit_entries</c> rows written before <paramref name="before"/> (what a reset started then must have cleared).</summary>
+    public static async Task<long> AuditEntriesBeforeAsync(string database, DateTimeOffset before)
+    {
+        await using var connection = new NpgsqlConnection(database);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand("select count(*) from audit_entries where occurred_at < @before", connection);
+        command.Parameters.AddWithValue("before", before.UtcDateTime);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     /// <summary>A scalar count, e.g. <c>select count(*) from approval_steps</c>.</summary>
     public static async Task<long> CountAsync(string database, string sql)
     {

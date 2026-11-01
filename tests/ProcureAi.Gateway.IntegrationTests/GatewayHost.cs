@@ -80,6 +80,8 @@ public sealed class GatewayHost : IAsyncDisposable
             ["Oidc:RequireHttpsMetadata"] = "false",
             ["ConnectionStrings:Redis"] = redis.ConnectionString,
             ["Session:RedisKeyPrefix"] = keyPrefix,
+            // Every host its own maintenance flag (tests share one Redis): a flag one test sets never blocks another's writes.
+            ["DemoReset:MaintenanceKey"] = keyPrefix + "maintenance",
             ["RateLimiting:PermitLimit"] = "100000",
             // Tests sign in and switch many times from the one test client address; DemoEntryRateLimitTests use the real limit.
             ["RateLimiting:DemoEntry:PermitLimit"] = "100000",

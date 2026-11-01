@@ -49,4 +49,28 @@ public sealed class DemoResetTests(ApprovalsApp app)
 
         (await DemoResetProbe.ResetAsync(client, "approvals")).ShouldBe(HttpStatusCode.NoContent, "twice is safe");
     }
+
+    /// <summary>
+    /// The service's own <c>audit_entries</c> are demo audit data too (spec 5.1, plan 07 Task 0b): the reset empties them first, so afterwards
+    /// the table holds only the reset's own Delete rows (ruling 5) and what came after.
+    /// </summary>
+    [Fact]
+    public async Task Demo_reset_clears_audit_entries()
+    {
+        await using var instance = await app.StartFastInstanceAsync(new Dictionary<string, string?>(ManualTimeouts) { ["DemoReset:Enabled"] = "true" });
+        var tenant = NewTenant();
+        app.UseAcme(tenant);
+        var submitted = Submitted(tenant, DemoUsers.Tom, 30_000m);
+        await instance.InvokeAsync(submitted, tenant, DemoUsers.Tom);
+        await instance.InvokeAsync(Reserved(submitted), tenant, DemoUsers.Tom);
+        var earlier = await DemoResetProbe.InsertEarlierAuditEntryAsync(instance.DbConnectionString);
+        var started = DateTimeOffset.UtcNow;
+        using var client = instance.CreateClient();
+
+        (await DemoResetProbe.ResetAsync(client, "approvals")).ShouldBe(HttpStatusCode.NoContent);
+
+        (await DemoResetProbe.CountAsync(instance.DbConnectionString, $"select count(*) from audit_entries where id = '{earlier}'")).ShouldBe(0, "yesterday's interceptor row");
+        (await DemoResetProbe.AuditEntriesBeforeAsync(instance.DbConnectionString, started)).ShouldBe(0, "every audit_entries row from before the reset is gone (carry-over 5)");
+        (await DemoResetProbe.DeleteEntriesAsync(instance.DbConnectionString, "approval_steps")).ShouldNotBeEmpty("the reset's own Delete rows stay");
+    }
 }

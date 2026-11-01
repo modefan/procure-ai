@@ -11,7 +11,7 @@ using Wolverine.Runtime;
 namespace ProcureAi.Budgets.Infrastructure;
 
 /// <summary>
-/// The Budgets part of the nightly demo reset (plan 06 ruling 4): Wolverine's envelopes, then every budget, reservation, spend and request
+/// The Budgets part of the nightly demo reset (plan 06 ruling 4): Wolverine's envelopes and the service's own <c>audit_entries</c>, then every budget, reservation, spend and request
 /// marker of every tenant is deleted and <see cref="DemoSeeder"/> writes the budgets again, in one transaction (no moment without a
 /// budget). The reservations come back when ProcureAi.DemoData submits the requests again.
 /// </summary>
@@ -22,6 +22,8 @@ public sealed class BudgetsDemoResetter(
     public async Task ResetAsync(CancellationToken cancellationToken)
     {
         await db.Database.ExecuteSqlRawAsync(WolverineDemoReset.ClearEnvelopesSql, cancellationToken);
+        // Yesterday's interceptor rows go first (carry-over 5); the deletes below write the reset's own.
+        await EfDemoReset.ClearAuditEntriesAsync(db, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var deleted = await EfDemoReset.DeleteAllRowsAsync(db, cancellationToken: cancellationToken);
         await DemoSeeder.SeedAsync(db, FiscalYear.For(time.GetUtcNow(), options.Value.Zone), cancellationToken);

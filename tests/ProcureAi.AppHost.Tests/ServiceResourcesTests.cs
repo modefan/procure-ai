@@ -105,6 +105,8 @@ public sealed class ServiceResourcesTests
         api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
         gatewayEnv.ShouldContainKeyAndValue("DevPanel__Enabled", "true");
         gatewayEnv.ShouldContainKey("ReverseProxy__Clusters__budgets__Destinations__d1__Address");
+        // The maintenance window of the demo reset lets only the valid admin key write (plan 07 Task 0b).
+        gatewayEnv.ShouldContainKey("Auth__AdminApiKeySha256");
         gateway.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == api);
         foreach (var cap in CapResources)
         {
