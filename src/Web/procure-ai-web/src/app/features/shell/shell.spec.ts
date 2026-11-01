@@ -381,6 +381,46 @@ describe('Shell header', () => {
     });
   });
 
+  describe('admin menu accessibility (final review F7)', () => {
+    const adminTrigger = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-testid=admin-menu]');
+
+    it('points aria-controls only at a list that exists, and Escape returns focus to the trigger', async () => {
+      signIn(['admin.authorization', 'admin.policies'], ['admin']);
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const el = fixture.nativeElement as HTMLElement;
+      const trigger = adminTrigger(el)!;
+      expect(trigger.getAttribute('aria-controls')).toBeNull();
+
+      trigger.click();
+      fixture.detectChanges();
+      const controls = trigger.getAttribute('aria-controls');
+      expect(controls).toBe('admin-links');
+      expect(el.querySelector(`#${controls}`)).not.toBeNull();
+
+      el.querySelector<HTMLAnchorElement>('[data-testid=admin-links] a')!.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      fixture.detectChanges();
+      expect(el.querySelector('[data-testid=admin-links]')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it('Escape with the list closed leaves focus where it is', async () => {
+      signIn(['admin.authorization'], ['admin']);
+      const fixture = TestBed.createComponent(Shell);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const el = fixture.nativeElement as HTMLElement;
+      const other = el.querySelector<HTMLButtonElement>('[data-testid=user-menu]')!;
+      other.focus();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      fixture.detectChanges();
+      expect(document.activeElement).toBe(other);
+    });
+  });
+
   describe('phone menu', () => {
     beforeEach(() => {
       HTMLDialogElement.prototype.showModal = function () {

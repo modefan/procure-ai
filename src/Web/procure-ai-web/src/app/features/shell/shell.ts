@@ -41,7 +41,7 @@ const ADMIN_LINKS: NavLink[] = [
  */
 @Component({
   selector: 'app-shell',
-  host: { '(window:resize)': 'onResize()', '(document:keydown.escape)': 'adminOpen.set(false)', '(document:click)': 'onDocumentClick($event)', '(document:keydown)': 'onKeydown($event)' },
+  host: { '(window:resize)': 'onResize()', '(document:keydown.escape)': 'closeAdminOnEscape()', '(document:click)': 'onDocumentClick($event)', '(document:keydown)': 'onKeydown($event)' },
   imports: [RouterLink, RouterLinkActive, RouterOutlet, Menu, MenuContent, MenuItem, MenuTrigger, BellMenu, DevPanel, LiveIndicator, OnlineUsers],
   template: `
     <a
@@ -100,11 +100,12 @@ const ADMIN_LINKS: NavLink[] = [
             @if (adminLinks().length > 0) {
               <div class="relative max-md:hidden" data-admin-menu>
                 <button
+                  #adminTrigger
                   type="button"
                   data-testid="admin-menu"
                   class="btn-ghost !px-3 !py-1"
                   [class.active]="adminActive()"
-                  aria-controls="admin-links"
+                  [attr.aria-controls]="adminOpen() ? 'admin-links' : null"
                   [attr.aria-expanded]="adminOpen()"
                   (click)="adminOpen.set(!adminOpen())"
                 >
@@ -249,6 +250,7 @@ const ADMIN_LINKS: NavLink[] = [
 export class Shell {
   private readonly nav = viewChild<ElementRef<HTMLElement>>('nav');
   private readonly drawer = viewChild.required<ElementRef<HTMLDialogElement>>('drawer');
+  private readonly adminTrigger = viewChild<ElementRef<HTMLButtonElement>>('adminTrigger');
   /** The phone menu (a native modal dialog, like the confirm dialog: the browser gives the focus trap and Esc). */
   protected readonly menuOpen = signal(false);
   protected readonly caches = inject(CacheRegistry);
@@ -352,6 +354,14 @@ export class Shell {
     const target = event.target as HTMLElement;
     if (target === this.drawer().nativeElement || target.closest('nav a')) {
       this.menuOpen.set(false);
+    }
+  }
+
+  /** Escape closes the Admin list and gives focus back to its button (the disclosure pattern); with the list closed it does nothing. */
+  protected closeAdminOnEscape(): void {
+    if (this.adminOpen()) {
+      this.adminOpen.set(false);
+      this.adminTrigger()?.nativeElement.focus();
     }
   }
 
