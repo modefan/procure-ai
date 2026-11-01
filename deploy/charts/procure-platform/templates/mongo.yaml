@@ -1,0 +1,259 @@
+{{- $r := .Values.appHostResources.Mongo }}
+{{- $labels := dict "root" $ "name" "mongo" }}
+{{- $rs := .Values.mongo.replicaSet }}
+# MongoDB: single-member replica set (change streams for Debezium), as the AppHost's WithReplicaSet. TLS is required here (plan 07
+# ruling 10; the AppHost only prefers it): server certificate mongo-tls (bootstrap/new-local-ca.ps1, SANs mongo, mongo.procure.svc...),
+# clients trust the local CA. Members authenticate with the keyfile from Secret procure-mongo; users with SCRAM.
+#
+# Headless and publishing not-ready addresses: `mongo` resolves straight to the pod, so the member name mongo:27017 is the pod itself
+# (rs.initiate checks that) and resolves before the member is ready (the mongo-init Job connects before it is PRIMARY).
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "procure-platform.selector" $labels | nindent 4 }}
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  serviceName: mongo
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+    spec:
+      # uid 999 is the image's mongodb user (its entrypoint skips the gosu step when not root).
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999 "fsGroup" 999) | nindent 6 }}
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        # mongod refuses a keyfile that group or others can read; a Secret volume with fsGroup is group-readable. Copy it owner-only.
+        - name: keyfile
+          image: {{ .Values.mongo.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [sh, -c, "cp /etc/mongo-keyfile-secret/keyfile /etc/mongo-keyfile/keyfile && chmod 0400 /etc/mongo-keyfile/keyfile"]
+          resources:
+            {{- toYaml .Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: keyfile-secret
+              mountPath: /etc/mongo-keyfile-secret
+              readOnly: true
+            - name: keyfile
+              mountPath: /etc/mongo-keyfile
+      containers:
+        - name: mongo
+          image: {{ .Values.mongo.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --bind_ip_all
+            - --replSet
+            - {{ $rs }}
+            - --keyFile
+            - /etc/mongo-keyfile/keyfile
+            - --tlsMode
+            - requireTLS
+            - --tlsCertificateKeyFile
+            - /etc/mongo-tls/mongo.pem
+            # The CA the member checks its own certificate against when it connects to itself; clients authenticate with SCRAM, not
+            # certificates.
+            - --tlsCAFile
+            - /etc/procure-ca/ca.crt
+            - --tlsAllowConnectionsWithoutCertificates
+            - --wiredTigerCacheSizeGB
+            - {{ $r.WiredTigerCacheGb | toString | quote }}
+          env:
+            # The root user, created by the image's entrypoint on the first start (it starts mongod without --replSet and with
+            # allowTLS for that, then restarts it with these arguments).
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: procure-mongo
+                  key: username
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-mongo
+                  key: password
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: mongo
+              containerPort: 27017
+              protocol: TCP
+          # TCP probes: mongosh is a Node process too heavy to run every few seconds in a 512 MB container. The mongo-init Job checks
+          # that the member becomes PRIMARY.
+          startupProbe:
+            tcpSocket:
+              port: mongo
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: mongo
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: mongo
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $ "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: configdb
+              mountPath: /data/configdb
+            - name: tmp
+              mountPath: /tmp
+            - name: keyfile
+              mountPath: /etc/mongo-keyfile
+              readOnly: true
+            - name: tls
+              mountPath: /etc/mongo-tls
+              readOnly: true
+            - name: procure-ca
+              mountPath: /etc/procure-ca
+              readOnly: true
+      volumes:
+        - name: keyfile-secret
+          secret:
+            secretName: procure-mongo
+            items:
+              - key: keyfile
+                path: keyfile
+        - name: keyfile
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: tls
+          secret:
+            secretName: mongo-tls
+            items:
+              - key: mongo.pem
+                path: mongo.pem
+        - name: procure-ca
+          configMap:
+            name: procure-ca
+        - name: configdb
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.mongo.storage }}
+---
+# Initiates the replica set once (the AppHost's WithReplicaSet does this locally) and waits until the member is PRIMARY. Idempotent:
+# an initiated set is left alone, so it runs after every sync. Credentials come from the environment into the script, never argv.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-init
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "mongo-init") | nindent 4 }}
+  annotations:
+    {{- include "procure-platform.postSyncHook" . | nindent 4 }}
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" (dict "root" $ "name" "mongo-init") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999) | nindent 6 }}
+      containers:
+        - name: mongo-init
+          image: {{ .Values.mongo.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              cat > /tmp/init.js <<'JS'
+              const admin = db.getSiblingDB('admin');
+              admin.auth(process.env.MONGO_USER, process.env.MONGO_PASSWORD);
+              let initiated = true;
+              try {
+                admin.runCommand({ replSetGetStatus: 1 });
+              } catch (e) {
+                if (e.code !== 94) { throw e; } // 94 NotYetInitialized; anything else is a real error
+                initiated = false;
+              }
+              if (initiated) {
+                print('replica set already initiated');
+              } else {
+                rs.initiate({ _id: '{{ $rs }}', members: [{ _id: 0, host: 'mongo:27017' }] });
+                print('replica set initiated');
+              }
+              for (let i = 0; i < 120; i++) {
+                if (admin.runCommand({ hello: 1 }).isWritablePrimary) { print('member is PRIMARY'); quit(0); }
+                sleep(1000);
+              }
+              print('member did not become PRIMARY within 120 s');
+              quit(1);
+              JS
+              uri='mongodb://mongo:27017/?directConnection=true&tls=true&tlsCAFile=/etc/procure-ca/ca.crt&serverSelectionTimeoutMS=5000'
+              for attempt in $(seq 1 60); do
+                if mongosh --quiet --norc "$uri" /tmp/init.js; then exit 0; fi
+                echo "attempt $attempt failed; retrying in 5 s"
+                sleep 5
+              done
+              exit 1
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-mongo
+                  key: username
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-mongo
+                  key: password
+            - name: HOME
+              value: /tmp
+          resources:
+            {{- toYaml .Values.mongoshResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: procure-ca
+              mountPath: /etc/procure-ca
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: procure-ca
+          configMap:
+            name: procure-ca

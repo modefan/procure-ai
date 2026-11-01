@@ -26,6 +26,8 @@
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\testcontainers.settings.json" Link="testcontainers.settings.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\src\AppHost\ProcureAi.AppHost\appsettings.json" Link="apphost.appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\infra\keycloak\procure-realm.json" Link="procure-realm.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\deploy\charts\procure-platform\values.yaml" Link="platform.values.yaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

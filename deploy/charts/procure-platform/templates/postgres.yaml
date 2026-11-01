@@ -1,0 +1,141 @@
+{{- $r := .Values.appHostResources.Postgres }}
+{{- $labels := dict "root" $ "name" "postgres" }}
+# Postgres: our image (pgvector pg17 + pgaudit), with the AppHost's server arguments (AppHost.cs). One server for every service database
+# and keycloakdb (role keycloak from infra/postgres/initdb/02-keycloak.sh). The databases of the services are created by their
+# migrations; each migration also creates its own publication for Debezium (CdcMigrations.EnableCdc).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-platform.selector" $labels | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+    spec:
+      # The image has no USER; uid 999 is its postgres user (the entrypoint skips its gosu step when not root). fsGroup makes the
+      # local-path volume writable for it.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999 "fsGroup" 999) | nindent 6 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" .Values.postgres.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - postgres
+            - -c
+            - wal_level=logical
+            - -c
+            - shared_preload_libraries=pgaudit
+            - -c
+            - pgaudit.log=ddl,role
+            # csvlog, one file per weekday in the data directory (Audit reads today's through file_fdw, plan 06 ruling 14); stderr goes to
+            # log/postgresql-<Dy>.log, which the image's entrypoint streams to the console.
+            - -c
+            - logging_collector=on
+            - -c
+            - log_destination=stderr,csvlog
+            - -c
+            - log_filename=postgresql-%a.log
+            - -c
+            - log_truncate_on_rotation=on
+            - -c
+            - log_rotation_age=1d
+            - -c
+            - {{ printf "shared_buffers=%s" $r.SharedBuffers }}
+            - -c
+            - {{ printf "work_mem=%s" $r.WorkMem }}
+            - -c
+            - {{ printf "max_connections=%v" $r.MaxConnections }}
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-postgres
+                  key: password
+            # PGDATA in a subfolder of the mount (initdb needs an empty folder; the volume root holds lost+found on some filesystems).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # initdb/01-debezium.sh: the replication role Debezium logs in as.
+            - name: DEBEZIUM_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-debezium
+                  key: postgres-password
+            # initdb/02-keycloak.sh: role keycloak and database keycloakdb.
+            - name: KEYCLOAK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: db-password
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          startupProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -p, "5432"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -p, "5432"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -p, "5432"]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $ "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}

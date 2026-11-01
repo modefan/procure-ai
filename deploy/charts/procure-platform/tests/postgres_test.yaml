@@ -1,0 +1,90 @@
+suite: postgres
+templates:
+  - postgres.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: postgres runs with logical wal, pgaudit and max_connections from values
+    set:
+      appHostResources.Postgres.MaxConnections: 123
+      appHostResources.Postgres.SharedBuffers: 99MB
+      appHostResources.Postgres.WorkMem: 3MB
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: procure-ai-postgres:abc1234
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: wal_level=logical
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: shared_preload_libraries=pgaudit
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: pgaudit.log=ddl,role
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: max_connections=123
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: shared_buffers=99MB
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: work_mem=3MB
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: log_destination=stderr,csvlog
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGDATA
+            value: /var/lib/postgresql/data/pgdata
+
+  - it: postgres keeps its data on a local-path volume of the size in values
+    set:
+      postgres.storage: 7Gi
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: local-path
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 7Gi
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 999
+
+  - it: postgres creates the keycloak role from the keycloak db password at init
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: procure-keycloak
+                key: db-password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEBEZIUM_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: procure-debezium
+                key: postgres-password
+
+  - it: a missing image tag fails the render
+    set:
+      global.imageTag: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: global.imageTag

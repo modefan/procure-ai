@@ -727,6 +727,25 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Keycloak_gets_the_dashboard_client_secret_and_no_project_gets_it()
+    {
+        // Plan 07 ruling 11: the realm's aspire-dashboard client takes its secret from KC_DASHBOARD_SECRET. Only the deployed dashboard
+        // (Kubernetes Secret procure-keycloak, from the same user secret) uses it; no AppHost project does.
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var keycloakEnv = await EnvironmentOfAsync(model.Resources.Single(r => r.Name == "keycloak"));
+
+        var secret = (ParameterResource)keycloakEnv["KC_DASHBOARD_SECRET"];
+        secret.Name.ShouldBe("keycloak-dashboard-secret");
+        secret.Secret.ShouldBeTrue();
+        foreach (var resource in model.Resources.OfType<ProjectResource>())
+        {
+            var env = await EnvironmentOfAsync(resource);
+            env.Values.ShouldNotContain(v => ReferenceEquals(v, secret), resource.Name);
+        }
+    }
+
+    [Fact]
     public async Task Gateway_gets_demo_login_on_with_the_demo_client_secret_and_password_and_no_other_project_gets_them()
     {
         await using var scope = await ModelScope.BuildAsync();

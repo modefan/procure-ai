@@ -1,0 +1,63 @@
+suite: network policies
+templates:
+  - network-policies.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: default deny network policy exists
+    documentSelector:
+      path: metadata.name
+      value: default-deny-ingress
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.podSelector
+          value: {}
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress]
+      - notExists:
+          path: spec.ingress
+
+  - it: pods of the namespace may reach each other, and nothing else is allowed in by it
+    documentSelector:
+      path: metadata.name
+      value: allow-same-namespace
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - podSelector: {}
+
+  - it: traefik reaches only the http port of ingress backends
+    documentSelector:
+      path: metadata.name
+      value: allow-traefik-to-ingress-backends
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value:
+            matchLabels:
+              procure.ai/ingress-backend: "true"
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: kube-system
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: traefik
+              ports:
+                - port: http
+                  protocol: TCP
+
+  - it: nothing outside the namespace but traefik is allowed in (observability gets nothing)
+    asserts:
+      - notExists:
+          path: $..namespaceSelector.matchLabels[?(@ == "observability")]
+      - notExists:
+          path: spec.ingress[?(@.from[0].ipBlock)]

@@ -1,0 +1,156 @@
+{{- $r := .Values.appHostResources.RabbitMq }}
+{{- $labels := dict "root" $ "name" "rabbitmq" }}
+# RabbitMQ with the management plugin, as the AppHost's AddRabbitMQ().WithManagementPlugin(): the user comes from Secret
+# procure-rabbitmq (RABBITMQ_DEFAULT_USER/PASS, read by the server on its first start), the memory watermark is the AppHost's Erlang
+# argument. A StatefulSet: the node name rabbit@rabbitmq-0 stays the same across restarts, so the volume's queues and the users survive.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-platform.selector" $labels | nindent 4 }}
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+      protocol: TCP
+    - name: management
+      port: 15672
+      targetPort: management
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+    spec:
+      # uid 999 is the image's rabbitmq user.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999 "fsGroup" 999) | nindent 6 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: rabbitmq
+          image: {{ .Values.rabbitmq.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: username
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: password
+            - name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+              value: {{ printf "-rabbit vm_memory_high_watermark {absolute,\"%s\"}" $r.VmMemoryHighWatermarkAbsolute | squote }}
+          ports:
+            - name: amqp
+              containerPort: 5672
+              protocol: TCP
+            - name: management
+              containerPort: 15672
+              protocol: TCP
+          # TCP probes: rabbitmq-diagnostics starts a second Erlang VM, too heavy for a 384 MB container every few seconds.
+          startupProbe:
+            tcpSocket:
+              port: amqp
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: amqp
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: amqp
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $ "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            # Data and the Erlang cookie ($HOME/.erlang.cookie).
+            - name: data
+              mountPath: /var/lib/rabbitmq
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.rabbitmq.storage }}
+---
+# Debezium's RabbitMQ sink only publishes, so its topic exchange must exist first. Under the AppHost CdcExchangeHealthCheck declares it;
+# here this hook Job does the same PUT through the management API after every sync. Idempotent (an equal exchange is left as it is);
+# an exchange of the same name with other properties answers 406 and fails the Job visibly. Credentials go to curl on stdin, never argv.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rabbitmq-cdc-exchange
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "rabbitmq-cdc-exchange") | nindent 4 }}
+  annotations:
+    {{- include "procure-platform.postSyncHook" . | nindent 4 }}
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" (dict "root" $ "name" "rabbitmq-cdc-exchange") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      # uid 100 is the image's curl_user.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 100 "gid" 101) | nindent 6 }}
+      containers:
+        - name: declare-exchange
+          image: {{ .Values.curl.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              printf 'user = "%s:%s"\n' "$RABBITMQ_USER" "$RABBITMQ_PASSWORD" | curl --config - --silent --show-error --fail-with-body \
+                --retry 60 --retry-delay 5 --retry-all-errors --max-time 10 \
+                -X PUT -H 'content-type: application/json' \
+                --data '{"type":"topic","durable":true,"auto_delete":false,"internal":false}' \
+                'http://rabbitmq:15672/api/exchanges/%2F/{{ .Values.rabbitmq.cdcExchange }}'
+              echo 'exchange {{ .Values.rabbitmq.cdcExchange }} declared (topic, durable)'
+          env:
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: password
+          resources:
+            {{- toYaml .Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}

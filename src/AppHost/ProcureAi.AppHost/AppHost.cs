@@ -15,7 +15,7 @@ var debeziumSelfHeal = builder.Configuration.GetValue("Debezium:SelfHealLostOffs
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
 // Substituted by Keycloak into the ${KC_DEMO_PASSWORD} / ${KC_GATEWAY_SECRET} / ${KC_INTERNAL_SECRET} / ${KC_ACCESS_ADMIN_SECRET} /
-// ${KC_DEMO_LOGIN_SECRET} placeholders of the realm import,
+// ${KC_DEMO_LOGIN_SECRET} / ${KC_DASHBOARD_SECRET} placeholders of the realm import,
 // so the committed realm file holds no passwords or secrets.
 var keycloakDemoPassword = builder.AddParameter("keycloak-demo-password", secret: true);
 var keycloakGatewaySecret = builder.AddParameter("keycloak-gateway-secret", secret: true);
@@ -27,6 +27,11 @@ var keycloakAccessAdminSecret = builder.AddParameter("keycloak-access-admin-secr
 // the first run and kept in the AppHost user secrets (Parameters:keycloak-demo-login-secret); Keycloak and the gateway read the same value.
 var keycloakDemoLoginSecret = builder.AddParameter(
     "keycloak-demo-login-secret", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
+// Secret of `aspire-dashboard`, the confidential client the deployed (standalone) Aspire dashboard signs users in with (plan 07 ruling 11).
+// The AppHost's own dashboard does not use it; Keycloak gets it so the realm import resolves ${KC_DASHBOARD_SECRET} here as in the cluster
+// (the cluster's Secret procure-keycloak is made from this same user secret). Generated on the first run, like the demo login secret.
+var keycloakDashboardSecret = builder.AddParameter(
+    "keycloak-dashboard-secret", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
@@ -130,6 +135,8 @@ var keycloak = builder.AddContainer(ResourceNames.Keycloak, "quay.io/keycloak/ke
     .WithEnvironment("KC_INTERNAL_SECRET", keycloakInternalSecret)
     .WithEnvironment("KC_ACCESS_ADMIN_SECRET", keycloakAccessAdminSecret)
     .WithEnvironment("KC_DEMO_LOGIN_SECRET", keycloakDemoLoginSecret)
+    .WithEnvironment("KC_DASHBOARD_SECRET", keycloakDashboardSecret)
+    // KC_APP_BASE_URL and KC_DASHBOARD_BASE_URL stay unset: the realm's defaults (https://localhost) are the local values.
     .WithEnvironment("JAVA_OPTS_KC_HEAP", limits.Keycloak.JavaHeapOpts)
     .WithBindMount("../../../infra/keycloak", "/opt/keycloak/data/import", isReadOnly: true)
     .WithArgs("start-dev", "--import-realm")

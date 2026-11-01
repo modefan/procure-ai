@@ -1,0 +1,9 @@
+apiVersion: v2
+name: procure-platform
+description: >-
+  The infrastructure ProcureAI's services run on, as the AppHost runs it: Postgres (pgvector, pgaudit, logical WAL), MongoDB
+  (replica set rs0, TLS), Redis, RabbitMQ, Keycloak (production mode, realm baked in), Mailpit and the namespace's network policies.
+  Our own small manifests, no Bitnami and no operators (plan 07 ruling 3). Debezium is added by plan 07 Task 4.
+type: application
+version: 0.1.0
+appVersion: "plan07"

@@ -1,0 +1,58 @@
+{{- if .Values.networkPolicies.enabled }}
+# Network policies of namespace procure (enforced by k3s's built-in policy controller). Ingress only; egress stays open (pods send
+# telemetry to the observability namespace and reach Keycloak through Traefik by its public name).
+#
+# 1. Nothing may connect to a pod in procure unless a policy below allows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "network-policies") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 2. Pods in procure may reach each other (services, databases, broker, Keycloak). Pods of other namespaces may not: a pod in `default`
+#    or `observability` cannot open postgres:5432.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "network-policies") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# 3. Traefik (kube-system) may reach the port named `http` of the pods that sit behind an Ingress (label procure.ai/ingress-backend),
+#    nothing else: not Keycloak's management port, not Mailpit's SMTP, not the databases.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-ingress-backends
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "network-policies") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      procure.ai/ingress-backend: "true"
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}

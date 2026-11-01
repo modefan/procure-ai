@@ -1,0 +1,87 @@
+# procure-platform: the infrastructure of ProcureAI, as the AppHost runs it (images, tags, server arguments and memory settings equal
+# src/AppHost/ProcureAi.AppHost: AppHost.cs and appsettings.json "Resources"). Environment values (hosts, sizes) come from the GitOps
+# repo's envs/<env>/platform.yaml. Secrets are referenced by name only; bootstrap/new-secrets.ps1 in the GitOps repo creates them.
+
+global:
+  # Our own images (procure-ai-<name>, built by deploy/scripts/build-images.ps1 or CI): registry prefix ("" for images imported into
+  # k3d with -ImportTo procure, ghcr.io/modefan once CI publishes) and tag (the full commit SHA, or local-<sha7> for PC builds). Required.
+  imageRegistry: ""
+  imageTag: ""
+  imagePullPolicy: IfNotPresent
+  # The GHCR pull Secret (plan 07 ruling 7); harmless for imported images.
+  imagePullSecrets:
+    - ghcr-pull
+
+storageClassName: local-path
+ingressClassName: traefik
+
+hosts:
+  # The app as the browser opens it (Keycloak's gateway redirect URIs and web origins: KC_APP_BASE_URL).
+  app: procure.localtest.me
+  # Keycloak; also the token issuer (https://<keycloak>/realms/procure) that pods reach through the CoreDNS rewrite (ruling 8).
+  keycloak: auth.procure.localtest.me
+  # The standalone Aspire dashboard (the aspire-dashboard client's redirect URI: KC_DASHBOARD_BASE_URL).
+  dashboard: dashboard.procure.localtest.me
+  mailpit: mail.procure.localtest.me
+
+# Mirrors src/AppHost/ProcureAi.AppHost/appsettings.json "Resources" value for value (AppHost.Tests PlatformChartTests checks it).
+# MemoryMb and Cpus are each container's limits (docker --memory / --cpus under the AppHost). Keep one flow mapping per line.
+appHostResources:
+  Postgres: { MemoryMb: 768, Cpus: 1, SharedBuffers: 128MB, WorkMem: 4MB, MaxConnections: 200, PoolSizePerService: 8, ReservedConnections: 30 }
+  Mongo: { MemoryMb: 512, Cpus: 1, WiredTigerCacheGb: 0.25 }
+  Keycloak: { MemoryMb: 768, Cpus: 1, JavaHeapOpts: "-Xms256m -Xmx512m" }
+  Debezium: { MemoryMb: 512, Cpus: 0.3, JavaOpts: "-Xmx256m" }
+  RabbitMq: { MemoryMb: 384, Cpus: 1, VmMemoryHighWatermarkAbsolute: 256MiB }
+  Redis: { MemoryMb: 192, Cpus: 1, MaxMemory: 128mb, MaxMemoryPolicy: volatile-ttl }
+  Mailpit: { MemoryMb: 64, Cpus: 0.5 }
+
+# Requests, from the limits above: the scheduler reserves this share of each memory limit and this much CPU per container, so the
+# whole system fits the 10 GB k3d node (limits still cap each container exactly as the AppHost does).
+requests:
+  memoryPercent: 50
+  cpu: 50m
+
+# Small helper containers (the keyfile init container, the hook Jobs).
+helperResources:
+  limits: { memory: 128Mi, cpu: 500m }
+  requests: { memory: 64Mi, cpu: 50m }
+# mongosh (Node) in the mongo-init Job needs more than the other helpers.
+mongoshResources:
+  limits: { memory: 256Mi, cpu: 500m }
+  requests: { memory: 128Mi, cpu: 50m }
+
+postgres:
+  image: procure-ai-postgres   # our image (infra/postgres): pgvector pg17 + pgaudit + initdb scripts
+  user: postgres               # the superuser; its password is Secret procure-postgres (key password)
+  storage: 5Gi
+
+mongo:
+  image: docker.io/library/mongo:8.3
+  replicaSet: rs0
+  storage: 2Gi
+
+redis:
+  image: docker.io/library/redis:8.6
+
+rabbitmq:
+  image: docker.io/library/rabbitmq:4.3-management
+  storage: 1Gi
+  # The topic exchange Debezium publishes changes to (ResourceNames.CdcExchange); declared by the rabbitmq-cdc-exchange hook Job.
+  cdcExchange: cdc
+
+keycloak:
+  image: procure-ai-keycloak   # our image (infra/keycloak): kc.sh build --db=postgres --health-enabled=true, realm baked in
+  database: keycloakdb         # role keycloak, created by infra/postgres/initdb/02-keycloak.sh
+  dbUser: keycloak
+  # Keycloak trusts X-Forwarded-* only from these (Traefik's pods; k3s pod CIDR).
+  proxyTrustedAddresses: 10.42.0.0/16
+
+mailpit:
+  image: docker.io/axllent/mailpit:v1.32.0
+
+curl:
+  # Runs the rabbitmq-cdc-exchange Job (the management API PUT that CdcExchangeHealthCheck does under the AppHost).
+  image: docker.io/curlimages/curl:8.23.0
+
+networkPolicies:
+  enabled: true

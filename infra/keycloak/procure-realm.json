@@ -31,7 +31,15 @@
         "name": "admin",
         "description": "Procurement role: admin"
       }
-    ]
+    ],
+    "client": {
+      "aspire-dashboard": [
+        {
+          "name": "dashboard-viewer",
+          "description": "May open the standalone Aspire dashboard (logs, traces, metrics)"
+        }
+      ]
+    }
   },
   "defaultRole": {
     "name": "default-roles-procure",
@@ -203,7 +211,12 @@
       ],
       "realmRoles": [
         "admin"
-      ]
+      ],
+      "clientRoles": {
+        "aspire-dashboard": [
+          "dashboard-viewer"
+        ]
+      }
     },
     {
       "id": "00000000-0000-4000-8000-000000000006",
@@ -387,15 +400,17 @@
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
+        "${KC_APP_BASE_URL:https://localhost}/*",
         "https://localhost:*",
         "http://localhost:*"
       ],
       "webOrigins": [
+        "${KC_APP_BASE_URL:https://localhost}",
         "+"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://localhost:*##http://localhost:*"
+        "post.logout.redirect.uris": "${KC_APP_BASE_URL:https://localhost}/*##https://localhost:*##http://localhost:*"
       },
       "defaultClientScopes": [
         "profile",
@@ -418,10 +433,12 @@
       "directAccessGrantsEnabled": false,
       "implicitFlowEnabled": false,
       "redirectUris": [
+        "${KC_APP_BASE_URL:https://localhost}/*",
         "https://localhost:*",
         "http://localhost:*"
       ],
       "webOrigins": [
+        "${KC_APP_BASE_URL:https://localhost}",
         "+"
       ],
       "attributes": {
@@ -494,6 +511,82 @@
       "optionalClientScopes": [
         "offline_access"
       ]
+    },
+    {
+      "clientId": "aspire-dashboard",
+      "name": "Aspire dashboard (deployed: logs, traces and metrics; dashboard-viewer only)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KC_DASHBOARD_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [
+        "${KC_DASHBOARD_BASE_URL:https://localhost}/signin-oidc"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${KC_DASHBOARD_BASE_URL:https://localhost}/signout-callback-oidc",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "config": {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "preferred_username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-full-name-mapper",
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "dashboard_roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "aspire-dashboard",
+            "claim.name": "dashboard_roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
     }
   ]
 }

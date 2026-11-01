@@ -69,6 +69,8 @@ public sealed class KeycloakFixture : IAsyncLifetime
             .WithEnvironment("KC_INTERNAL_SECRET", InternalSecret)
             .WithEnvironment("KC_ACCESS_ADMIN_SECRET", AccessAdminSecret)
             .WithEnvironment("KC_DEMO_LOGIN_SECRET", DemoLoginSecret)
+            // The aspire-dashboard client's secret (plan 07 ruling 11): random, the tests never use that client.
+            .WithEnvironment("KC_DASHBOARD_SECRET", Convert.ToHexString(RandomNumberGenerator.GetBytes(24)))
             .WithResourceMapping(Encoding.UTF8.GetBytes(realm.ToJsonString()), "/opt/keycloak/data/import/procure-realm.json")
             .WithCommand("start-dev", "--import-realm")
             .WithCreateParameterModifier(p =>

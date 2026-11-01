@@ -1,0 +1,94 @@
+suite: keycloak
+templates:
+  - keycloak.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: keycloak uses the optimized image against keycloakdb
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: procure-ai-keycloak:abc1234
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: [start, --optimized, --import-realm]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DB_URL
+            value: jdbc:postgresql://postgres:5432/keycloakdb
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DB_USERNAME
+            value: keycloak
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: procure-keycloak
+                key: db-password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_HOSTNAME
+            value: https://auth.procure.localtest.me
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_PROXY_HEADERS
+            value: xforwarded
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_HTTP_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_APP_BASE_URL
+            value: https://procure.localtest.me
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DASHBOARD_BASE_URL
+            value: https://dashboard.procure.localtest.me
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DASHBOARD_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: procure-keycloak
+                key: dashboard-secret
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: JAVA_OPTS_KC_HEAP
+            value: -Xms256m -Xmx512m
+      # Build-time options are baked into the optimized image; setting them at runtime would make Keycloak rebuild or refuse.
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DB
+            value: postgres
+
+  - it: keycloak is reached through the ingress at its issuer host
+    documentSelector:
+      path: kind
+      value: Ingress
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: auth.procure.localtest.me
+      - equal:
+          path: spec.tls[0].hosts[0]
+          value: auth.procure.localtest.me
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.name
+          value: http

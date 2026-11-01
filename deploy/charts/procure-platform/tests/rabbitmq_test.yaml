@@ -1,0 +1,60 @@
+suite: rabbitmq
+templates:
+  - rabbitmq.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: cdc exchange job is a PostSync hook
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - equal:
+          path: metadata.name
+          value: rabbitmq-cdc-exchange
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+          value: PostSync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
+          value: BeforeHookCreation
+      # As CdcExchangeHealthCheck does: PUT the durable topic exchange through the management API (idempotent; 406 on a mismatch).
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "-X PUT"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "http://rabbitmq:15672/api/exchanges/%2F/cdc"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '\{"type":"topic","durable":true,"auto_delete":false,"internal":false\}'
+
+  - it: rabbitmq creates its user from the procure-rabbitmq secret with the AppHost's memory watermark
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/library/rabbitmq:4.3-management
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RABBITMQ_DEFAULT_USER
+            valueFrom:
+              secretKeyRef:
+                name: procure-rabbitmq
+                key: username
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RABBITMQ_DEFAULT_PASS
+            valueFrom:
+              secretKeyRef:
+                name: procure-rabbitmq
+                key: password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+            value: '-rabbit vm_memory_high_watermark {absolute,"256MiB"}'

@@ -1,0 +1,89 @@
+{{- $r := .Values.appHostResources.Redis }}
+{{- $labels := dict "root" $ "name" "redis" }}
+# Redis: cache (FusionCache L2 and backplane), idempotency records, BFF sessions, SignalR backplane, presence. Password required; the
+# AppHost's maxmemory and eviction policy (volatile-ttl keeps the long-lived session and idempotency keys, drops the 1 s cache first).
+# No volume, as under the AppHost: a restart drops sessions and cache only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-platform.selector" $labels | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+    spec:
+      # uid 999 is the image's redis user.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999 "fsGroup" 999) | nindent 6 }}
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # The password goes into a config file in memory, not onto the command line (where ps would show it).
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              # A quoted config string: escape \ and " so any password survives.
+              escaped=$(printf '%s' "$REDIS_PASSWORD" | sed 's/[\\"]/\\&/g')
+              printf 'requirepass "%s"\n' "$escaped" > /run/redis/redis.conf
+              exec redis-server /run/redis/redis.conf --maxmemory {{ $r.MaxMemory }} --maxmemory-policy {{ $r.MaxMemoryPolicy }}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-redis
+                  key: password
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $ "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: run
+              mountPath: /run/redis
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi

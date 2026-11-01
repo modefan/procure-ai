@@ -1,0 +1,178 @@
+{{- $r := .Values.appHostResources.Keycloak }}
+{{- $labels := dict "root" $ "name" "keycloak" }}
+# Keycloak in production mode (plan 07 ruling 11): our optimized image (kc.sh build --db=postgres --health-enabled=true, realm baked in),
+# started with `start --optimized --import-realm` against keycloakdb. Build-time options are not set here (they are in the image).
+# The realm is imported on the first start only (an existing realm is left as it is): after changing a realm secret, delete the realm
+# or the database. Behind Traefik: TLS ends there, Keycloak speaks http and trusts X-Forwarded-* from the pod network only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-platform.selector" $labels | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+        # Traefik may reach its http port (network-policies.yaml).
+        procure.ai/ingress-backend: "true"
+    spec:
+      # uid 1000 is the image's keycloak user (group 0 owns /opt/keycloak).
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 1000 "gid" 0) | nindent 6 }}
+      containers:
+        - name: keycloak
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" .Values.keycloak.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: [start, --optimized, --import-realm]
+          env:
+            - name: KC_DB_URL
+              value: {{ printf "jdbc:postgresql://postgres:5432/%s" .Values.keycloak.database }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.keycloak.dbUser }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: db-password
+            - name: KC_HOSTNAME
+              value: {{ printf "https://%s" .Values.hosts.keycloak }}
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_PROXY_TRUSTED_ADDRESSES
+              value: {{ .Values.keycloak.proxyTrustedAddresses | quote }}
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-username
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-password
+            # The realm's placeholders (infra/keycloak/procure-realm.json).
+            - name: KC_DEMO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: demo-password
+            - name: KC_GATEWAY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: gateway-secret
+            - name: KC_INTERNAL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: internal-secret
+            - name: KC_ACCESS_ADMIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: access-admin-secret
+            - name: KC_DEMO_LOGIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: demo-login-secret
+            - name: KC_DASHBOARD_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: dashboard-secret
+            - name: KC_APP_BASE_URL
+              value: {{ printf "https://%s" .Values.hosts.app }}
+            - name: KC_DASHBOARD_BASE_URL
+              value: {{ printf "https://%s" .Values.hosts.dashboard }}
+            - name: JAVA_OPTS_KC_HEAP
+              value: {{ $r.JavaHeapOpts | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 9000
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: management
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $ "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data-tmp
+              mountPath: /opt/keycloak/data/tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: data-tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  # No secretName: Traefik serves its default certificate (the local CA's, set by the TLSStore from bootstrap/new-local-ca.ps1).
+  tls:
+    - hosts:
+        - {{ .Values.hosts.keycloak }}
+  rules:
+    - host: {{ .Values.hosts.keycloak }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  name: http

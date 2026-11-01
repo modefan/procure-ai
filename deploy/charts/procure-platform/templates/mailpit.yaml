@@ -1,0 +1,99 @@
+{{- $r := .Values.appHostResources.Mailpit }}
+{{- $labels := dict "root" $ "name" "mailpit" }}
+# Mailpit: catches every email Notifications sends (SMTP 1025); its web UI (8025) shows them at https://<hosts.mailpit>.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-platform.selector" $labels | nindent 4 }}
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: smtp
+      protocol: TCP
+    - name: http
+      port: 8025
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+        # Traefik may reach its http port (network-policies.yaml); SMTP stays inside the namespace.
+        procure.ai/ingress-backend: "true"
+    spec:
+      # The image runs as root by default; it needs no privileges.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 1000 "gid" 1000) | nindent 6 }}
+      containers:
+        - name: mailpit
+          image: {{ .Values.mailpit.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: smtp
+              containerPort: 1025
+              protocol: TCP
+            - name: http
+              containerPort: 8025
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $ "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mailpit
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  tls:
+    - hosts:
+        - {{ .Values.hosts.mailpit }}
+  rules:
+    - host: {{ .Values.hosts.mailpit }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mailpit
+                port:
+                  name: http
