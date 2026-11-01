@@ -62,6 +62,43 @@ public sealed class SystemHealthTests(SystemFixture system)
     }
 
     /// <summary>
+    /// The system status screen's endpoint (plan 06 Task 4) lists every service API as Healthy, each with at least one instance: every
+    /// service publishes its snapshot to Redis and Notifications merges them. A service without a snapshot would be listed as Down.
+    /// </summary>
+    [Fact]
+    public async Task Status_endpoint_lists_every_service_healthy()
+    {
+        system.RequireReady();
+        using var gateway = system.Gateway();
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+        string last = "";
+        while (true)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/notifications/system-status");
+            request.Headers.Add("X-Api-Key", system.AdminApiKey);
+            request.Headers.Add("X-Tenant-Id", SystemFixture.Tenant);
+            using var response = await gateway.SendAsync(request, TestContext.Current.CancellationToken);
+            last = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            response.StatusCode.ShouldBe(HttpStatusCode.OK, last);
+
+            using var json = System.Text.Json.JsonDocument.Parse(last);
+            var services = json.RootElement.GetProperty("services").EnumerateArray()
+                .ToDictionary(s => s.GetProperty("name").GetString()!, s => (Health: s.GetProperty("health").GetString(), Instances: s.GetProperty("instances").GetInt32()));
+            var expected = SystemFixture.Services.Select(s => $"{s}-api").ToArray();
+            if (expected.All(name => services.TryGetValue(name, out var s) && s.Health == "Healthy" && s.Instances >= 1))
+            {
+                services.Keys.Order().ShouldBe(expected.Order(), "the status lists exactly the service APIs");
+                return;
+            }
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new ShouldAssertException($"Not every service is Healthy on the status endpoint after 2 minutes: {last}");
+            }
+            await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <summary>
     /// The supplier catalog through the gateway: proves the route and that Suppliers reaches its MongoDB database with the AppHost's
     /// connection string (it must authenticate against <c>admin</c>, where Aspire creates the user).
     /// </summary>
