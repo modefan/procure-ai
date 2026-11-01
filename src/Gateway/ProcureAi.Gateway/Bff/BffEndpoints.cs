@@ -8,6 +8,9 @@ namespace ProcureAi.Gateway.Bff;
 /// <summary>The <c>/bff</c> endpoints the Angular app talks to: sign in, register, who am I, sign out.</summary>
 public static class BffEndpoints
 {
+    /// <summary>The logger category of these endpoints.</summary>
+    public static readonly string LogCategory = typeof(BffEndpoints).FullName!;
+
     public static IEndpointRouteBuilder MapBff(this IEndpointRouteBuilder app)
     {
         var bff = app.MapGroup("/bff");
@@ -42,7 +45,7 @@ public static class BffEndpoints
 
     private static async Task<IResult> GetUserAsync(
         HttpContext http, ICurrentUser user, IPermissionProvider permissions, IAccessDirectory directory, IAntiforgery antiforgery,
-        DemoRegistration registration, IUserTenantsClient userTenants, ILogger<UserTenantsClient> logger, CancellationToken cancellationToken)
+        DemoRegistration registration, IUserTenantsClient userTenants, ILoggerFactory loggers, CancellationToken cancellationToken)
     {
         // A user without a tenant just registered: they join the demo company (and get their new claims) on this call.
         // When that fails they are answered as before: no tenant, no permissions.
@@ -61,7 +64,8 @@ public static class BffEndpoints
         IssueXsrfToken(http, antiforgery);
 
         var tenantName = await TenantNameAsync(user, directory, cancellationToken);
-        var tenants = await TenantsAsync(user, tenantName, userTenants, logger, cancellationToken);
+        // A static class cannot be a logger's type argument: the category is named after it (final review F9).
+        var tenants = await TenantsAsync(user, tenantName, userTenants, loggers.CreateLogger(LogCategory), cancellationToken);
         var principal = http.User;
         return Results.Json(new
         {
