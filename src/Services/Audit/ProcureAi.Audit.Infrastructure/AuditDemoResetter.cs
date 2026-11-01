@@ -1,6 +1,7 @@
 using Marten;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Messaging;
 using ProcureAi.BuildingBlocks.Web.Demo;
 using Wolverine.Runtime;
@@ -14,7 +15,8 @@ namespace ProcureAi.Audit.Infrastructure;
 /// and is not touched. Nothing is seeded: the audit fills again from the events of the new demo data.
 /// </summary>
 public sealed class AuditDemoResetter(
-    IDocumentStore store, IWolverineRuntime runtime, IConfiguration configuration, ILogger<AuditDemoResetter> logger) : IDemoResetter
+    IDocumentStore store, IWolverineRuntime runtime, IConfiguration configuration, IOptions<DemoResetOptions> resetOptions,
+    ILogger<AuditDemoResetter> logger) : IDemoResetter
 {
     private static readonly string[] Queues =
         [DependencyInjection.CdcQueue, DependencyInjection.CdcMongoQueue, DependencyInjection.EventsQueue];
@@ -38,8 +40,7 @@ public sealed class AuditDemoResetter(
     /// </summary>
     private async Task WaitUntilQuietAsync(CancellationToken cancellationToken)
     {
-        var options = configuration.GetSection(DemoResetOptions.SectionName).Get<DemoResetOptions>() ?? new DemoResetOptions();
-        var poll = TimeSpan.FromMilliseconds(500);
+        var options = resetOptions.Value;
         var deadline = DateTimeOffset.UtcNow + options.DrainTimeout;
         var quietSince = (DateTimeOffset?)null;
         while (true)
@@ -62,7 +63,7 @@ public sealed class AuditDemoResetter(
                     $"Audit still had {waiting} message(s) to handle after {options.DrainTimeout}; the reset was not run (try again).");
             }
 
-            await Task.Delay(poll, cancellationToken);
+            await Task.Delay(options.DrainPollInterval, cancellationToken);
         }
     }
 }

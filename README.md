@@ -385,7 +385,8 @@ step that failed. It takes about two minutes on a fresh start (the simulated sup
 
 ### Nightly reset
 
-Reviewers can change anything, so the demo starts fresh every night at 02:00 (Africa/Johannesburg): `ProcureAi.DemoData reset` resets the
+Reviewers can change anything, so the demo starts fresh every night at 02:00 (Africa/Johannesburg): `ProcureAi.DemoData reset` first checks
+that every service and the simulators have the reset switched on (else it stops before touching anything), then resets the
 simulators, then every service in parallel through its internal `POST .../internal/demo/reset` (admin key or service account only, and
 404 unless `DemoReset:Enabled`), then Audit last, and seeds again. The users who registered themselves into the Demo company stay;
 Keycloak is not touched. Each service deletes with its normal write paths, so the audit trail shows the reset as the app's own changes,

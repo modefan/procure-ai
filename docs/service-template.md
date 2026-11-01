@@ -352,6 +352,7 @@ For a service that holds no business data of its own (Notifications: live pushes
 
 The public demo is reset every night at 02:00 Africa/Johannesburg. Every service takes part:
 
+- **Options**: `DemoResetOptions` (section `DemoReset`) is bound and validated at startup by `AddProcureAiWeb` (`AddProcureAiDemoResetOptions`); inject `IOptions<DemoResetOptions>`.
 - **Endpoint**: `app.MapProcureAiDemoReset("api/v1/<name>")` in `<Name>Api.Build` (BuildingBlocks.Web `Demo/`) maps
   `POST api/v1/<name>/internal/demo/reset` → 204. Only when `DemoReset:Enabled` is true (off by default; the AppHost sets
   `DemoReset__Enabled=true` on every api): otherwise the route does not exist and every caller gets 404. `InternalPolicy` (a service
@@ -373,12 +374,12 @@ The public demo is reset every night at 02:00 Africa/Johannesburg. Every service
   - `RedisDemoReset.DeleteKeysAsync(redis, "prefix:*")`: plain Redis state (Notifications' bell, the Assistant's question quotas).
   - A service with a seed of its own reseeds in the same transaction when it can (Access, Budgets: no moment without a matrix or a budget).
   - Per service: Access keeps the tenants and the users who registered themselves into the Demo company, and publishes
-    `AccessChanged(Matrix)` per tenant afterwards; Audit (called last) first waits until its CDC and event queues and its inbox have been empty for `DemoReset:QuietPeriod` (3 s; at most `DemoReset:DrainTimeout`, 2 min, else 503 and the caller retries: clearing in the middle of a reset transaction's 600 changes left the later half without the interceptor rows of the earlier half, false alerts), then deletes every Marten document and purges the broker queue
-    `wolverine-dead-letter-queue`. The simulators have `POST api/v1/simulators/reset` (admin key): orders, postings, waiting webhooks,
+    `AccessChanged(Matrix)` per tenant afterwards; Audit (called last) first waits until its CDC and event queues and its inbox have been empty for `DemoReset:QuietPeriod` (3 s; at most `DemoReset:DrainTimeout`, 90 s, at most 1 min 45 s so it stays below the caller's 2 min `ResetCallTimeout`; polled every `DemoReset:DrainPollInterval`, else 503 and the caller retries: clearing in the middle of a reset transaction's 600 changes left the later half without the interceptor rows of the earlier half, false alerts), then deletes every Marten document and purges the broker queue
+    `wolverine-dead-letter-queue`. The simulators have `POST api/v1/simulators/reset` (admin key, and like the services only when `DemoReset:Enabled` is true, else 404): orders, postings, waiting webhooks,
     number sequences and chaos back to the start.
-- **The caller**: `ProcureAi.DemoData reset` (simulators, then every service in parallel through the gateway with the admin key, then Audit
+- **The caller**: `ProcureAi.DemoData reset` (a preflight `GET` on every reset route first: 405 means switched on, and a 404, 401 or 403 anywhere stops the run before the simulators forget anything; then the simulators, then every service in parallel through the gateway with the admin key, then Audit
   after `DemoData:AuditGrace`, then `seed`; each call retried `ResetRetries` times; a failure exits 1 before Audit, and the next run starts
-  from the beginning). `schedule` runs it at `DemoReset:TimeOfDay` in `DemoReset:TimeZone`. Locally the dashboard command "Reset demo data"
+  from the beginning). `schedule` runs it at `DemoReset:TimeOfDay` in `DemoReset:TimeZone`; a failed or throwing night is logged and the next night still runs. Locally the dashboard command "Reset demo data"
   on `demo-data` starts the resource once with `reset`.
 - **A new service**: add its resetter, map the endpoint, add its name to `ResetRunner.ParallelServices`, and a
   `Demo_reset_clears_business_rows_and_reseeds` test (on a database of its own: the reset deletes every tenant's data).

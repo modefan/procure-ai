@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ProcureAi.Simulators;
@@ -26,6 +27,10 @@ builder.Services.AddOptions<AdminAuthOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+builder.Services.AddOptions<SimulatorDemoResetOptions>()
+    .BindConfiguration(SimulatorDemoResetOptions.Section)
+    .ValidateOnStart();
+
 builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ChaosState>();
 builder.Services.AddSingleton<SupplierStore>();
@@ -43,6 +48,11 @@ builder.Services.AddControllers()
     .AddJsonOptions(json => json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
+
+// The nightly demo reset exists only where DemoReset:Enabled is true (plan 06 ruling 4), else 404. Decided once the configuration is final
+// (after Build, so test and deployment overrides count); the controllers are discovered when MapControllers' endpoints are first built.
+app.Services.GetRequiredService<ApplicationPartManager>().FeatureProviders.Add(
+    new DemoResetControllerSwitch(app.Services.GetRequiredService<IOptions<SimulatorDemoResetOptions>>().Value.Enabled));
 
 app.MapDefaultEndpoints();
 app.MapControllers();

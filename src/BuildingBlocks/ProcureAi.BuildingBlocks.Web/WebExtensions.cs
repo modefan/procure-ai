@@ -7,6 +7,7 @@ using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
 using ProcureAi.BuildingBlocks.Web.Correlation;
+using ProcureAi.BuildingBlocks.Web.Demo;
 using ProcureAi.BuildingBlocks.Web.Diagnostics;
 using ProcureAi.BuildingBlocks.Web.Errors;
 using ProcureAi.BuildingBlocks.Web.Logging;
@@ -30,6 +31,7 @@ public static class WebExtensions
         services.AddValidatedOptions<CachingOptions>(builder.Configuration, CachingOptions.SectionName);
         services.AddValidatedOptions<ErrorResponseOptions>(builder.Configuration, ErrorResponseOptions.SectionName);
         services.AddValidatedOptions<DevPanelOptions>(builder.Configuration, DevPanelOptions.SectionName);
+        services.AddProcureAiDemoResetOptions(builder.Configuration);
         services.TryAddSingleton(new ServiceIdentity(serviceName));
         // Counts nothing until AddProcureAiCaching swaps in the Redis store.
         services.TryAddSingleton<IDailyStats, NoOpDailyStats>();

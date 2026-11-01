@@ -10,6 +10,10 @@ namespace ProcureAi.Simulators;
 /// The simulators' part of the nightly demo reset (plan 06 ruling 4), called first by ProcureAi.DemoData with the admin key: the supplier
 /// forgets its orders, the ERP its postings, both number sequences start again (SO-1001, INV-1001, ERP-5000), every webhook still waiting is
 /// dropped, and chaos is back to Normal. Safe to call twice.
+/// <para>
+/// Only there when <c>DemoReset:Enabled</c> is true (<see cref="SimulatorDemoResetOptions"/>, the services' switch): otherwise the controller
+/// is left out (<see cref="DemoResetControllerSwitch"/>) and the route is 404 for everyone.
+/// </para>
 /// </summary>
 [ApiController]
 [RequireAdminKey]

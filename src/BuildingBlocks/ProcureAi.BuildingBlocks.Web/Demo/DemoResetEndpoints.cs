@@ -2,9 +2,9 @@ using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ZiggyCreatures.Caching.Fusion;
@@ -27,8 +27,8 @@ public static class DemoResetEndpoints
     /// </summary>
     public static WebApplication MapProcureAiDemoReset(this WebApplication app, string routePrefix)
     {
-        var options = app.Configuration.GetSection(DemoResetOptions.SectionName).Get<DemoResetOptions>() ?? new DemoResetOptions();
-        if (!options.Enabled)
+        // The validated options (AddProcureAiDemoResetOptions): invalid settings fail here, at startup, and leave nothing mapped.
+        if (!app.Services.GetRequiredService<IOptions<DemoResetOptions>>().Value.Enabled)
         {
             return app;
         }

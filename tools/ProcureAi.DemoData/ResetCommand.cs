@@ -31,7 +31,7 @@ public sealed class ResetCommand(IServiceProvider services)
 
 /// <summary>
 /// <c>schedule</c>: sleeps until the next <c>DemoReset:TimeOfDay</c> in <c>DemoReset:TimeZone</c> (02:00 Africa/Johannesburg), runs
-/// <c>reset</c> (which seeds), logs how long it took, and waits for the next night. A failed night is logged and the loop goes on. Runs until
+/// <c>reset</c> (which seeds), logs how long it took, and waits for the next night. A failed night (an exit code 1 or an exception) is logged and the loop goes on. Runs until
 /// stopped (0). Plan 07 runs <c>reset</c> as a Kubernetes CronJob instead.
 /// </summary>
 public sealed class ScheduleCommand(IServiceProvider services, DemoResetScheduleOptions schedule)
@@ -54,10 +54,20 @@ public sealed class ScheduleCommand(IServiceProvider services, DemoResetSchedule
                 }
 
                 var clock = Stopwatch.StartNew();
-                var exitCode = await new ResetCommand(services).RunAsync(cancellationToken);
-                logger.Log(
-                    exitCode == 0 ? LogLevel.Information : LogLevel.Error,
-                    "Nightly demo reset finished in {Seconds:0} s with exit code {ExitCode}", clock.Elapsed.TotalSeconds, exitCode);
+                try
+                {
+                    var exitCode = await new ResetCommand(services).RunAsync(cancellationToken);
+                    logger.Log(
+                        exitCode == 0 ? LogLevel.Information : LogLevel.Error,
+                        "Nightly demo reset finished in {Seconds:0} s with exit code {ExitCode}", clock.Elapsed.TotalSeconds, exitCode);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    // Anything the reset did not handle itself (a bug, a broken handler): this night failed, the next one still runs. Every
+                    // step is idempotent, so the next run starts from the beginning.
+                    logger.LogError(
+                        exception, "Nightly demo reset failed after {Seconds:0} s; the next night runs again", clock.Elapsed.TotalSeconds);
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

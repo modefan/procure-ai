@@ -20,7 +20,7 @@ public sealed class SimulatorResetTests
     [Fact]
     public async Task Reset_forgets_orders_restarts_numbers_drops_waiting_webhooks_and_restores_chaos()
     {
-        await using var factory = new SimulatorFactory();
+        await using var factory = new SimulatorFactory(Enabled);
         using var supplier = factory.SupplierClient();
         using var admin = factory.AdminClient();
 
@@ -59,7 +59,7 @@ public sealed class SimulatorResetTests
     [InlineData(SimulatorKey)]
     public async Task Reset_needs_the_admin_key(string? key)
     {
-        await using var factory = new SimulatorFactory();
+        await using var factory = new SimulatorFactory(Enabled);
         using var client = factory.ClientWithKey(key);
         using var supplier = factory.SupplierClient();
         await PlaceAsync(supplier, "acme/PO-1001");
@@ -69,6 +69,42 @@ public sealed class SimulatorResetTests
         using var admin = factory.AdminClient();
         (await ReadAsync(await admin.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-0001"))).GetArrayLength().ShouldBe(1);
     }
+
+    [Fact]
+    public async Task Reset_disabled_is_404()
+    {
+        // DemoReset:Enabled off (the default, every deployment but the demo's): the route does not exist, like the services' reset. Nothing
+        // is forgotten, so live orders and the SO-/INV-/ERP- numbering stay as they are.
+        await using var factory = new SimulatorFactory();
+        using var admin = factory.AdminClient();
+        using var supplier = factory.SupplierClient();
+        (await PlaceAsync(supplier, "acme/PO-1001")).ShouldBe("SO-1001");
+
+        (await admin.PostAsync("api/v1/simulators/reset", null)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        using var anonymous = factory.ClientWithKey(null);
+        (await anonymous.PostAsync("api/v1/simulators/reset", null)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        // ProcureAi.DemoData's preflight probe (a GET) sees the same 404 before it touches anything.
+        (await admin.GetAsync("api/v1/simulators/reset")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+
+        (await ReadAsync(await admin.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-0001"))).GetArrayLength().ShouldBe(1);
+        (await PlaceAsync(supplier, "acme/PO-1002")).ShouldBe("SO-1002");
+    }
+
+    [Fact]
+    public async Task Reset_enabled_answers_the_preflight_probe_with_405()
+    {
+        // The probe ProcureAi.DemoData sends before any reset: a GET on the POST-only route. 405 means "there, switched on"; it runs nothing.
+        await using var factory = new SimulatorFactory(Enabled);
+        using var admin = factory.AdminClient();
+        using var supplier = factory.SupplierClient();
+        await PlaceAsync(supplier, "acme/PO-1001");
+
+        (await admin.GetAsync("api/v1/simulators/reset")).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+
+        (await ReadAsync(await admin.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-0001"))).GetArrayLength().ShouldBe(1);
+    }
+
+    private static Dictionary<string, string?> Enabled => new() { ["DemoReset:Enabled"] = "true" };
 
     private static async Task<string> PlaceAsync(HttpClient supplier, string externalReference)
     {

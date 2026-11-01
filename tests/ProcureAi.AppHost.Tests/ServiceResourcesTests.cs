@@ -725,16 +725,17 @@ public sealed class ServiceResourcesTests
     [Fact]
     public async Task Every_service_api_has_the_demo_reset_switched_on()
     {
-        // Plan 06 ruling 4: off by default in every service (404), on for the local AppHost.
+        // Plan 06 ruling 4: off by default in every service and the simulators (404), on for the local AppHost.
         await using var scope = await ModelScope.BuildAsync();
         var apis = scope.Model.Resources.OfType<ProjectResource>().Where(r => r.Name.EndsWith("-api", StringComparison.Ordinal)).ToList();
         apis.Count.ShouldBe(10);
-        foreach (var api in apis)
+        var resettable = apis.Append(scope.Model.Resources.OfType<ProjectResource>().Single(r => r.Name == "simulators")).ToList();
+        foreach (var resource in resettable)
         {
-            (await EnvironmentOfAsync(api)).ShouldContainKeyAndValue("DemoReset__Enabled", "true", api.Name);
+            (await EnvironmentOfAsync(resource)).ShouldContainKeyAndValue("DemoReset__Enabled", "true", resource.Name);
         }
 
-        foreach (var other in scope.Model.Resources.OfType<ProjectResource>().Where(r => !apis.Contains(r)))
+        foreach (var other in scope.Model.Resources.OfType<ProjectResource>().Where(r => !resettable.Contains(r)))
         {
             (await EnvironmentOfAsync(other)).ShouldNotContainKey("DemoReset__Enabled", other.Name);
         }

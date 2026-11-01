@@ -85,6 +85,8 @@ public sealed class DemoResetTests(InfraFixture infra)
 
         (await client.SendAsync(Post(Reset), Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.SendAsync(Post(Reset, bearer: TestAuth.CreateServiceToken(ServiceClientId)), Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        // ProcureAi.DemoData's preflight probe (a GET with the admin key) sees the same 404, before it resets anything anywhere.
+        (await client.SendAsync(Probe(), Ct)).StatusCode.ShouldBe(HttpStatusCode.NotFound);
 
         (await ListAsync(client, "acme")).Select(r => r.Id).ShouldBe([request.Id]);
     }
@@ -96,6 +98,9 @@ public sealed class DemoResetTests(InfraFixture infra)
         await using var _ = factory;
         using var client = factory.CreateClient();
         var request = await CreateAsync(client, "acme", "Laptops");
+
+        // Switched on, the POST-only route answers the preflight probe (a GET) with 405 and runs nothing.
+        (await client.SendAsync(Probe(), Ct)).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
 
         var admin = TestAuth.CreateToken("admin-user", "acme", "admin");
         (await client.SendAsync(Post(Reset, bearer: admin), Ct)).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -166,6 +171,13 @@ public sealed class DemoResetTests(InfraFixture infra)
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add("X-Api-Key", TestAuth.ApiKey);
         request.Headers.Add("X-Tenant-Id", tenant);
+        return request;
+    }
+
+    private static HttpRequestMessage Probe()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, Reset);
+        request.Headers.Add("X-Api-Key", TestAuth.ApiKey);
         return request;
     }
 

@@ -9,7 +9,8 @@ namespace ProcureAi.DemoData;
 public sealed record ResetClients(HttpClient Gateway, HttpClient Simulators);
 
 /// <summary>
-/// <c>reset</c> without the seed (plan 06 ruling 4): the simulators first, then every service's <c>internal/demo/reset</c> through the
+/// <c>reset</c> without the seed (plan 06 ruling 4): a preflight that every target has its reset switched on (<see cref="PreflightAsync"/>),
+/// then the simulators first, then every service's <c>internal/demo/reset</c> through the
 /// gateway in parallel, then, after <see cref="DemoDataOptions.AuditGrace"/> (late change data capture lands first), Audit last. Every call
 /// carries the admin key; a failed call is retried <see cref="DemoDataOptions.ResetRetries"/> times. A call that still fails stops the reset
 /// (after the parallel phase finished, and before Audit, so the audit of what happened stays) and the result is false: the next run starts
@@ -31,9 +32,30 @@ public sealed class ResetRunner(ResetClients clients, IOptions<DemoDataOptions> 
 
     public static string ServicePath(string service) => $"api/v1/{service}/internal/demo/reset";
 
-    /// <summary>Every phase in order. True when every call succeeded.</summary>
+    /// <summary>Every phase in order, after the preflight. True when every call succeeded.</summary>
     public async Task<bool> RunAsync(CancellationToken cancellationToken) =>
-        await ResetServicesAsync(cancellationToken) && await ResetAuditAsync(cancellationToken);
+        await PreflightAsync(cancellationToken) && await ResetServicesAsync(cancellationToken) && await ResetAuditAsync(cancellationToken);
+
+    /// <summary>
+    /// Before anything is reset: one <c>GET</c> on every target's reset route (the simulators, every service, Audit), in parallel. The routes
+    /// take only POST, so a target with <c>DemoReset:Enabled</c> on answers 405 and runs nothing; one with it off has no route and answers
+    /// 404. A 404, 401 or 403 (the reset call would be refused the same way, without a retry) stops the reset here, before the simulators
+    /// forget their orders and restart their numbering. Anything else (no answer, 5xx) is left to the reset call, which retries.
+    /// </summary>
+    public async Task<bool> PreflightAsync(CancellationToken cancellationToken)
+    {
+        var refused = (await Task.WhenAll(Targets().Select(async t => (t.Name, Status: await ProbeAsync(t.Http, t.Path, cancellationToken)))))
+            .Where(p => p.Status is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            .ToList();
+        foreach (var (name, status) in refused)
+        {
+            logger.LogError(
+                "Reset of {Service} would be refused ({Status} {Reason}): DemoReset:Enabled is off there, or the key is wrong. Nothing was reset",
+                name, (int)status!, status);
+        }
+
+        return refused.Count == 0;
+    }
 
     /// <summary>The simulators, then the services in parallel (all of them run, even when one fails).</summary>
     public async Task<bool> ResetServicesAsync(CancellationToken cancellationToken)
@@ -60,6 +82,37 @@ public sealed class ResetRunner(ResetClients clients, IOptions<DemoDataOptions> 
         return await CallAsync(AuditService, clients.Gateway, ServicePath(AuditService), cancellationToken);
     }
 
+    private IEnumerable<(string Name, HttpClient Http, string Path)> Targets() =>
+    [
+        ("simulators", clients.Simulators, SimulatorsPath),
+        .. ParallelServices.Select(s => (s, clients.Gateway, ServicePath(s))),
+        (AuditService, clients.Gateway, ServicePath(AuditService)),
+    ];
+
+    /// <summary>The probe's status code, or null when there was no answer in time (the reset call deals with that).</summary>
+    private async Task<HttpStatusCode?> ProbeAsync(HttpClient http, string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(options.Value.ResetCallTimeout);
+            using var message = Authorized(new HttpRequestMessage(HttpMethod.Get, path));
+            using var response = await http.SendAsync(message, timeout.Token);
+            return response.StatusCode;
+        }
+        catch (Exception e) when (e is HttpRequestException || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            return null;
+        }
+    }
+
+    private HttpRequestMessage Authorized(HttpRequestMessage message)
+    {
+        message.Headers.Add("X-Api-Key", options.Value.AdminApiKey);
+        message.Headers.Add("X-Calling-Service", GatewayClient.CallingService);
+        return message;
+    }
+
     private async Task<bool> CallAsync(string name, HttpClient http, string path, CancellationToken cancellationToken)
     {
         var settings = options.Value;
@@ -72,9 +125,7 @@ public sealed class ResetRunner(ResetClients clients, IOptions<DemoDataOptions> 
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(settings.ResetCallTimeout);
-                using var message = new HttpRequestMessage(HttpMethod.Post, path);
-                message.Headers.Add("X-Api-Key", settings.AdminApiKey);
-                message.Headers.Add("X-Calling-Service", GatewayClient.CallingService);
+                using var message = Authorized(new HttpRequestMessage(HttpMethod.Post, path));
                 using var response = await http.SendAsync(message, timeout.Token);
                 if (response.IsSuccessStatusCode)
                 {

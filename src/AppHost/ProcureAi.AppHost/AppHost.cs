@@ -201,6 +201,8 @@ var simulators = builder.AddProject<Projects.ProcureAi_Simulators>(ResourceNames
     .WithEnvironment("Simulators__Supplier__ConfirmDelay", simulatorSupplier["ConfirmDelay"] ?? throw new InvalidOperationException("Simulators:Supplier:ConfirmDelay is missing."))
     .WithEnvironment("Simulators__Supplier__InvoiceDelay", simulatorSupplier["InvoiceDelay"] ?? throw new InvalidOperationException("Simulators:Supplier:InvoiceDelay is missing."))
     .WithEnvironment("Auth__AdminApiKeySha256", adminApiKeySha256)
+    // The simulators' part of the nightly demo reset (plan 06 ruling 4; off by default, 404), like every service's.
+    .WithEnvironment("DemoReset__Enabled", "true")
     .WithHttpHealthCheck("/health/ready")
     .WithDotNetLimits(limits.DotNet);
 // Purchasing: orders of approved requests, sent to the supplier (the simulator) through its anti-corruption layer with the simulator
