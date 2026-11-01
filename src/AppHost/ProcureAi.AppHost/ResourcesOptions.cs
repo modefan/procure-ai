@@ -48,6 +48,12 @@ public sealed class PostgresLimits : ContainerLimits
 {
     [Required] public string SharedBuffers { get; set; } = null!;
     [Required] public string WorkMem { get; set; } = null!;
+
+    /// <summary>
+    /// The server's <c>max_connections</c>. Ten services share one server locally, each with a few connection pools (EF Core, Wolverine,
+    /// Marten), and the seed's burst took more than Postgres's default of 100 (53300 "too many clients"). A deployment uses its own value.
+    /// </summary>
+    [Range(20, 1000)] public int MaxConnections { get; set; } = 100;
 }
 
 public sealed class MongoLimits : ContainerLimits

@@ -62,7 +62,8 @@ var postgres = builder.AddPostgres(ResourceNames.Postgres)
         "-c", "log_truncate_on_rotation=on",
         "-c", "log_rotation_age=1d",
         "-c", $"shared_buffers={limits.Postgres.SharedBuffers}",
-        "-c", $"work_mem={limits.Postgres.WorkMem}")
+        "-c", $"work_mem={limits.Postgres.WorkMem}",
+        "-c", $"max_connections={limits.Postgres.MaxConnections}")
     // PGDATA in a subfolder of the mount (as the image docs advise for mounted volumes): initdb needs an empty folder,
     // and volumes made by earlier versions hold an empty "data" folder.
     .WithEnvironment("PGDATA", PostgresDataDirectory)
