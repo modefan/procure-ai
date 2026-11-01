@@ -56,7 +56,15 @@ public sealed class ResetRunner(ResetClients clients, IOptions<DemoDataOptions> 
 
         try
         {
-            return await ResetServicesAsync(cancellationToken) && await ResetAuditAsync(cancellationToken);
+            // Each phase can outlast the flag's TTL on a slow run (ResetCallTimeout x ResetRetries, Audit's drain): renew it before each.
+            await RenewMaintenanceAsync(cancellationToken);
+            if (!await ResetServicesAsync(cancellationToken))
+            {
+                return false;
+            }
+
+            await RenewMaintenanceAsync(cancellationToken);
+            return await ResetAuditAsync(cancellationToken);
         }
         finally
         {
@@ -69,6 +77,34 @@ public sealed class ResetRunner(ResetClients clients, IOptions<DemoDataOptions> 
     }
 
     private const string MaintenanceWindow = "maintenance window";
+
+    /// <summary>
+    /// Sets the flag again, which restarts its TTL. One attempt: a failure is logged as a warning and the reset goes on (the window is
+    /// already open and still runs for the rest of its TTL).
+    /// </summary>
+    private async Task RenewMaintenanceAsync(CancellationToken cancellationToken)
+    {
+        string outcome;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(options.Value.ResetCallTimeout);
+            using var message = Authorized(new HttpRequestMessage(HttpMethod.Put, MaintenancePath));
+            using var response = await clients.Gateway.SendAsync(message, timeout.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            outcome = $"{(int)response.StatusCode} {Truncate(await response.Content.ReadAsStringAsync(CancellationToken.None))}";
+        }
+        catch (Exception e) when (e is HttpRequestException || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            outcome = e is OperationCanceledException ? $"no answer within {options.Value.ResetCallTimeout}" : e.Message;
+        }
+
+        logger.LogWarning("Renewing the maintenance window failed ({Outcome}); the reset goes on and the window ends at its TTL", outcome);
+    }
 
     /// <summary>
     /// Before anything is reset: one <c>GET</c> on every target's reset route (the simulators, every service, Audit), in parallel. The routes

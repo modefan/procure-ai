@@ -36,7 +36,8 @@ public sealed class ResetTests
         afterProbes.First().RequestUri!.ToString().ShouldBe("https://gateway.test/api/v1/gateway/maintenance");
         afterProbes.Last().Method.ShouldBe(HttpMethod.Delete);
         afterProbes.Last().RequestUri!.ToString().ShouldBe("https://gateway.test/api/v1/gateway/maintenance");
-        afterProbes.Skip(1).SkipLast(1).ShouldAllBe(r => r.Method == HttpMethod.Post);
+        // In between: the resets, and the flag's renewals (PUT) before the services and before Audit.
+        afterProbes.Skip(1).SkipLast(1).ShouldAllBe(r => r.Method == HttpMethod.Post || (r.Method == HttpMethod.Put && Name(r) == "gateway"));
         fake.Requests.ShouldAllBe(r => r.Headers.GetValues("X-Api-Key").Single() == ApiKey);
 
         var order = fake.Posts.Select(Name).ToList();
@@ -126,9 +127,39 @@ public sealed class ResetTests
 
         (await Runner(fake).RunAsync(TestContext.Current.CancellationToken)).ShouldBeFalse();
 
-        fake.Requests.Count(r => r.Method == HttpMethod.Put && Name(r) == "gateway").ShouldBe(1);
+        fake.Requests.Count(r => r.Method == HttpMethod.Put && Name(r) == "gateway").ShouldBe(2, "opened, renewed before the services (Audit never came)");
         fake.Requests.Last().Method.ShouldBe(HttpMethod.Delete);
         Name(fake.Requests.Last()).ShouldBe("gateway");
+    }
+
+    [Fact]
+    public async Task Reset_renews_the_maintenance_flag_before_the_services_and_before_audit()
+    {
+        // A slow run (each call up to ResetCallTimeout x ResetRetries, Audit's drain) can outlast the flag's TTL: it is set again, which
+        // restarts the TTL, before each phase.
+        var fake = new FakeServices(_ => HttpStatusCode.NoContent);
+
+        (await Runner(fake).RunAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        var calls = fake.Requests.Where(r => r.Method != HttpMethod.Get).Select(r => (r.Method.Method, Name(r))).ToList();
+        calls.Count(c => c == ("PUT", "gateway")).ShouldBe(3, "opened, renewed before the services, renewed before Audit");
+        calls.Take(3).ShouldBe([("PUT", "gateway"), ("PUT", "gateway"), ("POST", "simulators")]);
+        calls.TakeLast(3).ShouldBe([("PUT", "gateway"), ("POST", "audit"), ("DELETE", "gateway")]);
+    }
+
+    [Fact]
+    public async Task A_failed_renewal_does_not_stop_the_reset()
+    {
+        // Only the first PUT must succeed (it opens the window); a renewal that fails is a warning.
+        var puts = 0;
+        var fake = new FakeServices(r => r.Method == HttpMethod.Put && Interlocked.Increment(ref puts) > 1 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NoContent);
+        var logs = new ConcurrentQueue<string>();
+
+        (await Runner(fake, logs).RunAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        puts.ShouldBe(3, "each renewal is tried once");
+        fake.Posts.Select(Name).Last().ShouldBe("audit");
+        logs.ShouldContain(l => l.Contains("Renewing the maintenance window failed") && l.Contains("503"));
     }
 
     [Theory]
