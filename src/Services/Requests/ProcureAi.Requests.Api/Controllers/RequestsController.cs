@@ -26,7 +26,8 @@ namespace ProcureAi.Requests.Api.Controllers;
 [Route("api/v{version:apiVersion}/requests")]
 [RequireTenant]
 public sealed class RequestsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, ILogger<RequestsController> logger) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, IPermissionProvider permissions,
+    ILogger<RequestsController> logger) : ControllerBase
 {
     [HttpPost(Name = "CreateRequest")]
     [Idempotent]
@@ -86,7 +87,12 @@ public sealed class RequestsController(
     {
         // "mine" is the requests the caller made (for a service or the admin key acting for a user, that user).
         var requester = mine ? caller.UserId : null;
-        return await bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(paging.Page, paging.Size(), status, requester), cancellationToken);
+        // A user with the tenant-admin permission sees the whole tenant. A service acting for a user never does: it is scoped like that user.
+        var wholeTenant = caller.Kind is CallerKind.User
+            && !user.IsServiceAccount
+            && (await permissions.GetPermissionsAsync(user, cancellationToken)).Contains(Permissions.AdminAuthorization);
+        return await bus.InvokeAsync<PagedResult<RequestDto>>(
+            new ListRequests(paging.Page, paging.Size(), status, requester, wholeTenant), cancellationToken);
     }
 
     [HttpPut("{id:guid}", Name = "UpdateRequest")]

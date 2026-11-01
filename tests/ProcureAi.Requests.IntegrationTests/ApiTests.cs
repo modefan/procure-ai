@@ -146,6 +146,88 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task List_shows_the_whole_tenant_to_an_admin_and_only_the_scope_to_a_requester()
+    {
+        var tenant = NewTenant("allist");
+        infra.Access.SetCostCenters(tenant, "alice", "CC-100");
+        infra.Access.SetCostCenters(tenant, "tom", "IT-200");
+        infra.Access.SetCostCenters(tenant, "ada");
+        var alice = TestAuth.CreateToken("alice", tenant, "requester");
+        var tom = TestAuth.CreateToken("tom", tenant, "requester");
+        var admin = TestAuth.CreateToken("ada", tenant, "admin");
+        var aliceRequest = await CreateAsync(tenant, alice, "Alice's");
+        using var created = await _client.SendAsync(Req(HttpMethod.Post, Requests,
+            new { title = "Tom's", costCenterCode = "IT-200", supplierId = "contoso-hardware", lines = new[] { new { sku = "LAP-1", quantity = 1 } } },
+            tenant, tom, idempotencyKey: Guid.NewGuid().ToString()), Ct);
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.Content.ReadAsStringAsync(Ct));
+        var tomRequest = (await created.Content.ReadFromJsonAsync<RequestDto>(Json, Ct))!;
+
+        async Task<string[]> TitlesFor(string bearer)
+        {
+            using var response = await _client.SendAsync(Req(HttpMethod.Get, Requests, tenant: tenant, bearer: bearer), Ct);
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            var page = (await response.Content.ReadFromJsonAsync<PagedResult<RequestDto>>(Json, Ct))!;
+            return [.. page.Items.Select(i => i.Title).Order()];
+        }
+
+        // The admin role holds admin.authorization (no cost centers of their own): the whole tenant.
+        (await TitlesFor(admin)).ShouldBe(["Alice's", "Tom's"]);
+        (await TitlesFor(tom)).ShouldBe(["Tom's"]);
+        (await TitlesFor(alice)).ShouldBe(["Alice's"]);
+        aliceRequest.Id.ShouldNotBe(tomRequest.Id);
+    }
+
+    [Fact]
+    public async Task Connection_string_handed_to_EF_and_Wolverine_carries_the_configured_max_pool_size()
+    {
+        await using var capped = new ApiFactory(infra, null, new Dictionary<string, string?> { ["Database:MaxPoolSize"] = "7" });
+        using var client = capped.CreateClient();
+
+        // What ServiceHost hands to EF Core, Wolverine (it reads the configuration), Marten and the readiness check.
+        var configured = capped.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()["ConnectionStrings:requestsdb"]!;
+        new Npgsql.NpgsqlConnectionStringBuilder(configured).MaxPoolSize.ShouldBe(7);
+
+        // And the pool Wolverine really opened: its message store builds its own NpgsqlDataSource (NpgsqlDataSource.Create).
+        var store = capped.Services.GetRequiredService<Wolverine.Runtime.IWolverineRuntime>().Storage;
+        var dataSources = FindDataSources(store).ToList();
+        dataSources.ShouldNotBeEmpty("Wolverine's Postgres message store holds its own data source");
+        dataSources.ShouldAllBe(d => new Npgsql.NpgsqlConnectionStringBuilder(d.ConnectionString).MaxPoolSize == 7);
+    }
+
+    private static IEnumerable<Npgsql.NpgsqlDataSource> FindDataSources(object root)
+    {
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var queue = new Queue<(object Value, int Depth)>([(root, 0)]);
+        while (queue.Count > 0)
+        {
+            var (value, depth) = queue.Dequeue();
+            if (!seen.Add(value))
+            {
+                continue;
+            }
+
+            if (value is Npgsql.NpgsqlDataSource found)
+            {
+                yield return found;
+                continue;
+            }
+
+            if (depth >= 3 || !(value.GetType().Namespace ?? "").StartsWith("Wolverine", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var field in value.GetType().GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+            {
+                if (field.GetValue(value) is { } next && !field.FieldType.IsPrimitive && field.FieldType != typeof(string))
+                {
+                    queue.Enqueue((next, depth + 1));
+                }
+            }
+        }
+    }
+
+    [Fact]
     public async Task Ten_parallel_submits_with_same_key_submit_once()
     {
         // Two instances of the API on the same infrastructure; the duplicates are spread over both.

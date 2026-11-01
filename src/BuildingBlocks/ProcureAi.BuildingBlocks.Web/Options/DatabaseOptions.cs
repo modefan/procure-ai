@@ -10,8 +10,10 @@ public sealed class DatabaseOptions
     public const string SectionName = "Database";
 
     /// <summary>
-    /// The largest number of connections the service's Npgsql pool opens to Postgres. Every service's pool plus the Debezium
-    /// servers, Keycloak and the reserved connections must fit the server's <c>max_connections</c> (the AppHost and the chart size it).
+    /// The largest number of connections <b>each</b> Npgsql pool of the service opens to Postgres. A service has several pools: plain
+    /// <c>NpgsqlConnection</c>s (and EF Core) share one per connection string, but Wolverine's message store and Marten each build a
+    /// data source of their own (own pool), and EF Core with <c>UseVector()</c> does too. All pools of all services plus the Debezium servers,
+    /// Keycloak and the reserved connections must fit the server's <c>max_connections</c> (the AppHost sizes it and a test checks the sum).
     /// </summary>
     [Range(1, 100)]
     public int MaxPoolSize { get; set; } = 10;
@@ -21,8 +23,8 @@ public sealed class DatabaseOptions
 public static class PostgresPooling
 {
     /// <summary>
-    /// Returns <paramref name="connectionString"/> with <c>Maximum Pool Size</c> set. EF Core, Wolverine's message store and the
-    /// readiness check read the same string, so Npgsql gives them one data source (one pool) of that size.
+    /// Returns <paramref name="connectionString"/> with <c>Maximum Pool Size</c> set. EF Core, Wolverine's message store, Marten and the
+    /// readiness check all read this string, so every pool they open (they do not share one: see <see cref="DatabaseOptions"/>) has that cap.
     /// </summary>
     public static string WithMaxPoolSize(string connectionString, int maxPoolSize) =>
         new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = maxPoolSize }.ConnectionString;

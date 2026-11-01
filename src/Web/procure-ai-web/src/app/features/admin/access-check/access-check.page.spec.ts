@@ -9,6 +9,7 @@ import { AuthStore } from '../../../core/auth/auth.store';
 import { APP_ROUTES } from '../../app.routes';
 import { checkDto, userDto } from '../admin.testing';
 import { AccessCheckPage } from './access-check.page';
+import { AccessCheckStore } from './access-check.store';
 
 describe('AccessCheckPage', () => {
   let access: { listUsers: ReturnType<typeof vi.fn> };
@@ -166,6 +167,35 @@ describe('AccessCheckPage', () => {
 
     expect(el.querySelector('[data-testid="verdict"]')).toBeNull();
     expect(el.querySelector('[data-testid="result"]')).toBeNull();
+  });
+
+  it('access check drops an answer that arrives before the clearing effect has run (guard in run())', async () => {
+    const { fixture, el } = await setup();
+    const store = TestBed.inject(AccessCheckStore);
+    let answer!: (value: unknown) => void;
+    approvals.checkAuthorization.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    await fillAndCheck(fixture, 'Maria', 'approve', 'pr-1039');
+
+    // The inputs change and the reply lands in the same turn, before change detection (and so the clearing effect) can run.
+    const input = el.querySelector<HTMLInputElement>('#check-request')!;
+    input.value = 'pr-1040';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    answer(checkDto());
+    await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+    await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+    await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+
+    expect(store.outcome()).toBeNull();
+  });
+
+  it('retyping the checked request in lower case keeps its verdict (inputs are compared normalised)', async () => {
+    const { fixture, el } = await setup();
+    await fillAndCheck(fixture, 'Maria', 'approve', 'PR-1039');
+    const input = el.querySelector<HTMLInputElement>('#check-request')!;
+    input.value = 'pr-1039';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(fixture);
+    expect(el.querySelector('[data-testid="verdict"]')).not.toBeNull();
   });
 
   it('request_placeholder_is_a_neutral_example (final review F13)', async () => {

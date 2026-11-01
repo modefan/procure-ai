@@ -77,12 +77,24 @@ public sealed class StatusContributorTests(AuditApp app)
         }
 
         open.Counts.Single(c => c.TenantId == tenant).Count.ShouldBe(2);
+        // Background Marten work on the shared store can log commands too: look only at those on the alert table.
+        var alertCommands = log.Commands.Where(c => c.Contains("mt_doc_outsideappalert", StringComparison.OrdinalIgnoreCase)).ToList();
         // The counts come from one GROUP BY command; the alerts themselves are only read for the newest per tenant (Take).
-        var groupBy = log.Commands.Where(c => c.Contains("group by", StringComparison.OrdinalIgnoreCase)).ToList();
+        var groupBy = alertCommands.Where(c => c.Contains("group by", StringComparison.OrdinalIgnoreCase)).ToList();
         groupBy.ShouldHaveSingleItem();
         groupBy[0].ShouldContain("count(", Case.Insensitive);
-        log.Commands.Where(c => !c.Contains("group by", StringComparison.OrdinalIgnoreCase))
+        alertCommands.Where(c => !c.Contains("group by", StringComparison.OrdinalIgnoreCase))
             .ShouldAllBe(c => c.Contains("limit", StringComparison.OrdinalIgnoreCase), "no unbounded read of the alerts");
+    }
+
+    [Fact]
+    public async Task Connection_string_handed_to_Marten_carries_the_max_pool_size()
+    {
+        // The test database's own string says nothing about pooling (Npgsql's default is 100); ServiceHost adds Database:MaxPoolSize (default 10).
+        var store = app.Services.GetRequiredService<IDocumentStore>();
+        await using var connection = store.Storage.Database.CreateConnection();
+        new NpgsqlConnectionStringBuilder(connection.ConnectionString).MaxPoolSize
+            .ShouldBe(new ProcureAi.BuildingBlocks.Web.Options.DatabaseOptions().MaxPoolSize);
     }
 
     private static OutsideAppAlert Alert(string tenant, string key, DateTimeOffset committedAt) =>

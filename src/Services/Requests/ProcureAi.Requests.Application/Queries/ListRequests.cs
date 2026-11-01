@@ -46,8 +46,12 @@ public static class RequestStatusFilters
     };
 }
 
-/// <summary><paramref name="RequesterId"/> limits the list to the requests that user made (the caller's own, for <c>mine=true</c>).</summary>
-public sealed record ListRequests(int Page, int PageSize, RequestStatusFilter? Status, string? RequesterId = null);
+/// <summary>
+/// <paramref name="RequesterId"/> limits the list to the requests that user made (the caller's own, for <c>mine=true</c>).
+/// <paramref name="WholeTenant"/> is set by the Api for a user who holds the tenant-admin permission (<c>admin.authorization</c>, the one the
+/// Access matrix endpoints need): the list then covers every request of the tenant, not only the caller's scope.
+/// </summary>
+public sealed record ListRequests(int Page, int PageSize, RequestStatusFilter? Status, string? RequesterId = null, bool WholeTenant = false);
 
 public static class ListRequestsHandler
 {
@@ -67,10 +71,12 @@ public static class ListRequestsHandler
             requests = requests.Where(r => r.RequesterId == requester);
         }
 
-        // Spec 4.2: the list holds the caller's own requests and those of the cost centers Access assigns to them (finance gets every
-        // cost center there). The admin key and services acting for nobody see all of the tenant's requests. No extra permission.
+        // Spec 4.2: the list holds the caller's own requests and those of the cost centers Access assigns to them (finance approvers get every
+        // cost center there; managers and department heads those they manage or head). The admin API key and a service acting for nobody
+        // see all of the tenant's requests, and so does a user holding the tenant-admin permission (WholeTenant, decided by the Api).
+        // A service acting on behalf of a user is scoped like that user. No new permission.
         var callerScope = await scope.GetAsync(cancellationToken);
-        if (!callerScope.All)
+        if (!callerScope.All && !query.WholeTenant)
         {
             var userId = callerScope.UserId;
             var codes = callerScope.CostCenterCodes.ToArray();

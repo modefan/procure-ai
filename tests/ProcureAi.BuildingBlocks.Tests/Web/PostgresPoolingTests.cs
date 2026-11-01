@@ -14,7 +14,7 @@ public sealed class PostgresPoolingTests
         var builder = new ConfigurationManager();
         builder.AddInMemoryCollection(settings);
         PostgresPooling.ApplyMaxPoolSize(builder, builder, Name);
-        // The data source every consumer of the connection string gets (Npgsql keeps one pool per string).
+        // A data source built from the string the service hands to EF Core, Wolverine, Marten and the health checks: the cap travels with the string.
         using var dataSource = NpgsqlDataSource.Create(builder.GetConnectionString(Name)!);
         return new NpgsqlConnectionStringBuilder(dataSource.ConnectionString);
     }

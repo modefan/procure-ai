@@ -56,11 +56,22 @@ public sealed class ServiceResourcesTests
         api.Annotations.OfType<HealthCheckAnnotation>().ShouldNotBeEmpty();
     }
 
-    /// <summary>Keycloak's own pool to the Postgres server connections are budgeted at 20 to be safe.</summary>
+    /// <summary>Keycloak's own connections to the Postgres server (it keeps its data elsewhere; budgeted at 20 to be safe).</summary>
     private const int KeycloakConnections = 20;
 
-    /// <summary>One Debezium Server per captured database (one replication connection each, budgeted generously).</summary>
-    private const int DebeziumConnections = 8;
+    /// <summary>
+    /// How many Npgsql pools one service opens, each capped at <c>Database:MaxPoolSize</c> (checked in the Npgsql, Wolverine.Postgresql 6.53
+    /// and Marten 9.54 assemblies, plan 07 Task 0c fix round): <c>new NpgsqlConnection(cs)</c> (readiness, status, the same string in EF Core)
+    /// shares one pool per connection string, but <c>PostgresqlBackedPersistence.BuildMessageStore</c> calls <c>NpgsqlDataSource.Create</c>
+    /// (its own pool), Marten's <c>Connection(cs)</c> builds its own <c>NpgsqlDataSourceBuilder</c> data source (Audit's Wolverine outbox
+    /// uses Marten's), and EF Core with <c>UseVector()</c> (Assistant) builds a data source of its own besides the shared one.
+    /// </summary>
+    private static int PoolsOf(string service) => service switch
+    {
+        "audit-api" => 2,      // plain connections + Marten (its Wolverine store is Marten's)
+        "assistant-api" => 3,  // plain + EF Core with UseVector + Wolverine
+        _ => 2,                // EF Core/plain + Wolverine
+    };
 
     [Fact]
     public async Task Pool_sizes_fit_max_connections()
@@ -83,8 +94,14 @@ public sealed class ServiceResourcesTests
             env.ShouldContainKeyAndValue("Database__MaxPoolSize", postgres.PoolSizePerService.ToString(System.Globalization.CultureInfo.InvariantCulture), name);
         }
 
-        var needed = postgresApis.Count * postgres.PoolSizePerService + DebeziumConnections + KeycloakConnections + postgres.ReservedConnections;
-        needed.ShouldBeLessThanOrEqualTo(postgres.MaxConnections);
+        // One replication connection per Debezium Server on a Postgres database (the MongoDB one does not connect to Postgres).
+        var debeziumServers = scope.Model.Resources.OfType<ContainerResource>()
+            .Count(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal) && r.Name != "debezium-mongo");
+        debeziumServers.ShouldBeGreaterThan(0);
+
+        var pools = postgresApis.Sum(a => PoolsOf(a.Name));
+        var worstCase = pools * postgres.PoolSizePerService + debeziumServers + KeycloakConnections + postgres.ReservedConnections;
+        worstCase.ShouldBeLessThanOrEqualTo(postgres.MaxConnections, $"{pools} pools x {postgres.PoolSizePerService} + {debeziumServers} Debezium + Keycloak + reserved");
     }
 
     [Fact]

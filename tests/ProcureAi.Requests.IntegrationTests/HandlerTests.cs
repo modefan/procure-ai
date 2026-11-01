@@ -276,9 +276,10 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task All_list_shows_every_cost_center_with_requests_read_all()
+    public async Task All_list_shows_every_cost_center_for_a_finance_approver_and_the_admin_key()
     {
-        // Whoever Access gives every cost center (finance approvers) and the admin key see all of the tenant's requests.
+        // Access gives a finance approver (TenantUser.IsFinanceApprover) every cost center, so their scope covers the tenant (EffectiveAccessTests);
+        // the admin API key is scoped to everything.
         var (alice, tom, own) = await SeedAllListAsync();
 
         _app.Caller.UserId = "finance";
@@ -289,6 +290,36 @@ public sealed class HandlerTests(InfraFixture infra) : IAsyncLifetime
         _app.Caller.UserId = "claude-admin";
         _app.Caller.Kind = CallerKind.AdminApiKey;
         (await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null))).Total.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task All_list_shows_the_cost_centers_a_manager_manages()
+    {
+        // Access resolves CostCenter.ManagerUserId (and a headed department) into the manager's cost center codes (EffectiveAccessTests).
+        var (alice, tom, _) = await SeedAllListAsync();
+
+        _app.Caller.UserId = "maria";
+        _app.Access.SetCostCenters(_app.Caller.TenantId!, "maria", "IT-200");
+        var page = await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null));
+
+        page.Items.Select(i => i.Id).ShouldContain(tom.Id, "Tom's request is on the cost center Maria manages");
+        page.Items.ShouldNotContain(i => i.Id == alice.Id);
+    }
+
+    [Fact]
+    public async Task A_service_acting_for_a_user_gets_the_users_list_even_with_the_whole_tenant_flag_off()
+    {
+        var (alice, tom, own) = await SeedAllListAsync();
+
+        _app.Caller.Kind = CallerKind.Service;
+        _app.Caller.UserId = "tom";
+        var page = await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null));
+
+        page.Items.Select(i => i.Id).ShouldBe([own.Id, tom.Id], ignoreOrder: true);
+        page.Items.ShouldNotContain(i => i.Id == alice.Id);
+
+        // The Api sets WholeTenant only for a user holding the tenant-admin permission.
+        (await _app.Bus.InvokeAsync<PagedResult<RequestDto>>(new ListRequests(1, 50, null, null, WholeTenant: true))).Total.ShouldBe(3);
     }
 
     [Fact]
