@@ -435,6 +435,21 @@ public sealed class TenantSwitchTests(KeycloakFixture keycloak, RedisFixture red
         (await NavigateToAsync(same)).ShouldBe("/app/requests");
     }
 
+    /// <summary>
+    /// Final review F12: a switch starts a new session like a login does, so the browser drops its HTTP cache (nothing cached for the old
+    /// company may be revalidated into the new one). The demo switch happens inside the POST; the code-flow switch at its callback.
+    /// </summary>
+    [Fact]
+    public async Task Demo_switch_sends_clear_site_data_cache()
+    {
+        var session = await SignInAsync("demo");
+
+        using var response = await PostSwitchAsync(session.Browser, "globex", "/app/budgets");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        response.Headers.GetValues("Clear-Site-Data").Single().ShouldBe("\"cache\"");
+    }
+
     [Fact]
     public async Task Challenge_ticket_is_single_use()
     {
