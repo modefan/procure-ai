@@ -1,0 +1,14 @@
+# Docker build contexts of this repository are the folders with a Dockerfile (infra/*, src/Web/procure-ai-web), plus a repository-root
+# context for anything that builds from the whole tree. Keep the context small and free of local state.
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/.angular/
+**/.git
+**/.vs/
+**/.playwright-cli/
+.superpowers/
+.github/
+**/*.user
+**/TestResults/

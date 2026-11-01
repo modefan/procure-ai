@@ -1,0 +1,27 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    Container images (plan 07 Task 1): the runnable projects (ProcureAi.*.Api, ProcureAi.Gateway, ProcureAi.Simulators) are published as
+    images with the .NET SDK container support, no Dockerfiles: `dotnet publish -t:PublishContainer -p:ImageTag=<tag>`
+    (deploy/scripts/build-images.ps1 does it for all of them). ProcureAi.DemoData (tools/) sets the same properties in its own csproj.
+    Image name: procure-ai-<project>, e.g. ProcureAi.Access.Api -> procure-ai-access-api, ProcureAi.Gateway -> procure-ai-gateway.
+    Chiseled Ubuntu (no shell, no package manager, non-root user `app`, UID 1654), listening on 8080 (the base image's ASPNETCORE_HTTP_PORTS).
+    The `-extra` variant is deliberate: plain noble-chiseled has neither ICU nor tzdata, so the services would silently run in
+    invariant-globalization mode (no en-ZA formatting) and could not find the Africa/Johannesburg time zone (fiscal year, daily limits,
+    the nightly demo reset, the Assistant's purchase dates).
+  -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ProcureAi.Gateway' Or '$(MSBuildProjectName)' == 'ProcureAi.Simulators' Or ($(MSBuildProjectName.StartsWith('ProcureAi.')) And $(MSBuildProjectName.EndsWith('.Api')))">
+    <ImageTag Condition="'$(ImageTag)' == ''">latest</ImageTag>
+    <ContainerRepository>procure-ai-$(MSBuildProjectName.Substring(10).Replace('.Api', '-api').ToLowerInvariant())</ContainerRepository>
+    <ContainerImageTags>$(ImageTag)</ContainerImageTags>
+    <ContainerFamily>noble-chiseled-extra</ContainerFamily>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(ContainerRepository)' != ''">
+    <ContainerEnvironmentVariable Include="ASPNETCORE_HTTP_PORTS" Value="8080" />
+    <ContainerPort Include="8080" Type="tcp" />
+  </ItemGroup>
+
+</Project>

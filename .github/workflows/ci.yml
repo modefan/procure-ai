@@ -153,6 +153,35 @@ jobs:
             exit 1
           fi
 
+  images:
+    name: Container images (build only, no push)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    # Builds every image of deploy/scripts/build-images.ps1 to prove they build; nothing is pushed and no secret is needed
+    # (publishing to GitHub Container Registry comes with the release workflow, plan 07 Task 2).
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Build all images
+        shell: pwsh
+        run: ./deploy/scripts/build-images.ps1 -Tag ci
+
+      # Starts the images (Keycloak against a throwaway Postgres, nginx, the .NET apps without configuration).
+      - name: Test the images
+        if: false # TESTS-OFF
+        shell: pwsh
+        run: ./deploy/scripts/test-images.ps1 -Tag ci
+
   e2e:
     name: End-to-end (Playwright)
     if: false # TESTS-OFF

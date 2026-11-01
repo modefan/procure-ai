@@ -7,6 +7,17 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <!-- Container image procure-ai-demo-data (plan 07 Task 1), same base as the services (see src/Directory.Build.props). It references
+       ServiceDefaults (ASP.NET Core framework reference), so it needs the ASP.NET runtime image, not the plain runtime one. -->
+  <PropertyGroup>
+    <EnableSdkContainerSupport>true</EnableSdkContainerSupport>
+    <ImageTag Condition="'$(ImageTag)' == ''">latest</ImageTag>
+    <ContainerRepository>procure-ai-demo-data</ContainerRepository>
+    <ContainerImageTags>$(ImageTag)</ContainerImageTags>
+    <ContainerFamily>noble-chiseled-extra</ContainerFamily>
+    <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra</ContainerBaseImage>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\ServiceDefaults\ProcureAi.ServiceDefaults\ProcureAi.ServiceDefaults.csproj" />
     <ProjectReference Include="..\..\src\Contracts\ProcureAi.Contracts\ProcureAi.Contracts.csproj" />
