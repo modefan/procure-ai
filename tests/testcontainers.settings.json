@@ -1,7 +1,7 @@
 {
   "_comment": "Same values as the Resources section of src/AppHost/ProcureAi.AppHost/appsettings.json (ResourceSettingsTests checks this).",
   "Resources": {
-    "Postgres": { "MemoryMb": 768, "Cpus": 1, "SharedBuffers": "128MB", "WorkMem": "4MB" },
+    "Postgres": { "MemoryMb": 768, "Cpus": 1, "SharedBuffers": "128MB", "WorkMem": "4MB", "MaxConnections": 200 },
     "Mongo": { "MemoryMb": 512, "Cpus": 1, "WiredTigerCacheGb": 0.25 },
     "Keycloak": { "MemoryMb": 768, "Cpus": 1, "JavaHeapOpts": "-Xms256m -Xmx512m" },
     "Debezium": { "MemoryMb": 512, "Cpus": 0.3, "JavaOpts": "-Xmx256m" },

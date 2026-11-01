@@ -67,7 +67,8 @@ public sealed class PostgresFixture : IAsyncLifetime
                 "-c", "log_truncate_on_rotation=on",
                 "-c", "log_rotation_age=1d",
                 "-c", $"shared_buffers={pg["SharedBuffers"]}",
-                "-c", $"work_mem={pg["WorkMem"]}")
+                "-c", $"work_mem={pg["WorkMem"]}",
+                "-c", $"max_connections={pg["MaxConnections"]}")
             .WithCreateParameterModifier(p => TestLimits.Apply(p, "Postgres"));
         if (Network is not null)
         {
