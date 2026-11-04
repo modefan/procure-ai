@@ -65,20 +65,30 @@ tests:
                 name: procure-mongo
                 key: password
 
-  - it: the replica set is initiated by an idempotent hook job
+  # Platform bootstrap must not wait for the apps (fresh-install deadlock, Task 5 fix round 2): an Argo CD Sync hook in wave 1, right
+  # after mongo (wave 0) is up and before Debezium (wave 2); no Helm hook, so `helm upgrade --install --wait` runs it as a plain Job
+  # at once. The release revision in its name makes Helm run it again on every upgrade (a Job's spec cannot change in place).
+  - it: the replica set is initiated by an idempotent job that does not wait for the apps
+    release:
+      revision: 4
     documentSelector:
       path: kind
       value: Job
     asserts:
       - equal:
           path: metadata.name
-          value: mongo-init
+          value: mongo-init-4
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook"]
-          value: PostSync
+          value: Sync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "1"
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
           value: BeforeHookCreation
+      - notExists:
+          path: metadata.annotations["helm.sh/hook"]
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: replSetGetStatus

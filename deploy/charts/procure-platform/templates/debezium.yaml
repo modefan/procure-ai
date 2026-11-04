@@ -73,6 +73,9 @@ metadata:
   labels:
     {{- include "procure-platform.labels" $labels | nindent 4 }}
     procure.ai/debezium: "true"
+  annotations:
+    # After the bootstrap jobs of wave 1 (the cdc exchange it publishes to, the MongoDB replica set it reads).
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   serviceName: debezium
   replicas: 1

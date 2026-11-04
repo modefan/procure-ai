@@ -65,11 +65,19 @@ securityContext:
       - ALL
 {{- end }}
 
-{{/* Hook annotations of a one-off setup Job: Argo CD PostSync (deleted before the next sync's run), and the Helm equivalent for
-     `helm upgrade --install` (Argo CD ignores the Helm ones when its own are present). */}}
-{{- define "procure-platform.postSyncHook" -}}
-argocd.argoproj.io/hook: PostSync
+{{/* Annotations of a platform bootstrap Job (replica-set initiation, the cdc exchange). It must not wait for the apps: Debezium only
+     becomes Ready after the apps' migrations, and those need this bootstrap (a PostSync / post-install hook deadlocked a fresh install,
+     plan 07 Task 5 fix round 2). Argo CD: a Sync hook in wave 1, after the platform's StatefulSets (wave 0) are up and before Debezium
+     (wave 2); re-run on every sync (BeforeHookCreation). Helm: no hook, so `helm upgrade --install --wait` creates it with everything
+     else and the Job retries until its server answers; "procure-platform.bootstrapJobName" makes each Helm revision a new Job. */}}
+{{- define "procure-platform.bootstrapJob" -}}
+argocd.argoproj.io/hook: Sync
 argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-helm.sh/hook: post-install,post-upgrade
-helm.sh/hook-delete-policy: before-hook-creation
+argocd.argoproj.io/sync-wave: "1"
+{{- end }}
+
+{{/* <base>-<release revision>: a Job's pod template cannot change in place, and a completed Job would not run again on `helm upgrade`.
+     Argo CD renders with revision 1, so its hook keeps one name. include "procure-platform.bootstrapJobName" (dict "root" $ "base" "x") */}}
+{{- define "procure-platform.bootstrapJobName" -}}
+{{- printf "%s-%d" .base (int .root.Release.Revision) -}}
 {{- end }}

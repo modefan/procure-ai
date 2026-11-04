@@ -129,7 +129,7 @@ spec:
               protocol: TCP
           # Startup and readiness check the replica-set state, not just the port: a REMOVED (or otherwise stuck) member must not count as
           # started or Ready. A failing startup probe restarts mongod, which checks its member host again. A set not initiated yet passes
-          # (mongo-init, a PostSync hook, initiates it once everything is Ready). mongosh is a Node process, so the checks run seldom;
+          # (mongo-init, a wave-1 Sync job, initiates it once mongo is up). mongosh is a Node process, so the checks run seldom;
           # the root credentials come from the container's environment, not the command line.
           startupProbe:
             exec:
@@ -205,15 +205,15 @@ spec:
             storage: {{ .Values.mongo.storage }}
 ---
 # Initiates the replica set once (the AppHost's WithReplicaSet does this locally) and waits until the member is PRIMARY. Idempotent:
-# an initiated set is left alone, so it runs after every sync. Credentials come from the environment into the script, never argv.
+# an initiated set is left alone, so it runs on every sync (and every Helm revision). Credentials come from the environment into the script, never argv.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: mongo-init
+  name: {{ include "procure-platform.bootstrapJobName" (dict "root" $ "base" "mongo-init") }}
   labels:
     {{- include "procure-platform.labels" (dict "root" $ "name" "mongo-init") | nindent 4 }}
   annotations:
-    {{- include "procure-platform.postSyncHook" . | nindent 4 }}
+    {{- include "procure-platform.bootstrapJob" . | nindent 4 }}
 spec:
   backoffLimit: 6
   activeDeadlineSeconds: 900

@@ -105,16 +105,16 @@ spec:
             storage: {{ .Values.rabbitmq.storage }}
 ---
 # Debezium's RabbitMQ sink only publishes, so its topic exchange must exist first. Under the AppHost CdcExchangeHealthCheck declares it;
-# here this hook Job does the same PUT through the management API after every sync. Idempotent (an equal exchange is left as it is);
+# here this bootstrap Job (wave-1 Sync hook; a plain Job under Helm) does the same PUT through the management API on every sync. Idempotent (an equal exchange is left as it is);
 # an exchange of the same name with other properties answers 406 and fails the Job visibly. Credentials go to curl on stdin, never argv.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: rabbitmq-cdc-exchange
+  name: {{ include "procure-platform.bootstrapJobName" (dict "root" $ "base" "rabbitmq-cdc-exchange") }}
   labels:
     {{- include "procure-platform.labels" (dict "root" $ "name" "rabbitmq-cdc-exchange") | nindent 4 }}
   annotations:
-    {{- include "procure-platform.postSyncHook" . | nindent 4 }}
+    {{- include "procure-platform.bootstrapJob" . | nindent 4 }}
 spec:
   backoffLimit: 6
   activeDeadlineSeconds: 900

@@ -181,3 +181,15 @@ tests:
           path: spec.template.spec.containers[0].env
           content: { name: DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING }
           any: true
+
+  # Debezium comes after the bootstrap jobs (wave 1: the cdc exchange, the replica set) in Argo CD's sync order.
+  - it: debezium is applied in wave 2, after the platform bootstrap jobs
+    asserts:
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "2"
+        documentIndex: 1
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "2"
+        documentIndex: 3

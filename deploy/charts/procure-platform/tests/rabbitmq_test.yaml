@@ -4,20 +4,28 @@ templates:
 set:
   global.imageTag: abc1234
 tests:
-  - it: cdc exchange job is a PostSync hook
+  # Like mongo-init: a Sync hook in wave 1 (after rabbitmq, before Debezium in wave 2), no Helm hook, renamed per Helm revision.
+  - it: cdc exchange job does not wait for the apps
+    release:
+      revision: 4
     documentSelector:
       path: kind
       value: Job
     asserts:
       - equal:
           path: metadata.name
-          value: rabbitmq-cdc-exchange
+          value: rabbitmq-cdc-exchange-4
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook"]
-          value: PostSync
+          value: Sync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "1"
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
           value: BeforeHookCreation
+      - notExists:
+          path: metadata.annotations["helm.sh/hook"]
       # As CdcExchangeHealthCheck does: PUT the durable topic exchange through the management API (idempotent; 406 on a mismatch).
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
