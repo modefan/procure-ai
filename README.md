@@ -346,7 +346,7 @@ default, like every demo-only feature).
 
 ## Run it locally
 
-Prerequisites: Docker, .NET 10 SDK, Node 24.
+Prerequisites: Docker, .NET 10 SDK, Node 26 LTS (see `.nvmrc`).
 
 1. Set the AppHost user secrets once (values are yours to choose; use long random strings):
 

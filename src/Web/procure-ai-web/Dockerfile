@@ -2,7 +2,7 @@
 #   docker build -t procure-ai-web:<tag> src/Web/procure-ai-web
 # One build runs in every environment: /config.json (public/config.json holds the local defaults) is replaced at run time by a file the
 # chart mounts at /usr/share/nginx/html/config.json. Nothing environment-specific is baked into the image.
-FROM node:24.22.2-alpine AS build
+FROM node:26.13.0-alpine AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
