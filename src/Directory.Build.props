@@ -24,4 +24,12 @@
     <ContainerPort Include="8080" Type="tcp" />
   </ItemGroup>
 
+  <!--
+    The service APIs run Wolverine (and Audit's Marten) on the code committed under Internal/Generated (plan 07 Task 5b,
+    docs/generated-code.md): Roslyn never loads in the container. A deployment may still override it (Wolverine__TypeLoadMode).
+  -->
+  <ItemGroup Condition="'$(ContainerRepository)' != '' And $(MSBuildProjectName.EndsWith('.Api'))">
+    <ContainerEnvironmentVariable Include="Wolverine__TypeLoadMode" Value="Static" />
+  </ItemGroup>
+
 </Project>

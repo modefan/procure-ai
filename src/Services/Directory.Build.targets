@@ -39,4 +39,23 @@
           Command="dotnet &quot;$(PkgMicrosoft_Extensions_ApiDescription_Server)/tools/dotnet-getdocument.dll&quot; --assembly &quot;$(TargetPath)&quot; --file-list &quot;$(IntermediateOutputPath)$(MSBuildProjectName).OpenApiFiles.cache&quot; --framework &quot;$(TargetFrameworkMoniker)&quot; --output &quot;$(OpenApiDocumentsDirectory)&quot; --project &quot;$(MSBuildProjectName)&quot; --assets-file &quot;$(ProjectAssetsFile)&quot; --platform AnyCPU --document-name v1 --file-name $(OpenApiDocumentName)" />
   </Target>
 
+  <!--
+    Pre-generated Wolverine (and Marten) code (plan 07 Task 5b, docs/generated-code.md). Every service API commits the code JasperFx
+    generates for its handlers under Internal/Generated, compiled into the API; the images run Wolverine:TypeLoadMode=Static on it, so
+    Roslyn never loads in a deployed service. Regenerate after changing a handler, a saga, a message or Marten's document setup:
+      dotnet build src/Services/<S>/ProcureAi.<S>.Api -t:Build;WriteGeneratedCode
+    The target runs the built API with `codegen write` and the same placeholder settings as the OpenAPI step (the host is built, never
+    started; nothing connects). GeneratedCodeDirectory redirects the output (ArchitectureTests GeneratedCodeTests compares a fresh copy
+    with the committed one).
+  -->
+  <PropertyGroup Condition="'$(IsServiceApi)' == 'true'">
+    <GeneratedCodeDirectory Condition="'$(GeneratedCodeDirectory)' == ''">$(MSBuildProjectDirectory)/Internal/Generated</GeneratedCodeDirectory>
+  </PropertyGroup>
+
+  <Target Name="WriteGeneratedCode" Condition="'$(IsServiceApi)' == 'true'">
+    <RemoveDir Directories="$(GeneratedCodeDirectory)" />
+    <Exec EnvironmentVariables="$(OpenApiPlaceholderSettings);DOTNET_ENVIRONMENT=Production;ASPNETCORE_ENVIRONMENT=Production;Wolverine__TypeLoadMode=Dynamic;Wolverine__GeneratedCodeOutputPath=$(GeneratedCodeDirectory)"
+          WorkingDirectory="$(TargetDir)" Command="dotnet &quot;$(TargetPath)&quot; codegen write" />
+  </Target>
+
 </Project>

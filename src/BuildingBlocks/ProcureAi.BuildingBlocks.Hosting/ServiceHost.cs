@@ -1,4 +1,5 @@
 using System.Reflection;
+using JasperFx;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +34,9 @@ public static class ServiceHost
     /// <summary><c>&lt;Service&gt;.Api --migrate</c> migrates the database and Wolverine's message store, seeds demo data when enabled, and exits.</summary>
     public const string MigrateFlag = "--migrate";
 
+    /// <summary><c>&lt;Service&gt;.Api codegen write</c> writes the service's Wolverine (and Marten) code to <c>Internal/Generated</c> and exits.</summary>
+    public const string CodegenCommand = "codegen";
+
     /// <summary>Set to <c>true</c> (<c>DemoSeed:Enabled</c>) by the AppHost's migrate resource.</summary>
     public const string DemoSeedSetting = "DemoSeed:Enabled";
 
@@ -65,6 +69,8 @@ public static class ServiceHost
         builder.AddProcureAiCaching();
 
         var services = builder.Services;
+        // Wolverine:TypeLoadMode (Dynamic | Auto | Static): the images run Static on the code committed under Internal/Generated.
+        services.AddProcureAiCodeGeneration(builder.Configuration);
         services.AddValidatedOptions<ServiceOptions>(builder.Configuration, ServiceOptions.SectionName);
         // Expected outcomes (404, 403, 412, 422) become problem details inside the MVC pipeline.
         services.Configure<MvcOptions>(mvc => mvc.Filters.Add<ApplicationExceptionFilter>());
@@ -154,6 +160,14 @@ public static class ServiceHost
         Func<IServiceProvider, CancellationToken, Task>? migrate,
         Func<IServiceProvider, CancellationToken, Task>? seedDemoData = null)
     {
+        if (args.Length > 0 && args[0] == CodegenCommand)
+        {
+            // `<Service>.Api codegen write|test|preview|delete`: JasperFx's code generation commands (the WriteGeneratedCode build
+            // target runs `codegen write`, docs/generated-code.md). The host is built, never started.
+            Environment.ExitCode = await app.RunJasperFxCommands(args);
+            return;
+        }
+
         if (!args.Contains(MigrateFlag))
         {
             await app.RunAsync();

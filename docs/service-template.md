@@ -31,6 +31,8 @@ Every service is built the same way from shared pieces. Nothing is copied from a
 5. **OpenAPI document**: in the Api csproj set `OpenApiDocumentName` (e.g. `<name>-v1`) and `OpenApiDatabaseConnectionName`.
    `src/Services/Directory.Build.targets` then writes `openapi/<name>-v1.json` on every build (commit it) and references the
    `Microsoft.Extensions.ApiDescription.Server` package; the project needs nothing else.
+   **Generated Wolverine code**: run `dotnet build src/Services/<Name>/ProcureAi.<Name>.Api -t:Build;WriteGeneratedCode` and commit
+   `Internal/Generated` (the images run it with `Wolverine:TypeLoadMode=Static`; see [generated-code.md](generated-code.md)).
 6. **AppHost**: `builder.AddProcureAiService<Projects.ProcureAi_<Name>_Api>(new ServiceSpec(...), shared)` in `AppHost.cs`
    creates the database, `<name>-migrate` and `<name>-api` with the environment, limits, wait-for-migration and `/health/ready`.
    Reference the returned API from the gateway. Add a `ServiceResourcesTests` case.
