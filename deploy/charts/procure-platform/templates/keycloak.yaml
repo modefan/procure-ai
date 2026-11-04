@@ -43,7 +43,7 @@ spec:
       {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 1000 "gid" 0) | nindent 6 }}
       containers:
         - name: keycloak
-          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" .Values.keycloak.image) }}
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" .Values.keycloak.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args: [start, --optimized, --import-realm]
           env:
