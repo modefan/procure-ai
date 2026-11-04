@@ -31,12 +31,12 @@ tests:
             - "0.25"
       # The keyfile comes from the Secret through an init container that makes it owner-read-only (mongod refuses a group-readable one).
       - equal:
-          path: spec.template.spec.initContainers[0].name
+          path: spec.template.spec.initContainers[1].name
           value: keyfile
       # Re-runnable in the same pod (a recreated sandbox reruns init containers on the kept Memory emptyDir): the 0400 copy is removed
       # before it is copied again, since a non-root user without capabilities cannot overwrite it.
       - matchRegex:
-          path: spec.template.spec.initContainers[0].command[2]
+          path: spec.template.spec.initContainers[1].command[2]
           pattern: '^rm -f /etc/mongo-keyfile/keyfile && cp /etc/mongo-keyfile-secret/keyfile /etc/mongo-keyfile/keyfile && chmod 0400 /etc/mongo-keyfile/keyfile$'
       - contains:
           path: spec.template.spec.volumes
@@ -97,3 +97,51 @@ tests:
       - equal:
           path: spec.publishNotReadyAddresses
           value: true
+
+  # Regression (Task 4 fix round 1): after a cluster restart mongo-0 came up REMOVED because `mongo` did not resolve to the new pod IP yet,
+  # and TCP probes reported the stuck member Ready.
+  - it: mongod starts only once the member host resolves to the pod itself
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: wait-for-member-dns
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: 'getent ahostsv4 mongo .*\n *if \[ "\$ips" = "\$POD_IP " \]; then .* exit 0; fi'
+      # Bounded: it gives up (and the pod is retried) instead of waiting forever.
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: 'for i in \$\(seq 1 120\); do[\s\S]*exit 1\s*$'
+
+  - it: a stuck replica set member is neither started nor ready
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].startupProbe.tcpSocket
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket
+      - matchRegex:
+          path: spec.template.spec.containers[0].startupProbe.exec.command[2]
+          pattern: 'replSetGetStatus.*s\.code === 94.*s\.myState === 1 \|\| s\.myState === 2'
+      - matchRegex:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[2]
+          pattern: 'replSetGetStatus.*s\.code === 94.*s\.myState === 1 \|\| s\.myState === 2'
+      # Over TLS, with the root credentials from the environment, never on the command line.
+      - matchRegex:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[2]
+          pattern: 'tls=true&tlsCAFile=/etc/procure-ca/ca\.crt.*admin\.auth\(process\.env\.MONGO_INITDB_ROOT_USERNAME, process\.env\.MONGO_INITDB_ROOT_PASSWORD\)'
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[2]
+          pattern: '--password|-p '

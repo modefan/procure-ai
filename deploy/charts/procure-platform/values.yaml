@@ -58,6 +58,8 @@ postgres:
 mongo:
   image: docker.io/library/mongo:8.3
   replicaSet: rs0
+  # How long mongod's init container waits for the member host `mongo` to resolve to the pod's own IP (after a restart DNS can lag).
+  memberDnsWaitSeconds: 120
   storage: 2Gi
 
 redis:

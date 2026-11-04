@@ -206,6 +206,11 @@ public sealed class MongoCdcTests(AuditApp app)
         var noAdmin = await Should.ThrowAsync<MongoCommandException>(() => debezium.GetDatabase("admin").RunCommandAsync<BsonDocument>(
             new BsonDocument { ["createUser"] = "intruder", ["pwd"] = "x", ["roles"] = new BsonArray() }, cancellationToken: Ct));
         noAdmin.Code.ShouldBe(13, noAdmin.Message);
+
+        // The cluster-wide find of debeziumChangeStreams covers non-system collections only: the users and their password hashes stay unreadable.
+        var noUsers = await Should.ThrowAsync<MongoCommandException>(() => debezium.GetDatabase("admin").GetCollection<BsonDocument>("system.users")
+            .Find(FilterDefinition<BsonDocument>.Empty).FirstOrDefaultAsync(Ct));
+        noUsers.Code.ShouldBe(13, noUsers.Message);
     }
 
     // ----- helpers -----

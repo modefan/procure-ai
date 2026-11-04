@@ -1,6 +1,7 @@
 {{- $r := .Values.appHostResources.Mongo }}
 {{- $labels := dict "root" $ "name" "mongo" }}
 {{- $rs := .Values.mongo.replicaSet }}
+{{- $member := "mongo" }}
 # MongoDB: single-member replica set (change streams for Debezium), as the AppHost's WithReplicaSet. TLS is required here (plan 07
 # ruling 10; the AppHost only prefers it): server certificate mongo-tls (bootstrap/new-local-ca.ps1, SANs mongo, mongo.procure.svc...),
 # clients trust the local CA. Members authenticate with the keyfile from Secret procure-mongo; users with SCRAM.
@@ -45,6 +46,31 @@ spec:
       {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999 "fsGroup" 999) | nindent 6 }}
       terminationGracePeriodSeconds: 60
       initContainers:
+        # The set's only member is `mongo:27017` (the headless Service). At every start mongod checks that this name resolves to itself
+        # (isSelf); after a cluster restart the pod has a new IP, and if DNS still serves the old one (or nothing) the member comes up REMOVED
+        # and, being alone, never checks again. So mongod starts only once `mongo` resolves to exactly this pod's IP (bounded, then the pod
+        # fails and is retried).
+        - name: wait-for-member-dns
+          image: {{ .Values.mongo.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - |
+              for i in $(seq 1 {{ .Values.mongo.memberDnsWaitSeconds }}); do
+                ips="$(getent ahostsv4 {{ $member }} | awk '{print $1}' | sort -u | tr '\n' ' ')"
+                if [ "$ips" = "$POD_IP " ]; then echo "{{ $member }} resolves to this pod ($POD_IP)"; exit 0; fi
+                sleep 1
+              done
+              echo "{{ $member }} still resolves to '$ips', not to this pod ($POD_IP), after {{ .Values.mongo.memberDnsWaitSeconds }} s"
+              exit 1
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            {{- toYaml .Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
         # mongod refuses a keyfile that group or others can read; a Secret volume with fsGroup is group-readable. Copy it owner-only.
         - name: keyfile
           image: {{ .Values.mongo.image }}
@@ -101,17 +127,23 @@ spec:
             - name: mongo
               containerPort: 27017
               protocol: TCP
-          # TCP probes: mongosh is a Node process too heavy to run every few seconds in a 512 MB container. The mongo-init Job checks
-          # that the member becomes PRIMARY.
+          # Startup and readiness check the replica-set state, not just the port: a REMOVED (or otherwise stuck) member must not count as
+          # started or Ready. A failing startup probe restarts mongod, which checks its member host again. A set not initiated yet passes
+          # (mongo-init, a PostSync hook, initiates it once everything is Ready). mongosh is a Node process, so the checks run seldom;
+          # the root credentials come from the container's environment, not the command line.
           startupProbe:
-            tcpSocket:
-              port: mongo
-            periodSeconds: 5
+            exec:
+              command: [bash, -c, {{ include "procure-platform.mongoStateCheck" . | quote }}]
+            periodSeconds: 10
+            timeoutSeconds: 20
             failureThreshold: 60
           readinessProbe:
-            tcpSocket:
-              port: mongo
-            periodSeconds: 10
+            exec:
+              command: [bash, -c, {{ include "procure-platform.mongoStateCheck" . | quote }}]
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 3
+          # Liveness stays a cheap TCP check: a member only goes REMOVED when it loads its config at start (covered above).
           livenessProbe:
             tcpSocket:
               port: mongo
@@ -213,7 +245,7 @@ spec:
               if (initiated) {
                 print('replica set already initiated');
               } else {
-                rs.initiate({ _id: '{{ $rs }}', members: [{ _id: 0, host: 'mongo:27017' }] });
+                rs.initiate({ _id: '{{ $rs }}', members: [{ _id: 0, host: '{{ $member }}:27017' }] });
                 print('replica set initiated');
               }
               for (let i = 0; i < 120; i++) {
@@ -259,3 +291,10 @@ spec:
         - name: procure-ca
           configMap:
             name: procure-ca
+
+{{/* The replica-set state check of mongod's probes: exit 0 when this member is PRIMARY or SECONDARY, or the set is not initiated yet
+     (NotYetInitialized, code 94); 1 otherwise (REMOVED, STARTUP, RECOVERING, no answer). Over TLS to localhost (in mongo-tls's SANs),
+     signed in as root from MONGO_INITDB_ROOT_USERNAME/PASSWORD of the container's environment. */}}
+{{- define "procure-platform.mongoStateCheck" -}}
+mongosh --quiet --norc 'mongodb://localhost:27017/?directConnection=true&tls=true&tlsCAFile=/etc/procure-ca/ca.crt&serverSelectionTimeoutMS=5000' --eval 'const admin = db.getSiblingDB("admin"); admin.auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD); let s; try { s = admin.runCommand({ replSetGetStatus: 1 }); } catch (e) { s = e; } if (s.code === 94) { quit(0); } quit(s.ok === 1 && (s.myState === 1 || s.myState === 2) ? 0 : 1);'
+{{- end }}
