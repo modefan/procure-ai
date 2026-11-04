@@ -214,7 +214,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # Builds every image of deploy/scripts/build-images.ps1 to prove they build; nothing is pushed and no secret is needed
-    # (publishing to GitHub Container Registry comes with the release workflow, plan 07 Task 2).
+    # (publish.yml pushes them to GitHub Container Registry after CI passed).
     steps:
       - uses: actions/checkout@v4
 

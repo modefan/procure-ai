@@ -1,0 +1,116 @@
+name: publish
+
+# After CI passed on main: build every image, push it to GitHub Container Registry with the commit's full SHA as tag, then deploy that
+# commit by setting appRevision in the GitOps repo (modefan/procure-ai-gitops envs/local/release.yaml). Argo CD sees the bump within a few
+# minutes and syncs: migrations first, then the new pods (plan 07 Task 6, rulings 1, 4 and 6).
+# Credentials: GITHUB_TOKEN (packages: write) for GHCR; the GitOps repo's write deploy key (Actions secret GITOPS_DEPLOY_KEY, created by
+# the GitOps repo's bootstrap/install-argocd.ps1) for the bump. No other secret.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+# One publish at a time; a newer commit's run cancels an older one (its images would be deployed only to be replaced at once).
+concurrency:
+  group: publish
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  # The commit CI tested. Not github.sha: for workflow_run that is the newest commit on main when this run starts, which may be a later,
+  # untested one.
+  REVISION: ${{ github.event.workflow_run.head_sha }}
+  # The GitOps environment this workflow deploys.
+  GITOPS_ENV: local
+
+jobs:
+  publish:
+    name: Push images and deploy
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          # Full history: the bump below checks that it moves the deployed revision forward.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Registry name (lower case)
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "REGISTRY=ghcr.io/${OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Every image of deploy/scripts/build-images.ps1, tagged <registry>/procure-ai-<name>:<full SHA> and labelled with this repository
+      # as its source, so GHCR links each package to procure-ai (and this workflow's GITHUB_TOKEN may push and prune it).
+      - name: Build and push the images
+        shell: pwsh
+        run: ./deploy/scripts/build-images.ps1 -Tag $env:REVISION -Registry $env:REGISTRY -Push
+
+      - name: Check out the GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/procure-ai-gitops
+          ref: main
+          ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          path: gitops
+          persist-credentials: true
+
+      - name: Deploy (set appRevision in the GitOps repo)
+        working-directory: gitops
+        run: |
+          set -euo pipefail
+          file="envs/${GITOPS_ENV}/release.yaml"
+          short="${REVISION:0:7}"
+          git config user.name "procure-ai publish"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            current="$(sed -n 's/^appRevision:[[:space:]]*"\{0,1\}\([0-9a-f]\{40\}\)"\{0,1\}[[:space:]]*$/\1/p' "$file")"
+            if [ "$current" = "$REVISION" ]; then
+              echo "appRevision is already $REVISION."
+              exit 0
+            fi
+            # Never move backwards: skip when this commit is an ancestor of the deployed one (a newer run already deployed).
+            if [ -n "$current" ] && git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$REVISION" "$current" 2>/dev/null; then
+              echo "::notice::Deployed revision $current is newer than $REVISION; nothing to do."
+              exit 0
+            fi
+            sed -i "s/^appRevision:.*/appRevision: ${REVISION}/" "$file"
+            grep -q "^appRevision: ${REVISION}$" "$file"
+            git commit -q -am "Deploy procure-ai ${short}" \
+              -m "procure-ai ${REVISION}, images ${REGISTRY}/procure-ai-<name>:${REVISION} (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            if git push -q origin HEAD:main; then
+              echo "### Deployed procure-ai ${short} to ${GITOPS_ENV}" >> "$GITHUB_STEP_SUMMARY"
+              echo "appRevision ${current:-<none>} -> ${REVISION}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            # Someone pushed to the GitOps repo meanwhile: start again from its newest main.
+            echo "::warning::push to the GitOps repo was rejected (attempt ${attempt}); retrying on its newest main"
+            git fetch -q origin main
+            git reset -q --hard origin/main
+          done
+          echo "::error::could not push the appRevision bump to the GitOps repo"
+          exit 1

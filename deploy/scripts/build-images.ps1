@@ -21,12 +21,19 @@ param(
     # Only some images, by name without the procure-ai- prefix (e.g. -Only web,keycloak). Default: all.
     [string[]]$Only = @(),
     # Target platform of the .NET images (the container's OS and CPU).
-    [string]$RuntimeIdentifier = 'linux-x64'
+    [string]$RuntimeIdentifier = 'linux-x64',
+    # Label org.opencontainers.image.source of every image. GitHub Container Registry links a package to the repository this names, which
+    # lets the repository's workflows (GITHUB_TOKEN) push and delete its versions. Without it the web image would carry its nginx base
+    # image's label (github.com/nginx/docker-nginx-unprivileged).
+    [string]$SourceUrl = 'https://github.com/modefan/procure-ai'
 )
 $ErrorActionPreference = 'Stop'
 # `pwsh -File ... -Only a,b` passes one string "a,b"; accept both forms.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+# Label org.opencontainers.image.revision: the commit the images are built from.
+$revision = (& git -C $root rev-parse HEAD 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $revision) { $revision = 'unknown' }
 
 if ($Push -and -not $Registry) { throw '-Push needs -Registry (e.g. ghcr.io/modefan).' }
 if ($ImportTo -and -not (Get-Command k3d -ErrorAction SilentlyContinue)) { throw "-ImportTo $ImportTo needs k3d on the PATH." }
@@ -68,7 +75,9 @@ foreach ($name in $dotnet.Keys) {
     $project = Join-Path $root $dotnet[$name]
     Write-Host "== procure-ai-${name}:$Tag (dotnet publish)"
     Run "dotnet publish $name" {
-        dotnet publish $project -c Release -m:4 -t:PublishContainer "-p:ImageTag=$Tag" "-p:ContainerRuntimeIdentifier=$RuntimeIdentifier" --nologo -v:minimal
+        # PublishRepositoryUrl: the SDK labels the image with the repository (source) and commit (revision) from git.
+        dotnet publish $project -c Release -m:4 -t:PublishContainer "-p:ImageTag=$Tag" "-p:ContainerRuntimeIdentifier=$RuntimeIdentifier" `
+            -p:PublishRepositoryUrl=true "-p:RepositoryUrl=$SourceUrl" --nologo -v:minimal
     }
     $built.Add("procure-ai-${name}:$Tag")
 }
@@ -77,7 +86,10 @@ foreach ($name in $dockerfiles.Keys) {
     if (-not (Wanted $name)) { continue }
     $context = Join-Path $root $dockerfiles[$name]
     Write-Host "== procure-ai-${name}:$Tag (docker build)"
-    Run "docker build $name" { docker build --tag "procure-ai-${name}:$Tag" $context }
+    Run "docker build $name" {
+        docker build --tag "procure-ai-${name}:$Tag" --label "org.opencontainers.image.source=$SourceUrl" `
+            --label "org.opencontainers.image.revision=$revision" $context
+    }
     $built.Add("procure-ai-${name}:$Tag")
 }
 
