@@ -71,17 +71,8 @@ public static class ListRequestsHandler
             requests = requests.Where(r => r.RequesterId == requester);
         }
 
-        // Spec 4.2: the list holds the caller's own requests and those of the cost centers Access assigns to them (finance approvers get every
-        // cost center there; managers and department heads those they manage or head). The admin API key and a service acting for nobody
-        // see all of the tenant's requests, and so does a user holding the tenant-admin permission (WholeTenant, decided by the Api).
-        // A service acting on behalf of a user is scoped like that user. No new permission.
-        var callerScope = await scope.GetAsync(cancellationToken);
-        if (!callerScope.All && !query.WholeTenant)
-        {
-            var userId = callerScope.UserId;
-            var codes = callerScope.CostCenterCodes.ToArray();
-            requests = requests.Where(r => r.RequesterId == userId || codes.Contains(r.CostCenterCode));
-        }
+        // The caller's scope (RequestScope, the same rule as the single-item reads).
+        requests = requests.VisibleTo(await scope.GetAsync(cancellationToken), query.WholeTenant);
 
         var total = await requests.CountAsync(cancellationToken);
         var page = await requests.Include(r => r.Lines)

@@ -143,6 +143,12 @@ namespace ProcureAi.Approvals.Infrastructure.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("comment");
 
+                    b.Property<string>("CostCenterCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("cost_center_code");
+
                     b.Property<DateTimeOffset?>("DueAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_at");

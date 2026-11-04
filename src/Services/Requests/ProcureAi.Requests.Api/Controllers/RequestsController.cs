@@ -48,14 +48,14 @@ public sealed class RequestsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RequestDto>> Get(Guid id, CancellationToken cancellationToken)
     {
-        var request = await bus.InvokeAsync<RequestDto>(new GetRequest(id), cancellationToken);
+        var request = await bus.InvokeAsync<RequestDto>(new GetRequest(id, await WholeTenantAsync(cancellationToken)), cancellationToken);
         Response.Headers.ETag = VersionETag.Format(request.Version);
         return request;
     }
 
     /// <summary>
-    /// One request by its number (<c>PR-1043</c>), with the same permission and scope as <c>GET {id}</c>; another tenant's request is
-    /// 404. Cached under the tenant's list tag, which every change of any of its requests evicts (the route has no ID to tag by).
+    /// One request by its number (<c>PR-1043</c>), with the same permission and scope as <c>GET {id}</c>; another tenant's request and
+    /// one outside the caller's scope are 404. Cached under the tenant's list tag, which every change of any of its requests evicts (the route has no ID to tag by).
     /// </summary>
     [HttpGet("by-number/{number}", Name = "GetRequestByNumber")]
     [CachedGet(Tags = [RequestCacheTag.ListTemplate])]
@@ -65,7 +65,7 @@ public sealed class RequestsController(
     public async Task<ActionResult<RequestDto>> GetByNumber(
         [StringLength(RequestLimits.CodeLength)] string number, CancellationToken cancellationToken)
     {
-        var request = await bus.InvokeAsync<RequestDto>(new GetRequestByNumber(number), cancellationToken);
+        var request = await bus.InvokeAsync<RequestDto>(new GetRequestByNumber(number, await WholeTenantAsync(cancellationToken)), cancellationToken);
         Response.Headers.ETag = VersionETag.Format(request.Version);
         return request;
     }
@@ -87,12 +87,8 @@ public sealed class RequestsController(
     {
         // "mine" is the requests the caller made (for a service or the admin key acting for a user, that user).
         var requester = mine ? caller.UserId : null;
-        // A user with the tenant-admin permission sees the whole tenant. A service acting for a user never does: it is scoped like that user.
-        var wholeTenant = caller.Kind is CallerKind.User
-            && !user.IsServiceAccount
-            && (await permissions.GetPermissionsAsync(user, cancellationToken)).Contains(Permissions.AdminAuthorization);
         return await bus.InvokeAsync<PagedResult<RequestDto>>(
-            new ListRequests(paging.Page, paging.Size(), status, requester, wholeTenant), cancellationToken);
+            new ListRequests(paging.Page, paging.Size(), status, requester, await WholeTenantAsync(cancellationToken)), cancellationToken);
     }
 
     [HttpPut("{id:guid}", Name = "UpdateRequest")]
@@ -171,6 +167,13 @@ public sealed class RequestsController(
         Response.Headers.ETag = VersionETag.Format(cancelled.Version);
         return cancelled;
     }
+
+    /// <summary>
+    /// A user with the tenant-admin permission reads the whole tenant (list and single requests). A service acting for a user never
+    /// does: it is scoped like that user. The cache keys of these reads carry the user, so one caller's answer is never another's.
+    /// </summary>
+    private Task<bool> WholeTenantAsync(CancellationToken cancellationToken) =>
+        permissions.SeesWholeTenantAsync(caller, user, cancellationToken);
 
     /// <summary>
     /// Drops the cached reads of this request and of the tenant list, so no read after a write sees the old state.

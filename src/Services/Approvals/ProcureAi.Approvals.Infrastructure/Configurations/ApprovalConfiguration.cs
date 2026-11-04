@@ -24,6 +24,7 @@ internal sealed class ApprovalStepConfiguration : IEntityTypeConfiguration<Appro
         builder.Property(s => s.RequestNumber).HasColumnName("request_number").HasMaxLength(50).IsRequired();
         builder.Property(s => s.RequestTitle).HasColumnName("request_title").HasMaxLength(200).IsRequired();
         builder.Property(s => s.RequesterId).HasColumnName("requester_id").HasMaxLength(100).IsRequired();
+        builder.Property(s => s.CostCenterCode).HasColumnName("cost_center_code").HasMaxLength(50).IsRequired();
         builder.Property(s => s.TotalInclVat).HasColumnName("total_incl_vat").HasColumnType(MoneyColumn)
             .HasConversion(money => money.Amount, amount => Money.Zar(amount));
         builder.Property(s => s.StepNo).HasColumnName("step_no");

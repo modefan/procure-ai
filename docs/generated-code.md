@@ -25,7 +25,7 @@ both read. Marten 9 generates no code for Audit's documents; only Audit's Wolver
 Regenerate whenever a handler, saga, message type, middleware/policy or the DI registration of a handler dependency changes:
 
 ```powershell
-dotnet build src/Services/<Service>/ProcureAi.<Service>.Api -t:Build;WriteGeneratedCode
+dotnet build src/Services/<Service>/ProcureAi.<Service>.Api "-t:Build;WriteGeneratedCode"
 # all services:
 foreach ($s in 'Access','Approvals','Assistant','Audit','Budgets','Invoicing','Notifications','Purchasing','Requests','Suppliers') {
     dotnet build src/Services/$s/ProcureAi.$s.Api -m:4 "-t:Build;WriteGeneratedCode"
@@ -41,7 +41,7 @@ in a separate command, then run the command above:
 
 ```powershell
 dotnet msbuild src/Services/<Service>/ProcureAi.<Service>.Api -t:CleanGeneratedCode
-dotnet build src/Services/<Service>/ProcureAi.<Service>.Api -t:Build;WriteGeneratedCode
+dotnet build src/Services/<Service>/ProcureAi.<Service>.Api "-t:Build;WriteGeneratedCode"
 ```
 
 The `codegen` run uses the same application assembly as a `Static` start (the API, `Wolverine:GeneratingCode`), so a handler placed in

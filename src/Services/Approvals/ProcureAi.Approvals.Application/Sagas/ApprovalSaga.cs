@@ -719,7 +719,7 @@ public sealed class ApprovalSaga : Saga
             .ToListAsync(cancellationToken);
 
     private ApprovalStep NewStep(PlannedStep planned) =>
-        ApprovalStep.Plan(TenantId, Id, RequestNumber, RequestTitle, RequesterId, Total, planned);
+        ApprovalStep.Plan(TenantId, Id, RequestNumber, RequestTitle, RequesterId, CostCenterCode, Total, planned);
 
     private static void CancelPending(IEnumerable<ApprovalStep> steps)
     {

@@ -36,6 +36,7 @@ namespace Internal.Generated.WolverineHandlers
             Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Wolverine.Runtime.ScopedMessageContextHolder>(serviceScope.ServiceProvider).Context = context;
             // This service has been marked as requiring service location independent of Wolverine's ability to use constructor injection of everything else
             var accessDirectory = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ProcureAi.BuildingBlocks.Application.Access.IAccessDirectory>(serviceScope.ServiceProvider);
+            var callerScopeResolver = new ProcureAi.BuildingBlocks.Application.CallerScopeResolver(callerContext, accessDirectory);
             // This service has been marked as requiring service location independent of Wolverine's ability to use constructor injection of everything else
             var approvalsDbContext = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ProcureAi.Approvals.Application.Abstractions.IApprovalsDbContext>(serviceScope.ServiceProvider);
             // The actual message body
@@ -61,7 +62,7 @@ namespace Internal.Generated.WolverineHandlers
                     System.Diagnostics.Activity.Current?.SetTag("handler.type", "ProcureAi.Approvals.Application.Queries.ApprovalQueriesHandler");
                     
                     // The actual message execution
-                    var outgoing1 = await ProcureAi.Approvals.Application.Queries.ApprovalQueriesHandler.Handle(getApprovalChain, approvalsDbContext, accessDirectory, callerContext, cancellation).ConfigureAwait(false);
+                    var outgoing1 = await ProcureAi.Approvals.Application.Queries.ApprovalQueriesHandler.Handle(getApprovalChain, approvalsDbContext, accessDirectory, callerContext, callerScopeResolver, cancellation).ConfigureAwait(false);
 
                     
                     // Outgoing, cascaded message

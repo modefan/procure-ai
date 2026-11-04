@@ -41,6 +41,9 @@ public sealed class ApprovalStep
 
     public string RequesterId { get; private set; } = "";
 
+    /// <summary>The request's cost center, so the chain can be scoped like the request after the saga is gone ("" on steps planned before it was kept).</summary>
+    public string CostCenterCode { get; private set; } = "";
+
     public Money TotalInclVat { get; private set; }
 
     public int StepNo { get; private set; }
@@ -76,8 +79,8 @@ public sealed class ApprovalStep
     public bool IsOpen => IsPending && DueAt is not null;
 
     public static ApprovalStep Plan(
-        string tenantId, Guid requestId, string requestNumber, string requestTitle, string requesterId, Money totalInclVat,
-        PlannedStep planned)
+        string tenantId, Guid requestId, string requestNumber, string requestTitle, string requesterId, string costCenterCode,
+        Money totalInclVat, PlannedStep planned)
     {
         if (planned.ApproverIds.Contains(requesterId, StringComparer.Ordinal))
         {
@@ -93,6 +96,7 @@ public sealed class ApprovalStep
             RequestNumber = requestNumber,
             RequestTitle = requestTitle,
             RequesterId = requesterId,
+            CostCenterCode = costCenterCode,
             TotalInclVat = totalInclVat,
             StepNo = planned.StepNo,
             Level = planned.Level,

@@ -35,7 +35,8 @@ namespace ProcureAi.Approvals.Api.Controllers;
 [Route("api/v{version:apiVersion}/approvals")]
 [RequireTenant]
 public sealed class ApprovalsController(
-    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, ILogger<ApprovalsController> logger) : ControllerBase
+    IMessageBus bus, ICacheInvalidator cache, ICurrentUser user, ICallerContext caller, IPermissionProvider permissions,
+    ILogger<ApprovalsController> logger) : ControllerBase
 {
     /// <summary>
     /// Approve and reject run in the request's saga, in process. A saga message that lost a race is retried inline
@@ -109,14 +110,18 @@ public sealed class ApprovalsController(
         return await ActedAsync(step, ApprovalStepStatus.Rejected);
     }
 
-    /// <summary>The approval chain of a request: its state and every step, with what the caller may do on each.</summary>
+    /// <summary>
+    /// The approval chain of a request: its state and every step, with what the caller may do on each. Scoped like the request
+    /// (requester, its cost center's people, the tenant admin, the admin key) plus the approvers of its steps; anyone else gets 404.
+    /// </summary>
     [HttpGet("requests/{requestId:guid}", Name = "GetApprovalChain")]
     [CachedGet(Tags = [ApprovalCacheTag.ChainTemplate])]
     [RequirePermission(Permissions.RequestsRead)]
     [ProducesResponseType<ApprovalChainDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApprovalChainDto>> Chain(Guid requestId, CancellationToken cancellationToken) =>
-        await bus.InvokeAsync<ApprovalChainDto>(new GetApprovalChain(requestId), cancellationToken);
+        await bus.InvokeAsync<ApprovalChainDto>(
+            new GetApprovalChain(requestId, await permissions.SeesWholeTenantAsync(caller, user, cancellationToken)), cancellationToken);
 
     /// <summary>Who would approve a request of <c>amount</c> (Rand incl. VAT) on <c>costCenter</c> raised by the caller, or why nobody can.</summary>
     [HttpGet("preview", Name = "PreviewApproval")]
