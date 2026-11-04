@@ -19,6 +19,8 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: {{ .Values.migration.backoffLimit }}
+  # A missing Postgres or a hung migration fails the hook visibly (and with it the sync) instead of blocking it forever.
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
   template:
     metadata:
       labels:
@@ -37,12 +39,20 @@ spec:
           args:
             - |
               set -eu
-              until pg_isready -h postgres -p 5432 -U postgres -q; do echo "waiting for postgres"; sleep 2; done
+              tries=0
+              until pg_isready -h postgres -p 5432 -U postgres -q; do
+                tries=$((tries + 1))
+                if [ "$tries" -ge "$WAIT_TRIES" ]; then echo "postgres not ready after $WAIT_TRIES tries" >&2; exit 1; fi
+                echo "waiting for postgres"; sleep 2
+              done
               exists=$(psql -h postgres -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DATABASE'")
               if [ "$exists" != "1" ]; then psql -h postgres -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$DATABASE\""; fi
           env:
             - name: DATABASE
               value: {{ . | quote }}
+            # pg_isready attempts, 2 s apart, before the init container gives up (the Job's backoffLimit retries it).
+            - name: WAIT_TRIES
+              value: {{ $.Values.migration.postgresWaitTries | quote }}
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

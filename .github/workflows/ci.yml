@@ -153,6 +153,54 @@ jobs:
             exit 1
           fi
 
+  charts:
+    # Chart checks (plan 07 ruling 9): seconds, no containers, so not behind TESTS-OFF. Tool versions pinned as on the PC (plan 07 Task 2).
+    name: Helm charts (lint, unittest, kubeconform)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      HELM_VERSION: v3.20.0
+      HELM_UNITTEST_VERSION: v1.2.1
+      KUBECONFORM_VERSION: v0.8.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm, helm-unittest and kubeconform
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar -xz -C /tmp
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}"
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C /tmp
+          sudo install /tmp/kubeconform /usr/local/bin/kubeconform
+          helm version --short && helm unittest --help > /dev/null && kubeconform -v
+
+      - name: Build the umbrella's dependencies
+        run: helm dependency build deploy/charts/procure-ai --skip-refresh
+
+      - name: helm lint
+        run: |
+          set -euo pipefail
+          helm lint deploy/charts/procure-platform --set global.imageTag=ci
+          helm lint deploy/charts/procure-app --set global.imageTag=ci --set name=ci-api --set image.repository=procure-ai-ci
+          helm lint deploy/charts/procure-ai --set global.imageTag=ci --set global.demo.seed=true --set global.demo.reset=true
+
+      - name: helm unittest
+        run: helm unittest deploy/charts/procure-platform deploy/charts/procure-app deploy/charts/procure-ai
+
+      - name: kubeconform -strict
+        run: |
+          set -euo pipefail
+          helm template procure-platform deploy/charts/procure-platform --namespace procure --set global.imageTag=ci \
+            | kubeconform -strict -summary
+          helm template ci-app deploy/charts/procure-app --namespace procure --set global.imageTag=ci --set name=ci-api \
+              --set image.repository=procure-ai-ci --set migration.enabled=true --set migration.createPostgresDatabase=cidb \
+              --set ingress.enabled=true --set ingress.host=ci.example.test \
+            | kubeconform -strict -summary
+          helm template procure-ai deploy/charts/procure-ai --namespace procure --set global.imageTag=ci \
+              --set global.demo.seed=true --set global.demo.reset=true \
+            | kubeconform -strict -summary
+
   images:
     name: Container images (build only, no push)
     runs-on: ubuntu-24.04

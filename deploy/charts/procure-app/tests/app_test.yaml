@@ -99,6 +99,23 @@ tests:
       - hasDocuments:
           count: 0
 
+  - it: the migration has a deadline
+    template: migrate-job.yaml
+    set:
+      migration.createPostgresDatabase: requestsdb
+    asserts:
+      - equal:
+          path: spec.activeDeadlineSeconds
+          value: 900
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: WAIT_TRIES
+            value: "60"
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: 'tries" -ge "\$WAIT_TRIES" \]; then .*exit 1'
+
   - it: a postgres migration creates its database first
     template: migrate-job.yaml
     set:

@@ -66,6 +66,10 @@ migration:
   # A Postgres database to create before migrating, as the AppHost's AddDatabase does ("" for none; MongoDB creates its own).
   createPostgresDatabase: ""
   backoffLimit: 6
+  # The whole Job (every attempt) must finish within this; then it fails and the sync stops with it.
+  activeDeadlineSeconds: 900
+  # create-database: pg_isready attempts 2 s apart before an attempt fails.
+  postgresWaitTries: 60
 
 ingress:
   enabled: false
@@ -74,14 +78,13 @@ ingress:
   paths:
     - /
 
-# Per container. The .NET heap is capped at DOTNET_GCHeapHardLimit (256 MiB), but the process needs more around it. Measured on k3d
-# (plan 07 Task 5, during the demo seed): the APIs that use Wolverine reached 450-730 MiB RSS, nearly all of it native (glibc malloc)
-# memory that grows in bursts as handlers are first used (Wolverine compiles its generated handler code at run time); Suppliers, the
-# gateway and the simulators stay at 110-150 MiB. 512Mi and 768Mi got the Wolverine APIs OOMKilled. See the task report: pre-generated
-# Wolverine code (TypeLoadMode.Static) is the fix, after which these numbers can come down.
+# Per container. The .NET heap is capped at DOTNET_GCHeapHardLimit (256 MiB), but the process needs more around it: the APIs that use
+# Wolverine reached 450-880 MiB RSS during the demo seed on k3d, nearly all native memory that grows in bursts as handlers are first
+# used (plan 07 Task 5; Task 5b moves Wolverine to pre-generated code). Requests are the measured working set so the scheduler is honest;
+# the umbrella sets each app's own measurement. This default fits a typical Wolverine API.
 resources:
   limits: { memory: 1Gi, cpu: "1" }
-  requests: { memory: 384Mi, cpu: 50m }
+  requests: { memory: 640Mi, cpu: 50m }
 
 # DOTNET_GCHeapHardLimit / DOTNET_gcServer / DOTNET_GCConserveMemory from global.dotnet unless set here; off for the web app.
 dotnet:

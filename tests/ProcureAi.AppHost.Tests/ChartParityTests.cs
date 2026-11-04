@@ -177,6 +177,32 @@ public sealed partial class ChartParityTests
         }
     }
 
+    /// <summary>
+    /// Every container the umbrella renders (each app's Deployment and migration Job with the umbrella's per-app overrides, the demo data,
+    /// init containers too) has memory and CPU requests and limits (Global Constraints). helm-unittest cannot render the aliased subcharts
+    /// from the umbrella, so this is checked here on the <c>helm template</c> output.
+    /// </summary>
+    [Fact]
+    public async Task Every_rendered_container_has_requests_and_limits()
+    {
+        var helm = Helm.FindOnPath();
+        if (helm is null)
+        {
+            Assert.Skip("helm is not on PATH: the umbrella chart cannot be rendered (CI's charts job and the PC have it).");
+        }
+
+        foreach (var (label, rendered) in await Helm.RenderUmbrellaVariantsAsync(helm))
+        {
+            var containers = RenderedChart.Containers(rendered);
+            containers.Count.ShouldBeGreaterThan(30, label);
+            containers.Where(c => !ResourcesBlock().IsMatch(c.Block)).Select(c => c.Name)
+                .ShouldBeEmpty($"{label}: containers without memory and cpu requests and limits");
+        }
+    }
+
+    [GeneratedRegex(@"\n\s+resources:\s*\n\s+limits:\s*\n\s+cpu: \S+\s*\n\s+memory: \S+\s*\n\s+requests:\s*\n\s+cpu: \S+\s*\n\s+memory: \S+")]
+    private static partial Regex ResourcesBlock();
+
     /// <summary>The environment variable names (and plain values) of every app resource of the AppHost model: projects and the web app.</summary>
     private static async Task<Dictionary<string, Dictionary<string, string?>>> AppHostEnvironmentsAsync()
     {
@@ -300,6 +326,52 @@ public sealed partial class ChartParityTests
                 var line = lines.FirstOrDefault(l => l.StartsWith("  replicas: ", StringComparison.Ordinal));
                 line.ShouldNotBeNull($"Deployment {Name(lines)} sets no replicas");
                 result[$"Deployment/{Name(lines)}"] = int.Parse(line["  replicas: ".Length..].Trim(), CultureInfo.InvariantCulture);
+            }
+
+            return result;
+        }
+
+        /// <summary>Every entry under <c>containers:</c> or <c>initContainers:</c> of every workload: <c>Kind/name/container</c> and its text.</summary>
+        public static List<(string Name, string Block)> Containers(string rendered)
+        {
+            var result = new List<(string, string)>();
+            foreach (var lines in Documents(rendered))
+            {
+                var kind = Kind(lines);
+                if (kind is not ("Deployment" or "Job" or "CronJob" or "StatefulSet"))
+                {
+                    continue;
+                }
+
+                for (var i = 0; i < lines.Length; i++)
+                {
+                    if (lines[i].Trim() is not ("containers:" or "initContainers:"))
+                    {
+                        continue;
+                    }
+
+                    var listIndent = Indent(lines[i]);
+                    var j = i + 1;
+                    while (j < lines.Length && (lines[j].Trim().Length == 0 || Indent(lines[j]) > listIndent
+                        || (Indent(lines[j]) == listIndent && lines[j].TrimStart().StartsWith('-'))))
+                    {
+                        var itemIndent = Indent(lines[j]);
+                        if (!lines[j].TrimStart().StartsWith("- name: ", StringComparison.Ordinal))
+                        {
+                            j++;
+                            continue;
+                        }
+
+                        var start = j++;
+                        while (j < lines.Length && (lines[j].Trim().Length == 0 || Indent(lines[j]) > itemIndent))
+                        {
+                            j++;
+                        }
+
+                        var name = lines[start].Trim()["- name: ".Length..];
+                        result.Add(($"{kind}/{Name(lines)}/{name}", "\n" + string.Join('\n', lines[start..j])));
+                    }
+                }
             }
 
             return result;
