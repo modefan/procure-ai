@@ -46,6 +46,16 @@ public sealed class CodeGenerationSetupTests
     }
 
     [Fact]
+    public void The_codegen_run_uses_the_same_application_assembly_as_a_static_start()
+    {
+        // Wolverine scans its application assembly for handlers: generation must see the same handlers Static loads.
+        var options = new Wolverine.WolverineOptions();
+        options.ApplicationAssembly = typeof(CodeGenerationSetup).Assembly;
+        options.UsePreGeneratedCodeOfTheApi(Config(("Wolverine:GeneratingCode", "true")));
+        options.ApplicationAssembly.ShouldBe(System.Reflection.Assembly.GetEntryAssembly());
+    }
+
+    [Fact]
     public void Dynamic_leaves_the_application_assembly_alone()
     {
         var options = new Wolverine.WolverineOptions();

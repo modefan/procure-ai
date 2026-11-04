@@ -127,27 +127,35 @@ jobs:
       - run: npx ng test --watch=false
         if: false # TESTS-OFF
 
-      # Every Api project writes its openapi/<name>-v1.json when built; the list is discovered, so a new service is covered at once.
-      - name: Regenerate OpenAPI documents and API client
+      # Every Api project writes its openapi/<name>-v1.json when built, and WriteGeneratedCode rewrites its pre-generated Wolverine code
+      # (Internal/Generated, run by the images in Static mode: docs/generated-code.md). The list is discovered, so a new service is
+      # covered at once.
+      - name: Regenerate OpenAPI documents, API client and Wolverine code
         run: |
           for api in ../../Services/*/ProcureAi.*.Api; do
-            dotnet build "$api" -c Release -m:4
+            dotnet build "$api" -c Release -m:4 "-t:Build;WriteGeneratedCode"
           done
           npm run generate:api
 
-      - name: Fail on client drift
+      - name: Fail on client or generated-code drift
         working-directory: .
         run: |
-          paths="$(find src/Services -type d -path '*.Api/openapi' | sort | xargs) src/Web/procure-ai-web/src/app/api"
+          paths="$(find src/Services -type d \( -path '*.Api/openapi' -o -path '*.Api/Internal/Generated' \) | sort | xargs) src/Web/procure-ai-web/src/app/api"
           echo "Checking: $paths"
           # Guard against the discovery silently finding nothing: every Api project must have written exactly one document.
           apis="$(find src/Services -maxdepth 2 -type d -name 'ProcureAi.*.Api' | wc -l)"
           docs="$(find src/Services -path '*.Api/openapi/*-v1.json' | wc -l)"
           if [ "$apis" -eq 0 ] || [ "$apis" -ne "$docs" ]; then echo "::error::Found $apis Api projects but $docs OpenAPI documents."; exit 1; fi
+          # ... and every Api project must have non-empty generated Wolverine code.
+          for api in $(find src/Services -maxdepth 2 -type d -name 'ProcureAi.*.Api' | sort); do
+            if [ -z "$(find "$api/Internal/Generated" -name '*.cs' 2>/dev/null | head -1)" ]; then
+              echo "::error::$api has no generated Wolverine code in Internal/Generated."; exit 1
+            fi
+          done
           # git status also lists new untracked files, which git diff would miss.
           drift="$(git status --porcelain -- $paths)"
           if [ -n "$drift" ]; then
-            echo "::error::Generated OpenAPI document or API client differs from what is committed. Regenerate and commit."
+            echo "::error::Generated OpenAPI document, API client or Wolverine code differs from what is committed. Regenerate and commit (docs/generated-code.md)."
             echo "$drift"
             git diff -- $paths | head -200
             exit 1

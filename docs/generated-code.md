@@ -36,12 +36,24 @@ foreach ($s in 'Access','Approvals','Assistant','Audit','Budgets','Invoicing','N
 `ProcureAi.<Service>.Api codegen write` with the OpenAPI step's placeholder settings and `ASPNETCORE_ENVIRONMENT=Production` (the host
 is built, never started; nothing connects). Commit the result.
 
-If the build fails because old generated code no longer compiles (a handler was removed or its signature changed), delete
-`Internal/Generated` first, then run the command above.
+If the build fails because old generated code no longer compiles (a handler was removed or its signature changed), remove it first
+in a separate command, then run the command above:
 
-## The guard
+```powershell
+dotnet msbuild src/Services/<Service>/ProcureAi.<Service>.Api -t:CleanGeneratedCode
+dotnet build src/Services/<Service>/ProcureAi.<Service>.Api -t:Build;WriteGeneratedCode
+```
 
-`tests/ProcureAi.ArchitectureTests/GeneratedCodeTests` writes a fresh copy of every service's code into a temp folder and compares it
+The `codegen` run uses the same application assembly as a `Static` start (the API, `Wolverine:GeneratingCode`), so a handler placed in
+an API project is generated too, not only the ones in the service's Application assembly and BuildingBlocks.Messaging.
+
+## The guards
+
+**CI (build-time, runs while tests are off):** the client-drift job of `.github/workflows/ci.yml` builds every API with
+`-t:Build;WriteGeneratedCode` and fails when `Internal/Generated` differs from what is committed (new, deleted or changed files, via
+`git status --porcelain`) or when an API has no generated code. A stale file that no longer compiles fails the build itself.
+
+**Locally:** `tests/ProcureAi.ArchitectureTests/GeneratedCodeTests` writes a fresh copy of every service's code into a temp folder and compares it
 file by file with the committed one (missing or stale code fails), and checks that each API image runs `Static`. Run it after
 regenerating:
 
@@ -49,8 +61,12 @@ regenerating:
 dotnet run --project tests/ProcureAi.ArchitectureTests -- -class "*GeneratedCodeTests"
 ```
 
-## Caveat
+## Caveats
 
-The generated code inlines `new X(...)` for dependencies Wolverine can construct itself. It is generated with the Production
-registrations; a dependency whose concrete type depends on configuration (e.g. an AI provider) must stay behind an interface that is
-injected or resolved (`AlwaysUseServiceLocationFor<T>()`), never inlined. Today only configuration-independent types are inlined.
+- Code is generated with placeholder Production settings. Wolverine setup (handlers, middleware, policies) must not branch on
+  deployment configuration; if it ever must, both variants need generated code, or the image runs the variant generated here.
+- Marten 9 writes no code for Audit's documents today. If Marten ever needs generated code (e.g. compiled queries or projections),
+  `codegen write` writes it too, and the CI drift check shows the new files until they are committed.
+- The generated code inlines `new X(...)` for dependencies Wolverine can construct itself. It is generated with the Production
+  registrations; a dependency whose concrete type depends on configuration (e.g. an AI provider) must stay behind an interface that is
+  injected or resolved (`AlwaysUseServiceLocationFor<T>()`), never inlined. Today only configuration-independent types are inlined.

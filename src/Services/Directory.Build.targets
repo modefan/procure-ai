@@ -52,6 +52,15 @@
     <GeneratedCodeDirectory Condition="'$(GeneratedCodeDirectory)' == ''">$(MSBuildProjectDirectory)/Internal/Generated</GeneratedCodeDirectory>
   </PropertyGroup>
 
+  <!--
+    After a change that makes the old generated code stop compiling (a handler removed or its signature changed), Build fails before
+    WriteGeneratedCode can run. Remove the old code first, in its own invocation (the next one evaluates the project without it):
+      dotnet msbuild src/Services/<S>/ProcureAi.<S>.Api -t:CleanGeneratedCode
+  -->
+  <Target Name="CleanGeneratedCode" Condition="'$(IsServiceApi)' == 'true'">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)/Internal/Generated" />
+  </Target>
+
   <Target Name="WriteGeneratedCode" Condition="'$(IsServiceApi)' == 'true'">
     <RemoveDir Directories="$(GeneratedCodeDirectory)" />
     <Exec EnvironmentVariables="$(OpenApiPlaceholderSettings);DOTNET_ENVIRONMENT=Production;ASPNETCORE_ENVIRONMENT=Production;Wolverine__TypeLoadMode=Dynamic;Wolverine__GeneratedCodeOutputPath=$(GeneratedCodeDirectory)"

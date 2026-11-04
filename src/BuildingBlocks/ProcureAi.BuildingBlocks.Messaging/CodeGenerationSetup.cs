@@ -25,6 +25,9 @@ public static class CodeGenerationSetup
     public const string TypeLoadModeSetting = "Wolverine:TypeLoadMode";
     public const string GeneratedCodeOutputPathSetting = "Wolverine:GeneratedCodeOutputPath";
 
+    /// <summary><c>true</c> while the API runs its <c>codegen</c> command (set by <c>ServiceHost</c>).</summary>
+    public const string GeneratingCodeSetting = "Wolverine:GeneratingCode";
+
     public static IServiceCollection AddProcureAiCodeGeneration(this IServiceCollection services, IConfiguration configuration)
     {
         var mode = TypeLoadModeFrom(configuration);
@@ -50,13 +53,16 @@ public static class CodeGenerationSetup
 
     /// <summary>
     /// Points Wolverine at the assembly that holds the pre-generated types: the service API (the entry assembly), where
-    /// <c>Internal/Generated</c> is compiled. Left alone in <c>Dynamic</c> mode (nothing is loaded from it; tests keep their defaults).
-    /// Without it Wolverine guesses the assembly that called <c>UseWolverine</c> setup code (BuildingBlocks.Messaging) and, in
-    /// <c>Static</c> mode, finds none of the types.
+    /// <c>Internal/Generated</c> is compiled. Wolverine also scans that assembly for handlers, so the <c>codegen</c> run
+    /// (<see cref="GeneratingCodeSetting"/>) uses the same assembly as a <c>Static</c> start: a handler placed in the API project is then
+    /// in the generated code too. Left alone in <c>Dynamic</c> mode otherwise (nothing is loaded from it; in tests the entry assembly is
+    /// the test runner). Without it Wolverine guesses the assembly that called the <c>UseWolverine</c> setup code
+    /// (BuildingBlocks.Messaging) and, in <c>Static</c> mode, finds none of the types.
     /// </summary>
     public static WolverineOptions UsePreGeneratedCodeOfTheApi(this WolverineOptions options, IConfiguration configuration)
     {
-        if (TypeLoadModeFrom(configuration) != TypeLoadMode.Dynamic && Assembly.GetEntryAssembly() is { } api)
+        var usesTheApiAssembly = TypeLoadModeFrom(configuration) != TypeLoadMode.Dynamic || configuration.GetValue<bool>(GeneratingCodeSetting);
+        if (usesTheApiAssembly && Assembly.GetEntryAssembly() is { } api)
         {
             options.ApplicationAssembly = api;
         }

@@ -65,6 +65,12 @@ public static class ServiceHost
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { [MigratingSetting] = "true" });
         }
 
+        if (args.Length > 0 && args[0] == CodegenCommand)
+        {
+            // Generate for the same application assembly (the API) a Static start loads from (CodeGenerationSetup).
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { [CodeGenerationSetup.GeneratingCodeSetting] = "true" });
+        }
+
         builder.AddProcureAiWeb(serviceName);
         builder.AddProcureAiCaching();
 
