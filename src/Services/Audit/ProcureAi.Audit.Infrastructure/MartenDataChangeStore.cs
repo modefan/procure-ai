@@ -169,6 +169,16 @@ public sealed class MartenDataChangeStore(IDocumentStore store, TimeProvider clo
         return new PagedResult<DataChange>(items, page, pageSize, (int)stats.TotalResults);
     }
 
+    public async Task<DataChange?> LatestRowOfSubjectAsync(
+        string tenantId, string database, string table, Guid subjectId, CancellationToken cancellationToken)
+    {
+        await using var session = store.QuerySession();
+        return await session.Query<DataChange>()
+            .Where(c => c.TenantId == tenantId && c.SubjectId == subjectId && c.Database == database && c.Table == table)
+            .OrderByDescending(c => c.CommittedAt).ThenByDescending(c => c.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<PagedResult<DataChange>> SearchAsync(
         DataChangeFilter filter, int page, int pageSize, CancellationToken cancellationToken)
     {

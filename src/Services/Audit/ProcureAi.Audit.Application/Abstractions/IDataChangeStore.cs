@@ -48,6 +48,9 @@ public interface IDataChangeStore
     /// <summary>The changes of one tenant about one purchase request, oldest first.</summary>
     Task<PagedResult<DataChange>> ForSubjectAsync(string tenantId, Guid subjectId, int page, int pageSize, CancellationToken cancellationToken);
 
+    /// <summary>The newest stored change of one tenant's row of <paramref name="database"/>.<paramref name="table"/> about one request; null when there is none.</summary>
+    Task<DataChange?> LatestRowOfSubjectAsync(string tenantId, string database, string table, Guid subjectId, CancellationToken cancellationToken);
+
     /// <summary>The data-change log, newest first.</summary>
     Task<PagedResult<DataChange>> SearchAsync(DataChangeFilter filter, int page, int pageSize, CancellationToken cancellationToken);
 

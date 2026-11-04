@@ -8,8 +8,11 @@ using ProcureAi.BuildingBlocks.Application;
 
 namespace ProcureAi.Audit.Application.Queries;
 
-/// <summary>The data changes of one purchase request of the caller tenant, across services, oldest first (screen 7, "Data changes").</summary>
-public sealed record GetRequestDataChanges(Guid RequestId, int Page, int PageSize);
+/// <summary>
+/// The data changes of one purchase request of the caller tenant, across services, oldest first (screen 7, "Data changes"), for
+/// callers who may read the request (<see cref="RequestReadScope"/>; <paramref name="WholeTenant"/> is decided by the Api).
+/// </summary>
+public sealed record GetRequestDataChanges(Guid RequestId, int Page, int PageSize, bool WholeTenant = false);
 
 /// <summary>
 /// The data-change log (screen 24). A user sees the changes of their own tenant; the admin API key without a tenant sees every
@@ -20,16 +23,22 @@ public sealed record SearchDataChanges(
 
 public static class DataChangeQueriesHandler
 {
-    /// <summary>404 when the tenant has no change about the request (another tenant's request looks the same as none).</summary>
+    /// <summary>
+    /// 404 when the tenant has no change about the request (another tenant's request looks the same as none) and when the request is
+    /// outside the caller's scope.
+    /// </summary>
     public static async Task<PagedResult<DataChangeDto>> Handle(
-        GetRequestDataChanges query, ICallerContext caller, IDataChangeStore store,
-        CancellationToken cancellationToken)
+        GetRequestDataChanges query, ICallerContext caller, ICallerScope scope, IDataChangeStore store, IAuditStore events,
+        IOptions<AuditOptions> options, CancellationToken cancellationToken)
     {
-        var tenant = caller.TenantId ?? throw new NotFoundException($"No data changes for request {query.RequestId}.");
+        var notFound = $"No data changes for request {query.RequestId}.";
+        var tenant = caller.TenantId ?? throw new NotFoundException(notFound);
+        await RequestReadScope.EnsureReadableAsync(
+            query.RequestId, tenant, query.WholeTenant, scope, events, store, options.Value.RequestScope, notFound, cancellationToken);
         var page = await store.ForSubjectAsync(tenant, query.RequestId, query.Page, query.PageSize, cancellationToken);
         if (page.Total == 0)
         {
-            throw new NotFoundException($"No data changes for request {query.RequestId}.");
+            throw new NotFoundException(notFound);
         }
 
         return DataChangeView.ToDto(page);

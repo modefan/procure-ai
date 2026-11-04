@@ -41,6 +41,7 @@ namespace Internal.Generated.WolverineHandlers
             var callerContext = new ProcureAi.BuildingBlocks.Messaging.CallerContext(currentUser, incomingMessage, _serviceIdentity);
             // This service has been marked as requiring service location independent of Wolverine's ability to use constructor injection of everything else
             var accessDirectory = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ProcureAi.BuildingBlocks.Application.Access.IAccessDirectory>(serviceScope.ServiceProvider);
+            var callerScopeResolver = new ProcureAi.BuildingBlocks.Application.CallerScopeResolver(callerContext, accessDirectory);
             // The actual message body
             var getActivity = (ProcureAi.Audit.Application.Queries.GetActivity)context.Envelope.Message;
 
@@ -51,7 +52,7 @@ namespace Internal.Generated.WolverineHandlers
                 System.Diagnostics.Activity.Current?.SetTag("handler.type", "ProcureAi.Audit.Application.Queries.GetActivityHandler");
                 
                 // The actual message execution
-                var outgoing1 = await ProcureAi.Audit.Application.Queries.GetActivityHandler.Handle(getActivity, callerContext, _auditStore, accessDirectory, _optionsOfAuditOptions, _loggerForMessage, cancellation).ConfigureAwait(false);
+                var outgoing1 = await ProcureAi.Audit.Application.Queries.GetActivityHandler.Handle(getActivity, callerContext, callerScopeResolver, _auditStore, accessDirectory, _optionsOfAuditOptions, _loggerForMessage, cancellation).ConfigureAwait(false);
 
                 
                 // Outgoing, cascaded message

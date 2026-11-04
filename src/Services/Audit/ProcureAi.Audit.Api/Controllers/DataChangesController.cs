@@ -19,11 +19,11 @@ namespace ProcureAi.Audit.Api.Controllers;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/audit")]
-public sealed class DataChangesController(IMessageBus bus) : ControllerBase
+public sealed class DataChangesController(IMessageBus bus, ICurrentUser user, ICallerContext caller, IPermissionProvider permissions) : ControllerBase
 {
     /// <summary>
     /// The data changes of a purchase request of the caller tenant across services (request, lines, budget reservation), oldest
-    /// first. 404 when the tenant has no change for it.
+    /// first. 404 when the tenant has no change for it, and when the request is outside the caller's scope (the Requests read rule).
     /// </summary>
     [HttpGet("requests/{requestId:guid}/data-changes", Name = "GetRequestDataChanges")]
     [CachedGet]
@@ -36,7 +36,9 @@ public sealed class DataChangesController(IMessageBus bus) : ControllerBase
         Guid requestId, [FromQuery] PagingQuery paging, CancellationToken cancellationToken = default)
     {
         return await bus.InvokeAsync<PagedResult<DataChangeDto>>(
-            new GetRequestDataChanges(requestId, paging.Page, paging.Size()), cancellationToken);
+            new GetRequestDataChanges(
+                requestId, paging.Page, paging.Size(), await permissions.SeesWholeTenantAsync(caller, user, cancellationToken)),
+            cancellationToken);
     }
 
     /// <summary>

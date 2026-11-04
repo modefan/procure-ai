@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using ProcureAi.Approvals.Application.Dtos;
 using ProcureAi.Approvals.Application.Sagas;
 using ProcureAi.Contracts;
+using Npgsql;
 using Shouldly;
 using static ProcureAi.Approvals.IntegrationTests.ApprovalsApp;
 
@@ -30,6 +31,7 @@ public sealed class ChainScopeTests(ApprovalsApp app)
     {
         var tenant = NewTenant();
         app.UseAcme(tenant);
+        app.Access.SetDisplayName(tenant, DemoUsers.Tom, "Tom Mokoena");
         app.Access.SetCostCenters(tenant, "alice", "CC-100");
         app.Access.SetCostCenters(tenant, "mia", CostCenter);
         app.Access.SetCostCenters(tenant, "ada");
@@ -63,7 +65,9 @@ public sealed class ChainScopeTests(ApprovalsApp app)
 
         using var alice = await ChainAsync(client, id, tenant, "alice");
         alice.StatusCode.ShouldBe(HttpStatusCode.NotFound, "Alice acts for CC-100 only");
-        (await alice.Content.ReadAsStringAsync(Ct)).ShouldNotContain(steps[0].Id.ToString());
+        var body = await alice.Content.ReadAsStringAsync(Ct);
+        body.ShouldNotContain(steps[0].Id.ToString());
+        body.ShouldNotContain("Tom Mokoena");
 
         foreach (var (who, user, role) in new (string, string?, string)[]
                  {
@@ -110,5 +114,59 @@ public sealed class ChainScopeTests(ApprovalsApp app)
         alice.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         mia.StatusCode.ShouldBe(HttpStatusCode.OK, "the step keeps the request's cost center");
         (await Main.StepsAsync(id)).ShouldAllBe(s => s.CostCenterCode == CostCenter);
+    }
+
+    [Fact]
+    public async Task A_chain_without_a_stored_cost_center_fails_closed_for_a_colleague()
+    {
+        // A step planned before the migration kept no cost center, and its saga is gone: only the requester and the approvers can
+        // be told, so a colleague of IT-200 who is no approver gets 404 (narrower, never wider).
+        var (tenant, id, steps) = await TomsChainAsync();
+        await Main.InvokeAsync(new RejectStep(id, steps[0].Id, steps[0].Version, "Too expensive"), tenant, DemoUsers.Maria);
+        await Main.WaitForSagaAsync(id, saga => saga is null, EventTimeout);
+        await using (var connection = new NpgsqlConnection(Main.DbConnectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = new NpgsqlCommand("UPDATE approval_steps SET cost_center_code = '' WHERE request_id = @id", connection);
+            command.Parameters.AddWithValue("id", id);
+            (await command.ExecuteNonQueryAsync(Ct)).ShouldBeGreaterThan(0);
+        }
+
+        using var client = Main.CreateClient();
+        using var mia = await ChainAsync(client, id, tenant, "mia");
+        using var tom = await ChainAsync(client, id, tenant, DemoUsers.Tom);
+        using var maria = await ChainAsync(client, id, tenant, DemoUsers.Maria, "manager");
+
+        mia.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        tom.StatusCode.ShouldBe(HttpStatusCode.OK);
+        maria.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task An_approver_of_a_step_reads_the_chain_without_the_cost_center_in_Access()
+    {
+        // Maria approves step 1 but Access (now) assigns her only CC-100: the approver clause alone lets her read the chain.
+        var (tenant, id, _) = await TomsChainAsync();
+        app.Access.SetCostCenters(tenant, DemoUsers.Maria, "CC-100");
+        using var client = Main.CreateClient();
+
+        using var maria = await ChainAsync(client, id, tenant, DemoUsers.Maria, "manager");
+
+        maria.StatusCode.ShouldBe(HttpStatusCode.OK, await maria.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Concurrent_reads_by_in_scope_and_out_of_scope_callers_are_not_coalesced()
+    {
+        var (tenant, id, _) = await TomsChainAsync();
+        using var client = Main.CreateClient();
+
+        var reads = await Task.WhenAll(Enumerable.Range(0, 6).Select(i => ChainAsync(client, id, tenant, i % 2 == 0 ? DemoUsers.Tom : "alice")));
+
+        for (var i = 0; i < reads.Length; i++)
+        {
+            reads[i].StatusCode.ShouldBe(i % 2 == 0 ? HttpStatusCode.OK : HttpStatusCode.NotFound, $"read {i}");
+            reads[i].Dispose();
+        }
     }
 }

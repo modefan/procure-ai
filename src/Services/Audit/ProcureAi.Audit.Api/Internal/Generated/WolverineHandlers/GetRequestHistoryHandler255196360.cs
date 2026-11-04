@@ -19,9 +19,10 @@ namespace Internal.Generated.WolverineHandlers
         private readonly Microsoft.Extensions.Options.IOptions<ProcureAi.Audit.Application.AuditOptions> _optionsOfAuditOptions;
         private readonly Microsoft.Extensions.Options.IOptions<ProcureAi.BuildingBlocks.Web.Auth.AuthOptions> _optionsOfAuthOptions;
         private readonly ProcureAi.Audit.Application.Abstractions.IAuditStore _auditStore;
+        private readonly ProcureAi.Audit.Application.Abstractions.IDataChangeStore _dataChangeStore;
         private readonly ProcureAi.BuildingBlocks.Application.ServiceIdentity _serviceIdentity;
 
-        public GetRequestHistoryHandler255196360(Microsoft.AspNetCore.Http.IHttpContextAccessor httpContextAccessor, Microsoft.Extensions.DependencyInjection.IServiceScopeFactory serviceScopeFactory, Microsoft.Extensions.Logging.ILogger<ProcureAi.Audit.Application.Queries.GetRequestHistory> loggerForMessage, Microsoft.Extensions.Options.IOptions<ProcureAi.Audit.Application.AuditOptions> optionsOfAuditOptions, Microsoft.Extensions.Options.IOptions<ProcureAi.BuildingBlocks.Web.Auth.AuthOptions> optionsOfAuthOptions, ProcureAi.Audit.Application.Abstractions.IAuditStore auditStore, ProcureAi.BuildingBlocks.Application.ServiceIdentity serviceIdentity)
+        public GetRequestHistoryHandler255196360(Microsoft.AspNetCore.Http.IHttpContextAccessor httpContextAccessor, Microsoft.Extensions.DependencyInjection.IServiceScopeFactory serviceScopeFactory, Microsoft.Extensions.Logging.ILogger<ProcureAi.Audit.Application.Queries.GetRequestHistory> loggerForMessage, Microsoft.Extensions.Options.IOptions<ProcureAi.Audit.Application.AuditOptions> optionsOfAuditOptions, Microsoft.Extensions.Options.IOptions<ProcureAi.BuildingBlocks.Web.Auth.AuthOptions> optionsOfAuthOptions, ProcureAi.Audit.Application.Abstractions.IAuditStore auditStore, ProcureAi.Audit.Application.Abstractions.IDataChangeStore dataChangeStore, ProcureAi.BuildingBlocks.Application.ServiceIdentity serviceIdentity)
         {
             _httpContextAccessor = httpContextAccessor;
             _serviceScopeFactory = serviceScopeFactory;
@@ -29,6 +30,7 @@ namespace Internal.Generated.WolverineHandlers
             _optionsOfAuditOptions = optionsOfAuditOptions;
             _optionsOfAuthOptions = optionsOfAuthOptions;
             _auditStore = auditStore;
+            _dataChangeStore = dataChangeStore;
             _serviceIdentity = serviceIdentity;
         }
 
@@ -41,6 +43,7 @@ namespace Internal.Generated.WolverineHandlers
             var callerContext = new ProcureAi.BuildingBlocks.Messaging.CallerContext(currentUser, incomingMessage, _serviceIdentity);
             // This service has been marked as requiring service location independent of Wolverine's ability to use constructor injection of everything else
             var accessDirectory = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ProcureAi.BuildingBlocks.Application.Access.IAccessDirectory>(serviceScope.ServiceProvider);
+            var callerScopeResolver = new ProcureAi.BuildingBlocks.Application.CallerScopeResolver(callerContext, accessDirectory);
             // The actual message body
             var getRequestHistory = (ProcureAi.Audit.Application.Queries.GetRequestHistory)context.Envelope.Message;
 
@@ -51,7 +54,7 @@ namespace Internal.Generated.WolverineHandlers
                 System.Diagnostics.Activity.Current?.SetTag("handler.type", "ProcureAi.Audit.Application.Queries.GetRequestHistoryHandler");
                 
                 // The actual message execution
-                var outgoing1 = await ProcureAi.Audit.Application.Queries.GetRequestHistoryHandler.Handle(getRequestHistory, callerContext, _auditStore, accessDirectory, _optionsOfAuditOptions, _loggerForMessage, cancellation).ConfigureAwait(false);
+                var outgoing1 = await ProcureAi.Audit.Application.Queries.GetRequestHistoryHandler.Handle(getRequestHistory, callerContext, callerScopeResolver, _auditStore, _dataChangeStore, accessDirectory, _optionsOfAuditOptions, _loggerForMessage, cancellation).ConfigureAwait(false);
 
                 
                 // Outgoing, cascaded message

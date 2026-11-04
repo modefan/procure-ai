@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using ProcureAi.Audit.Application.Dtos;
 using ProcureAi.Audit.Application.Queries;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using ProcureAi.BuildingBlocks.Web.Auth;
 using ProcureAi.BuildingBlocks.Web.Caching;
@@ -16,11 +17,12 @@ namespace ProcureAi.Audit.Api.Controllers;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/audit")]
 [RequireTenant]
-public sealed class AuditController(IMessageBus bus, ICurrentUser user, IPermissionProvider permissions) : ControllerBase
+public sealed class AuditController(IMessageBus bus, ICurrentUser user, ICallerContext caller, IPermissionProvider permissions) : ControllerBase
 {
     /// <summary>
     /// The business events of a purchase request, oldest first, each with a one-line summary (names from Access; user IDs when
-    /// Access cannot answer). 404 when the tenant has no events for it.
+    /// Access cannot answer). 404 when the tenant has no events for it, and when the request is outside the caller's scope (the
+    /// Requests read rule: own requests, the caller's cost centers, the tenant admin and the admin key see it).
     /// </summary>
     [HttpGet("requests/{requestId:guid}/history", Name = "GetRequestHistory")]
     [CachedGet]
@@ -28,12 +30,13 @@ public sealed class AuditController(IMessageBus bus, ICurrentUser user, IPermiss
     [ProducesResponseType<IReadOnlyList<BusinessEventDto>>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<BusinessEventDto>>> GetRequestHistory(Guid requestId, CancellationToken cancellationToken) =>
-        Ok(await bus.InvokeAsync<IReadOnlyList<BusinessEventDto>>(new GetRequestHistory(requestId), cancellationToken));
+        Ok(await bus.InvokeAsync<IReadOnlyList<BusinessEventDto>>(
+            new GetRequestHistory(requestId, await permissions.SeesWholeTenantAsync(caller, user, cancellationToken)), cancellationToken));
 
     /// <summary>
     /// The latest business events of the tenant (1 to 50, default 20), newest first, for the dashboard. Budget events are listed only
     /// for callers with <c>budgets.manage</c>, invoice and payment events only for finance (<c>invoices.release-payment</c>) and the
-    /// admin key, because the request history is tenant-wide but budgets and invoices are scoped to cost centers.
+    /// admin key. Events about a request are listed only for callers who may read that request (the Requests read rule).
     /// </summary>
     [HttpGet("activity", Name = "GetActivity")]
     [CachedGet]
@@ -45,7 +48,9 @@ public sealed class AuditController(IMessageBus bus, ICurrentUser user, IPermiss
     {
         var granted = await permissions.GetPermissionsAsync(user, cancellationToken);
         return Ok(await bus.InvokeAsync<IReadOnlyList<ActivityDto>>(
-            new GetActivity(limit, granted.Contains(Permissions.BudgetsManage), granted.Contains(Permissions.InvoicesReleasePayment)),
+            new GetActivity(
+                limit, granted.Contains(Permissions.BudgetsManage), granted.Contains(Permissions.InvoicesReleasePayment),
+                await permissions.SeesWholeTenantAsync(caller, user, cancellationToken)),
             cancellationToken));
     }
 }

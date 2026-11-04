@@ -76,8 +76,9 @@ public sealed class ActivityTests(AuditApp app)
         var acme = AuditApp.NewTenant();
         var globex = AuditApp.NewTenant();
         var now = DateTimeOffset.UtcNow;
-        await app.PublishAsync(new BudgetReserved(Guid.NewGuid(), acme, "ACME-CC", "FY2027", 1m, now), Exchanges.Budgets, acme, Tom);
-        await app.PublishAsync(new BudgetReserved(Guid.NewGuid(), globex, "GLOBEX-CC", "FY2027", 1m, now), Exchanges.Budgets, globex, Tom);
+        // Budget amounts are about no request (no request scope applies), so finance sees them tenant by tenant.
+        await app.PublishAsync(new BudgetAmountSet(acme, "ACME-CC", "FY2027", 1m, 1, now), Exchanges.Budgets, acme, Tom);
+        await app.PublishAsync(new BudgetAmountSet(globex, "GLOBEX-CC", "FY2027", 1m, 1, now), Exchanges.Budgets, globex, Tom);
         await app.WaitForStoredAsync(acme, s => s.Count == 1);
         await app.WaitForStoredAsync(globex, s => s.Count == 1);
 
@@ -123,6 +124,9 @@ public sealed class ActivityTests(AuditApp app)
     public async Task Budget_invoice_and_payment_events_are_for_finance_not_for_a_requester()
     {
         var tenant = AuditApp.NewTenant();
+        // Both act for FIN-100, so the request scope (Task 5c) shows them the request; the event types are what differ.
+        app.Access.SetCostCenters(tenant, "requester-user", "FIN-100");
+        app.Access.SetCostCenters(tenant, "finance-user", "FIN-100");
         var request = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         await app.PublishAsync(new RequestSubmitted(request, tenant, "PR-7", "Laptop", Tom, "FIN-100", 30_000m, now.AddMinutes(-10), "SUP-1", []),
@@ -150,6 +154,7 @@ public sealed class ActivityTests(AuditApp app)
     public async Task Hidden_events_do_not_use_up_the_limit()
     {
         var tenant = AuditApp.NewTenant();
+        app.Access.SetCostCenters(tenant, "req-user", "IT-200");
         var now = DateTimeOffset.UtcNow;
         await app.PublishAsync(new RequestSubmitted(Guid.NewGuid(), tenant, "PR-1", "Old", Tom, "IT-200", 1m, now.AddMinutes(-30), "SUP-1", []),
             Exchanges.Requests, tenant, Tom);

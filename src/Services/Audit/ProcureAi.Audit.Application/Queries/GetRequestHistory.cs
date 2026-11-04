@@ -7,24 +7,31 @@ using ProcureAi.BuildingBlocks.Application.Access;
 
 namespace ProcureAi.Audit.Application.Queries;
 
-/// <summary>The business events of one purchase request of the caller tenant, oldest first.</summary>
-public sealed record GetRequestHistory(Guid RequestId);
+/// <summary>
+/// The business events of one purchase request of the caller tenant, oldest first, for callers who may read the request
+/// (<see cref="RequestReadScope"/>; <paramref name="WholeTenant"/> is decided by the Api, as for the Requests list).
+/// </summary>
+public sealed record GetRequestHistory(Guid RequestId, bool WholeTenant = false);
 
 public static class GetRequestHistoryHandler
 {
     /// <summary>
-    /// 404 when the caller tenant has no event about the request (another tenant's request looks the same as none).
+    /// 404 when the caller tenant has no event about the request (another tenant's request looks the same as none) and when the
+    /// request is outside the caller's scope.
     /// Display names come from Access (cached); when Access cannot answer in time, the summaries use user IDs.
     /// </summary>
     public static async Task<IReadOnlyList<BusinessEventDto>> Handle(
-        GetRequestHistory query, ICallerContext caller, IAuditStore store, IAccessDirectory access, IOptions<AuditOptions> options,
-        ILogger<GetRequestHistory> logger, CancellationToken cancellationToken)
+        GetRequestHistory query, ICallerContext caller, ICallerScope scope, IAuditStore store, IDataChangeStore changes,
+        IAccessDirectory access, IOptions<AuditOptions> options, ILogger<GetRequestHistory> logger, CancellationToken cancellationToken)
     {
-        var tenant = caller.TenantId ?? throw new NotFoundException($"No history for request {query.RequestId}.");
+        var notFound = $"No history for request {query.RequestId}.";
+        var tenant = caller.TenantId ?? throw new NotFoundException(notFound);
+        await RequestReadScope.EnsureReadableAsync(
+            query.RequestId, tenant, query.WholeTenant, scope, store, changes, options.Value.RequestScope, notFound, cancellationToken);
         var events = await store.ForSubjectAsync(tenant, query.RequestId, cancellationToken);
         if (events.Count == 0)
         {
-            throw new NotFoundException($"No history for request {query.RequestId}.");
+            throw new NotFoundException(notFound);
         }
 
         var history = BusinessEventSummaries.Read(events);

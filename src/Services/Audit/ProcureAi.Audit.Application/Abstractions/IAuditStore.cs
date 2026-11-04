@@ -11,9 +11,12 @@ public interface IAuditStore
     /// <summary>The events of one tenant about one purchase request, oldest first.</summary>
     Task<IReadOnlyList<BusinessEvent>> ForSubjectAsync(string tenantId, Guid subjectId, CancellationToken cancellationToken);
 
-    /// <summary>The newest events of one tenant, newest first, leaving out the event types in <paramref name="excludedTypes"/>.</summary>
+    /// <summary>
+    /// The newest events of one tenant, newest first, leaving out the event types in <paramref name="excludedTypes"/>: at most
+    /// <paramref name="limit"/>, after skipping the first <paramref name="skip"/>.
+    /// </summary>
     Task<IReadOnlyList<BusinessEvent>> LatestAsync(
-        string tenantId, int limit, IReadOnlyCollection<string> excludedTypes, CancellationToken cancellationToken);
+        string tenantId, int skip, int limit, IReadOnlyCollection<string> excludedTypes, CancellationToken cancellationToken);
 
     /// <summary>The <c>RequestSubmitted</c> events of the given requests of one tenant (they carry the request numbers).</summary>
     Task<IReadOnlyList<BusinessEvent>> SubmissionsAsync(string tenantId, IReadOnlyCollection<Guid> subjectIds, CancellationToken cancellationToken);

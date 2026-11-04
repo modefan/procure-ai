@@ -37,10 +37,14 @@ public sealed class AuditOptions : IValidatableObject
     [Required]
     public CdcOptions Cdc { get; set; } = new();
 
+    /// <summary>Where Audit finds who may read a request (<c>Audit:RequestScope</c>).</summary>
+    [Required]
+    public RequestScopeOptions RequestScope { get; set; } = new();
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         // DataAnnotations does not descend into nested objects by itself.
-        foreach (var (name, nested) in new (string, object)[] { (nameof(Matching), Matching), (nameof(Cdc), Cdc) })
+        foreach (var (name, nested) in new (string, object)[] { (nameof(Matching), Matching), (nameof(Cdc), Cdc), (nameof(RequestScope), RequestScope) })
         {
             var results = new List<ValidationResult>();
             Validator.TryValidateObject(nested, new ValidationContext(nested), results, validateAllProperties: true);
@@ -50,6 +54,29 @@ public sealed class AuditOptions : IValidatableObject
             }
         }
     }
+}
+
+/// <summary>
+/// <c>Audit:RequestScope</c>: the per-request reads and the activity feed follow the request's caller scope (plan 07 Task 5c), from the
+/// data Audit already stores: the request's <c>RequestSubmitted</c> event (requester, cost center), or for a request never submitted
+/// (a draft) the newest captured row of <see cref="Database"/>.<see cref="Table"/> (its <c>requester_id</c> and <c>cost_center_code</c>).
+/// </summary>
+public sealed class RequestScopeOptions
+{
+    /// <summary>The Requests database as Debezium names it (<c>requestsdb</c>).</summary>
+    [Required(AllowEmptyStrings = false)]
+    public string Database { get; set; } = "";
+
+    /// <summary>The requests table (<c>purchase_requests</c>), keyed by the request ID.</summary>
+    [Required(AllowEmptyStrings = false)]
+    public string Table { get; set; } = "";
+
+    /// <summary>
+    /// The most events one activity read looks through to fill its limit with events the caller may see (newest first, in pages of
+    /// the limit). A caller who may see few of the tenant's requests can get fewer than the limit, never events outside their scope.
+    /// </summary>
+    [Range(1, 100_000)]
+    public int ActivityScanLimit { get; set; }
 }
 
 /// <summary><c>Audit:Matching</c>.</summary>
