@@ -70,17 +70,24 @@ public sealed class MongoFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// A connection string for another container on <see cref="Network"/> (Debezium): the server by its alias, as the root user, straight to
-    /// the one member (the set is initiated as 127.0.0.1, which only resolves inside the MongoDB container).
+    /// A connection string for another container on <see cref="Network"/> (Debezium): the server by its alias, without credentials (Debezium
+    /// takes the user and password as <c>mongodb.user</c> / <c>mongodb.password</c>, as the AppHost and the chart pass them), straight to the
+    /// one member (the set is initiated as 127.0.0.1, which only resolves inside the MongoDB container).
     /// </summary>
-    public string NetworkConnectionString
+    public string NetworkConnectionString =>
+        $"mongodb://{NetworkAlias}:{ContainerPort}/?authSource=admin&replicaSet={ReplicaSetName}&directConnection=true";
+
+    /// <summary>
+    /// A new client on this server signed in as another user of the <c>admin</c> database (e.g. <c>debezium</c>), on connections of its own (a
+    /// unique application name, so the driver never hands it connections authenticated earlier). The caller disposes it.
+    /// </summary>
+    public MongoClient ClientAs(string user, string password)
     {
-        get
+        var url = new MongoUrlBuilder(ConnectionString)
         {
-            var url = new MongoUrl(ConnectionString);
-            return $"mongodb://{Uri.EscapeDataString(url.Username)}:{Uri.EscapeDataString(url.Password)}@{NetworkAlias}:{ContainerPort}/" +
-                $"?authSource=admin&replicaSet={ReplicaSetName}&directConnection=true";
-        }
+            Username = user, Password = password, AuthenticationSource = "admin", ApplicationName = $"test-{user}-{Guid.NewGuid():N}",
+        };
+        return new MongoClient(url.ToMongoUrl());
     }
 
     /// <summary>

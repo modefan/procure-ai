@@ -33,6 +33,10 @@ var keycloakDemoLoginSecret = builder.AddParameter(
 var keycloakDashboardSecret = builder.AddParameter(
     "keycloak-dashboard-secret", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
+// Password of the least-privilege MongoDB user `debezium` that debezium-mongo connects as (plan 07 Task 4); Suppliers' --migrate creates the
+// user with it. Generated on the first run and kept in the AppHost user secrets (the cluster's Secret procure-debezium is made from it).
+var debeziumMongoPassword = builder.AddParameter(
+    "debezium-mongo-password", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
 var adminApiKeySha256 = builder.AddParameter("admin-api-key-sha256", secret: true);
 // The admin API key itself, for the demo data seeder only (it calls the gateway with it, on behalf of the demo users; plan 06 ruling 1).
@@ -156,7 +160,8 @@ var mailpit = builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
-    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes, debeziumSelfHeal);
+    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes, debeziumSelfHeal,
+    debeziumMongoPassword.Resource);
 
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),

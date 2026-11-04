@@ -629,7 +629,8 @@ public sealed class ServiceResourcesTests
         var shared = new SharedResources(
             builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
             builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
-            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false,
+            DebeziumMongoPassword: secret.Resource);
         #pragma warning restore ASPIREMONGODB001
 
         var api = builder.AddProcureAiService<MongoServiceProject>(
@@ -659,7 +660,7 @@ public sealed class ServiceResourcesTests
         env.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", "suppliersdb.suppliers,assistantchatdb.conversations");
         var connection = env["DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING"].ShouldBeOfType<ReferenceExpression>().ValueExpression;
         connection.ShouldStartWith("mongodb://");
-        connection.ShouldContain("@mongo:27017/");
+        connection.ShouldContain("//mongo:27017/");
         connection.ShouldContain("replicaSet=rs0");
         connection.ShouldContain("directConnection=true");
         connection.ShouldNotContain("tls=true", Case.Insensitive, "Debezium (Java) does not trust the developer certificate");
@@ -696,6 +697,39 @@ public sealed class ServiceResourcesTests
         texts[texts.IndexOf("--memory") + 1].ShouldBe("512m");
         // Eight Debezium Servers at 0.35 CPU would take the whole system past 8 CPUs, so every one is capped at 0.3 (ruling 16).
         texts[texts.IndexOf("--cpus") + 1].ShouldBe("0.3");
+    }
+
+    /// <summary>
+    /// Plan 07 Task 4: debezium-mongo connects as the least-privilege MongoDB user <c>debezium</c> (password parameter
+    /// <c>debezium-mongo-password</c>), not as root: the connection string carries no credentials. Suppliers' migration, which runs with the
+    /// server's root rights, creates the user with the same password and read rights on every captured MongoDB database.
+    /// </summary>
+    [Fact]
+    public async Task Debezium_mongo_connects_as_the_debezium_user_that_suppliers_migrate_creates()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var env = await EnvironmentOfAsync(model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-mongo"));
+
+        env.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_MONGODB_USER", "debezium");
+        var password = env["DEBEZIUM_SOURCE_MONGODB_PASSWORD"].ShouldBeOfType<ParameterResource>();
+        password.Name.ShouldBe("debezium-mongo-password");
+        password.Secret.ShouldBeTrue();
+        var connection = env["DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING"].ShouldBeOfType<ReferenceExpression>().ValueExpression;
+        connection.ShouldStartWith("mongodb://mongo:27017/");
+        connection.ShouldNotContain("@");
+
+        var suppliers = await EnvironmentOfAsync(model.Resources.OfType<ProjectResource>().Single(r => r.Name == "suppliers-migrate"));
+        suppliers["Mongo__DebeziumPassword"].ShouldBeSameAs(password);
+        suppliers.ShouldContainKeyAndValue("Mongo__DebeziumDatabases__0", "suppliersdb");
+        suppliers.ShouldContainKeyAndValue("Mongo__DebeziumDatabases__1", "assistantchatdb");
+        suppliers.ShouldNotContainKey("Mongo__DebeziumDatabases__2");
+
+        // Nothing else gets the password.
+        foreach (var resource in model.Resources.Where(r => r.Name is not "suppliers-migrate" and not "debezium-mongo"))
+        {
+            (await EnvironmentOfAsync(resource)).Values.ShouldNotContain(v => ReferenceEquals(v, password), resource.Name);
+        }
     }
 
     [Fact]
@@ -748,6 +782,16 @@ public sealed class ServiceResourcesTests
             .Where(l => l.StartsWith("FROM ", StringComparison.Ordinal))
             .Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1]).Distinct().ToArray();
         keycloakBase.ShouldBe([AppHostImage(model, ResourceNames.Keycloak)], "infra/keycloak/Dockerfile FROM");
+
+        // Plan 07 Task 4: the chart's Debezium Servers run our image built FROM the Debezium Server image every AppHost Debezium runs.
+        var debeziumBase = File.ReadAllLines("debezium.Dockerfile")
+            .Where(l => l.StartsWith("FROM ", StringComparison.Ordinal))
+            .Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1]).Distinct().ToArray();
+        var appHostDebezium = model.Resources.OfType<ContainerResource>().Where(r => r.Name.StartsWith("debezium-", StringComparison.Ordinal))
+            .Select(r => AppHostImage(model, r.Name)).Distinct().ToArray();
+        appHostDebezium.ShouldHaveSingleItem();
+        debeziumBase.ShouldBe(appHostDebezium, "infra/debezium/Dockerfile FROM (quay.io/..., a fully qualified reference)");
+        ChartImage(values, "debezium").ShouldBe("procure-ai-debezium", "values.yaml debezium.image");
     }
 
     /// <summary>The resource's image as a fully qualified reference (docker.io and library/ made explicit).</summary>
@@ -1147,7 +1191,7 @@ public sealed class ServiceResourcesTests
     /// stack of containers in the background while the test process lived on (for the InfrastructureStartsTests fixture),
     /// so every test here leaked a full stack: five stacks per run, which exhausted the CI runner until the job timed out.
     /// </summary>
-    private sealed class ModelScope : IAsyncDisposable
+    internal sealed class ModelScope : IAsyncDisposable
     {
         private readonly IDistributedApplicationTestingBuilder _builder;
         private readonly DistributedApplication _app;
@@ -1174,7 +1218,7 @@ public sealed class ServiceResourcesTests
     }
 
     /// <summary>The environment variables the resource's callbacks set (secret parameters stay unresolved, so no secrets are needed).</summary>
-    private static async Task<Dictionary<string, object>> EnvironmentOfAsync(IResource resource)
+    internal static async Task<Dictionary<string, object>> EnvironmentOfAsync(IResource resource)
     {
         var variables = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         var context = new EnvironmentCallbackContext(new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), resource, variables);

@@ -38,6 +38,8 @@ public sealed record ServiceSpec(
 /// <param name="DebeziumSelfHealLostOffsets">Config <c>Debezium:SelfHealLostOffsets</c>: when a Debezium Server's stored offset is no longer available
 /// (slot gone, database reset), drop it and stream from a new slot instead of failing. Leaves a CDC gap; local runs only.</param>
 /// <param name="OtlpEndpoint">The Aspire dashboard's OTLP endpoint (the Serilog OpenTelemetry sink has no environment fallback).</param>
+/// <param name="DebeziumMongoPassword">Password of the least-privilege MongoDB user <c>debezium</c> (secret parameter
+/// <c>debezium-mongo-password</c>) that <c>debezium-mongo</c> connects as; required once a service captures MongoDB collections.</param>
 public sealed record SharedResources(
     IResourceBuilder<PostgresServerResource> Postgres,
     IResourceBuilder<RabbitMQServerResource> RabbitMq,
@@ -52,7 +54,8 @@ public sealed record SharedResources(
     ResourcesOptions Limits,
     ParameterResource DebeziumPassword,
     bool UseDataVolumes,
-    bool DebeziumSelfHealLostOffsets = false);
+    bool DebeziumSelfHealLostOffsets = false,
+    ParameterResource? DebeziumMongoPassword = null);
 
 public static class ServiceResources
 {
@@ -66,6 +69,10 @@ public static class ServiceResources
 
     /// <summary>The one Debezium Server for every captured MongoDB collection (plan 06 ruling 16).</summary>
     public const string DebeziumMongoName = DebeziumPrefix + "mongo";
+
+    /// <summary>The least-privilege MongoDB user <c>debezium-mongo</c> connects as (<c>DebeziumMongoUser.UserName</c> in BuildingBlocks; the
+    /// AppHost does not reference that library).</summary>
+    public const string DebeziumMongoUser = "debezium";
 
     /// <summary>The port MongoDB listens on inside its container (the <c>mongo</c> resource's target port).</summary>
     private const int MongoContainerPort = 27017;
@@ -271,9 +278,12 @@ public static class ServiceResources
     /// (plan 06 ruling 16), creating it on the first call: change streams of the <c>mongo</c> replica set to the <c>cdc</c> exchange with
     /// routing keys <c>mongo.&lt;database&gt;.&lt;collection&gt;</c>. One MongoDB connector watches the whole replica set, so one instance serves
     /// every MongoDB service (unlike Postgres, one per database). It runs infra/debezium/application-mongo.properties with the same caps as
-    /// the Postgres ones, connects as the server's root user straight to the one member, and starts after every migration that adds
-    /// collections (the seed is not captured) and after RabbitMQ. The caller's API waits for it (no change made through the app precedes the
-    /// capture, as no data snapshot is taken).
+    /// the Postgres ones, connects straight to the one member as the least-privilege user <see cref="DebeziumMongoUser"/> (plan 07 Task 4; the
+    /// password is <see cref="SharedResources.DebeziumMongoPassword"/>), and starts after every migration that adds collections (the seed is
+    /// not captured) and after RabbitMQ. The caller's API waits for it (no change made through the app precedes the capture, as no data
+    /// snapshot is taken).
+    /// The migrate resource of the first call (Suppliers: it runs with the server's root rights) creates that user: it gets
+    /// <c>Mongo__DebeziumPassword</c> and <c>Mongo__DebeziumDatabases__&lt;i&gt;</c> (every captured database, from later calls too).
     /// </summary>
     public static IResourceBuilder<ContainerResource> AddDebeziumForMongo(
         this IDistributedApplicationBuilder builder,
@@ -294,17 +304,21 @@ public static class ServiceResources
         var replicaSet = mongo.ReplicaSetName
             ?? throw new InvalidOperationException("MongoDB change data capture needs the mongo resource to be a replica set (WithReplicaSet).");
 #pragma warning restore ASPIREMONGODB001
-        var password = mongo.PasswordParameter ?? throw new InvalidOperationException("The mongo resource has no password parameter.");
+        var password = shared.DebeziumMongoPassword
+            ?? throw new InvalidOperationException("MongoDB change data capture needs SharedResources.DebeziumMongoPassword (parameter debezium-mongo-password).");
         // Aspire initiates the single-member set with an address only it can reach, so Debezium connects straight to the member by its
-        // container name (directConnection); the connector still insists on the replica set's name.
+        // container name (directConnection); the connector still insists on the replica set's name. No credentials in the string: the
+        // connector takes them as mongodb.user / mongodb.password (no URI escaping), as the chart passes them from its Secret.
         var connectionString = ReferenceExpression.Create(
-            $"mongodb://{mongo.UserNameReference}:{password:uri}@{mongo.Name}:{MongoContainerPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}/?authSource=admin&replicaSet={replicaSet}&directConnection=true");
+            $"mongodb://{mongo.Name}:{MongoContainerPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}/?authSource=admin&replicaSet={replicaSet}&directConnection=true");
         var debezium = builder.AddContainer(DebeziumMongoName, DebeziumImage, DebeziumTag)
             .WithAnnotation(capture)
             .WithHttpEndpoint(targetPort: DebeziumHttpPort, name: "http")
             .WithBindMount("../../../infra/debezium/application-mongo.properties", "/debezium/config/application.properties", isReadOnly: true)
             .WithEnvironment("JAVA_OPTS", shared.Limits.Debezium.JavaOpts)
             .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING", connectionString)
+            .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_USER", DebeziumMongoUser)
+            .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_PASSWORD", password)
             .WithEnvironment(context => context.EnvironmentVariables["DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST"] = string.Join(',', capture.Collections))
             .WithEnvironment(SelfHealEnvironmentVariable, shared.DebeziumSelfHealLostOffsets ? "true" : "false")
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", shared.RabbitMq.Resource.UserNameReference)
@@ -314,6 +328,18 @@ public static class ServiceResources
             .WaitForCompletion(migrate)
             .WaitFor(shared.RabbitMq)
             .WithContainerLimits(shared.Limits.Debezium);
+        // The first MongoDB service's migration creates the user, with read on every captured database (evaluated when the resource starts,
+        // so collections added by later services are included).
+        migrate
+            .WithEnvironment("Mongo__DebeziumPassword", password)
+            .WithEnvironment(context =>
+            {
+                var databases = capture.Collections.Select(c => c.Split('.', 2)[0]).Distinct(StringComparer.Ordinal).ToArray();
+                for (var i = 0; i < databases.Length; i++)
+                {
+                    context.EnvironmentVariables[$"Mongo__DebeziumDatabases__{i}"] = databases[i];
+                }
+            });
         if (shared.UseDataVolumes)
         {
             // The resume token must live as long as the oplog it points into; the mongo data volume is scoped per AppHost, so is this one.

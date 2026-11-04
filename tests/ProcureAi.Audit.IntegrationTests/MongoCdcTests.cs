@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 using ProcureAi.Audit.Domain;
@@ -153,6 +154,58 @@ public sealed class MongoCdcTests(AuditApp app)
         // Debezium's Postgres keys are <database>.public.<table>, the MongoDB keys mongo.<database>.<collection>: each queue gets its own.
         (await BindingKeysAsync(AuditInfrastructure.CdcQueue)).ShouldBe([AuditInfrastructure.CdcExchange + " " + "*.public.*"]);
         (await BindingKeysAsync(AuditInfrastructure.CdcMongoQueue)).ShouldBe([AuditInfrastructure.CdcExchange + " " + "mongo.#"]);
+    }
+
+    /// <summary>
+    /// Plan 07 Task 4: Debezium reads the change streams as the least-privilege user <c>debezium</c> (the fixture creates it the way
+    /// Suppliers' --migrate does), not as root, and the capture still works: the server lists its change stream cursor under that user and
+    /// an app write reaches the audit.
+    /// </summary>
+    [Fact]
+    public async Task Mongo_cdc_works_as_least_privilege_debezium_user()
+    {
+        var mongo = await app.EnsureMongoCdcAsync();
+        app.Infra.MongoDebezium.User.ShouldBe(DebeziumMongoUser.UserName);
+
+        var operations = await (await mongo.Client.GetDatabase("admin").AggregateAsync<BsonDocument>(
+            new[] { new BsonDocument("$currentOp", new BsonDocument { ["allUsers"] = true, ["idleCursors"] = true }) },
+            cancellationToken: Ct)).ToListAsync(Ct);
+        var changeStreams = operations.Where(op => op.ToJson().Contains("$changeStream", StringComparison.Ordinal)).ToList();
+        changeStreams.ShouldNotBeEmpty();
+        changeStreams.ShouldAllBe(op => op["effectiveUsers"].AsBsonArray.Single()["user"].AsString == DebeziumMongoUser.UserName);
+
+        var tenant = AuditApp.NewTenant();
+        var key = $"{tenant}:least-privilege";
+        await SuppliersAs(mongo, tenant, "tom").InsertOneAsync(
+            new SupplierRow { Id = key, TenantId = tenant, Name = "Least Privilege Ltd", Email = "lp@test" }, Ct);
+        var change = (await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Database == SuppliersDb && c.PrimaryKey == key),
+            found => found.Count == 1)).Single();
+        change.Operation.ShouldBe("Insert");
+        change.Attribution.Kind.ShouldBe(AttributionKind.App);
+    }
+
+    /// <summary>The <c>debezium</c> user only reads: a write to a captured database as that user is refused (Unauthorized, code 13).</summary>
+    [Fact]
+    public async Task Debezium_user_cannot_write()
+    {
+        var mongo = await app.EnsureMongoCdcAsync();
+        using var debezium = mongo.ClientAs(app.Infra.MongoDebezium.User, app.Infra.MongoDebezium.Password);
+
+        // It can read (what the change streams need) ...
+        await debezium.GetDatabase(SuppliersDb).GetCollection<BsonDocument>(Suppliers).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: Ct);
+
+        // ... but not write, in either captured database, nor create a user.
+        foreach (var (database, collection) in new[] { (SuppliersDb, Suppliers), ("assistantchatdb", "conversations") })
+        {
+            var refused = await Should.ThrowAsync<MongoCommandException>(() => debezium.GetDatabase(database).GetCollection<BsonDocument>(collection)
+                .InsertOneAsync(new BsonDocument("_id", Guid.NewGuid().ToString()), cancellationToken: Ct));
+            refused.Code.ShouldBe(13, $"{database}.{collection}: {refused.Message}");
+        }
+
+        var noAdmin = await Should.ThrowAsync<MongoCommandException>(() => debezium.GetDatabase("admin").RunCommandAsync<BsonDocument>(
+            new BsonDocument { ["createUser"] = "intruder", ["pwd"] = "x", ["roles"] = new BsonArray() }, cancellationToken: Ct));
+        noAdmin.Code.ShouldBe(13, noAdmin.Message);
     }
 
     // ----- helpers -----

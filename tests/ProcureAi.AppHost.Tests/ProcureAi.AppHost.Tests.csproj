@@ -29,6 +29,7 @@
     <Content Include="..\..\infra\keycloak\procure-realm.json" Link="procure-realm.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\deploy\charts\procure-platform\values.yaml" Link="platform.values.yaml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\infra\keycloak\Dockerfile" Link="keycloak.Dockerfile" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\infra\debezium\Dockerfile" Link="debezium.Dockerfile" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

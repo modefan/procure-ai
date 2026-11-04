@@ -36,9 +36,35 @@ public sealed class SuppliersInfra : IAsyncLifetime
         await MigrateAsync();
     }
 
-    /// <summary>Runs the real <c>Suppliers.Api --migrate</c> with the demo seed (it can be run again: it must not change the result).</summary>
-    public Task MigrateAsync() =>
-        ApiMigrateProcess.RunAsync(ApiAssembly, Database, DatabaseConnectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true);
+    /// <summary>The databases the <c>debezium</c> MongoDB user may read, as the AppHost passes them (every captured MongoDB database).</summary>
+    public static readonly string[] DebeziumDatabases = [Database, "assistantchatdb"];
+
+    /// <summary>The password --migrate gives the <c>debezium</c> MongoDB user (<c>Mongo:DebeziumPassword</c>; generated per run).</summary>
+    public string DebeziumPassword { get; set; } = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+
+    /// <summary>
+    /// Runs the real <c>Suppliers.Api --migrate</c> with the demo seed (it can be run again: it must not change the result). As under the
+    /// AppHost it also creates the least-privilege <c>debezium</c> user (plan 07 Task 4) with <see cref="DebeziumPassword"/>.
+    /// </summary>
+    public Task MigrateAsync()
+    {
+        var environment = new Dictionary<string, string> { ["Mongo__DebeziumPassword"] = DebeziumPassword };
+        for (var i = 0; i < DebeziumDatabases.Length; i++)
+        {
+            environment[$"Mongo__DebeziumDatabases__{i}"] = DebeziumDatabases[i];
+        }
+
+        return ApiMigrateProcess.RunAsync(
+            ApiAssembly, Database, DatabaseConnectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true, environment: environment);
+    }
+
+    /// <summary>Runs <c>--migrate</c> with exactly these settings (no Debezium user settings unless given), e.g. to check it refuses to run.</summary>
+    public Task MigrateWithAsync(IReadOnlyDictionary<string, string> environment) =>
+        ApiMigrateProcess.RunAsync(
+            ApiAssembly, Database, DatabaseConnectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false, environment: environment);
+
+    /// <summary>A new client signed in as another user of the admin database (the caller disposes it).</summary>
+    public MongoClient ClientAs(string user, string password) => _mongo.ClientAs(user, password);
 
     public async ValueTask DisposeAsync()
     {

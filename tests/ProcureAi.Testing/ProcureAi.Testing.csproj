@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Web/ProcureAi.BuildingBlocks.Web.csproj" />
+    <!-- DebeziumMongoUser: the MongoDB CDC fixture creates the least-privilege user the way Suppliers' migrate step does. -->
+    <ProjectReference Include="../../src/BuildingBlocks/ProcureAi.BuildingBlocks.Persistence.Mongo/ProcureAi.BuildingBlocks.Persistence.Mongo.csproj" />
     <ProjectReference Include="../../src/Contracts/ProcureAi.Contracts/ProcureAi.Contracts.csproj" />
   </ItemGroup>
 

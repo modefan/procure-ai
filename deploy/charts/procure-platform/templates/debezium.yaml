@@ -1,0 +1,213 @@
+{{- $r := .Values.appHostResources.Debezium }}
+{{- $image := include "procure-platform.ownImage" (dict "root" $ "image" .Values.debezium.image) }}
+# Debezium Server, as the AppHost's AddDebeziumFor / AddDebeziumForMongo (ServiceResources.cs): one instance per captured Postgres database
+# (Debezium Server runs one source connector per instance) and one, debezium-mongo, for every captured MongoDB collection (one connector
+# watches the whole replica set). Our image procure-ai-debezium (infra/debezium) holds both properties files; what differs per instance comes
+# as environment variables, as in the AppHost. The offsets live on a 1 Gi volume per instance, exactly as long as the instance.
+#
+# Self-healing of a lost offset is OFF here (the AppHost turns it on for local runs only): a dropped slot or a reset database must fail
+# loudly in a deployment instead of silently leaving a CDC gap.
+#
+# What to capture: debezium.postgres and debezium.mongo in values.yaml, the same tables and collections as the AppHost's ServiceSpecs
+# (AppHost.Tests ChartDebeziumTests renders this template and compares).
+#
+# Nobody connects to Debezium; this headless Service only governs the StatefulSets' pod names.
+apiVersion: v1
+kind: Service
+metadata:
+  name: debezium
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "debezium") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: procure-ai
+    procure.ai/debezium: "true"
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+{{- range .Values.debezium.postgres }}
+{{- $env := list
+  (dict "name" "DEBEZIUM_SOURCE_DATABASE_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" "procure-debezium" "key" "postgres-password")))
+  (dict "name" "DEBEZIUM_SOURCE_DATABASE_DBNAME" "value" .database)
+  (dict "name" "DEBEZIUM_SOURCE_TOPIC_PREFIX" "value" .database)
+  (dict "name" "DEBEZIUM_SOURCE_SLOT_NAME" "value" (printf "debezium_%s" .database))
+  (dict "name" "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST" "value" (include "procure-platform.debeziumTables" .tables))
+}}
+---
+{{- include "procure-platform.debezium" (dict "root" $ "name" (printf "debezium-%s" .database) "image" $image "javaOpts" $r.JavaOpts "env" $env "mongo" false) }}
+{{- end }}
+{{- with .Values.debezium.mongo.collections }}
+{{- $truststore := "/debezium/truststore/procure-ca.jks" }}
+{{- $connection := printf "mongodb://mongo:27017/?authSource=admin&replicaSet=%s&directConnection=true&tls=true" $.Values.mongo.replicaSet }}
+{{- $env := list
+  (dict "name" "DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING" "value" $connection)
+  (dict "name" "DEBEZIUM_SOURCE_MONGODB_USER" "value" $.Values.debezium.mongo.user)
+  (dict "name" "DEBEZIUM_SOURCE_MONGODB_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" "procure-debezium" "key" "mongo-password")))
+  (dict "name" "DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST" "value" (join "," .))
+}}
+{{- $javaOpts := printf "%s -Djavax.net.ssl.trustStore=%s -Djavax.net.ssl.trustStoreType=JKS -Djavax.net.ssl.trustStorePassword=%s" $r.JavaOpts $truststore $.Values.debezium.mongo.truststorePassword }}
+---
+{{- include "procure-platform.debezium" (dict "root" $ "name" "debezium-mongo" "image" $image "javaOpts" $javaOpts "env" $env "mongo" true "truststore" $truststore) }}
+{{- end }}
+
+{{/* "public.a,public.b" from a list of table names. */}}
+{{- define "procure-platform.debeziumTables" -}}
+{{- $tables := list -}}
+{{- range . -}}{{- $tables = append $tables (printf "public.%s" .) -}}{{- end -}}
+{{- join "," $tables -}}
+{{- end }}
+
+{{/* One Debezium Server StatefulSet: dict "root" $ "name" <name> "image" <ref> "javaOpts" <JAVA_OPTS> "env" <source env> "mongo" <bool> ["truststore" <path>] */}}
+{{- define "procure-platform.debezium" -}}
+{{- $root := .root }}
+{{- $r := $root.Values.appHostResources.Debezium }}
+{{- $labels := dict "root" $root "name" .name }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+    procure.ai/debezium: "true"
+spec:
+  serviceName: debezium
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "procure-platform.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+        procure.ai/debezium: "true"
+    spec:
+      # uid 185 is the image's jboss user; its /debezium tree is world-writable, fsGroup makes the offsets volume writable.
+      {{- include "procure-platform.podSecurity" (dict "root" $root "uid" 185 "gid" 185 "fsGroup" 185) | nindent 6 }}
+      {{- if .mongo }}
+      initContainers:
+        # The JVM's TLS trust for MongoDB (required TLS, plan 07 ruling 10): a JKS truststore with only the local CA, built from ConfigMap
+        # procure-ca on every start. Its password guards nothing secret (a truststore holds public certificates; the JDK default).
+        - name: truststore
+          image: {{ .image | quote }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - rm -f {{ .truststore }} && "$JAVA_HOME"/bin/keytool -importcert -noprompt -alias procure-ca -file /etc/procure-ca/ca.crt -keystore {{ .truststore }} -storetype JKS -storepass {{ $root.Values.debezium.mongo.truststorePassword }}
+          resources:
+            {{- toYaml $root.Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: procure-ca
+              mountPath: /etc/procure-ca
+              readOnly: true
+            - name: truststore
+              mountPath: /debezium/truststore
+            - name: tmp
+              mountPath: /tmp
+        # The image has both properties files (plan 07 ruling R1). Only the MongoDB one may be read here: it is copied and mounted over
+        # application.properties (the file Debezium Server reads), so no Postgres key (hostname, slot, publication) reaches this instance.
+        # application-mongo.properties itself is only read under a Quarkus profile "mongo", which nothing sets.
+        - name: config
+          image: {{ .image | quote }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: [cp, /debezium/config/application-mongo.properties, /debezium/selected-config/application.properties]
+          resources:
+            {{- toYaml $root.Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: config
+              mountPath: /debezium/selected-config
+      {{- end }}
+      containers:
+        - name: debezium
+          image: {{ .image | quote }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: JAVA_OPTS
+              value: {{ .javaOpts | quote }}
+            {{- range .env }}
+            - name: {{ .name }}
+              {{- if hasKey . "value" }}
+              value: {{ .value | quote }}
+              {{- else }}
+              valueFrom:
+                {{- toYaml .valueFrom | nindent 16 }}
+              {{- end }}
+            {{- end }}
+            # Off: a lost offset fails loudly (the AppHost's Debezium:SelfHealLostOffsets is for local runs only).
+            - name: DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR
+              value: "false"
+            - name: DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: username
+            - name: DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: password
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # /q/health is UP once the connector streams (the AppHost's WithHttpHealthCheck("/q/health")).
+          readinessProbe:
+            httpGet:
+              path: /q/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- include "procure-platform.resources" (dict "root" $root "limits" $r) | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /debezium/data
+            - name: tmp
+              mountPath: /tmp
+            {{- if .mongo }}
+            - name: config
+              mountPath: /debezium/config/application.properties
+              subPath: application.properties
+              readOnly: true
+            - name: truststore
+              mountPath: /debezium/truststore
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- if .mongo }}
+        - name: config
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: truststore
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: procure-ca
+          configMap:
+            name: procure-ca
+        {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ $root.Values.storageClassName }}
+        resources:
+          requests:
+            storage: {{ $root.Values.debezium.storage }}
+{{- end }}

@@ -8,6 +8,7 @@ templates:
   - rabbitmq.yaml
   - keycloak.yaml
   - mailpit.yaml
+  - debezium.yaml
 set:
   global.imageTag: abc1234
 tests:

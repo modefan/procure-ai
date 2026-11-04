@@ -14,7 +14,8 @@ public static class DependencyInjection
     public const string SuppliersCollection = "suppliers";
 
     /// <summary>
-    /// The MongoDB client and database, the tenant-scoped collection, the store and the index migration that <c>--migrate</c> runs.
+    /// The MongoDB client and database, the tenant-scoped collection, the store and the migrations <c>--migrate</c> runs (the index and the
+    /// <c>debezium</c> user).
     /// The caller registers <see cref="BuildingBlocks.Application.ICallerContext"/> and the <c>Paging</c> options.
     /// </summary>
     public static IServiceCollection AddSuppliersInfrastructure(this IServiceCollection services, IConfiguration configuration)
@@ -23,6 +24,10 @@ public static class DependencyInjection
         services.AddTenantCollection<SupplierDocument>(SuppliersCollection);
         services.AddScoped<ISupplierStore, MongoSupplierStore>();
         services.AddSingleton<IMongoMigration, SupplierIndexMigration>();
+        // The least-privilege user debezium-mongo connects as (plan 07 Task 4). Validated when the migration reads it, not at API startup:
+        // only --migrate needs the password.
+        services.AddOptions<DebeziumUserOptions>().Bind(configuration.GetSection(DebeziumUserOptions.SectionName)).ValidateDataAnnotations();
+        services.AddSingleton<IMongoMigration, CreateDebeziumUser>();
         services.AddScoped<ProcureAi.BuildingBlocks.Web.Demo.IDemoResetter, SuppliersDemoResetter>();
         return services;
     }

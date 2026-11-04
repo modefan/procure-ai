@@ -1,5 +1,6 @@
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Networks;
+using ProcureAi.BuildingBlocks.Persistence.Mongo;
 using RabbitMQ.Client;
 
 namespace ProcureAi.Testing;
@@ -136,7 +137,12 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
 
             if (_mongoDebezium is null)
             {
-                var debezium = new MongoDebeziumFixture(_network!, _mongo);
+                // As deployed: Debezium connects as the least-privilege user `debezium`, created the way Suppliers' --migrate creates it,
+                // with read rights on exactly the captured databases.
+                var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+                var databases = collections.Select(c => c.Split('.', 2)[0]).Distinct(StringComparer.Ordinal).ToArray();
+                await DebeziumMongoUser.EnsureAsync(_mongo.Client, password, databases, CancellationToken.None);
+                var debezium = new MongoDebeziumFixture(_network!, _mongo, DebeziumMongoUser.UserName, password);
                 _mongoDebezium = debezium;
                 await debezium.StartAsync(collections);
             }

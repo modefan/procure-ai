@@ -12,9 +12,10 @@ namespace ProcureAi.Testing;
 /// The MongoDB Debezium Server (plan 06 ruling 16), started the way the AppHost's <c>AddDebeziumForMongo</c> does it:
 /// infra/debezium/application-mongo.properties plus environment variables (connection string, captured collections), with the caps of
 /// the <c>Debezium</c> section of tests/testcontainers.settings.json. MongoDB and RabbitMQ (with the <c>cdc</c> exchange) must be reachable
-/// on <paramref name="network"/> as <c>mongo</c> and <c>rabbitmq</c>.
+/// on <paramref name="network"/> as <c>mongo</c> and <c>rabbitmq</c>. It connects as the least-privilege user <paramref name="user"/>
+/// (<see cref="ProcureAi.BuildingBlocks.Persistence.Mongo.DebeziumMongoUser"/>, created by the caller first), as deployed (plan 07 Task 4).
 /// </summary>
-public sealed class MongoDebeziumFixture(INetwork network, MongoFixture mongo) : IAsyncDisposable
+public sealed class MongoDebeziumFixture(INetwork network, MongoFixture mongo, string user, string password) : IAsyncDisposable
 {
     private const string Image = "quay.io/debezium/server:3.7.0.Final";
     private const int HttpPort = 8080;
@@ -22,6 +23,12 @@ public sealed class MongoDebeziumFixture(INetwork network, MongoFixture mongo) :
     private static readonly TimeSpan StreamingTimeout = TimeSpan.FromSeconds(60);
 
     private IContainer? _container;
+
+    /// <summary>The MongoDB user Debezium connects as.</summary>
+    public string User => user;
+
+    /// <summary>That user's password (generated per test run).</summary>
+    public string Password => password;
 
     /// <summary>
     /// Starts Debezium for <paramref name="collections"/> (<c>&lt;database&gt;.&lt;collection&gt;</c>) and returns once its change stream is
@@ -37,6 +44,8 @@ public sealed class MongoDebeziumFixture(INetwork network, MongoFixture mongo) :
                 AccessMode.ReadOnly)
             .WithEnvironment("JAVA_OPTS", TestLimits.Section("Debezium")["JavaOpts"])
             .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING", mongo.NetworkConnectionString)
+            .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_USER", user)
+            .WithEnvironment("DEBEZIUM_SOURCE_MONGODB_PASSWORD", password)
             .WithEnvironment("DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", string.Join(',', collections))
             .WithEnvironment("DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR", "false")
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", RabbitMqBuilder.DefaultUsername)

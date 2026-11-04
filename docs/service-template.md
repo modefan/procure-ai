@@ -318,9 +318,16 @@ For a service that holds no business data of its own (Notifications: live pushes
   `SecondaryMongoCapturedCollections`; the first call creates the container, later calls add their collections and a wait for their
   migration. It runs `infra/debezium/application-mongo.properties` with the same caps as the Postgres ones (`Resources:Debezium`: 512 MB,
   0.3 CPU, `-Xmx256m`; with eight Debezium Servers the 0.35 CPU of before would pass the 8-CPU budget). Environment:
-  `DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING` (root user, `mongo:27017`, `replicaSet=rs0&directConnection=true`: Aspire's single-member set
-  is initiated with an address only it can reach) and `DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST`. Routing keys are
+  `DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING` (no credentials, `mongo:27017`, `replicaSet=rs0&directConnection=true`: Aspire's single-member
+  set is initiated with an address only it can reach; `&tls=true` in Kubernetes, with a truststore holding the local CA),
+  `DEBEZIUM_SOURCE_MONGODB_USER`/`_PASSWORD` and `DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST`. Routing keys are
   `mongo.<database>.<collection>`; the APIs wait for it to be healthy (no data snapshot, as for Postgres).
+- **Least privilege (plan 07 Task 4)**: it connects as the MongoDB user `debezium` (password parameter `debezium-mongo-password`), never root.
+  The first MongoDB service's migration (Suppliers, which runs with root rights) creates or updates it on every run (`CreateDebeziumUser`,
+  `DebeziumMongoUser.EnsureAsync`; settings `Mongo:DebeziumPassword` and `Mongo:DebeziumDatabases`, which the AppHost fills from every
+  captured database): `read` on each captured database plus the role `debeziumChangeStreams` (cluster-wide `find` + `changeStream`, which a
+  deployment-wide change stream needs, and `listDatabases`). It cannot write, nor manage users. A new captured MongoDB database needs no code:
+  the AppHost adds it to `Mongo:DebeziumDatabases`, and the chart's `debezium.mongo.collections` must list its collections too.
 - **No transaction ID to match, so every write is stamped**: `TenantCollection<T>` sets `_audit: { userId, correlationId, at }`
   (`AuditStamp`, BuildingBlocks.Persistence.Mongo) on every insert and replace of an `IAuditedDocument`, and before a delete it stamps
   the documents `deleting: true` (a delete event carries no document) and then deletes only the documents carrying that stamp (a document

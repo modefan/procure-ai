@@ -1,0 +1,183 @@
+# Debezium Server in the cluster (plan 07 Task 4): one StatefulSet per captured Postgres database plus debezium-mongo, each with its
+# offsets on a 1 Gi volume, self-healing of lost offsets off (deployments fail loudly), and debezium-mongo over TLS as the
+# least-privilege user `debezium`.
+suite: debezium
+templates:
+  - debezium.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: one debezium statefulset per captured database
+    set:
+      debezium.postgres:
+        - database: accessdb
+          tables: [permission_matrices, audit_entries]
+        - database: requestsdb
+          tables: [purchase_requests]
+      debezium.mongo.collections: [suppliersdb.suppliers]
+    asserts:
+      - hasDocuments:
+          count: 4   # the headless Service plus three StatefulSets
+      - containsDocument:
+          kind: StatefulSet
+          apiVersion: apps/v1
+          name: debezium-accessdb
+        documentIndex: 1
+      - containsDocument:
+          kind: StatefulSet
+          apiVersion: apps/v1
+          name: debezium-requestsdb
+        documentIndex: 2
+      - containsDocument:
+          kind: StatefulSet
+          apiVersion: apps/v1
+          name: debezium-mongo
+        documentIndex: 3
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: procure-ai-debezium:abc1234
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_DATABASE_DBNAME, value: accessdb }
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_TOPIC_PREFIX, value: accessdb }
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_SLOT_NAME, value: debezium_accessdb }
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST, value: "public.permission_matrices,public.audit_entries" }
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST, value: public.purchase_requests }
+        documentIndex: 2
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEBEZIUM_SOURCE_DATABASE_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-debezium, key: postgres-password } }
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST, value: suppliersdb.suppliers }
+        documentIndex: 3
+      # Offsets on their own 1 Gi volume, mounted where both properties files keep them.
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 1Gi
+        documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: { name: data, mountPath: /debezium/data }
+        documentIndex: 3
+      # Ready once Debezium reports healthy, like the AppHost's WithHttpHealthCheck("/q/health").
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /q/health
+        documentIndex: 3
+      # The caps of the AppHost's Resources:Debezium.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: JAVA_OPTS, value: "-Xmx256m" }
+        documentIndex: 1
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits
+          value: { memory: 512Mi, cpu: "0.3" }
+        documentIndex: 2
+
+  - it: no debezium mongo without captured collections
+    set:
+      debezium.mongo.collections: []
+    asserts:
+      - notEqual:
+          path: metadata.name
+          value: debezium-mongo
+      - hasDocuments:
+          count: 8   # the Service plus the seven Postgres databases of values.yaml
+
+  - it: self heal is off
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR, value: "false" }
+        documentSelector:
+          path: kind
+          value: StatefulSet
+          matchMany: true
+
+  - it: debezium mongo uses tls and a truststore
+    documentSelector:
+      path: metadata.name
+      value: debezium-mongo
+    asserts:
+      # The connection string asks for TLS and carries no credentials; the user and password come separately (Secret).
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING
+            value: mongodb://mongo:27017/?authSource=admin&replicaSet=rs0&directConnection=true&tls=true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_MONGODB_USER, value: debezium }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEBEZIUM_SOURCE_MONGODB_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-debezium, key: mongo-password } }
+      # The JVM trusts the local CA through a truststore an init container builds from ConfigMap procure-ca.
+      - matchRegex:
+          path: spec.template.spec.containers[0].env[?(@.name == "JAVA_OPTS")].value
+          pattern: '^-Xmx256m -Djavax\.net\.ssl\.trustStore=/debezium/truststore/procure-ca\.jks -Djavax\.net\.ssl\.trustStoreType=JKS -Djavax\.net\.ssl\.trustStorePassword=changeit$'
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: truststore
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: 'keytool -importcert -noprompt -alias procure-ca -file /etc/procure-ca/ca\.crt -keystore /debezium/truststore/procure-ca\.jks -storetype JKS'
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: procure-ca, configMap: { name: procure-ca } }
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: truststore, emptyDir: { sizeLimit: 1Mi } }
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: { name: truststore, mountPath: /debezium/truststore, readOnly: true }
+
+  - it: debezium mongo runs only the mongo properties file
+    documentSelector:
+      path: metadata.name
+      value: debezium-mongo
+    asserts:
+      # The image has both files; the MongoDB one is copied over application.properties (subPath), so no Postgres key is read.
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: config
+      - equal:
+          path: spec.template.spec.initContainers[1].command
+          value: [cp, /debezium/config/application-mongo.properties, /debezium/selected-config/application.properties]
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: { name: config, mountPath: /debezium/config/application.properties, subPath: application.properties, readOnly: true }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_DATABASE_DBNAME }
+          any: true
+
+  - it: postgres instances run the baked application.properties without the mongo file
+    documentSelector:
+      path: metadata.name
+      value: debezium-accessdb
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_MONGODB_CONNECTION_STRING }
+          any: true
