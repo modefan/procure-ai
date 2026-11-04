@@ -72,10 +72,11 @@ global:
 
 access:
   name: access-api
-  # Peak RSS 474 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 152 MiB (RSS 259) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 768Mi, cpu: "1" }
-    requests: { memory: 512Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
   image: { repository: procure-ai-access-api }
   sharedEnv: [telemetry, service, postgres]
   secretEnv:
@@ -92,10 +93,11 @@ access:
 
 budgets:
   name: budgets-api
-  # Peak RSS 577 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 168 MiB (RSS 275) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 832Mi, cpu: "1" }
-    requests: { memory: 640Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
   image: { repository: procure-ai-budgets-api }
   sharedEnv: [telemetry, service, postgres]
   secretEnv:
@@ -106,10 +108,11 @@ budgets:
 
 approvals:
   name: approvals-api
-  # Peak RSS 792 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 186 MiB (RSS 296) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 1088Mi, cpu: "1" }
-    requests: { memory: 832Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 224Mi, cpu: 50m }
   image: { repository: procure-ai-approvals-api }
   sharedEnv: [telemetry, service, postgres]
   secretEnv:
@@ -121,10 +124,11 @@ approvals:
 # Audit (Marten): nothing of its own is captured. It reads the server's pgaudit log as audit_log_reader (its --migrate creates the role).
 audit:
   name: audit-api
-  # Peak RSS 461 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 144 MiB (RSS 249) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 768Mi, cpu: "1" }
-    requests: { memory: 512Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
   image: { repository: procure-ai-audit-api }
   sharedEnv: [telemetry, service, postgres]
   secretEnv:
@@ -137,10 +141,11 @@ audit:
 # debezium-mongo, with read on every captured MongoDB database (plan 07 Task 4: it fails on purpose without these).
 suppliers:
   name: suppliers-api
-  # Peak RSS 390 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 125 MiB (RSS 228) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 576Mi, cpu: "1" }
-    requests: { memory: 448Mi, cpu: 50m }
+    limits: { memory: 384Mi, cpu: "1" }
+    requests: { memory: 160Mi, cpu: 50m }
   image: { repository: procure-ai-suppliers-api }
   sharedEnv: [telemetry, service]
   env:
@@ -159,10 +164,11 @@ suppliers:
 
 requests:
   name: requests-api
-  # Peak RSS 837 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 184 MiB (RSS 293) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 1152Mi, cpu: "1" }
-    requests: { memory: 896Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 224Mi, cpu: 50m }
   image: { repository: procure-ai-requests-api }
   sharedEnv: [telemetry, service, postgres]
   secretEnv:
@@ -174,10 +180,11 @@ requests:
 # Purchasing: orders to the supplier (the simulators) with the simulator key; the supplier's webhooks are signed with the shared secret.
 purchasing:
   name: purchasing-api
-  # Peak RSS 692 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 184 MiB (RSS 291) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 960Mi, cpu: "1" }
-    requests: { memory: 704Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 224Mi, cpu: 50m }
   image: { repository: procure-ai-purchasing-api }
   sharedEnv: [telemetry, service, postgres]
   env:
@@ -194,10 +201,11 @@ purchasing:
 # is configuration (AI__*): none here, so the Fake provider runs (no key, no account) until plan 08 adds a real one.
 assistant:
   name: assistant-api
-  # Peak RSS 756 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 199 MiB (RSS 316) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 1024Mi, cpu: "1" }
-    requests: { memory: 768Mi, cpu: 50m }
+    limits: { memory: 640Mi, cpu: "1" }
+    requests: { memory: 224Mi, cpu: 50m }
   image: { repository: procure-ai-assistant-api }
   sharedEnv: [telemetry, service, postgres]
   env:
@@ -213,10 +221,11 @@ assistant:
 
 invoicing:
   name: invoicing-api
-  # Peak RSS 881 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 188 MiB (RSS 300) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 1152Mi, cpu: "1" }
-    requests: { memory: 896Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 224Mi, cpu: 50m }
   image: { repository: procure-ai-invoicing-api }
   sharedEnv: [telemetry, service, postgres]
   env:
@@ -233,10 +242,11 @@ invoicing:
 # screen expects a snapshot from every service API.
 notifications:
   name: notifications-api
-  # Peak RSS 831 MiB during the demo seed on k3d (plan 07 Task 5 fix round 1); request = that, limit about 1.3x.
+  # Peak working set 132 MiB (RSS 237) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
+  # request = that rounded up, limit = the 256 MiB heap cap plus native headroom.
   resources:
-    limits: { memory: 1088Mi, cpu: "1" }
-    requests: { memory: 832Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 160Mi, cpu: 50m }
   image: { repository: procure-ai-notifications-api }
   sharedEnv: [telemetry, service]
   env:

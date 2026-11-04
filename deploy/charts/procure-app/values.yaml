@@ -78,13 +78,14 @@ ingress:
   paths:
     - /
 
-# Per container. The .NET heap is capped at DOTNET_GCHeapHardLimit (256 MiB), but the process needs more around it: the APIs that use
-# Wolverine reached 450-880 MiB RSS during the demo seed on k3d, nearly all native memory that grows in bursts as handlers are first
-# used (plan 07 Task 5; Task 5b moves Wolverine to pre-generated code). Requests are the measured working set so the scheduler is honest;
-# the umbrella sets each app's own measurement. This default fits a typical Wolverine API.
+# Per container. The .NET heap is capped at DOTNET_GCHeapHardLimit (256 MiB); the limit adds native headroom around it. With Wolverine
+# running its pre-generated code (Wolverine:TypeLoadMode=Static in the images, docs/generated-code.md) a service API's working set stayed
+# at 125-199 MiB over two demo resets on k3d; with runtime (Roslyn) code generation it had reached 450-940 MiB (plan 07 Tasks 5 and 5b).
+# Requests are the measured working set so the scheduler is honest; the umbrella sets each app's own measurement. This default fits a
+# typical Wolverine API.
 resources:
-  limits: { memory: 1Gi, cpu: "1" }
-  requests: { memory: 640Mi, cpu: 50m }
+  limits: { memory: 512Mi, cpu: "1" }
+  requests: { memory: 224Mi, cpu: 50m }
 
 # DOTNET_GCHeapHardLimit / DOTNET_gcServer / DOTNET_GCConserveMemory from global.dotnet unless set here; off for the web app.
 dotnet:
