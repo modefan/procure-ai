@@ -84,12 +84,14 @@ jobs:
               if grep -q 'Not Found\|404' "$RUNNER_TEMP/err"; then echo "$package: no package yet"; continue; fi
               echo "::error::$package: listing versions failed: $(cat "$RUNNER_TEMP/err")"; status=1; continue
             fi
-            # Newest first; keep the newest $KEEP and any version with a protected tag.
+            # Tagged versions only, newest first; keep the newest $KEEP and any version with a protected tag. Untagged versions are never
+            # deleted: they can be the per-platform manifests or attestations of a kept tagged image (every publish pushes new tags, so
+            # untagged leftovers do not pile up).
             doomed="$(jq -rs --argjson keep "$KEEP" --rawfile prot "$protected" '
               ($prot | split("\n") | map(select(length > 0))) as $p
-              | add | sort_by(.created_at) | reverse | to_entries
-              | map(select(.key >= $keep and ((.value.metadata.container.tags // []) | any(. as $t | $p | index($t)) | not)))
-              | .[].value | "\(.id) \((.metadata.container.tags // []) | join(",") | if . == "" then "<untagged>" else . end)"' <<< "$versions")"
+              | add | map(select((.metadata.container.tags // []) | length > 0)) | sort_by(.created_at) | reverse | to_entries
+              | map(select(.key >= $keep and (.value.metadata.container.tags | any(. as $t | $p | index($t)) | not)))
+              | .[].value | "\(.id) \(.metadata.container.tags | join(","))"' <<< "$versions")"
             total="$(jq -s 'add | length' <<< "$versions")"
             echo "$package: $total versions, $(grep -c . <<< "$doomed" || true) to delete"
             while read -r id tags; do

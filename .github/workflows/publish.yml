@@ -143,7 +143,7 @@ jobs:
             # Quoted strings: a SHA made of digits only would otherwise be read as a number.
             REVISION="$REVISION" PLATFORM_TAGS="$PLATFORM_TAGS" yq -i '
               .appRevision = strenv(REVISION) | .appRevision style="double" |
-              .platformImageTags = (strenv(PLATFORM_TAGS) | from_json) | .platformImageTags style="" | .platformImageTags[] style="double"' "$file"
+              .platformImageTags = (strenv(PLATFORM_TAGS) | from_json) | .platformImageTags style="" | (.platformImageTags[] | key) style="" | .platformImageTags[] style="double"' "$file"
             [ "$(yq -r '.appRevision' "$file")" = "$REVISION" ]
             git commit -q -am "Deploy procure-ai ${short}" \
               -m "procure-ai ${REVISION}; platform images ${PLATFORM_TAGS} (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
