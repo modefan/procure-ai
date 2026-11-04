@@ -3,9 +3,10 @@
 # Only when KEYCLOAK_DB_PASSWORD is set: the chart sets it from Secret procure-keycloak (key db-password, made from the AppHost user
 # secret keycloak-db-password). The AppHost runs Keycloak with start-dev on its own file database and does not set it, nor do the tests.
 # Like every initdb script this runs once, on an empty data directory; a later password change needs ALTER ROLE by hand.
-set -euo pipefail
-
-# No `exit`: the image's entrypoint sources a script that is not executable, and an exit would end the entrypoint itself.
+# The image's entrypoint executes an executable *.sh and sources one that is not. Its mode in the image depends on the build host
+# (committed 100755; a Windows build context makes every file executable, a Linux one keeps the git mode), so this script works both
+# ways: no `exit` (sourced, it would end the entrypoint) and no `set` (sourced, it would change the entrypoint's options). A failed
+# psql still stops the init: ON_ERROR_STOP makes psql exit non-zero, and the entrypoint runs under `set -e`.
 if [ -z "${KEYCLOAK_DB_PASSWORD:-}" ]; then
     echo "02-keycloak.sh: KEYCLOAK_DB_PASSWORD not set, no keycloak role or database."
 else

@@ -134,7 +134,9 @@ spec:
           args:
             - |
               set -eu
-              printf 'user = "%s:%s"\n' "$RABBITMQ_USER" "$RABBITMQ_PASSWORD" | curl --config - --silent --show-error --fail-with-body \
+              # A quoted curl config string: escape \ and " so any user name and password survive (as in redis.yaml).
+              esc() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
+              printf 'user = "%s:%s"\n' "$(esc "$RABBITMQ_USER")" "$(esc "$RABBITMQ_PASSWORD")" | curl --config - --silent --show-error --fail-with-body \
                 --retry 60 --retry-delay 5 --retry-all-errors --max-time 10 \
                 -X PUT -H 'content-type: application/json' \
                 --data '{"type":"topic","durable":true,"auto_delete":false,"internal":false}' \

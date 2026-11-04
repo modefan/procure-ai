@@ -33,6 +33,11 @@ tests:
       - equal:
           path: spec.template.spec.initContainers[0].name
           value: keyfile
+      # Re-runnable in the same pod (a recreated sandbox reruns init containers on the kept Memory emptyDir): the 0400 copy is removed
+      # before it is copied again, since a non-root user without capabilities cannot overwrite it.
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: '^rm -f /etc/mongo-keyfile/keyfile && cp /etc/mongo-keyfile-secret/keyfile /etc/mongo-keyfile/keyfile && chmod 0400 /etc/mongo-keyfile/keyfile$'
       - contains:
           path: spec.template.spec.volumes
           content:

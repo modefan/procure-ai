@@ -727,6 +727,55 @@ public sealed class ServiceResourcesTests
     }
 
     [Fact]
+    public async Task Platform_chart_images_equal_the_AppHost_images()
+    {
+        // Plan 07 Task 3: the platform chart runs the AppHost's images and tags. Mongo, Redis and RabbitMQ come from Aspire's package
+        // defaults (an Aspire upgrade moves them), Mailpit and Keycloak from AppHost.cs literals; the chart's Keycloak is our image
+        // built FROM the same Keycloak image. Postgres is built from infra/postgres in both, so it cannot drift.
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var values = File.ReadAllLines("platform.values.yaml");
+
+        foreach (var (resource, section) in new[]
+        {
+            (ResourceNames.Mongo, "mongo"), (ResourceNames.Redis, "redis"), (ResourceNames.RabbitMq, "rabbitmq"), (ResourceNames.Mailpit, "mailpit"),
+        })
+        {
+            ChartImage(values, section).ShouldBe(AppHostImage(model, resource), $"values.yaml {section}.image");
+        }
+
+        var keycloakBase = File.ReadAllLines("keycloak.Dockerfile")
+            .Where(l => l.StartsWith("FROM ", StringComparison.Ordinal))
+            .Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1]).Distinct().ToArray();
+        keycloakBase.ShouldBe([AppHostImage(model, ResourceNames.Keycloak)], "infra/keycloak/Dockerfile FROM");
+    }
+
+    /// <summary>The resource's image as a fully qualified reference (docker.io and library/ made explicit).</summary>
+    private static string AppHostImage(DistributedApplicationModel model, string resourceName)
+    {
+        var image = model.Resources.Single(r => r.Name == resourceName).Annotations.OfType<ContainerImageAnnotation>().Last();
+        var reference = string.IsNullOrEmpty(image.Registry) ? image.Image : $"{image.Registry}/{image.Image}";
+        // As docker reads a reference: a first segment with a dot or colon is a registry; otherwise it is Docker Hub.
+        var firstSegment = reference.Split('/')[0];
+        if (!reference.Contains('/') || !(firstSegment.Contains('.') || firstSegment.Contains(':')))
+        {
+            reference = reference.Contains('/') ? $"docker.io/{reference}" : $"docker.io/library/{reference}";
+        }
+
+        return $"{reference}:{image.Tag}";
+    }
+
+    /// <summary>`image:` of a top-level section of the chart's values.yaml (`<section>:` then `  image: <ref>`).</summary>
+    private static string ChartImage(string[] values, string section)
+    {
+        var start = Array.IndexOf(values, $"{section}:");
+        start.ShouldBeGreaterThanOrEqualTo(0, $"values.yaml has no `{section}:` section");
+        var line = values.Skip(start + 1).TakeWhile(l => l.StartsWith("  ", StringComparison.Ordinal))
+            .Single(l => l.TrimStart().StartsWith("image:", StringComparison.Ordinal));
+        return line.Split(':', 2)[1].Split('#')[0].Trim().Trim('"');
+    }
+
+    [Fact]
     public async Task Keycloak_gets_the_dashboard_client_secret_and_no_project_gets_it()
     {
         // Plan 07 ruling 11: the realm's aspire-dashboard client takes its secret from KC_DASHBOARD_SECRET. Only the deployed dashboard

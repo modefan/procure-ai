@@ -49,7 +49,9 @@ spec:
         - name: keyfile
           image: {{ .Values.mongo.image }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          command: [sh, -c, "cp /etc/mongo-keyfile-secret/keyfile /etc/mongo-keyfile/keyfile && chmod 0400 /etc/mongo-keyfile/keyfile"]
+          # Re-runnable in the same pod: init containers run again when the sandbox is recreated, and the Memory emptyDir keeps the 0400 copy,
+          # which a non-root user without capabilities cannot overwrite; removing it first works (the directory is writable).
+          command: [sh, -c, "rm -f /etc/mongo-keyfile/keyfile && cp /etc/mongo-keyfile-secret/keyfile /etc/mongo-keyfile/keyfile && chmod 0400 /etc/mongo-keyfile/keyfile"]
           resources:
             {{- toYaml .Values.helperResources | nindent 12 }}
           {{- include "procure-platform.containerSecurity" . | nindent 10 }}
