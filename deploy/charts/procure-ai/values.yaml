@@ -269,6 +269,9 @@ gateway:
     Auth__Internal__TokenUrl: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure/protocol/openid-connect/token'
     # Traefik's pods (k3s pod CIDR); ForwardLimit 1 (appsettings): Traefik is the one proxy in front.
     ForwardedHeaders__KnownNetworks__0: 10.42.0.0/16
+    # Traefik forwards a WebSocket upgrade with X-Forwarded-Proto wss, so the hub origin check's "own origin" is wss://<host> and the
+    # browser's https://<host> was refused (403; SignalR fell back to another transport). The app's origin is allowed explicitly.
+    Hubs__AllowedOrigins__0: 'https://{{ .Values.global.hosts.app }}'
     ReverseProxy__Clusters__requests__Destinations__d1__Address: 'http://requests-api:{{ .Values.global.port }}'
     ReverseProxy__Clusters__access__Destinations__d1__Address: 'http://access-api:{{ .Values.global.port }}'
     ReverseProxy__Clusters__budgets__Destinations__d1__Address: 'http://budgets-api:{{ .Values.global.port }}'

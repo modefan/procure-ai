@@ -64,10 +64,13 @@ public sealed partial class ChartParityTests
     [GeneratedRegex("^[A-Z0-9_]+_(HOST|PORT|URI|PASSWORD|USERNAME|DATABASENAME|JDBCCONNECTIONSTRING|AUTHENTICATIONDATABASE|AUTHENTICATIONMECHANISM|HTTP|HTTPS)$")]
     private static partial Regex AspireReferenceProperty();
 
-    /// <summary>What only the cluster needs: the local CA for TLS to Keycloak and MongoDB (ruling 8), the ingress as trusted proxy (gateway).</summary>
+    /// <summary>
+    /// What only the cluster needs: the local CA for TLS to Keycloak and MongoDB (ruling 8); for the gateway, the ingress as trusted proxy
+    /// and the app's origin for the hubs (Traefik forwards WebSocket upgrades as wss, so the gateway's own origin no longer matches).
+    /// </summary>
     private static bool ChartOnly(string app, string name) =>
         name == "SSL_CERT_DIR"
-        || (app == "gateway" && name.StartsWith("ForwardedHeaders__", StringComparison.Ordinal));
+        || (app == "gateway" && (name.StartsWith("ForwardedHeaders__", StringComparison.Ordinal) || name.StartsWith("Hubs__AllowedOrigins__", StringComparison.Ordinal)));
 
     /// <summary>The Angular dev server's own settings under the AppHost (<c>ng serve --port</c>, Node heap); the cluster serves the build with nginx.</summary>
     private static readonly Dictionary<string, string[]> AppHostOnly = new(StringComparer.Ordinal)
