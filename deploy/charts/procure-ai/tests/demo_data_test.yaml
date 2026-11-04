@@ -1,0 +1,78 @@
+# The demo data in the cluster (plan 07 ruling 13): demo-seed after every sync (Argo CD PostSync), demo-reset every night at 02:00
+# Johannesburg, never two at once. Both run ProcureAi.DemoData against the gateway inside the cluster with the admin key.
+suite: demo data
+templates:
+  - demo-data.yaml
+set:
+  global.imageTag: abc1234
+  global.demo.seed: true
+  global.demo.reset: true
+tests:
+  - it: demo seed is a PostSync hook
+    documentIndex: 0
+    asserts:
+      - containsDocument:
+          kind: Job
+          apiVersion: batch/v1
+          name: demo-seed
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+          value: PostSync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
+          value: BeforeHookCreation
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: [seed]
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: procure-ai-demo-data:abc1234
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DemoData__GatewayUrl
+            value: http://gateway:8080
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DemoData__AllowUntrustedServerCertificate
+            value: "false"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DemoData__AdminApiKey
+            valueFrom:
+              secretKeyRef: { name: procure-api-keys, key: admin-api-key }
+
+  - it: demo reset cronjob runs at 02:00 Johannesburg and forbids overlap
+    documentIndex: 1
+    asserts:
+      - containsDocument:
+          kind: CronJob
+          apiVersion: batch/v1
+          name: demo-reset
+      - equal:
+          path: spec.schedule
+          value: "0 2 * * *"
+      - equal:
+          path: spec.timeZone
+          value: Africa/Johannesburg
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].args
+          value: [reset]
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: DemoData__SimulatorUrl
+            value: http://simulators:8080
+
+  - it: no demo data while the demo switches are off
+    set:
+      global.demo.seed: false
+      global.demo.reset: false
+    asserts:
+      - hasDocuments:
+          count: 0

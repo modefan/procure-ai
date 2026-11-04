@@ -1,0 +1,9 @@
+apiVersion: v2
+name: procure-app
+description: >-
+  One app of ProcureAI (a service API, the gateway, the simulators or the web app): Deployment, Service, optional Ingress, the
+  `--migrate` Job that runs first (Argo CD Sync hook, wave -1) and, for the web app, the runtime config.json. Generic: the umbrella
+  chart procure-ai adds it once per app (alias) with that app's wiring.
+type: application
+version: 0.1.0
+appVersion: "plan07"

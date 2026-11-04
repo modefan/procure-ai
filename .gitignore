@@ -495,3 +495,6 @@ dist/
 
 # Assistant evaluation reports (tests/ProcureAi.Assistant.Evaluation/reports)
 tests/ProcureAi.Assistant.Evaluation/reports/
+
+# Helm chart dependencies (helm dependency build: deploy/charts/procure-ai/charts/procure-app-*.tgz)
+deploy/charts/*/charts/

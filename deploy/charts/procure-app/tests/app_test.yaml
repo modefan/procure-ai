@@ -1,0 +1,315 @@
+# procure-app (plan 07 Task 5): one app of ProcureAI. The migration runs first as an Argo CD Sync hook (wave -1) with the app's image and
+# environment plus --migrate; the Deployment follows in wave 0. Secrets by reference only, never optional.
+suite: procure-app
+templates:
+  - deployment.yaml
+  - migrate-job.yaml
+  - service.yaml
+  - configmap.yaml
+  - ingress.yaml
+set:
+  global.imageTag: abc1234
+  name: requests-api
+  image.repository: procure-ai-requests-api
+  env:
+    Service__Store: Postgres
+  secretEnv:
+    ConnectionStrings__requestsdb: { secret: procure-connection-strings, key: requestsdb }
+  migration.enabled: true
+tests:
+  - it: migration job is a Sync hook in wave -1
+    template: migrate-job.yaml
+    asserts:
+      - containsDocument:
+          kind: Job
+          apiVersion: batch/v1
+          name: requests-migrate
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+          value: Sync
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook-delete-policy"]
+          value: BeforeHookCreation
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "-1"
+      - equal:
+          path: spec.backoffLimit
+          value: 6
+      # The same image and environment as the app, plus --migrate.
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: procure-ai-requests-api:abc1234
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: [--migrate]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Service__Store
+            value: Postgres
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ConnectionStrings__requestsdb
+            valueFrom:
+              secretKeyRef: { name: procure-connection-strings, key: requestsdb }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DemoSeed__Enabled
+            value: "false"
+
+  - it: demo seed of the migration comes from values
+    template: migrate-job.yaml
+    set:
+      global.demo.seed: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DemoSeed__Enabled
+            value: "true"
+
+  - it: migration-only settings stay out of the app
+    set:
+      migration.secretEnv:
+        Mongo__DebeziumPassword: { secret: procure-debezium, key: mongo-password }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Mongo__DebeziumPassword
+            valueFrom:
+              secretKeyRef: { name: procure-debezium, key: mongo-password }
+        template: migrate-job.yaml
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Mongo__DebeziumPassword
+            valueFrom:
+              secretKeyRef: { name: procure-debezium, key: mongo-password }
+        template: deployment.yaml
+
+  - it: no migration job unless enabled
+    template: migrate-job.yaml
+    set:
+      migration.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: a postgres migration creates its database first
+    template: migrate-job.yaml
+    set:
+      migration.createPostgresDatabase: requestsdb
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: create-database
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: procure-ai-postgres:abc1234
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: PGPASSWORD
+            valueFrom:
+              secretKeyRef: { name: procure-postgres, key: password }
+
+  - it: deployment is wave 0
+    template: deployment.yaml
+    asserts:
+      - containsDocument:
+          kind: Deployment
+          apiVersion: apps/v1
+          name: requests-api
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "0"
+      - equal:
+          path: spec.template.spec.containers[0].ports[0]
+          value: { name: http, containerPort: 8080, protocol: TCP }
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /health/ready
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /health/live
+
+  - it: service discovery points at the called apps
+    template: deployment.yaml
+    set:
+      calls: [access-api, approvals-api]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: services__access-api__http__0
+            value: http://access-api:8080
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: services__approvals-api__http__0
+            value: http://approvals-api:8080
+
+  - it: shared env groups come from global and the app overrides them
+    template: deployment.yaml
+    set:
+      global.sharedEnv.service:
+        Auth__Authority: "https://{{ .Values.global.hosts.keycloak }}/realms/procure"
+        Auth__InternalClientId: procure-internal
+      global.sharedSecretEnv.service:
+        Auth__AdminApiKeySha256: { secret: procure-api-keys, key: admin-api-key-sha256 }
+      global.hosts.keycloak: auth.example.test
+      sharedEnv: [service]
+      env:
+        Auth__InternalClientId: overridden
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Auth__Authority
+            value: https://auth.example.test/realms/procure
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Auth__InternalClientId
+            value: overridden
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Auth__AdminApiKeySha256
+            valueFrom:
+              secretKeyRef: { name: procure-api-keys, key: admin-api-key-sha256 }
+
+  - it: an unknown shared env group fails the render
+    template: deployment.yaml
+    set:
+      sharedEnv: [nope]
+      migration.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "shared env group nope"
+
+  - it: dotnet caps from values
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOTNET_GCHeapHardLimit
+            value: "0x10000000"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOTNET_gcServer
+            value: "0"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOTNET_GCConserveMemory
+            value: "5"
+
+  - it: ca trust mounts the hash file and sets SSL_CERT_DIR
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SSL_CERT_DIR
+            value: /etc/ssl/certs:/etc/procure-ca
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: procure-ca
+            mountPath: /etc/procure-ca
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: procure-ca
+            configMap:
+              name: procure-ca
+
+  - it: ingress routes the host to the app
+    template: ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.host: procure.example.test
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: procure.example.test
+      - equal:
+          path: spec.rules[0].http.paths[0]
+          value: { path: /, pathType: Prefix, backend: { service: { name: requests-api, port: { name: http } } } }
+      - equal:
+          path: spec.tls[0].hosts[0]
+          value: procure.example.test
+
+  - it: an ingress backend is labelled for the traefik network policy
+    template: deployment.yaml
+    set:
+      ingress.enabled: true
+      ingress.host: procure.example.test
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels["procure.ai/ingress-backend"]
+          value: "true"
+
+  - it: no ingress unless enabled
+    template: ingress.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: web mounts config.json
+    set:
+      name: web
+      image.repository: procure-ai-web
+      dotnet.enabled: false
+      caTrust.enabled: false
+      migration.enabled: false
+      probes: { liveness: /, readiness: / }
+      configJson:
+        apiBaseUrl: ""
+        devPanel: { enabled: true }
+    asserts:
+      - template: configmap.yaml
+        containsDocument:
+          kind: ConfigMap
+          apiVersion: v1
+          name: web-config
+      - template: configmap.yaml
+        matchRegex:
+          path: data["config.json"]
+          pattern: '"devPanel": \{\s*"enabled": true'
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config-json
+            mountPath: /usr/share/nginx/html/config.json
+            subPath: config.json
+            readOnly: true
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config-json
+            configMap:
+              name: web-config
+      - template: deployment.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /
+
+  - it: no secretKeyRef is optional
+    asserts:
+      - notExists:
+          path: $..secretKeyRef.optional
+      - notExists:
+          path: $..configMap.optional
+      - notExists:
+          path: $..secret.optional

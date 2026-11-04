@@ -1,0 +1,51 @@
+{{- if or .Values.global.demo.seed .Values.global.demo.reset }}
+{{- $tag := required "global.imageTag is required (the commit SHA, or local-<sha7> for images built on the PC)" .Values.global.imageTag }}
+{{- $image := printf "%s:%s" .Values.demoData.image.repository $tag }}
+{{- if .Values.global.imageRegistry }}{{ $image = printf "%s/%s" (trimSuffix "/" .Values.global.imageRegistry) $image }}{{ end }}
+{{- if .Values.global.demo.seed }}
+# demo-seed: after every sync (Argo CD PostSync, i.e. once every app is healthy) `seed` drives the scenario requests to their states. Safe
+# to run again: it resumes what is there and creates nothing twice. The Helm hook does the same for `helm upgrade --install --wait`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-seed
+  labels:
+    app.kubernetes.io/name: demo-seed
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: procure-ai
+    app.kubernetes.io/component: demo-data
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.demoData.backoffLimit }}
+  template:
+    {{- include "procure-ai.demoDataPod" (dict "root" $ "name" "demo-seed" "image" $image "command" "seed") | nindent 4 }}
+{{- end }}
+{{- if .Values.global.demo.reset }}
+---
+# demo-reset: every night (ruling 13) `reset` clears every service's data (the users who registered stay) and seeds again; never two at once.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: demo-reset
+  labels:
+    app.kubernetes.io/name: demo-reset
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: procure-ai
+    app.kubernetes.io/component: demo-data
+spec:
+  schedule: {{ .Values.demoData.reset.schedule | quote }}
+  timeZone: {{ .Values.demoData.reset.timeZone }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.demoData.backoffLimit }}
+      template:
+        {{- include "procure-ai.demoDataPod" (dict "root" $ "name" "demo-reset" "image" $image "command" "reset") | nindent 8 }}
+{{- end }}
+{{- end }}

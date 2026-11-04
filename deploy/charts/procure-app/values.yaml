@@ -1,0 +1,106 @@
+# procure-app: one app of ProcureAI. The umbrella chart procure-ai sets these per app (alias); the defaults here suit a .NET service API.
+# No secrets: secretEnv names a Kubernetes Secret and key (created by the GitOps repo's bootstrap/new-secrets.ps1), never a value.
+
+global:
+  # Registry prefix ("" for images imported into k3d, ghcr.io/modefan once CI publishes) and tag (full commit SHA, or local-<sha7>).
+  imageRegistry: ""
+  imageTag: ""
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+    - ghcr-pull
+  # The port every app listens on (the .NET images' ASPNETCORE_HTTP_PORTS, nginx in the web image); also the port of every Service.
+  port: 8080
+  hosts:
+    app: procure.localtest.me
+    keycloak: auth.procure.localtest.me
+  # Demo switches (off by default; envs/local turns them on). Used through `tpl` in env values, e.g. '{{ .Values.global.demo.devPanel }}'.
+  demo:
+    seed: false
+    reset: false
+    devPanel: false
+    login: false
+  # .NET GC caps (the AppHost's Resources:DotNet); an app's own dotnet.* values win.
+  dotnet:
+    heapHardLimit: "0x10000000"
+    gcServer: "0"
+    gcConserveMemory: "5"
+  # Named groups of plain env (name -> value, rendered through `tpl`) and secret env (name -> {secret, key}) that apps opt into with
+  # `sharedEnv: [group, ...]`, so a setting every service needs is written once in the umbrella.
+  sharedEnv: {}
+  sharedSecretEnv: {}
+  # Images of the helper init containers.
+  postgresImage: procure-ai-postgres       # our image (psql for create-database)
+  curlImage: docker.io/curlimages/curl:8.23.0
+  helperResources:
+    limits: { memory: 128Mi, cpu: 500m }
+    requests: { memory: 64Mi, cpu: 50m }
+
+# The workload and Service name, e.g. requests-api (the AppHost resource name; services find each other by it). Required.
+name: ""
+image:
+  repository: ""   # e.g. procure-ai-requests-api (without registry)
+  tag: ""          # default: global.imageTag
+replicas: 1
+args: []
+# Groups of global.sharedEnv / global.sharedSecretEnv this app takes.
+sharedEnv: []
+# The app's own settings (win over the groups). Values go through `tpl`.
+env: {}
+# name -> { secret: <Secret name>, key: <key> }; rendered as a secretKeyRef (never optional: a missing Secret or key stops the pod).
+secretEnv: {}
+# Apps this one calls (AppHost WithReference): services__<name>__http__0 = http://<name>:<global.port>, as Aspire's service discovery.
+calls: []
+# URLs that must answer 2xx before the app starts (init container, curl): the Debezium Server of the app's database, as the AppHost's
+# WaitFor(debezium) (no change made through the app may precede the capture).
+waitFor: []
+
+migration:
+  enabled: false
+  # Default: <name without -api>-migrate.
+  name: ""
+  # DemoSeed__Enabled of the migration (the AppHost sets true; off by default here).
+  demoSeed: '{{ .Values.global.demo.seed }}'
+  # Settings only the migration gets (e.g. the debezium MongoDB user's password for Suppliers).
+  env: {}
+  secretEnv: {}
+  # A Postgres database to create before migrating, as the AppHost's AddDatabase does ("" for none; MongoDB creates its own).
+  createPostgresDatabase: ""
+  backoffLimit: 6
+
+ingress:
+  enabled: false
+  className: traefik
+  host: ""
+  paths:
+    - /
+
+# Per container. The .NET heap is capped at DOTNET_GCHeapHardLimit (256 MiB), but the process needs more around it. Measured on k3d
+# (plan 07 Task 5, during the demo seed): the APIs that use Wolverine reached 450-730 MiB RSS, nearly all of it native (glibc malloc)
+# memory that grows in bursts as handlers are first used (Wolverine compiles its generated handler code at run time); Suppliers, the
+# gateway and the simulators stay at 110-150 MiB. 512Mi and 768Mi got the Wolverine APIs OOMKilled. See the task report: pre-generated
+# Wolverine code (TypeLoadMode.Static) is the fix, after which these numbers can come down.
+resources:
+  limits: { memory: 1Gi, cpu: "1" }
+  requests: { memory: 384Mi, cpu: 50m }
+
+# DOTNET_GCHeapHardLimit / DOTNET_gcServer / DOTNET_GCConserveMemory from global.dotnet unless set here; off for the web app.
+dotnet:
+  enabled: true
+
+# The local CA (ConfigMap procure-ca from bootstrap/new-local-ca.ps1: <subject hash>.0 and ca.crt) for TLS to Keycloak and MongoDB
+# (plan 07 ruling 8).
+caTrust:
+  enabled: true
+  configMap: procure-ca
+  mountPath: /etc/procure-ca
+
+probes:
+  liveness: /health/live
+  readiness: /health/ready
+
+# The image's non-root user: 1654 is `app` in the .NET images, 101 nginx in the web image.
+runAsUser: 1654
+
+# Web only: the runtime config.json (mounted at /usr/share/nginx/html/config.json). Empty: none.
+configJson: {}
+configJsonPath: /usr/share/nginx/html/config.json

@@ -1,0 +1,63 @@
+apiVersion: v2
+name: procure-ai
+description: >-
+  ProcureAI's apps on Kubernetes: every service API (with its --migrate Job), the gateway (the only ingress), the simulators, the web
+  app and the demo data (seed after every sync, reset every night). One procure-app per app (alias); values.yaml holds the wiring the
+  AppHost gives each app (AppHost.Tests ChartParityTests keeps them equal). The platform (databases, broker, Keycloak, Debezium) is the
+  separate chart procure-platform.
+type: application
+version: 0.1.0
+appVersion: "plan07"
+dependencies:
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: access
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: approvals
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: assistant
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: audit
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: budgets
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: invoicing
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: notifications
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: purchasing
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: requests
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: suppliers
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: gateway
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: simulators
+  - name: procure-app
+    version: 0.1.0
+    repository: file://../procure-app
+    alias: web

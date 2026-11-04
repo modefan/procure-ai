@@ -1,0 +1,337 @@
+# procure-ai: the wiring of every app, as src/AppHost/ProcureAi.AppHost gives it (AppHost.cs, ServiceResources.cs). AppHost.Tests
+# ChartParityTests renders this chart and compares every app's environment variable names with the AppHost's, so a setting added on one
+# side only fails the build. Values differ on purpose: in-cluster hosts, https Keycloak behind Traefik, secrets by Secret reference.
+# Environment values (hosts, demo switches, image registry and tag, the web app's config.json) come from the GitOps repo's
+# envs/<env>/procure-ai.yaml. No secrets here: bootstrap/new-secrets.ps1 creates the Secrets referenced below (controller ruling R2:
+# procure-connection-strings holds one key per AppHost connection name).
+
+global:
+  # "" for images imported into k3d (deploy/scripts/build-images.ps1 -ImportTo procure); ghcr.io/modefan once CI publishes them.
+  imageRegistry: ""
+  # The app revision (full commit SHA), or local-<sha7> for images built on the PC. Required.
+  imageTag: ""
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+    - ghcr-pull
+  port: 8080
+  hosts:
+    # The app as the browser opens it (the gateway's ingress; links in the notification emails).
+    app: procure.localtest.me
+    # Keycloak; the token issuer is https://<keycloak>/realms/procure, which pods reach through the CoreDNS rewrite (ruling 8).
+    keycloak: auth.procure.localtest.me
+  # Demo switches (plan 06: off by default, 404 when off). envs/local turns them on.
+  demo:
+    seed: false       # DemoSeed__Enabled of every migration
+    reset: false      # DemoReset__Enabled: the reset endpoints ProcureAi.DemoData calls
+    devPanel: false   # DevPanel__Enabled: the "behind the scenes" response headers
+    login: false      # DemoLogin__Enabled: one-click demo login on the gateway
+  # The AppHost's Resources:DotNet (ChartParityTests checks the rendered values).
+  dotnet:
+    heapHardLimit: "0x10000000"
+    gcServer: "0"
+    gcConserveMemory: "5"
+  postgresImage: procure-ai-postgres
+  curlImage: docker.io/curlimages/curl:8.23.0
+  helperResources:
+    limits: { memory: 128Mi, cpu: 500m }
+    requests: { memory: 64Mi, cpu: 50m }
+
+  sharedEnv:
+    # Telemetry to the OpenTelemetry Collector in namespace observability (Task 7; until it exists the exporters fail quietly). The Serilog
+    # sink has no environment fallback, so it gets the endpoint too (ServiceResources.WithOtlpEndpoint).
+    telemetry:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector.observability:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: '{{ .Values.name }}'
+      Serilog__WriteTo__OpenTelemetry__Args__endpoint: http://collector.observability:4317
+    # Every service API (ServiceResources.AddProcureAiService).
+    service:
+      DevPanel__Enabled: '{{ .Values.global.demo.devPanel }}'
+      DemoReset__Enabled: '{{ .Values.global.demo.reset }}'
+      Auth__Authority: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure'
+      # https in the cluster (the AppHost's Keycloak container speaks plain http and sets false).
+      Auth__RequireHttpsMetadata: "true"
+      Auth__OpenApi__AuthorizationUrl: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure/protocol/openid-connect/auth'
+      Auth__OpenApi__TokenUrl: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure/protocol/openid-connect/token'
+      Auth__InternalClientId: procure-internal
+      Auth__Internal__ClientId: procure-internal
+      Auth__Internal__TokenUrl: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure/protocol/openid-connect/token'
+    # Services on Postgres: every Npgsql pool capped so all fit max_connections 200 (Resources:Postgres:PoolSizePerService, Task 0c; the
+    # budget in ServiceResourcesTests.Pool_sizes_fit_max_connections assumes one replica per service).
+    postgres:
+      Service__Store: Postgres
+      Database__MaxPoolSize: "8"
+  sharedSecretEnv:
+    service:
+      Auth__AdminApiKeySha256: { secret: procure-api-keys, key: admin-api-key-sha256 }
+      Auth__Internal__ClientSecret: { secret: procure-keycloak, key: internal-secret }
+      ConnectionStrings__rabbitmq: { secret: procure-connection-strings, key: rabbitmq }
+      ConnectionStrings__redis: { secret: procure-connection-strings, key: redis }
+
+# --- The service APIs (Service <alias>-api). calls = the AppHost's CallsServices; waitFor = its WaitFor(debezium-...). ---
+
+access:
+  name: access-api
+  image: { repository: procure-ai-access-api }
+  sharedEnv: [telemetry, service, postgres]
+  secretEnv:
+    ConnectionStrings__accessdb: { secret: procure-connection-strings, key: accessdb }
+    # Self-registration: only Access talks to the Keycloak admin API, as procure-access-admin.
+    Keycloak__AdminClientSecret: { secret: procure-keycloak, key: access-admin-secret }
+  env:
+    Keycloak__AdminBaseUrl: 'https://{{ .Values.global.hosts.keycloak }}'
+    Keycloak__Realm: procure
+    Keycloak__DemoOrganization: demo
+    Keycloak__AdminClientId: procure-access-admin
+  waitFor: [http://debezium-accessdb-0.debezium:8080/q/health]
+  migration: { enabled: true, createPostgresDatabase: accessdb }
+
+budgets:
+  name: budgets-api
+  image: { repository: procure-ai-budgets-api }
+  sharedEnv: [telemetry, service, postgres]
+  secretEnv:
+    ConnectionStrings__budgetsdb: { secret: procure-connection-strings, key: budgetsdb }
+  calls: [access-api]
+  waitFor: [http://debezium-budgetsdb-0.debezium:8080/q/health]
+  migration: { enabled: true, createPostgresDatabase: budgetsdb }
+
+approvals:
+  name: approvals-api
+  image: { repository: procure-ai-approvals-api }
+  sharedEnv: [telemetry, service, postgres]
+  secretEnv:
+    ConnectionStrings__approvalsdb: { secret: procure-connection-strings, key: approvalsdb }
+  calls: [access-api]
+  waitFor: [http://debezium-approvalsdb-0.debezium:8080/q/health]
+  migration: { enabled: true, createPostgresDatabase: approvalsdb }
+
+# Audit (Marten): nothing of its own is captured. It reads the server's pgaudit log as audit_log_reader (its --migrate creates the role).
+audit:
+  name: audit-api
+  image: { repository: procure-ai-audit-api }
+  sharedEnv: [telemetry, service, postgres]
+  secretEnv:
+    ConnectionStrings__auditdb: { secret: procure-connection-strings, key: auditdb }
+    ConnectionStrings__auditlog: { secret: procure-connection-strings, key: auditlog }
+  calls: [access-api]
+  migration: { enabled: true, createPostgresDatabase: auditdb }
+
+# Suppliers (MongoDB): no message store. Its --migrate (as the server's root) creates the least-privilege `debezium` user of
+# debezium-mongo, with read on every captured MongoDB database (plan 07 Task 4: it fails on purpose without these).
+suppliers:
+  name: suppliers-api
+  # No Wolverine: measured at 110-150 MiB on k3d (procure-app values.yaml explains the Wolverine APIs' larger default).
+  resources:
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
+  image: { repository: procure-ai-suppliers-api }
+  sharedEnv: [telemetry, service]
+  env:
+    Service__Store: MongoDB
+  secretEnv:
+    ConnectionStrings__suppliersdb: { secret: procure-connection-strings, key: suppliersdb }
+  calls: [access-api]
+  waitFor: [http://debezium-mongo-0.debezium:8080/q/health]
+  migration:
+    enabled: true
+    env:
+      Mongo__DebeziumDatabases__0: suppliersdb
+      Mongo__DebeziumDatabases__1: assistantchatdb
+    secretEnv:
+      Mongo__DebeziumPassword: { secret: procure-debezium, key: mongo-password }
+
+requests:
+  name: requests-api
+  image: { repository: procure-ai-requests-api }
+  sharedEnv: [telemetry, service, postgres]
+  secretEnv:
+    ConnectionStrings__requestsdb: { secret: procure-connection-strings, key: requestsdb }
+  calls: [access-api, approvals-api, suppliers-api]
+  waitFor: [http://debezium-requestsdb-0.debezium:8080/q/health]
+  migration: { enabled: true, createPostgresDatabase: requestsdb }
+
+# Purchasing: orders to the supplier (the simulators) with the simulator key; the supplier's webhooks are signed with the shared secret.
+purchasing:
+  name: purchasing-api
+  image: { repository: procure-ai-purchasing-api }
+  sharedEnv: [telemetry, service, postgres]
+  env:
+    SupplierClient__BaseUrl: 'http://simulators:{{ .Values.global.port }}'
+  secretEnv:
+    ConnectionStrings__purchasingdb: { secret: procure-connection-strings, key: purchasingdb }
+    SupplierClient__ApiKey: { secret: procure-api-keys, key: simulator-api-key }
+    Webhooks__Sources__supplier__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
+  calls: [access-api]
+  waitFor: [http://debezium-purchasingdb-0.debezium:8080/q/health]
+  migration: { enabled: true, createPostgresDatabase: purchasingdb }
+
+# The Assistant: assistantdb (pgvector) plus the chat history on MongoDB (assistantchatdb, captured by debezium-mongo). The model provider
+# is configuration (AI__*): none here, so the Fake provider runs (no key, no account) until plan 08 adds a real one.
+assistant:
+  name: assistant-api
+  image: { repository: procure-ai-assistant-api }
+  sharedEnv: [telemetry, service, postgres]
+  env:
+    Service__SecondaryMongoConnectionName: assistantchatdb
+  secretEnv:
+    ConnectionStrings__assistantdb: { secret: procure-connection-strings, key: assistantdb }
+    ConnectionStrings__assistantchatdb: { secret: procure-connection-strings, key: assistantchatdb }
+  calls: [access-api, requests-api, approvals-api, budgets-api, suppliers-api]
+  waitFor:
+    - http://debezium-assistantdb-0.debezium:8080/q/health
+    - http://debezium-mongo-0.debezium:8080/q/health
+  migration: { enabled: true, createPostgresDatabase: assistantdb }
+
+invoicing:
+  name: invoicing-api
+  image: { repository: procure-ai-invoicing-api }
+  sharedEnv: [telemetry, service, postgres]
+  env:
+    ErpClient__BaseUrl: 'http://simulators:{{ .Values.global.port }}'
+  secretEnv:
+    ConnectionStrings__invoicingdb: { secret: procure-connection-strings, key: invoicingdb }
+    ErpClient__ApiKey: { secret: procure-api-keys, key: simulator-api-key }
+    Webhooks__Sources__supplier__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
+  calls: [access-api, assistant-api]
+  waitFor: [http://debezium-invoicingdb-0.debezium:8080/q/health]
+  migration: { enabled: true, createPostgresDatabase: invoicingdb }
+
+# Notifications: no database (no migration, no Debezium). Emails through Mailpit; the links point at the app's public host. The status
+# screen expects a snapshot from every service API.
+notifications:
+  name: notifications-api
+  image: { repository: procure-ai-notifications-api }
+  sharedEnv: [telemetry, service]
+  env:
+    Service__Store: None
+    Notifications__Smtp__Host: mailpit
+    Notifications__Smtp__Port: "1025"
+    Notifications__Smtp__From: no-reply@procure-ai.local
+    Notifications__Smtp__AppBaseUrl: 'https://{{ .Values.global.hosts.app }}'
+    Status__ExpectedServices__0: access-api
+    Status__ExpectedServices__1: budgets-api
+    Status__ExpectedServices__2: approvals-api
+    Status__ExpectedServices__3: audit-api
+    Status__ExpectedServices__4: suppliers-api
+    Status__ExpectedServices__5: requests-api
+    Status__ExpectedServices__6: purchasing-api
+    Status__ExpectedServices__7: assistant-api
+    Status__ExpectedServices__8: invoicing-api
+    Status__ExpectedServices__9: notifications-api
+  calls: [access-api]
+
+# --- The simulators, the gateway and the web app. ---
+
+# The simulated supplier and ERP (in memory); webhooks straight to Purchasing and Invoicing, signed with the shared secret.
+simulators:
+  name: simulators
+  # No Wolverine: measured at 110-150 MiB on k3d (procure-app values.yaml explains the Wolverine APIs' larger default).
+  resources:
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
+  image: { repository: procure-ai-simulators }
+  sharedEnv: [telemetry]
+  caTrust: { enabled: false }
+  env:
+    DevPanel__Enabled: '{{ .Values.global.demo.devPanel }}'
+    DemoReset__Enabled: '{{ .Values.global.demo.reset }}'
+    # As the AppHost's Simulators:Supplier (appsettings.json).
+    Simulators__Supplier__ConfirmDelay: "00:00:03"
+    Simulators__Supplier__InvoiceDelay: "00:00:20"
+    Simulators__Webhooks__PurchasingUrl: 'http://purchasing-api:{{ .Values.global.port }}/api/v1/purchasing/webhooks/supplier'
+    Simulators__Webhooks__InvoicingUrl: 'http://invoicing-api:{{ .Values.global.port }}/api/v1/invoicing/webhooks/supplier'
+  secretEnv:
+    Simulators__ApiKey: { secret: procure-api-keys, key: simulator-api-key }
+    Simulators__Webhooks__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
+    Auth__AdminApiKeySha256: { secret: procure-api-keys, key: admin-api-key-sha256 }
+
+# The gateway: the only door in (ingress at the app host, every path). BFF login against Keycloak, YARP to the services and the web app.
+# Behind Traefik it trusts X-Forwarded-For/-Proto from the pod network only, so the __Host- session cookie sees https (Review Focus 5).
+gateway:
+  name: gateway
+  # No Wolverine: measured at 110-150 MiB on k3d (procure-app values.yaml explains the Wolverine APIs' larger default).
+  resources:
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
+  image: { repository: procure-ai-gateway }
+  sharedEnv: [telemetry]
+  ingress:
+    enabled: true
+    host: '{{ .Values.global.hosts.app }}'
+    paths: [/]
+  env:
+    DevPanel__Enabled: '{{ .Values.global.demo.devPanel }}'
+    DemoLogin__Enabled: '{{ .Values.global.demo.login }}'
+    Oidc__Authority: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure'
+    Oidc__RequireHttpsMetadata: "true"
+    Auth__Internal__ClientId: procure-internal
+    Auth__Internal__TokenUrl: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure/protocol/openid-connect/token'
+    # Traefik's pods (k3s pod CIDR); ForwardLimit 1 (appsettings): Traefik is the one proxy in front.
+    ForwardedHeaders__KnownNetworks__0: 10.42.0.0/16
+    ReverseProxy__Clusters__requests__Destinations__d1__Address: 'http://requests-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__access__Destinations__d1__Address: 'http://access-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__budgets__Destinations__d1__Address: 'http://budgets-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__approvals__Destinations__d1__Address: 'http://approvals-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__audit__Destinations__d1__Address: 'http://audit-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__suppliers__Destinations__d1__Address: 'http://suppliers-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__purchasing__Destinations__d1__Address: 'http://purchasing-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__invoicing__Destinations__d1__Address: 'http://invoicing-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__notifications__Destinations__d1__Address: 'http://notifications-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__assistant__Destinations__d1__Address: 'http://assistant-api:{{ .Values.global.port }}'
+    ReverseProxy__Clusters__web__Destinations__d1__Address: 'http://web:{{ .Values.global.port }}'
+  secretEnv:
+    ConnectionStrings__redis: { secret: procure-connection-strings, key: redis }
+    Oidc__ClientSecret: { secret: procure-keycloak, key: gateway-secret }
+    DemoLogin__ClientSecret: { secret: procure-keycloak, key: demo-login-secret }
+    DemoLogin__Password: { secret: procure-keycloak, key: demo-password }
+    Auth__Internal__ClientSecret: { secret: procure-keycloak, key: internal-secret }
+    # The demo reset's maintenance window: only the valid admin key writes (plan 07 Task 0b).
+    Auth__AdminApiKeySha256: { secret: procure-api-keys, key: admin-api-key-sha256 }
+  calls: [requests-api, access-api, budgets-api, approvals-api, audit-api, suppliers-api, purchasing-api, invoicing-api, notifications-api, assistant-api]
+
+# The Angular app (production build on unprivileged nginx). Only the gateway talks to it; its config.json comes from values.
+web:
+  name: web
+  image: { repository: procure-ai-web }
+  runAsUser: 101
+  dotnet: { enabled: false }
+  caTrust: { enabled: false }
+  probes: { liveness: /, readiness: / }
+  resources:
+    limits: { memory: 64Mi, cpu: 500m }
+    requests: { memory: 32Mi, cpu: 20m }
+  # The runtime config (src/Web/procure-ai-web/public/config.json holds the AppHost defaults). Production-safe defaults here.
+  configJson:
+    apiBaseUrl: ""
+    logger:
+      consoleLevel: warn
+      serverLevel: warn
+      serverUrl: /api/client-logs
+      batchSize: 10
+      flushMs: 5000
+      serverMaxPerMinute: 60
+    paging: { pageSize: 25 }
+    live:
+      heartbeatMs: 15000
+      reconnectDelaysMs: [0, 2000, 5000, 10000, 30000]
+      offlineRetryMs: 30000
+    cache: { staleMs: 30000, trailingReloadMs: 2000 }
+    observability: { dashboardUrl: "" }
+    devPanel: { enabled: false }
+
+# --- The demo data (templates/demo-data.yaml, plan 07 ruling 13): ProcureAi.DemoData through the gateway with the admin key. ---
+# demo-seed runs when global.demo.seed is on, demo-reset when global.demo.reset is on.
+demoData:
+  image: { repository: procure-ai-demo-data }
+  # Inside the cluster: plain http to the gateway's Service, so no untrusted-certificate switch.
+  gatewayUrl: 'http://gateway:{{ .Values.global.port }}'
+  simulatorUrl: 'http://simulators:{{ .Values.global.port }}'
+  # The nightly reset (reset, then seed).
+  reset:
+    schedule: "0 2 * * *"
+    timeZone: Africa/Johannesburg
+  backoffLimit: 6
+  resources:
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 128Mi, cpu: 50m }

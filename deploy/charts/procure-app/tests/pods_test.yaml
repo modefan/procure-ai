@@ -1,0 +1,92 @@
+# Rules every pod of the chart follows (plan 07 Global Constraints): requests and limits on every container (init containers too),
+# non-root with a read-only root filesystem, no privilege escalation, no capabilities, and a Secret that is missing fails the pod.
+suite: every pod
+templates:
+  - deployment.yaml
+  - migrate-job.yaml
+set:
+  global.imageTag: abc1234
+  name: requests-api
+  image.repository: procure-ai-requests-api
+  secretEnv:
+    ConnectionStrings__requestsdb: { secret: procure-connection-strings, key: requestsdb }
+  migration.enabled: true
+  migration.createPostgresDatabase: requestsdb
+  waitFor: [http://debezium-requestsdb-0.debezium:8080/q/health]
+tests:
+  - it: every container has requests and limits
+    asserts:
+      - notExists:
+          path: $..spec.containers[?(!@.resources.limits.memory)]
+      - notExists:
+          path: $..spec.containers[?(!@.resources.limits.cpu)]
+      - notExists:
+          path: $..spec.containers[?(!@.resources.requests.memory)]
+      - notExists:
+          path: $..spec.containers[?(!@.resources.requests.cpu)]
+      - notExists:
+          path: $..spec.initContainers[?(!@.resources.limits.memory)]
+      - notExists:
+          path: $..spec.initContainers[?(!@.resources.limits.cpu)]
+      - notExists:
+          path: $..spec.initContainers[?(!@.resources.requests.memory)]
+      - notExists:
+          path: $..spec.initContainers[?(!@.resources.requests.cpu)]
+
+  - it: no secretKeyRef is optional
+    asserts:
+      - notExists:
+          path: $..secretKeyRef.optional
+      - notExists:
+          path: $..secretRef.optional
+      - notExists:
+          path: $..secret.optional
+      - notExists:
+          path: $..configMapKeyRef.optional
+      - notExists:
+          path: $..configMap.optional
+
+  # The JSONPath filters of helm-unittest treat a missing field as "not equal to nothing", so every rule is checked twice: the field is
+  # missing (`!@.x`) or it has the wrong value.
+  - it: pods run as non-root with read-only root fs
+    asserts:
+      - notExists:
+          path: $..template[?(!@.spec.securityContext.runAsNonRoot)]
+      - notExists:
+          path: $..template[?(@.spec.securityContext.runAsNonRoot == false)]
+      - notExists:
+          path: $..template[?(!@.spec.securityContext.runAsUser)]
+      - notExists:
+          path: $..template[?(@.spec.securityContext.runAsUser == 0)]
+      - notExists:
+          path: $..template[?(!@.spec.securityContext.seccompProfile.type)]
+      - notExists:
+          path: $..template[?(!@.spec.automountServiceAccountToken)]
+      - notExists:
+          path: $..template[?(@.spec.automountServiceAccountToken == true)]
+      - notExists:
+          path: $..spec.containers[?(!@.securityContext.readOnlyRootFilesystem)]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.readOnlyRootFilesystem == false)]
+      - notExists:
+          path: $..spec.containers[?(!@.securityContext.allowPrivilegeEscalation)]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.allowPrivilegeEscalation == true)]
+      - notExists:
+          path: $..spec.containers[?(!@.securityContext.capabilities.drop[0])]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.capabilities.drop[0] != "ALL")]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.capabilities.add)]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.privileged == true)]
+      - notExists:
+          path: $..spec.initContainers[?(!@.securityContext.readOnlyRootFilesystem)]
+      - notExists:
+          path: $..spec.initContainers[?(@.securityContext.readOnlyRootFilesystem == false)]
+      - notExists:
+          path: $..spec.initContainers[?(!@.securityContext.allowPrivilegeEscalation)]
+      - notExists:
+          path: $..spec.initContainers[?(@.securityContext.allowPrivilegeEscalation == true)]
+      - notExists:
+          path: $..spec.initContainers[?(@.securityContext.capabilities.drop[0] != "ALL")]

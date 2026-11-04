@@ -1,0 +1,17 @@
+{{- $name := include "procure-app.name" . }}
+{{- $labels := dict "root" $ "name" $name }}
+# http://<name>:<global.port>: what the other apps' service discovery (services__<name>__http__0) and the gateway's clusters point at.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "procure-app.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-app.selector" $labels | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.global.port }}
+      targetPort: http
+      protocol: TCP

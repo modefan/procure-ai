@@ -1,0 +1,29 @@
+{{- if .Values.ingress.enabled }}
+{{- $name := include "procure-app.name" . }}
+{{- $host := required "ingress.host is required when the ingress is enabled" .Values.ingress.host }}
+# The app's public host through Traefik. No secretName: Traefik serves its default certificate (the local CA's TLSStore, Task 2).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "procure-app.labels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ tpl $host $ }}
+  rules:
+    - host: {{ tpl $host $ }}
+      http:
+        paths:
+          {{- range .Values.ingress.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  name: http
+          {{- end }}
+{{- end }}

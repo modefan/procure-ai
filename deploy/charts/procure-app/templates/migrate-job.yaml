@@ -1,0 +1,74 @@
+{{- if .Values.migration.enabled }}
+{{- $name := include "procure-app.migrationName" . }}
+{{- $labels := dict "root" $ "name" $name "component" "migration" }}
+{{- $env := merge (dict "DemoSeed__Enabled" .Values.migration.demoSeed) (.Values.migration.env | default dict) }}
+# The app's migration (schema, Wolverine message store, demo seed): the same image and environment with --migrate. An Argo CD Sync hook in
+# wave -1, so every sync (a new appRevision) reruns it before the Deployment (wave 0) changes, and a failing migration stops the sync
+# while the old pods keep serving. The Helm hooks do the same for `helm upgrade --install` (Argo CD ignores them next to its own).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "procure-app.labels" $labels | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-app.labels" $labels | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "procure-app.podSecurity" . | nindent 6 }}
+      {{- if .Values.migration.createPostgresDatabase }}
+      initContainers:
+        {{- with .Values.migration.createPostgresDatabase }}
+        # As the AppHost's AddDatabase: create the database on the shared server if it is missing (EF Core would, Marten does not).
+        - name: create-database
+          image: {{ include "procure-app.imageRef" (dict "root" $ "repository" $.Values.global.postgresImage "tag" "") | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+              until pg_isready -h postgres -p 5432 -U postgres -q; do echo "waiting for postgres"; sleep 2; done
+              exists=$(psql -h postgres -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DATABASE'")
+              if [ "$exists" != "1" ]; then psql -h postgres -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$DATABASE\""; fi
+          env:
+            - name: DATABASE
+              value: {{ . | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-postgres
+                  key: password
+          resources:
+            {{- toYaml $.Values.global.helperResources | nindent 12 }}
+          {{- include "procure-app.containerSecurity" $ | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "procure-app.image" . | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --migrate
+          env:
+            {{- include "procure-app.env" (dict "root" $ "env" $env "secretEnv" .Values.migration.secretEnv) | trim | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- include "procure-app.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            {{- include "procure-app.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "procure-app.volumes" . | nindent 8 }}
+{{- end }}

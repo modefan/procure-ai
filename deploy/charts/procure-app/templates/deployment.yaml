@@ -1,0 +1,75 @@
+{{- $name := include "procure-app.name" . }}
+{{- $labels := dict "root" $ "name" $name }}
+# The app: wave 0, after its migration (the Sync hook in wave -1, migrate-job.yaml) finished.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "procure-app.labels" $labels | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "procure-app.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-app.labels" $labels | nindent 8 }}
+        {{- if .Values.ingress.enabled }}
+        # Traefik may reach its http port (procure-platform network-policies.yaml).
+        procure.ai/ingress-backend: "true"
+        {{- end }}
+      {{- if .Values.configJson }}
+      annotations:
+        # A changed config.json rolls the pods (nginx reads the file at every request, but the subPath mount does not update).
+        checksum/config-json: {{ toJson .Values.configJson | sha256sum }}
+      {{- end }}
+    spec:
+      {{- include "procure-app.podSecurity" . | nindent 6 }}
+      {{- with .Values.waitFor }}
+      initContainers:
+        {{- include "procure-app.waitFor" $ | trim | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ include "procure-app.image" . | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.global.port }}
+              protocol: TCP
+          env:
+            {{- include "procure-app.env" (dict "root" $) | trim | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness }}
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness }}
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness }}
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- include "procure-app.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            {{- include "procure-app.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "procure-app.volumes" . | nindent 8 }}

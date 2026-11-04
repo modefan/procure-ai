@@ -1,0 +1,13 @@
+{{- if .Values.configJson }}
+{{- $name := include "procure-app.name" . }}
+# The web app's runtime config.json (one build runs in every environment; public/config.json in the image holds the local defaults).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-config" $name }}
+  labels:
+    {{- include "procure-app.labels" (dict "root" $ "name" $name) | nindent 4 }}
+data:
+  config.json: |
+    {{- toPrettyJson .Values.configJson | nindent 4 }}
+{{- end }}
