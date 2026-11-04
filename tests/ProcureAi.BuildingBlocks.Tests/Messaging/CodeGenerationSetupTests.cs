@@ -38,6 +38,23 @@ public sealed class CodeGenerationSetupTests
     }
 
     [Fact]
+    public void Static_loads_the_types_from_the_entry_assembly_where_the_api_compiles_them()
+    {
+        var options = new Wolverine.WolverineOptions();
+        options.UsePreGeneratedCodeOfTheApi(Config(("Wolverine:TypeLoadMode", "Static")));
+        options.ApplicationAssembly.ShouldBe(System.Reflection.Assembly.GetEntryAssembly());
+    }
+
+    [Fact]
+    public void Dynamic_leaves_the_application_assembly_alone()
+    {
+        var options = new Wolverine.WolverineOptions();
+        var before = options.ApplicationAssembly;
+        options.UsePreGeneratedCodeOfTheApi(Config());
+        options.ApplicationAssembly.ShouldBe(before);
+    }
+
+    [Fact]
     public void Static_applies_to_both_profiles_and_asserts_every_type_exists()
     {
         var services = new ServiceCollection();

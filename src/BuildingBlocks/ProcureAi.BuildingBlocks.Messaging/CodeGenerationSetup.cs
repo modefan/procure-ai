@@ -1,7 +1,9 @@
+using System.Reflection;
 using JasperFx;
 using JasperFx.CodeGeneration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Wolverine;
 
 namespace ProcureAi.BuildingBlocks.Messaging;
 
@@ -44,6 +46,22 @@ public static class CodeGenerationSetup
             }
         });
         return services;
+    }
+
+    /// <summary>
+    /// Points Wolverine at the assembly that holds the pre-generated types: the service API (the entry assembly), where
+    /// <c>Internal/Generated</c> is compiled. Left alone in <c>Dynamic</c> mode (nothing is loaded from it; tests keep their defaults).
+    /// Without it Wolverine guesses the assembly that called <c>UseWolverine</c> setup code (BuildingBlocks.Messaging) and, in
+    /// <c>Static</c> mode, finds none of the types.
+    /// </summary>
+    public static WolverineOptions UsePreGeneratedCodeOfTheApi(this WolverineOptions options, IConfiguration configuration)
+    {
+        if (TypeLoadModeFrom(configuration) != TypeLoadMode.Dynamic && Assembly.GetEntryAssembly() is { } api)
+        {
+            options.ApplicationAssembly = api;
+        }
+
+        return options;
     }
 
     /// <summary>The configured mode; <c>Dynamic</c> when unset. An unknown value fails at startup.</summary>

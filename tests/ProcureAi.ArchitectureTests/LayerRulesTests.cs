@@ -145,7 +145,9 @@ public sealed class LayerRulesTests
         {
             var own = LayerAssemblies.Where(a => LayerAssembly.Match(Name(a)).Groups["service"].Value == service).ToArray();
             var allowed = string.Join('|', SharedRoots.Append(Regex.Escape(service)));
-            Types().That().ResideInAssembly(own[0], own[1..])
+            // Not Wolverine's pre-generated code (Internal.Generated, docs/generated-code.md): every API has a GeneratedHandlerRegistry of that
+            // same full name, which ArchUnitNET merges into one type across assemblies. GeneratedCodeTests guards that code instead.
+            Types().That().ResideInAssembly(own[0], own[1..]).And().DoNotResideInNamespaceMatching(@"^Internal\.Generated(\..*)?$")
                 .Should().NotDependOnAnyTypesThat()
                 .ResideInNamespaceMatching($@"^ProcureAi\.(?!({allowed})(\.|$))\w+(\..*)?$")
                 .Check(Architecture);

@@ -59,6 +59,7 @@ public static class MessagingSetup
     public static WolverineOptions UseProcureAiHandlers(
         this WolverineOptions options, IConfiguration configuration, string serviceName, Assembly handlers, bool listenToAccessChanges = true)
     {
+        options.UsePreGeneratedCodeOfTheApi(configuration);
         options.Discovery.IncludeAssembly(handlers);
         // The shared handlers (cache eviction after commit, AccessChanged).
         options.Discovery.IncludeAssembly(typeof(MessagingSetup).Assembly);
@@ -95,6 +96,7 @@ public static class MessagingSetup
     public static WolverineOptions UseProcureAiAccessEviction(
         this WolverineOptions options, IConfiguration configuration, string serviceName, Assembly handlers)
     {
+        options.UsePreGeneratedCodeOfTheApi(configuration);
         options.Discovery.IncludeAssembly(handlers);
         options.Discovery.IncludeAssembly(typeof(MessagingSetup).Assembly);
         options.UseProcureAiTransport(configuration);
