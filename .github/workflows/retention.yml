@@ -1,35 +1,101 @@
 name: retention
 
-# Keeps the newest 15 versions of every image in GitHub Container Registry and deletes older ones (plan 07 ruling 1), so the private
-# packages stay small. The deployed revision is always among the newest unless appRevision was pinned by hand to an old commit: re-run
-# the publish workflow for that commit (or pin a newer one) before this runs.
-# The packages are linked to this repository (publish.yml labels the images with it), which gives this workflow's GITHUB_TOKEN admin
-# access to them.
+# Weekly clean-up of GitHub Container Registry (plan 07 ruling 1): per image, keep the newest 15 versions plus every version whose tag a
+# recent release used, and delete the rest.
+#   "A recent release": every tag (appRevision and platformImageTags) in envs/*/release.yaml of the GitOps repo at its newest main and in
+#   its last 15 commits that touched a release file. So the deployed images and a rollback window are never deleted, also when they are
+#   older than the newest 15 (e.g. a hand-pinned appRevision, or a platform image whose tag changes only when infra/ changes).
+# The image list comes from deploy/scripts/build-images.ps1 -List (one list for build, publish and retention). The packages are linked
+# to this repository (the images carry its org.opencontainers.image.source label), which gives GITHUB_TOKEN access to them. The GitOps
+# repo is read with the deploy key of the Environment `gitops` (main only).
 
 on:
   schedule:
     # Mondays 03:17 UTC (05:17 in Johannesburg).
     - cron: "17 3 * * 1"
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: List what would be deleted, delete nothing
+        type: boolean
+        default: false
 
 permissions:
-  packages: write
+  contents: read
+
+concurrency:
+  group: retention
+  cancel-in-progress: false
 
 jobs:
   prune:
-    name: Prune procure-ai-${{ matrix.image }}
+    name: Prune old image versions
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        # The images of deploy/scripts/build-images.ps1.
-        image: [access-api, approvals-api, assistant-api, audit-api, budgets-api, invoicing-api, notifications-api, purchasing-api,
-                requests-api, suppliers-api, gateway, simulators, demo-data, web, postgres, keycloak, debezium]
+    timeout-minutes: 15
+    environment: gitops
+    permissions:
+      contents: read
+      packages: write
+    env:
+      KEEP: "15"
+      RELEASE_HISTORY: "15"
+      DRY_RUN: ${{ inputs.dry-run && 'true' || 'false' }}
     steps:
-      - uses: actions/delete-package-versions@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          package-name: procure-ai-${{ matrix.image }}
-          package-type: container
-          min-versions-to-keep: 15
+          persist-credentials: false
+          path: app
+
+      - name: Check out the GitOps repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ github.repository_owner }}/procure-ai-gitops
+          ref: main
+          ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: gitops
+
+      - name: Tags in use by recent releases
+        working-directory: gitops
+        run: |
+          set -euo pipefail
+          {
+            cat envs/*/release.yaml
+            for commit in $(git log -n "$RELEASE_HISTORY" --format=%H -- 'envs/*/release.yaml'); do
+              for file in $(git ls-tree -r --name-only "$commit" -- envs | grep '/release.yaml$'); do git show "$commit:$file"; done
+            done
+          } | grep -oE '\b[0-9a-f]{40}\b' | sort -u > "$RUNNER_TEMP/protected-tags.txt"
+          echo "Protected tags: $(wc -l < "$RUNNER_TEMP/protected-tags.txt")"
+          [ -s "$RUNNER_TEMP/protected-tags.txt" ] || { echo "::error::no tags found in the releases; refusing to prune"; exit 1; }
+
+      - name: Delete old versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          images="$(pwsh -NoProfile -File app/deploy/scripts/build-images.ps1 -List | jq -r '.[]')"
+          protected="$RUNNER_TEMP/protected-tags.txt"
+          status=0
+          for image in $images; do
+            package="procure-ai-${image}"
+            if ! versions="$(gh api --paginate "/users/${OWNER}/packages/container/${package}/versions?per_page=100" 2>"$RUNNER_TEMP/err")"; then
+              if grep -q 'Not Found\|404' "$RUNNER_TEMP/err"; then echo "$package: no package yet"; continue; fi
+              echo "::error::$package: listing versions failed: $(cat "$RUNNER_TEMP/err")"; status=1; continue
+            fi
+            # Newest first; keep the newest $KEEP and any version with a protected tag.
+            doomed="$(jq -rs --argjson keep "$KEEP" --rawfile prot "$protected" '
+              ($prot | split("\n") | map(select(length > 0))) as $p
+              | add | sort_by(.created_at) | reverse | to_entries
+              | map(select(.key >= $keep and ((.value.metadata.container.tags // []) | any(. as $t | $p | index($t)) | not)))
+              | .[].value | "\(.id) \((.metadata.container.tags // []) | join(",") | if . == "" then "<untagged>" else . end)"' <<< "$versions")"
+            total="$(jq -s 'add | length' <<< "$versions")"
+            echo "$package: $total versions, $(grep -c . <<< "$doomed" || true) to delete"
+            while read -r id tags; do
+              [ -n "$id" ] || continue
+              if [ "$DRY_RUN" = "true" ]; then echo "  would delete $id ($tags)"; continue; fi
+              gh api -X DELETE "/users/${OWNER}/packages/container/${package}/versions/${id}" && echo "  deleted $id ($tags)" || status=1
+            done <<< "$doomed"
+          done
+          exit $status

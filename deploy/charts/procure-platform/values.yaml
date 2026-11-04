@@ -7,6 +7,10 @@ global:
   # k3d with -ImportTo procure, ghcr.io/modefan once CI publishes) and tag (the full commit SHA, or local-<sha7> for PC builds). Required.
   imageRegistry: ""
   imageTag: ""
+  # Per image (name without procure-ai-), overriding imageTag: the platform images postgres, keycloak and debezium are tagged by a hash
+  # of their build context (infra/<name>), so a deploy that changes only app code does not restart them (plan 07 Task 6). The GitOps
+  # repo's release.yaml sets them (platformImageTags).
+  imageTags: {}
   imagePullPolicy: IfNotPresent
   # The GHCR pull Secret (plan 07 ruling 7); harmless for imported images.
   imagePullSecrets:

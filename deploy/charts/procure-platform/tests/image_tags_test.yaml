@@ -1,0 +1,41 @@
+# The platform images (procure-ai-postgres, -keycloak, -debezium) are tagged by the content of their build context (plan 07 Task 6), so an
+# app-only deploy (new global.imageTag) does not restart them.
+suite: image tags
+templates:
+  - postgres.yaml
+  - keycloak.yaml
+  - debezium.yaml
+set:
+  global.imageTag: abc1234
+  global.imageRegistry: ghcr.io/modefan
+tests:
+  - it: platform images take their own tags from global.imageTags
+    set:
+      global.imageTags:
+        postgres: a111111111111111111111111111111111111111
+        keycloak: b222222222222222222222222222222222222222
+        debezium: c333333333333333333333333333333333333333
+    asserts:
+      - template: postgres.yaml
+        documentSelector: { path: kind, value: StatefulSet }
+        equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/modefan/procure-ai-postgres:a111111111111111111111111111111111111111
+      - template: keycloak.yaml
+        documentSelector: { path: kind, value: Deployment }
+        equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/modefan/procure-ai-keycloak:b222222222222222222222222222222222222222
+      - template: debezium.yaml
+        documentSelector: { path: metadata.name, value: debezium-requestsdb }
+        equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/modefan/procure-ai-debezium:c333333333333333333333333333333333333333
+
+  - it: without their own tags they fall back to global.imageTag
+    asserts:
+      - template: postgres.yaml
+        documentSelector: { path: kind, value: StatefulSet }
+        equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/modefan/procure-ai-postgres:abc1234

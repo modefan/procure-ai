@@ -22,9 +22,10 @@ app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end }}
 
-{{/* [<registry>/]<repository>:<tag>. include "procure-app.imageRef" (dict "root" $ "repository" "procure-ai-x" "tag" "") */}}
+{{/* [<registry>/]<repository>:<tag>; tag: the given one, else global.imageTags.<repository without procure-ai-> (e.g. postgres: the
+platform image's content tag), else global.imageTag. include "procure-app.imageRef" (dict "root" $ "repository" "procure-ai-x" "tag" "") */}}
 {{- define "procure-app.imageRef" -}}
-{{- $tag := .tag | default .root.Values.global.imageTag -}}
+{{- $tag := .tag | default (index (.root.Values.global.imageTags | default dict) (trimPrefix "procure-ai-" (toString .repository))) | default .root.Values.global.imageTag -}}
 {{- $tag = required "global.imageTag is required (the commit SHA, or local-<sha7> for images built on the PC)" $tag -}}
 {{- $repository := required "image.repository is required (e.g. procure-ai-requests-api)" .repository -}}
 {{- if .root.Values.global.imageRegistry -}}

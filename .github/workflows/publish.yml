@@ -1,10 +1,14 @@
 name: publish
 
-# After CI passed on main: build every image, push it to GitHub Container Registry with the commit's full SHA as tag, then deploy that
-# commit by setting appRevision in the GitOps repo (modefan/procure-ai-gitops envs/local/release.yaml). Argo CD sees the bump within a few
-# minutes and syncs: migrations first, then the new pods (plan 07 Task 6, rulings 1, 4 and 6).
-# Credentials: GITHUB_TOKEN (packages: write) for GHCR; the GitOps repo's write deploy key (Actions secret GITOPS_DEPLOY_KEY, created by
-# the GitOps repo's bootstrap/install-argocd.ps1) for the bump. No other secret.
+# After CI passed for a push to main: build the images, push them to GitHub Container Registry, then deploy the commit by setting
+# appRevision (and the platform image tags) in the GitOps repo (modefan/procure-ai-gitops envs/local/release.yaml). Argo CD sees the bump
+# within a few minutes and syncs: migrations first, then the new pods (plan 07 Task 6, rulings 1, 4 and 6).
+#   App images (the .NET apps, web, demo-data): tag = the commit's full SHA.
+#   Platform images (postgres, keycloak, debezium, built from infra/<name>): tag = the git tree hash of infra/<name>, built and pushed only
+#   when GHCR does not have that tag yet, so a deploy that changes only app code does not restart Postgres, Keycloak or Debezium.
+# Credentials: GITHUB_TOKEN (packages: write) in the build job; the GitOps repo's write deploy key only in the deploy job, from the
+# Environment `gitops` (deployment branch: main only; created by the GitOps repo's bootstrap/install-argocd.ps1). Third-party actions are
+# pinned by commit SHA.
 
 on:
   workflow_run:
@@ -12,14 +16,8 @@ on:
     types: [completed]
     branches: [main]
 
-# One publish at a time; a newer commit's run cancels an older one (its images would be deployed only to be replaced at once).
-concurrency:
-  group: publish
-  cancel-in-progress: true
-
 permissions:
   contents: read
-  packages: write
 
 env:
   DOTNET_NOLOGO: "true"
@@ -27,27 +25,39 @@ env:
   # The commit CI tested. Not github.sha: for workflow_run that is the newest commit on main when this run starts, which may be a later,
   # untested one.
   REVISION: ${{ github.event.workflow_run.head_sha }}
-  # The GitOps environment this workflow deploys.
-  GITOPS_ENV: local
 
 jobs:
-  publish:
-    name: Push images and deploy
-    if: github.event.workflow_run.conclusion == 'success'
+  images:
+    name: Build and push the images
+    # Only a green CI run of a push to main of this repository (never a pull request or a fork's branch that happens to be called main).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    # At job level, so a skipped run (a failed or cancelled CI) never cancels the publish of a tested commit. A newer tested commit
+    # cancels an older one's image build: its images would be replaced at once.
+    concurrency:
+      group: publish-images
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      platform-tags: ${{ steps.push.outputs.platform-tags }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          # Full history: the bump below checks that it moves the deployed revision forward.
-          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
@@ -58,53 +68,90 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: echo "REGISTRY=ghcr.io/${OWNER,,}" >> "$GITHUB_ENV"
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Every image of deploy/scripts/build-images.ps1, tagged <registry>/procure-ai-<name>:<full SHA> and labelled with this repository
-      # as its source, so GHCR links each package to procure-ai (and this workflow's GITHUB_TOKEN may push and prune it).
-      - name: Build and push the images
+      # Every image of deploy/scripts/build-images.ps1, labelled with this repository as its source, so GHCR links each package to
+      # procure-ai (and this repository's GITHUB_TOKEN may push and prune it).
+      - name: Build and push
+        id: push
         shell: pwsh
-        run: ./deploy/scripts/build-images.ps1 -Tag $env:REVISION -Registry $env:REGISTRY -Push
+        run: |
+          $tags = Join-Path $env:RUNNER_TEMP 'platform-tags.json'
+          ./deploy/scripts/build-images.ps1 -Tag $env:REVISION -Registry $env:REGISTRY -Push -ContentTagPlatform -SkipExisting -TagsFile $tags
+          "platform-tags=$((Get-Content -Raw $tags | ConvertFrom-Json | ConvertTo-Json -Compress))" >> $env:GITHUB_OUTPUT
+
+  deploy:
+    name: Deploy (set the release in the GitOps repo)
+    needs: images
+    # Deploys run one after another and never cancel each other; the bump itself refuses to move backwards.
+    concurrency:
+      group: publish-deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # GITOPS_DEPLOY_KEY lives in this Environment, which only the main branch may use.
+    environment: gitops
+    permissions:
+      contents: read
+    steps:
+      # This repository's history, for the never-move-backwards check. No build code runs in this job.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: app
 
       - name: Check out the GitOps repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.repository_owner }}/procure-ai-gitops
           ref: main
           ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
           path: gitops
-          persist-credentials: true
 
-      - name: Deploy (set appRevision in the GitOps repo)
+      - name: Set appRevision and the platform image tags
         working-directory: gitops
+        env:
+          PLATFORM_TAGS: ${{ needs.images.outputs.platform-tags }}
+          GITOPS_ENV: local
         run: |
           set -euo pipefail
           file="envs/${GITOPS_ENV}/release.yaml"
           short="${REVISION:0:7}"
+          for name in postgres keycloak debezium; do
+            tag="$(jq -r --arg n "$name" '.[$n] // empty' <<< "$PLATFORM_TAGS")"
+            [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no platform tag for $name in '$PLATFORM_TAGS'"; exit 1; }
+          done
           git config user.name "procure-ai publish"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for attempt in 1 2 3; do
-            current="$(sed -n 's/^appRevision:[[:space:]]*"\{0,1\}\([0-9a-f]\{40\}\)"\{0,1\}[[:space:]]*$/\1/p' "$file")"
+            current="$(yq -r '.appRevision // ""' "$file")"
             if [ "$current" = "$REVISION" ]; then
               echo "appRevision is already $REVISION."
               exit 0
             fi
             # Never move backwards: skip when this commit is an ancestor of the deployed one (a newer run already deployed).
-            if [ -n "$current" ] && git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$REVISION" "$current" 2>/dev/null; then
+            if [ -n "$current" ] && git -C ../app merge-base --is-ancestor "$REVISION" "$current" 2>/dev/null; then
               echo "::notice::Deployed revision $current is newer than $REVISION; nothing to do."
               exit 0
             fi
-            sed -i "s/^appRevision:.*/appRevision: ${REVISION}/" "$file"
-            grep -q "^appRevision: ${REVISION}$" "$file"
+            # Quoted strings: a SHA made of digits only would otherwise be read as a number.
+            REVISION="$REVISION" PLATFORM_TAGS="$PLATFORM_TAGS" yq -i '
+              .appRevision = strenv(REVISION) | .appRevision style="double" |
+              .platformImageTags = (strenv(PLATFORM_TAGS) | from_json) | .platformImageTags style="" | .platformImageTags[] style="double"' "$file"
+            [ "$(yq -r '.appRevision' "$file")" = "$REVISION" ]
             git commit -q -am "Deploy procure-ai ${short}" \
-              -m "procure-ai ${REVISION}, images ${REGISTRY}/procure-ai-<name>:${REVISION} (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+              -m "procure-ai ${REVISION}; platform images ${PLATFORM_TAGS} (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
             if git push -q origin HEAD:main; then
-              echo "### Deployed procure-ai ${short} to ${GITOPS_ENV}" >> "$GITHUB_STEP_SUMMARY"
-              echo "appRevision ${current:-<none>} -> ${REVISION}" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo "### Deployed procure-ai ${short} to ${GITOPS_ENV}"
+                echo "appRevision ${current:-<none>} -> ${REVISION}; platform image tags ${PLATFORM_TAGS}"
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             # Someone pushed to the GitOps repo meanwhile: start again from its newest main.
@@ -112,5 +159,5 @@ jobs:
             git fetch -q origin main
             git reset -q --hard origin/main
           done
-          echo "::error::could not push the appRevision bump to the GitOps repo"
+          echo "::error::could not push the release bump to the GitOps repo"
           exit 1

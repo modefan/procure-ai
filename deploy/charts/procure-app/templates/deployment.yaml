@@ -11,6 +11,10 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
 spec:
   replicas: {{ .Values.replicas }}
+  {{- with (.Values.strategy | default .Values.global.deploymentStrategy) }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "procure-app.selector" $labels | nindent 6 }}

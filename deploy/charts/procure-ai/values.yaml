@@ -10,6 +10,11 @@ global:
   imageRegistry: ""
   # The app revision (full commit SHA), or local-<sha7> for images built on the PC. Required.
   imageTag: ""
+  # Per image tags (name without procure-ai-) that override imageTag: the platform image postgres (psql in the migrations) is tagged by
+  # its build context; the GitOps repo's release.yaml sets platformImageTags (plan 07 Task 6).
+  imageTags: {}
+  # Rollout strategy of every app Deployment (procure-app); envs/local sets maxSurge 0 so a deploy never needs room for extra pods.
+  deploymentStrategy: {}
   imagePullPolicy: IfNotPresent
   imagePullSecrets:
     - ghcr-pull

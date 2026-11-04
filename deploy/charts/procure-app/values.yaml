@@ -5,6 +5,11 @@ global:
   # Registry prefix ("" for images imported into k3d, ghcr.io/modefan once CI publishes) and tag (full commit SHA, or local-<sha7>).
   imageRegistry: ""
   imageTag: ""
+  # Per image (repository without procure-ai-), overriding imageTag; e.g. postgres (the psql of the migration's create-database step) is
+  # a platform image tagged by its build context (plan 07 Task 6).
+  imageTags: {}
+  # Rollout strategy of every Deployment unless an app sets its own `strategy` (envs/local: no surge pods, the node has no room for them).
+  deploymentStrategy: {}
   imagePullPolicy: IfNotPresent
   imagePullSecrets:
     - ghcr-pull
@@ -41,6 +46,8 @@ image:
   repository: ""   # e.g. procure-ai-requests-api (without registry)
   tag: ""          # default: global.imageTag
 replicas: 1
+# Deployment strategy; {} = global.deploymentStrategy, else Kubernetes' default (RollingUpdate, 25 % surge).
+strategy: {}
 args: []
 # Groups of global.sharedEnv / global.sharedSecretEnv this app takes.
 sharedEnv: []

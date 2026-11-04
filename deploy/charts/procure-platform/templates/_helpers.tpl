@@ -13,9 +13,12 @@ app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end }}
 
-{{/* One of our images: [<registry>/]<name>:<global.imageTag>. include "procure-platform.ownImage" (dict "root" $ "image" "procure-ai-postgres") */}}
+{{/* One of our images: [<registry>/]<name>:<tag>, the tag from global.imageTags.<name without procure-ai-> (the platform images are
+tagged by the content of their build context, plan 07 Task 6), else global.imageTag.
+include "procure-platform.ownImage" (dict "root" $ "image" "procure-ai-postgres") */}}
 {{- define "procure-platform.ownImage" -}}
-{{- $tag := required "global.imageTag is required (the commit SHA, or local-<sha7> for images built on the PC)" .root.Values.global.imageTag -}}
+{{- $tag := index (.root.Values.global.imageTags | default dict) (trimPrefix "procure-ai-" .image) | default .root.Values.global.imageTag -}}
+{{- $tag = required "global.imageTag is required (the commit SHA, or local-<sha7> for images built on the PC)" $tag -}}
 {{- if .root.Values.global.imageRegistry -}}
 {{ printf "%s/%s:%s" (trimSuffix "/" .root.Values.global.imageRegistry) .image $tag }}
 {{- else -}}

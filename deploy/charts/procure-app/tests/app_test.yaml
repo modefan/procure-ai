@@ -330,3 +330,45 @@ tests:
           path: $..configMap.optional
       - notExists:
           path: $..secret.optional
+
+  - it: the migration's psql takes the postgres platform image's own tag (plan 07 Task 6)
+    template: migrate-job.yaml
+    set:
+      migration.createPostgresDatabase: requestsdb
+      global.imageTags.postgres: 0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: procure-ai-postgres:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: procure-ai-requests-api:abc1234
+
+  - it: deployments take the global rollout strategy unless they set their own
+    template: deployment.yaml
+    set:
+      global.deploymentStrategy:
+        type: RollingUpdate
+        rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+            rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+
+  - it: an app's own strategy wins and none is rendered by default
+    template: deployment.yaml
+    asserts:
+      - notExists:
+          path: spec.strategy
+
+  - it: an app's own strategy wins over the global one
+    template: deployment.yaml
+    set:
+      global.deploymentStrategy: { type: Recreate }
+      strategy: { type: RollingUpdate }
+    asserts:
+      - equal:
+          path: spec.strategy
+          value: { type: RollingUpdate }

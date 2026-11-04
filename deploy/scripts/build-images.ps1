@@ -14,7 +14,8 @@
   deploy/scripts/build-images.ps1 -Tag dev -ImportTo procure
 #>
 param(
-    [Parameter(Mandatory)][string]$Tag,
+    # Tag of the app images (and of the platform images unless -ContentTagPlatform). Not needed with -List.
+    [string]$Tag = '',
     [string]$Registry = '',
     [switch]$Push,
     [string]$ImportTo = '',
@@ -25,7 +26,17 @@ param(
     # Label org.opencontainers.image.source of every image. GitHub Container Registry links a package to the repository this names, which
     # lets the repository's workflows (GITHUB_TOKEN) push and delete its versions. Without it the web image would carry its nginx base
     # image's label (github.com/nginx/docker-nginx-unprivileged).
-    [string]$SourceUrl = 'https://github.com/modefan/procure-ai'
+    [string]$SourceUrl = 'https://github.com/modefan/procure-ai',
+    # The platform images (postgres, keycloak, debezium: built from infra/<name>) get the git tree hash of their build context as tag
+    # (`git rev-parse HEAD:infra/<name>`) instead of -Tag, so they change only when their files change and an app-only deploy does not
+    # restart Postgres, Keycloak or Debezium (plan 07 Task 6). The folder must have no uncommitted changes.
+    [switch]$ContentTagPlatform,
+    # With -Registry and -ContentTagPlatform: a platform image whose tag is already in the registry is neither built nor pushed.
+    [switch]$SkipExisting,
+    # Writes the platform images' tags as JSON ({"postgres": "<tag>", ...}) to this file (the publish workflow reads it).
+    [string]$TagsFile = '',
+    # Prints the image names (without procure-ai-) as a JSON array and exits; the one list other tools read (e.g. retention.yml).
+    [switch]$List
 )
 $ErrorActionPreference = 'Stop'
 # `pwsh -File ... -Only a,b` passes one string "a,b"; accept both forms.
@@ -34,6 +45,10 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 # Label org.opencontainers.image.revision: the commit the images are built from.
 $revision = (& git -C $root rev-parse HEAD 2>$null)
 if ($LASTEXITCODE -ne 0 -or -not $revision) { $revision = 'unknown' }
+
+$platformImages = @('postgres', 'keycloak', 'debezium')
+if (-not $List -and -not $Tag) { throw '-Tag is required (the commit SHA, or local-<sha7>).' }
+if ($SkipExisting -and -not ($Registry -and $ContentTagPlatform)) { throw '-SkipExisting needs -Registry and -ContentTagPlatform.' }
 
 if ($Push -and -not $Registry) { throw '-Push needs -Registry (e.g. ghcr.io/modefan).' }
 if ($ImportTo -and -not (Get-Command k3d -ErrorAction SilentlyContinue)) { throw "-ImportTo $ImportTo needs k3d on the PATH." }
@@ -67,6 +82,29 @@ function Run([string]$what, [scriptblock]$command) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)." }
 }
 
+if ($List) {
+    ConvertTo-Json -Compress -InputObject @(@($dotnet.Keys) + @($dockerfiles.Keys))
+    return
+}
+
+function Get-ImageTag([string]$name) {
+    if (-not ($ContentTagPlatform -and $platformImages -contains $name)) { return $Tag }
+    $folder = $dockerfiles[$name]
+    $dirty = & git -C $root status --porcelain -- $folder
+    if ($LASTEXITCODE -ne 0) { throw "git status of $folder failed." }
+    if ($dirty) { throw "$folder has uncommitted changes; commit them first (the platform image tag is the folder's committed tree hash)." }
+    $hash = & git -C $root rev-parse "HEAD:$folder"
+    if ($LASTEXITCODE -ne 0 -or $hash -notmatch '^[0-9a-f]{40}$') { throw "git rev-parse HEAD:$folder failed." }
+    $hash
+}
+
+function Test-InRegistry([string]$image) {
+    & docker manifest inspect "$($Registry.TrimEnd('/'))/$image" *> $null
+    $LASTEXITCODE -eq 0
+}
+
+$platformTags = [ordered]@{}
+$skipped = [System.Collections.Generic.List[string]]::new()
 $built = [System.Collections.Generic.List[string]]::new()
 function Wanted([string]$name) { $Only.Count -eq 0 -or $Only -contains $name }
 
@@ -85,12 +123,19 @@ foreach ($name in $dotnet.Keys) {
 foreach ($name in $dockerfiles.Keys) {
     if (-not (Wanted $name)) { continue }
     $context = Join-Path $root $dockerfiles[$name]
-    Write-Host "== procure-ai-${name}:$Tag (docker build)"
+    $imageTag = Get-ImageTag $name
+    if ($platformImages -contains $name) { $platformTags[$name] = $imageTag }
+    if ($SkipExisting -and $platformImages -contains $name -and (Test-InRegistry "procure-ai-${name}:$imageTag")) {
+        Write-Host "== procure-ai-${name}:$imageTag is already in ${Registry}: not built, not pushed"
+        $skipped.Add("procure-ai-${name}:$imageTag")
+        continue
+    }
+    Write-Host "== procure-ai-${name}:$imageTag (docker build)"
     Run "docker build $name" {
-        docker build --tag "procure-ai-${name}:$Tag" --label "org.opencontainers.image.source=$SourceUrl" `
+        docker build --tag "procure-ai-${name}:$imageTag" --label "org.opencontainers.image.source=$SourceUrl" `
             --label "org.opencontainers.image.revision=$revision" $context
     }
-    $built.Add("procure-ai-${name}:$Tag")
+    $built.Add("procure-ai-${name}:$imageTag")
 }
 
 if ($Registry) {
@@ -110,5 +155,11 @@ if ($ImportTo) {
     Run 'k3d image import' { k3d image import @names --cluster $ImportTo }
 }
 
+if ($TagsFile) {
+    ConvertTo-Json -InputObject $platformTags | Set-Content -Path $TagsFile -Encoding utf8NoBOM
+    Write-Host "Platform image tags written to $TagsFile"
+}
+
 Write-Host "`nBuilt $($built.Count) image(s):"
 $built | ForEach-Object { Write-Host "  $_" }
+if ($skipped.Count) { Write-Host "Already in the registry ($($skipped.Count)):"; $skipped | ForEach-Object { Write-Host "  $_" } }
