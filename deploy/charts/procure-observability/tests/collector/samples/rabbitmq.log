@@ -1,0 +1,4 @@
+2026-11-05T12:06:41.123456789Z stdout F 2026-11-05 12:06:41.123456+00:00 [info] <0.1234.0> accepting AMQP connection 203.0.113.30:51234 -> 10.42.0.5:5672
+2026-11-05T12:06:41.223456789Z stdout F 2026-11-05 12:06:41.223456+00:00 [info] <0.1234.0> connection 203.0.113.30:51234 -> 10.42.0.5:5672: user 'svc-requests' authenticated and granted access to vhost '/'
+2026-11-05T12:06:41.323456789Z stdout F 2026-11-05 12:06:41.323456+00:00 [info] <0.1301.0> accepting AMQP connection [2001:db8::30]:51240 -> [2001:db8::5]:5672
+2026-11-05T12:06:41.423456789Z stdout F 2026-11-05 12:06:41.423456+00:00 [info] <0.1302.0> closing AMQP connection <0.1301.0> (203.0.113.30:51240 -> 10.42.0.5:5672, vhost: '/', user: 'svc-requests')

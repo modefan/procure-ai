@@ -1,0 +1,5 @@
+2026-11-05T12:06:41.100000000Z stdout F 2026-11-05 12:06:41.100 UTC [412] LOG:  connection received: host=203.0.113.20 port=51234
+2026-11-05T12:06:41.200000000Z stdout F 2026-11-05 12:06:41.200 UTC [413] LOG:  connection received: host=2001:db8::5 port=51235
+2026-11-05T12:06:41.300000000Z stdout F 2026-11-05 12:06:41.300 UTC [412] LOG:  connection authorized: user=procure_app database=procure_requests
+2026-11-05T12:06:42.200000000Z stdout F 2026-11-05 12:06:42.200 UTC [455] LOG:  AUDIT: SESSION,1,1,DDL,CREATE TABLE,TABLE,public.orders,"CREATE TABLE orders (id uuid, owner_email text DEFAULT 'buyer.invented@example.com')",<not logged>
+2026-11-05T12:06:43.000000000Z stdout F 2026-11-05 12:06:41.000 UTC [88] LOG:  checkpoint complete: wrote 12 buffers (0.1%); ref=ab12:cd34:ef56 sha=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 slot=3fa85f64-5717-4562-b3fc-2c963f66afa6 at 12:06:41

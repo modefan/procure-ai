@@ -498,3 +498,6 @@ tests/ProcureAi.Assistant.Evaluation/reports/
 
 # Helm chart dependencies (helm dependency build: deploy/charts/procure-ai/charts/procure-app-*.tgz)
 deploy/charts/*/charts/
+
+# Collector redaction test samples (real-format CRI log lines with invented values)
+!deploy/charts/procure-observability/tests/collector/samples/*.log
