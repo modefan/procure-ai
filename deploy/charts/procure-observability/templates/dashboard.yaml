@@ -89,6 +89,12 @@ spec:
             # OTLP without an API key: only the collector may connect (network-policies.yaml).
             - name: Dashboard__Otlp__AuthMode
               value: Unsecured
+            # No dashboard API (telemetry API under /api/telemetry, MCP server): not needed, and it has its own auth mode. 13.6.2 reads
+            # both keys; its start-up log says "Dashboard API disabled: True".
+            - name: Dashboard__Api__Disabled
+              value: "true"
+            - name: Dashboard__Api__Enabled
+              value: "false"
             - name: Dashboard__TelemetryLimits__MaxLogCount
               value: {{ $d.telemetryLimits.maxLogCount | quote }}
             - name: Dashboard__TelemetryLimits__MaxTraceCount
