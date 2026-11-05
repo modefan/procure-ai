@@ -40,6 +40,7 @@ spec:
   schedule: {{ .Values.demoData.reset.schedule | quote }}
   timeZone: {{ .Values.demoData.reset.timeZone }}
   concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.demoData.reset.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:

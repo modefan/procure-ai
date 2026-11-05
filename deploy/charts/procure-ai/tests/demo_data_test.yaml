@@ -60,6 +60,10 @@ tests:
       - equal:
           path: spec.concurrencyPolicy
           value: Forbid
+      # A run missed while the cluster was off must not start when the cluster starts (the apps are not up yet).
+      - equal:
+          path: spec.startingDeadlineSeconds
+          value: 600
       - equal:
           path: spec.jobTemplate.spec.template.spec.containers[0].args
           value: [reset]

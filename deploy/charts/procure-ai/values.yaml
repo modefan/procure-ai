@@ -385,6 +385,10 @@ demoData:
   reset:
     schedule: "0 2 * * *"
     timeZone: Africa/Johannesburg
+    # A run missed while the cluster was off is skipped, not started at the next cluster start: the CronJob controller starts the last
+    # missed run at once otherwise, while the apps are still starting (its first attempts failed with 502/504, plan 07 Task 8), and a
+    # reset at start-up wipes data the user expects to find. Cost: with the PC off at 02:00 the reset waits for the next night.
+    startingDeadlineSeconds: 600
   backoffLimit: 6
   # Peak RSS 93 MiB during the seed.
   resources:

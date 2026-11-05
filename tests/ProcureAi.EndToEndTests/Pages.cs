@@ -53,10 +53,26 @@ internal static class Pages
     /// </summary>
     public static async Task DemoLogInAsync(AppFixture fixture, IPage page, string key, string? path = null)
     {
-        await page.GotoAsync(fixture.GatewayUrl.ToString());
-        var section = page.GetByTestId("demo-login");
-        await section.GetByRole(AriaRole.Button).Filter(new() { Has = page.GetByTestId("demo-label").GetByText(DemoRoles[key], new() { Exact = true }) })
-            .ClickAsync(new() { Timeout = Timeout });
+        // The gateway allows 10 demo logins a minute per client IP (RateLimiting:DemoEntry) and a whole run signs in more often than that:
+        // when the welcome page says the sign-in failed, wait for the next window and click again (twice at most).
+        for (var attempt = 1; ; attempt++)
+        {
+            await page.GotoAsync(fixture.GatewayUrl.ToString());
+            var section = page.GetByTestId("demo-login");
+            await section.GetByRole(AriaRole.Button).Filter(new() { Has = page.GetByTestId("demo-label").GetByText(DemoRoles[key], new() { Exact = true }) })
+                .ClickAsync(new() { Timeout = Timeout });
+            var refused = section.GetByText("could not sign you in");
+            await page.GetByTestId("user-menu").Or(refused).First.WaitForAsync(new() { Timeout = Timeout });
+            if (!await refused.IsVisibleAsync())
+            {
+                break;
+            }
+            if (attempt == 3)
+            {
+                throw new InvalidOperationException($"The demo login as {key} was refused three times.");
+            }
+            await page.WaitForTimeoutAsync(30_000);
+        }
         await page.WaitForURLAsync(new Regex(@"/app/dashboard$"), new() { Timeout = Timeout });
         await Assertions.Expect(page.GetByTestId("user-menu")).ToBeVisibleAsync(new() { Timeout = Timeout });
         if (path is not null)

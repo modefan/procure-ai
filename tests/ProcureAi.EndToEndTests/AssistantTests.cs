@@ -68,9 +68,12 @@ public sealed class AssistantTests(AppFixture fixture)
     }
 
     [Fact]
+    [Trait("Target", "AppHost")]
     public async Task Stop_keeps_partial_answer()
     {
-        fixture.RequireReady();
+        fixture.RequireAppHost(
+            "the Fake model must stream slowly (AI:Fake:StreamDelayMs=60, set only by the test AppHost) so Stop lands halfway; a deployment "
+            + "streams at the default 15 ms");
         await fixture.WaitForSeededPolicyAsync();
         await using var context = await fixture.NewContextAsync();
         var page = await context.NewPageAsync();

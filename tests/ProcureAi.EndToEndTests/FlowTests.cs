@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using Shouldly;
@@ -109,10 +110,63 @@ public sealed class FlowTests(AppFixture fixture)
         await Assertions.Expect(viewing).ToHaveCountAsync(0, new() { Timeout = Pages.Timeout });
     }
 
+    /// <summary>
+    /// Plan 07 Review Focus 5 (and the Task 5 carry-over): the live connection is a real WebSocket through the gateway (on the cluster also
+    /// through Traefik), not SignalR's silent fallback to Server-Sent Events or long polling, and pushes arrive over it.
+    /// </summary>
     [Fact]
-    public async Task Restarting_notifications_shows_reconnecting_then_live()
+    public async Task Live_connection_is_a_websocket_through_the_gateway()
     {
         fixture.RequireReady();
+        await using var context = await fixture.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        var sockets = new ConcurrentQueue<IWebSocket>();
+        var framesReceived = 0;
+        var fallbackRequests = new ConcurrentQueue<string>();
+        page.WebSocket += (_, socket) =>
+        {
+            if (new Uri(socket.Url).AbsolutePath == "/hubs/live")
+            {
+                sockets.Enqueue(socket);
+                socket.FrameReceived += (_, _) => Interlocked.Increment(ref framesReceived);
+            }
+        };
+        page.Request += (_, request) =>
+        {
+            // negotiate (POST /hubs/live/negotiate) comes first with every transport; any other HTTP request to the hub is a fallback.
+            var path = new Uri(request.Url).AbsolutePath;
+            if (path.StartsWith("/hubs/live", StringComparison.Ordinal) && path != "/hubs/live/negotiate"
+                && request.ResourceType is "xhr" or "fetch" or "eventsource")
+            {
+                fallbackRequests.Enqueue($"{request.Method} {request.Url} ({request.ResourceType})");
+            }
+        };
+
+        await fixture.DemoLogInAsync(page, "tom", "/app/requests");
+        await Pages.ExpectLiveAsync(page);
+
+        // A request submitted by someone else appears in the list: the push came in, over the socket.
+        var title = NewTitle("E2E websocket");
+        await fixture.SubmitRequestAsync(title);
+        await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = title })).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
+
+        fallbackRequests.ShouldBeEmpty("SignalR fell back from WebSockets");
+        sockets.ShouldNotBeEmpty("no WebSocket to /hubs/live was opened");
+        var socket = sockets.Last();
+        socket.Url.ShouldStartWith($"wss://{fixture.GatewayUrl.Authority}/hubs/live");
+        socket.IsClosed.ShouldBeFalse("the hub's WebSocket closed");
+        // The handshake's answer and at least one message after it.
+        Volatile.Read(ref framesReceived).ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    [Trait("Target", "AppHost")]
+    public async Task Restarting_notifications_shows_reconnecting_then_live()
+    {
+        fixture.RequireAppHost(
+            "it stops and starts notifications-api with the AppHost's resource commands (on the cluster Argo CD's self-heal would undo a "
+            + "scale to zero within seconds)");
         await using var context = await fixture.NewContextAsync();
         var page = await context.NewPageAsync();
         await Pages.LogInAsync(fixture, page, AppFixture.DemoUser, "/app/requests");

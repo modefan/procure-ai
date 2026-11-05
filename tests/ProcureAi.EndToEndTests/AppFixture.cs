@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Playwright;
 
 namespace ProcureAi.EndToEndTests;
@@ -10,9 +11,28 @@ namespace ProcureAi.EndToEndTests;
 /// One AppHost (the whole system) and one headless Chromium for the whole run. Secrets are read from the same places
 /// the AppHost uses (its user secrets, and the user environment variable DEMO_ADMIN_API_KEY) and never printed.
 /// If they are missing the tests skip with a message instead of failing: CI wiring comes with the pipeline task.
+/// <para>
+/// External target (plan 07 Task 8): with <c>PROCUREAI_E2E_GATEWAY_URL</c> set (e.g. <c>https://procure.localtest.me</c>, the k3d cluster) no
+/// AppHost starts; the tests run against that deployment, Keycloak at <c>PROCUREAI_E2E_KEYCLOAK_URL</c> (default: <c>https://auth.</c> + the
+/// gateway's host). The demo password still comes from the AppHost user secrets (the cluster's Secrets are made from them). Tests that need
+/// the AppHost itself (its resource commands, its settings) carry <c>[Trait("Target", "AppHost")]</c>; run the rest with
+/// <c>dotnet run --project tests/ProcureAi.EndToEndTests -- -trait- "Target=AppHost"</c> (the xUnit v3 runner's option; <c>--filter-not-trait</c> is Microsoft Testing Platform syntax, which this project does not use).
+/// </para>
 /// </summary>
 public sealed class AppFixture : IAsyncLifetime
 {
+    /// <summary>The deployment to test instead of starting the AppHost (external target mode).</summary>
+    public const string GatewayUrlVariable = "PROCUREAI_E2E_GATEWAY_URL";
+
+    /// <summary>Keycloak's public URL in external target mode (optional).</summary>
+    public const string KeycloakUrlVariable = "PROCUREAI_E2E_KEYCLOAK_URL";
+
+    /// <summary>The kubectl context of the external target, for the tests that change data behind the app's back (default k3d-procure).</summary>
+    public const string KubeContextVariable = "PROCUREAI_E2E_KUBE_CONTEXT";
+
+    /// <summary>The AppHost's UserSecretsId (src/AppHost/ProcureAi.AppHost): where the demo password lives.</summary>
+    private const string AppHostUserSecretsId = "procure-ai-apphost";
+
     public const string TenantId = "acme";
     public const string DemoUser = "tom@acme.test";
 
@@ -38,10 +58,20 @@ public sealed class AppFixture : IAsyncLifetime
 
     public string DemoPassword => _demoPassword!;
 
+    /// <summary>True when the tests run against a deployment (<see cref="GatewayUrlVariable"/>) instead of an AppHost they started.</summary>
+    public bool IsExternal { get; private set; }
+
     public async ValueTask InitializeAsync()
     {
         _adminApiKey = Environment.GetEnvironmentVariable("DEMO_ADMIN_API_KEY")
                        ?? Environment.GetEnvironmentVariable("DEMO_ADMIN_API_KEY", EnvironmentVariableTarget.User);
+
+        var externalGateway = Environment.GetEnvironmentVariable(GatewayUrlVariable);
+        if (!string.IsNullOrWhiteSpace(externalGateway))
+        {
+            await InitializeExternalAsync(externalGateway);
+            return;
+        }
 
         // Tests never keep data: no volumes, so every run starts from empty databases. The Fake model streams one word every 60 ms
         // (instead of 15), so Stop_keeps_partial_answer can stop an answer halfway.
@@ -94,6 +124,80 @@ public sealed class AppFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// External target: no AppHost. The deployment must be up and seeded (on the k3d cluster Argo CD's demo-seed hook has run); the fixture
+    /// only waits for the gateway's readiness, so a deployment that is still starting does not fail every test.
+    /// </summary>
+    private async Task InitializeExternalAsync(string gatewayUrl)
+    {
+        IsExternal = true;
+        GatewayUrl = new Uri(gatewayUrl.TrimEnd('/') + "/");
+        var keycloak = Environment.GetEnvironmentVariable(KeycloakUrlVariable);
+        KeycloakUrl = new Uri(string.IsNullOrWhiteSpace(keycloak) ? $"{GatewayUrl.Scheme}://auth.{GatewayUrl.Authority}" : keycloak);
+        _demoPassword = new ConfigurationBuilder()
+            .AddUserSecrets(AppHostUserSecretsId)
+            .Build()["Parameters:keycloak-demo-password"];
+
+        if (string.IsNullOrEmpty(_adminApiKey) || string.IsNullOrEmpty(_demoPassword))
+        {
+            _skipReason = "End-to-end tests need the user environment variable DEMO_ADMIN_API_KEY and the AppHost user secret "
+                          + "Parameters:keycloak-demo-password (see DEMO PASSWORDS.txt). Not set, so the tests are skipped.";
+            return;
+        }
+
+        var exit = Microsoft.Playwright.Program.Main(["install", "chromium"]);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException($"playwright install chromium failed with exit code {exit}");
+        }
+        _playwright = await Playwright.CreateAsync();
+        Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+
+        try
+        {
+            // The local cluster's certificate comes from its own CA (and ESET re-signs TLS on this PC): no certificate check, as the
+            // browser contexts (IgnoreHTTPSErrors).
+            using var http = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true })
+            {
+                BaseAddress = GatewayUrl,
+                Timeout = TimeSpan.FromSeconds(10),
+            };
+            await EventuallyAsync<bool>(
+                async () =>
+                {
+                    try
+                    {
+                        using var response = await http.GetAsync("health/ready");
+                        return response.IsSuccessStatusCode ? true : null;
+                    }
+                    catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+                    {
+                        throw new InvalidOperationException(e.Message, e);
+                    }
+                },
+                $"{GatewayUrl}health/ready", TimeSpan.FromMinutes(2));
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// For a test that needs the AppHost itself (its resource commands or settings only the test AppHost has): skips it in external
+    /// target mode with <paramref name="reason"/>. Such tests also carry <c>[Trait("Target", "AppHost")]</c>, so a filtered run leaves
+    /// them out altogether.
+    /// </summary>
+    public void RequireAppHost(string reason)
+    {
+        RequireReady();
+        if (IsExternal)
+        {
+            Assert.Skip($"Needs the AppHost: {reason}");
+        }
+    }
+
+    /// <summary>
     /// Skips the calling test (with the reason) when secrets are missing, unless REQUIRE_E2E=1 (or true), in which
     /// case a missing secret is a failure. CI sets it so that a misconfigured pipeline cannot go green by skipping.
     /// </summary>
@@ -134,7 +238,11 @@ public sealed class AppFixture : IAsyncLifetime
         return new TracedContext(context, testName);
     }
 
-    /// <summary>Creates a purchase request through the gateway with the admin API key; returns its number.</summary>
+    /// <summary>
+    /// Creates a draft purchase request on IT-200 through the gateway with the admin API key; returns its number. IT-200 is Tom's cost center:
+    /// a requester's All list shows only the requests of his own cost centers (plan 07 ruling 12, Task 0c), so a request on CC-100 is not
+    /// in Tom's list.
+    /// </summary>
     public async Task<string> SeedRequestAsync(string title)
     {
         using var http = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true })
@@ -146,7 +254,7 @@ public sealed class AppFixture : IAsyncLifetime
             Content = JsonContent.Create(new
             {
                 title,
-                costCenterCode = "CC-100",
+                costCenterCode = "IT-200",
                 supplierId = "contoso-hardware",
                 lines = new[] { new { sku = "LAP-14", quantity = 3 } },
             }),
@@ -325,37 +433,68 @@ public sealed class AppFixture : IAsyncLifetime
     public async Task<(Guid Id, string Number)> SeededRequestAsync(string key, string tenant = TenantId)
     {
         var title = Scenarios.Single(s => s.Tenant == tenant).Requests.Single(r => r.Key == key).Title;
-        var (body, _) = await CallAsync(HttpMethod.Get, "/api/v1/requests?pageSize=100", null, tenant: tenant);
-        var item = body.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("title").GetString() == title);
-        return (item.GetProperty("id").GetGuid(), item.GetProperty("number").GetString()!);
+        // Newest first: on a deployment that keeps its data (external target) earlier runs' requests come before the seeded ones.
+        for (var page = 1; ; page++)
+        {
+            var (body, _) = await CallAsync(HttpMethod.Get, $"/api/v1/requests?pageSize=100&page={page}", null, tenant: tenant);
+            var items = body.GetProperty("items").EnumerateArray().ToList();
+            var found = items.Where(i => i.GetProperty("title").GetString() == title).ToList();
+            if (found.Count > 0)
+            {
+                var item = found.Single();
+                return (item.GetProperty("id").GetGuid(), item.GetProperty("number").GetString()!);
+            }
+            if (items.Count < 100)
+            {
+                throw new InvalidOperationException($"The seeded request '{title}' ({key}, {tenant}) was not found.");
+            }
+        }
     }
 
     /// <summary>
     /// Runs SQL in the system's Postgres container as the superuser, the way someone with database access changes data behind the app's
-    /// back (<c>docker exec ... psql</c>). Returns psql's output; fails on a non-zero exit code.
+    /// back (<c>docker exec ... psql</c>; in external target mode <c>kubectl exec</c> into the cluster's postgres-0). Returns psql's output;
+    /// fails on a non-zero exit code.
     /// </summary>
     public async Task<string> PsqlAsync(string database, string sql)
     {
-        if (!_app!.ResourceNotifications.TryGetCurrentState("postgres", out var state)
-            || state.Snapshot.Properties.FirstOrDefault(p => p.Name == "container.id")?.Value is not string containerId)
+        System.Diagnostics.ProcessStartInfo start;
+        if (IsExternal)
         {
-            throw new InvalidOperationException("The postgres container is not known yet.");
+            // The cluster's Postgres pod (procure/postgres-0): kubectl exec instead of docker exec. kubectl exec has no -e, so the SQL is
+            // the shell's positional parameter $1 (still no shell quoting).
+            var context = Environment.GetEnvironmentVariable(KubeContextVariable) is { Length: > 0 } c ? c : "k3d-procure";
+            start = new System.Diagnostics.ProcessStartInfo("kubectl");
+            foreach (var argument in new[]
+                     {
+                         "--context", context, "-n", "procure", "exec", "postgres-0", "-c", "postgres", "--", "sh", "-c",
+                         $"PGPASSWORD=\"$POSTGRES_PASSWORD\" psql -v ON_ERROR_STOP=1 -U postgres -d {database} -At -c \"$1\"", "sh", sql,
+                     })
+            {
+                start.ArgumentList.Add(argument);
+            }
         }
-        var start = new System.Diagnostics.ProcessStartInfo("docker")
+        else
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        // The SQL goes in an environment variable (no shell quoting); the password is the container's own POSTGRES_PASSWORD.
-        foreach (var argument in new[]
-                 {
-                     "exec", "-e", $"PSQL_SQL={sql}", containerId, "sh", "-c",
-                     $"PGPASSWORD=\"$POSTGRES_PASSWORD\" psql -v ON_ERROR_STOP=1 -U postgres -d {database} -At -c \"$PSQL_SQL\"",
-                 })
-        {
-            start.ArgumentList.Add(argument);
+            if (!_app!.ResourceNotifications.TryGetCurrentState("postgres", out var state)
+                || state.Snapshot.Properties.FirstOrDefault(p => p.Name == "container.id")?.Value is not string containerId)
+            {
+                throw new InvalidOperationException("The postgres container is not known yet.");
+            }
+            start = new System.Diagnostics.ProcessStartInfo("docker");
+            // The SQL goes in an environment variable (no shell quoting); the password is the container's own POSTGRES_PASSWORD.
+            foreach (var argument in new[]
+                     {
+                         "exec", "-e", $"PSQL_SQL={sql}", containerId, "sh", "-c",
+                         $"PGPASSWORD=\"$POSTGRES_PASSWORD\" psql -v ON_ERROR_STOP=1 -U postgres -d {database} -At -c \"$PSQL_SQL\"",
+                     })
+            {
+                start.ArgumentList.Add(argument);
+            }
         }
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        start.UseShellExecute = false;
         using var process = System.Diagnostics.Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
@@ -367,28 +506,32 @@ public sealed class AppFixture : IAsyncLifetime
         return (await output).Trim();
     }
 
+    /// <summary>The running AppHost; not there in external target mode (such tests call <see cref="RequireAppHost"/> first).</summary>
+    private DistributedApplication AppHost =>
+        _app ?? throw new InvalidOperationException("This test needs the AppHost, but the tests run against an external target.");
+
     /// <summary>Stops a resource the way the dashboard's Stop command does, and waits until it has ended.</summary>
     public async Task StopAsync(string resource)
     {
-        var result = await _app!.ResourceCommands.ExecuteCommandAsync(resource, KnownResourceCommands.StopCommand);
+        var result = await AppHost.ResourceCommands.ExecuteCommandAsync(resource, KnownResourceCommands.StopCommand);
         if (!result.Success)
         {
             throw new InvalidOperationException($"Stopping {resource} failed: {result.Message}");
         }
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await _app.ResourceNotifications.WaitForResourceAsync(resource, KnownResourceStates.TerminalStates, cts.Token);
+        await AppHost.ResourceNotifications.WaitForResourceAsync(resource, KnownResourceStates.TerminalStates, cts.Token);
     }
 
     /// <summary>Starts a stopped resource (the dashboard's Start command) and waits until it is running and healthy.</summary>
     public async Task StartAsync(string resource)
     {
-        var result = await _app!.ResourceCommands.ExecuteCommandAsync(resource, KnownResourceCommands.StartCommand);
+        var result = await AppHost.ResourceCommands.ExecuteCommandAsync(resource, KnownResourceCommands.StartCommand);
         if (!result.Success)
         {
             throw new InvalidOperationException($"Starting {resource} failed: {result.Message}");
         }
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await _app.ResourceNotifications.WaitForResourceHealthyAsync(resource, cts.Token);
+        await AppHost.ResourceNotifications.WaitForResourceHealthyAsync(resource, cts.Token);
     }
 
     public async ValueTask DisposeAsync()
