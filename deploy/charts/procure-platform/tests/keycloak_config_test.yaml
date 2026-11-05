@@ -1,0 +1,100 @@
+# The keycloak-config Job (plan 08 ruling 7): keycloak-config-cli applies the realm file of the deployed Keycloak image to the running
+# Keycloak on every sync, after Keycloak is Ready, managing only what the file declares, secrets from Secret procure-keycloak only.
+suite: keycloak-config
+templates:
+  - keycloak-config-job.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: is a wave-1 sync hook that reruns on every sync and removes itself when it succeeded
+    asserts:
+      - isKind: { of: Job }
+      - matchRegex: { path: metadata.name, pattern: "^keycloak-config-[0-9]+$" }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/hook"]', value: Sync }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/hook-delete-policy"]', value: "BeforeHookCreation,HookSucceeded" }
+      # After wave 0 (the Keycloak Deployment) is Healthy.
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-wave"]', value: "1" }
+      - isNotNullOrEmpty: { path: spec.ttlSecondsAfterFinished }
+
+  - it: takes the realm file from the deployed Keycloak image and only rewrites the default-value syntax
+    set:
+      global.imageRegistry: ghcr.io/modefan
+      global.imageTags.keycloak: b222222222222222222222222222222222222222
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: ghcr.io/modefan/procure-ai-keycloak:b222222222222222222222222222222222222222
+      - equal:
+          path: spec.template.spec.initContainers[0].args[0]
+          value: |
+            set -eu
+            sed -E 's/\$\{(KC_[A-Z0-9_]+):([^-])/${\1:-\2/g' /opt/keycloak/data/import/procure-realm.json > /config/procure-realm.json
+      # No secret reaches the init container.
+      - notExists: { path: 'spec.template.spec.initContainers[0].env' }
+
+  - it: runs the pinned keycloak-config-cli against the Service with the realm's placeholder syntax
+    asserts:
+      - equal: { path: 'spec.template.spec.containers[0].image', value: docker.io/adorsys/keycloak-config-cli:6.5.1-26.5.5 }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KEYCLOAK_URL, value: http://keycloak:8080 } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KEYCLOAK_AVAILABILITYCHECK_ENABLED, value: "true" } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_FILES_LOCATIONS, value: file:/config/procure-realm.json } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_VARSUBSTITUTION_ENABLED, value: "true" } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_VARSUBSTITUTION_PREFIX, value: "${" } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_VARSUBSTITUTION_SUFFIX, value: "}" } }
+      # Every run applies the file (an unchanged file must still put a hand change back).
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_CACHE_ENABLED, value: "false" } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KC_APP_BASE_URL, value: https://procure.localtest.me } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KC_DASHBOARD_BASE_URL, value: https://dashboard.procure.localtest.me } }
+
+  - it: manages only what the file declares and keeps self-registered organization members
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_REMOTESTATE_ENABLED, value: "true" } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_MANAGED_ORGANIZATION, value: no-delete } }
+
+  - it: logs at warn, except the tool's own progress lines, so the realm and the HTTP wire are never logged
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: LOGGING_LEVEL_ROOT, value: warn } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: LOGGING_LEVEL_KCC, value: info } }
+      - notContains: { path: 'spec.template.spec.containers[0].env', content: { name: LOGGING_LEVEL_HTTP, value: debug } }
+      - notExists: { path: 'spec.template.spec.containers[0].env[?(@.name == "LOGGING_LEVEL_REALMCONFIG")]' }
+
+  - it: gets the admin and every realm secret from Secret procure-keycloak, never as a value
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KEYCLOAK_USER, valueFrom: { secretKeyRef: { name: procure-keycloak, key: admin-username } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KEYCLOAK_PASSWORD, valueFrom: { secretKeyRef: { name: procure-keycloak, key: admin-password } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KC_DEMO_PASSWORD, valueFrom: { secretKeyRef: { name: procure-keycloak, key: demo-password } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KC_GATEWAY_SECRET, valueFrom: { secretKeyRef: { name: procure-keycloak, key: gateway-secret } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KC_INTERNAL_SECRET, valueFrom: { secretKeyRef: { name: procure-keycloak, key: internal-secret } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KC_ACCESS_ADMIN_SECRET, valueFrom: { secretKeyRef: { name: procure-keycloak, key: access-admin-secret } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KC_DEMO_LOGIN_SECRET, valueFrom: { secretKeyRef: { name: procure-keycloak, key: demo-login-secret } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KC_DASHBOARD_SECRET, valueFrom: { secretKeyRef: { name: procure-keycloak, key: dashboard-secret } } }
+      - notExists: { path: 'spec.template.spec.containers[0].env[?(@.name =~ /SECRET|PASSWORD/ && @.value)]' }
+
+  - it: caps the Java heap under its memory limit
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: JAVA_OPTS, value: "-Xms64m -Xmx192m -XX:+ExitOnOutOfMemoryError" } }
+      - equal: { path: 'spec.template.spec.containers[0].resources.limits.memory', value: 384Mi }
+      - equal: { path: 'spec.template.spec.securityContext.runAsUser', value: 65534 }
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: tmp, mountPath: /tmp } }
+
+  - it: can be switched off
+    set:
+      keycloakConfig.enabled: false
+    asserts:
+      - hasDocuments: { count: 0 }

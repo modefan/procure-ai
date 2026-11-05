@@ -67,6 +67,25 @@ public sealed class RealmFileTests
     }
 
     [Fact]
+    public void Realm_clients_name_only_scopes_the_realm_has()
+    {
+        // Keycloak's own import skips a client scope the realm does not define, but keycloak-config-cli (the keycloak-config Job, plan 08
+        // ruling 7) fails on it (NullPointerException in addDefaultClientScopes; `email` and `roles` were listed this way). The realm's
+        // clientScopes replace Keycloak's built-in ones; only offline_access is still created by Keycloak itself (with its realm role).
+        var defined = Realm.GetProperty("clientScopes").EnumerateArray().Select(s => s.GetProperty("name").GetString()!)
+            .Append("offline_access").ToHashSet();
+        foreach (var client in Realm.GetProperty("clients").EnumerateArray())
+        {
+            var clientId = client.GetProperty("clientId").GetString();
+            foreach (var list in new[] { "defaultClientScopes", "optionalClientScopes" })
+            {
+                if (client.TryGetProperty(list, out _))
+                    Strings(client, list).Where(s => !defined.Contains(s)).ShouldBeEmpty($"{clientId} {list}");
+            }
+        }
+    }
+
+    [Fact]
     public void Realm_gateway_redirects_use_app_base_url_placeholder()
     {
         foreach (var clientId in new[] { "procure-gateway", "procure-swagger" })

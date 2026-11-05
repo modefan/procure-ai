@@ -2,6 +2,10 @@
 
 - `procure-realm.json` is imported at start (`--import-realm`). It holds no secrets: `${KC_DEMO_PASSWORD}`,
   `${KC_GATEWAY_SECRET}`, `${KC_INTERNAL_SECRET}`, `${KC_ACCESS_ADMIN_SECRET}` and `${KC_DEMO_LOGIN_SECRET}` are replaced by Keycloak from environment variables (Aspire parameters `keycloak-demo-password`, `keycloak-gateway-secret`, `keycloak-internal-secret`, `keycloak-access-admin-secret`, `keycloak-demo-login-secret`).
+- Deployed clusters: Keycloak imports the file on its first start only; the platform chart's `keycloak-config` Job (keycloak-config-cli,
+  plan 08 ruling 7) applies it again on every Argo CD sync, so a change here reaches an existing cluster (`docs/kubernetes.md`, "The realm
+  comes from Git"). keycloak-config-cli fails on a client scope a client lists but the realm does not define (Keycloak skips it), so list
+  only defined ones (`RealmFileTests`). The AppHost has no such Job: `start-dev` imports the file into a fresh container at every start.
 - Tenants are Keycloak organizations; the `tenant` claim is the organization alias. Roles are explicit realm roles per demo user.
 - **Exactly one tenant per token.** The `tenant` claim comes from the single-valued organization mapper in the `organization` client
   scope, and that is the only scope with an organization mapper. Keycloak 26 treats *every* client scope that holds an

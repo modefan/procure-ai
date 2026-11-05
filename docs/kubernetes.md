@@ -86,8 +86,8 @@ their own or are not meant for the internet; the defaults keep today's local beh
 Who calls Keycloak on which path: browsers (login pages, `/realms/procure/protocol/openid-connect/*`, themes under `/resources/`), the
 gateway (OIDC and the demo login's token request), every service API (discovery, keys, client-credentials tokens), the Aspire dashboard
 (OIDC) and Swagger UI's Authorize dialog all use `/realms/procure/...` on the public host, so they work with `publicPathsOnly`. Only
-Access calls the admin REST API (`/admin/realms/procure/...`, self-registration): it uses Keycloak's Service `http://keycloak:8080` in
-both modes (`Keycloak__AdminBaseUrl`). The token it gets there still carries the public issuer (Keycloak's hostname is fixed by
+Access (`/admin/realms/procure/...`, self-registration) and the `keycloak-config` Job (the realm, below) call the admin REST API: both use
+Keycloak's Service `http://keycloak:8080` in both modes (`Keycloak__AdminBaseUrl`). The token it gets there still carries the public issuer (Keycloak's hostname is fixed by
 `KC_HOSTNAME`), which is what the admin API checks.
 
 ### Who may connect to the gateway and Keycloak
@@ -100,11 +100,37 @@ only these connect to their `http` port (plan 08 ruling 5):
 | Pod | May be reached directly by | Why |
 |---|---|---|
 | gateway | Traefik (kube-system), the `demo-data` Jobs | The demo seed and reset call `http://gateway:8080` with the admin key |
-| Keycloak | Traefik, `access-api` | The admin REST API (above). Every other pod reaches Keycloak by its public name, which CoreDNS answers with Traefik |
+| Keycloak | Traefik, `access-api`, the `keycloak-config` Job | The admin REST API (above). Every other pod reaches Keycloak by its public name, which CoreDNS answers with Traefik |
 
 Kubelet probes come from the node and are not affected (Keycloak's management port 9000 is otherwise closed to every pod).
 `tests/Test-Smoke.ps1` checks it with a curl pod that sends `X-Forwarded-For: 203.0.113.9`: refused straight to either Service, 200
 through Traefik. Traefik's own trust of forwarded headers is part of the hosted setup.
+
+### The realm comes from Git (plan 08 ruling 7)
+
+`infra/keycloak/procure-realm.json` is the realm on every cluster, not only on a fresh one. Keycloak imports it on its first start only
+(`--import-realm` skips a realm that exists), so the platform chart also runs the Job `keycloak-config` on every Argo CD sync:
+[keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli) (adorsys, Apache 2.0) `docker.io/adorsys/keycloak-config-cli:6.5.1-26.5.5`
+(release 6.5.1 built against Keycloak 26.5.5, the newest 26.x build published; it is used against our 26.8.1 and checked on the cluster)
+applies the file to the running Keycloak. A change made by hand in the admin console is put back by the next sync; `tests/Test-Smoke.ps1`
+("the realm in Git matches the server") compares the file with Keycloak's partial export.
+
+- **When**: a Sync hook in wave 1, so Argo CD starts it after wave 0 (the Keycloak Deployment) is Healthy; it also waits up to 300 s for
+  Keycloak to answer. A succeeded Job is deleted, a failed one stays (with its log) until the next sync, and the sync fails.
+- **The file**: an init container copies it from the deployed Keycloak image, so the Job applies exactly what Keycloak imported, and changes
+  only the default-value syntax (`${KC_X:default}` for Keycloak becomes `${KC_X:-default}` for keycloak-config-cli). keycloak-config-cli
+  fills the placeholders from its environment: the client secrets and the demo users' password from Secret `procure-keycloak`
+  (`secretKeyRef`), the base URLs from the chart's hosts, as for the Keycloak Deployment. It logs at warn except its own four progress
+  lines, never the realm or the HTTP traffic.
+- **What it manages**: only what the file declares. It deletes only what it imported itself (remote state, kept in realm attributes
+  `de.adorsys.keycloak.config.*`), so Keycloak's own clients, client scopes and roles stay; resource types the file does not list (flows,
+  required actions, components) are not touched. Users who registered themselves are not in the file and stay, and organizations run in
+  `no-delete` mode, so the members Access added to `demo` stay too (the default would remove every member the file does not list). Removing
+  something from the file therefore removes it from Keycloak only once the Job has imported it at least once.
+- **Access**: the bootstrap admin of the master realm (Secret `procure-keycloak`, `admin-username` / `admin-password`) on the Service. It is
+  the only account that can change the realm on an existing cluster: a client in the `procure` realm for the Job would first have to be
+  created by this very Job.
+- **Under the AppHost** there is no keycloak-config-cli: `start-dev` imports the realm into a fresh container at every start.
 
 ### Database roles (plan 08 ruling 6)
 
@@ -151,6 +177,7 @@ ignore certificate errors.
 | Postgres | 17 with pgvector and pgaudit (`infra/postgres`) |
 | MongoDB / Redis / RabbitMQ | 8.3 / 8.6 / 4.3 |
 | Keycloak | 26.8.1, production mode (`start --optimized`, realm baked into `infra/keycloak`) |
+| keycloak-config-cli | 6.5.1, the build for Keycloak 26.5.5 (`keycloakConfig.image`; move to a 26.8 build once one is published) |
 | Debezium Server | 3.7.0.Final (`infra/debezium`) |
 | OpenTelemetry Collector chart / Aspire dashboard | 0.178.2 / 13.6.2 |
 | Helm (chart checks) | 3.20 with helm-unittest 1.2.1 and kubeconform 0.8.0 (CI job `charts`) |
@@ -265,19 +292,20 @@ API server.
 
 - **A pod stays in `CreateContainerConfigError`.** A Secret or one of its keys is missing: rerun `bootstrap/new-secrets.ps1` (it creates
   every Secret from the AppHost user secrets) and check `kubectl -n procure describe pod <pod>`.
-- **Keycloak changes in `infra/keycloak/procure-realm.json` do not show on an existing cluster.** Keycloak imports the realm only once,
-  into an empty database (`--import-realm` skips a realm that exists). A fresh cluster (`Test-FreshCluster.ps1`) gets the new realm; an
-  existing one needs the change made by hand, e.g. with `kcadm.sh` in the Keycloak pod (credentials from the pod's own environment):
+- **Change the realm in Git.** Edit `infra/keycloak/procure-realm.json` and push: the Keycloak image is rebuilt (its tag is the tree hash of
+  `infra/keycloak`) and the next sync's `keycloak-config` Job applies the file to the running Keycloak ("The realm comes from Git").
+  Don't patch the realm by hand: the next sync puts it back, and `tests/Test-Smoke.ps1` reports the difference until then. If the Job
+  fails, the platform sync fails; its log names the resource (`kubectl -n procure logs job/keycloak-config-1`). A client may list only
+  client scopes the realm defines (`RealmFileTests.Realm_clients_name_only_scopes_the_realm_has`): Keycloak skips an unknown one,
+  keycloak-config-cli fails on it. To look at the live realm, use `kcadm.sh` in the Keycloak pod (credentials from the pod's own environment):
 
   ```powershell
-  kubectl --context k3d-procure -n procure exec deploy/keycloak -- sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" --config /tmp/kcadm.config && /opt/keycloak/bin/kcadm.sh get clients -r procure -q clientId=aspire-dashboard --fields id,redirectUris,optionalClientScopes --config /tmp/kcadm.config'
+  kubectl --context k3d-procure -n procure exec deploy/keycloak -- sh -c 'export KC_CLI_PASSWORD="$KC_BOOTSTRAP_ADMIN_PASSWORD"; /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --config /tmp/kcadm.config && /opt/keycloak/bin/kcadm.sh get clients -r procure -q clientId=aspire-dashboard --fields id,redirectUris,optionalClientScopes --config /tmp/kcadm.config; rm -f /tmp/kcadm.config'
   ```
 
-  Clusters made before plan 07 Task 7 need this for the dashboard client `aspire-dashboard`: redirect URI
-  `https://dashboard.procure.localtest.me/` and the client scope `profile` as an optional scope (the dashboard asks for `openid profile`).
 - **The dashboard says the sign-in failed, or shows 404 after signing in.** Only users with the `aspire-dashboard` client role
   `dashboard-viewer` get in (the demo admin); everyone else ends on a 404. A Keycloak error page about the redirect URI or scope means the
-  realm patch above is missing.
+  realm on the server differs from Git: check the last `keycloak-config` Job.
 - **The browser warns about the certificate.** Expected until the local CA is trusted (`bootstrap/trust-local-ca.ps1`).
 - **Leftover Jobs after removing the app.** The `<name>-migrate` and `demo-seed` Jobs are Helm and Argo CD hooks, not release resources:
   `helm uninstall` leaves them behind, and so may deleting the Argo CD Application (the StatefulSets' volumes stay in any case). Remove

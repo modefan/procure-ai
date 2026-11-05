@@ -423,8 +423,6 @@
       },
       "defaultClientScopes": [
         "profile",
-        "email",
-        "roles",
         "procure-api",
         "organization"
       ],
@@ -455,8 +453,6 @@
       },
       "defaultClientScopes": [
         "profile",
-        "email",
-        "roles",
         "procure-api",
         "organization"
       ]
@@ -474,7 +470,6 @@
       "serviceAccountsEnabled": true,
       "defaultClientScopes": [
         "profile",
-        "roles",
         "procure-api"
       ],
       "optionalClientScopes": []
@@ -512,8 +507,6 @@
       },
       "defaultClientScopes": [
         "profile",
-        "email",
-        "roles",
         "procure-api",
         "organization"
       ],

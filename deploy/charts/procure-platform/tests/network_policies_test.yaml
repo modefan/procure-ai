@@ -116,6 +116,10 @@ tests:
                   - podSelector:
                       matchLabels:
                         app.kubernetes.io/name: access-api
+                  # The keycloak-config Job (plan 08 ruling 7) applies the realm through the admin REST API on the Service.
+                  - podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: keycloak-config
                 ports:
                   - port: http
                     protocol: TCP

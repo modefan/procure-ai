@@ -10,6 +10,7 @@ templates:
   - mailpit.yaml
   - debezium.yaml
   - db-roles-job.yaml
+  - keycloak-config-job.yaml
 set:
   global.imageTag: abc1234
 tests:

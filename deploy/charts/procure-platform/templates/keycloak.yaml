@@ -2,8 +2,8 @@
 {{- $labels := dict "root" $ "name" "keycloak" }}
 # Keycloak in production mode (plan 07 ruling 11): our optimized image (kc.sh build --db=postgres --health-enabled=true, realm baked in),
 # started with `start --optimized --import-realm` against keycloakdb. Build-time options are not set here (they are in the image).
-# The realm is imported on the first start only (an existing realm is left as it is): after changing a realm secret, delete the realm
-# or the database. Behind Traefik: TLS ends there, Keycloak speaks http and trusts X-Forwarded-* from the pod network; the NetworkPolicy
+# The realm is imported on the first start only (an existing realm is left as it is); on every sync the keycloak-config Job
+# (keycloak-config-job.yaml, plan 08 ruling 7) applies the same file, secrets included, to the running Keycloak. Behind Traefik: TLS ends there, Keycloak speaks http and trusts X-Forwarded-* from the pod network; the NetworkPolicy
 # allow-direct-callers-keycloak lets only Traefik and Access connect, so no other pod can claim a client address (plan 08 ruling 5).
 apiVersion: v1
 kind: Service

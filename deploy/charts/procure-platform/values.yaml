@@ -89,6 +89,37 @@ keycloak:
     # and REST API are then reached inside the cluster only (Access on the Service; kcadm in the pod). false (local): every path.
     publicPathsOnly: false
 
+# The keycloak-config Job (templates/keycloak-config-job.yaml, plan 08 ruling 7): keycloak-config-cli applies the realm file to the running
+# Keycloak on every sync. Not under the AppHost (start-dev imports the realm at every start of its fresh container).
+keycloakConfig:
+  enabled: true
+  # adorsys/keycloak-config-cli 6.5.1 built against Keycloak 26.5.5, the newest 26.x build published (none for 26.8 yet; the admin REST
+  # API it uses is the same across 26.x, checked on the cluster against 26.8.1). Move to a <release>-26.8.x tag once there is one.
+  image: docker.io/adorsys/keycloak-config-cli:6.5.1-26.5.5
+  # How long it waits for Keycloak to answer before it fails.
+  availabilityTimeout: 300s
+  # The tool's own progress lines (which realm, which resources); never the realm content (see the template).
+  logLevel: info
+  javaOpts: "-Xms64m -Xmx192m -XX:+ExitOnOutOfMemoryError"
+  resources:
+    limits: { memory: 384Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
+  # import.<key> settings: what keycloak-config-cli may delete. Remote state (its record in realm attributes of what it imported) limits
+  # every deletion to things it imported itself, never Keycloak's own (built-in clients and scopes, default roles). Organizations are not
+  # covered by remote state and default to full management, which would remove members the file does not list: the users who registered
+  # themselves and were added to `demo` by Access. no-delete keeps them (and any organization made outside the file).
+  importSettings:
+    remote-state.enabled: "true"
+    managed.organization: no-delete
+  # Environment variable of each ${KC_...} secret placeholder of the realm file -> its key in Secret procure-keycloak (as keycloak.yaml).
+  secretPlaceholders:
+    KC_DEMO_PASSWORD: demo-password
+    KC_GATEWAY_SECRET: gateway-secret
+    KC_INTERNAL_SECRET: internal-secret
+    KC_ACCESS_ADMIN_SECRET: access-admin-secret
+    KC_DEMO_LOGIN_SECRET: demo-login-secret
+    KC_DASHBOARD_SECRET: dashboard-secret
+
 mailpit:
   image: docker.io/axllent/mailpit:v1.32.0
   ingress:
@@ -147,5 +178,7 @@ networkPolicies:
     gateway:
       - { app.kubernetes.io/component: demo-data }
     # Access calls the Keycloak admin REST API on the Service (Keycloak__AdminBaseUrl), which the public ingress may not route.
+    # The keycloak-config Job applies the realm file through the admin REST API on the Service (plan 08 ruling 7).
     keycloak:
       - { app.kubernetes.io/name: access-api }
+      - { app.kubernetes.io/name: keycloak-config }

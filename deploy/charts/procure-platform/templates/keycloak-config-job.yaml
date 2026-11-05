@@ -1,0 +1,134 @@
+{{- $c := .Values.keycloakConfig }}
+{{- $labels := dict "root" $ "name" "keycloak-config" }}
+# Realm updates through GitOps (plan 08 ruling 7). Keycloak imports the realm only on its first start (`--import-realm` skips a realm that
+# exists, keycloak.yaml), so a realm change in Git would never reach an existing cluster. This Job runs keycloak-config-cli
+# (adorsys, Apache 2.0) against the running Keycloak on every sync with the same file, so Git is the source of truth for the realm;
+# a change made by hand in the admin console is put back by the next sync. Keycloak's own first-start import stays (a fresh install
+# works without the Job; the Job then finds the realm as the file describes it and changes nothing).
+#   realm file    the init container copies procure-realm.json out of the deployed Keycloak image (the same bytes Keycloak imported, no copy
+#                 in the chart) and rewrites only the defaults' syntax: Keycloak writes ${KC_X:default}, keycloak-config-cli (Apache
+#                 Commons Text) ${KC_X:-default}. No value passes through sed: keycloak-config-cli fills every ${KC_...} placeholder from
+#                 its environment, the same variables and Secret keys as the Keycloak Deployment.
+#   when          a Sync hook in wave 1: Argo CD starts it once wave 0 (Keycloak's Deployment) is Healthy, i.e. Keycloak is Ready, next
+#                 to db-roles and before Debezium (wave 2); it waits for Keycloak itself too (availability check), which is all there is
+#                 under Helm (no hooks: a plain Job per revision, like the other bootstrap Jobs). Rerun on every sync (BeforeHookCreation);
+#                 a succeeded Job is deleted (HookSucceeded), a failed one stays for its log until the next sync.
+#   what it owns  only what the file declares (see keycloakConfig in values.yaml): remote state on, so it deletes only what it imported
+#                 itself; organizations no-delete, so self-registered members of `demo` (Access adds them) stay; users and resource types
+#                 the file does not list (built-in clients and scopes, default roles, flows, required actions) are left alone.
+#   access        the bootstrap admin (Secret procure-keycloak) on the master realm, through the Service: the only account that can change
+#                 the realm on an existing cluster (a realm-scoped client would first have to be created by this very Job); the public
+#                 ingress does not route /admin (publicPathsOnly), and NetworkPolicy allow-direct-callers-keycloak lets this Job's pods in.
+{{- if $c.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "procure-platform.bootstrapJobName" (dict "root" $ "base" "keycloak-config") }}
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  # Under Helm (no hook policy) the finished Job of a revision goes after a day.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" $labels | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # uid 65534: keycloak-config-cli's image user (nobody); the Keycloak image's realm file and sed are world-readable.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 65534 "gid" 65534) | nindent 6 }}
+      initContainers:
+        - name: realm-file
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" .Values.keycloak.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+              sed -E 's/\$\{(KC_[A-Z0-9_]+):([^-])/${\1:-\2/g' /opt/keycloak/data/import/procure-realm.json > /config/procure-realm.json
+          resources:
+            {{- toYaml .Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      containers:
+        - name: keycloak-config
+          image: {{ $c.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: KEYCLOAK_URL
+              value: http://keycloak:8080
+            - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
+              value: "true"
+            - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
+              value: {{ $c.availabilityTimeout | quote }}
+            - name: KEYCLOAK_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-username
+            - name: KEYCLOAK_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-password
+            - name: IMPORT_FILES_LOCATIONS
+              value: file:/config/procure-realm.json
+            # Apply the file on every run, not only when it changed: the cache would skip an unchanged file and keep a hand change.
+            - name: IMPORT_CACHE_ENABLED
+              value: "false"
+            - name: IMPORT_VARSUBSTITUTION_ENABLED
+              value: "true"
+            - name: IMPORT_VARSUBSTITUTION_PREFIX
+              value: "${"
+            - name: IMPORT_VARSUBSTITUTION_SUFFIX
+              value: "}"
+            {{- range $key, $value := $c.importSettings }}
+            - name: {{ printf "IMPORT_%s" (upper (replace "-" "" (replace "." "_" $key))) }}
+              value: {{ $value | quote }}
+            {{- end }}
+            # warn everywhere except the tool's own progress lines (logger group `kcc`, an alias of `keycloak-config-cli` that an
+            # environment variable can name: Spring cannot bind a dash from one). The groups realm-config (the realm file with its secrets,
+            # at trace) and http (the wire: requests and tokens, at debug) follow the root level.
+            - name: LOGGING_LEVEL_ROOT
+              value: warn
+            - name: LOGGING_LEVEL_KCC
+              value: {{ $c.logLevel | quote }}
+            - name: JAVA_OPTS
+              value: {{ $c.javaOpts | quote }}
+            # The realm's placeholders (infra/keycloak/procure-realm.json), as the Keycloak Deployment sets them.
+            {{- range $name, $key := $c.secretPlaceholders }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: {{ $key }}
+            {{- end }}
+            - name: KC_APP_BASE_URL
+              value: {{ printf "https://%s" .Values.hosts.app }}
+            - name: KC_DASHBOARD_BASE_URL
+              value: {{ printf "https://%s" .Values.hosts.dashboard }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          emptyDir:
+            sizeLimit: 8Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}
