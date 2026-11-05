@@ -72,7 +72,10 @@ global:
       ConnectionStrings__rabbitmq: { secret: procure-connection-strings, key: rabbitmq }
       ConnectionStrings__redis: { secret: procure-connection-strings, key: redis }
 
-# --- The service APIs (Service <alias>-api). calls = the AppHost's CallsServices; waitFor = its WaitFor(debezium-...). ---
+# --- The service APIs (Service <alias>-api). calls = the AppHost's CallsServices. ---
+# No waitFor on Debezium (plan 08 ruling 8): the AppHost's APIs WaitFor their Debezium Server (local determinism), the cluster's do not. An
+# API and its outbox need only Postgres and RabbitMQ; a Debezium Server that is down catches up from its replication slot when it is back.
+# The outage shows on the system status page and as a platform Application that is not Healthy, never as an API that cannot start.
 
 access:
   name: access-api
@@ -96,7 +99,6 @@ access:
     Keycloak__Realm: procure
     Keycloak__DemoOrganization: demo
     Keycloak__AdminClientId: procure-access-admin
-  waitFor: [http://debezium-accessdb-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 budgets:
@@ -111,7 +113,6 @@ budgets:
   secretEnv:
     ConnectionStrings__budgetsdb: { secret: procure-connection-strings, key: budgetsdb }
   calls: [access-api]
-  waitFor: [http://debezium-budgetsdb-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 approvals:
@@ -126,7 +127,6 @@ approvals:
   secretEnv:
     ConnectionStrings__approvalsdb: { secret: procure-connection-strings, key: approvalsdb }
   calls: [access-api]
-  waitFor: [http://debezium-approvalsdb-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 # Audit (Marten): nothing of its own is captured. It reads the server's pgaudit log as audit_log_reader (the platform's db-roles Job creates
@@ -162,7 +162,6 @@ suppliers:
   secretEnv:
     ConnectionStrings__suppliersdb: { secret: procure-connection-strings, key: suppliersdb }
   calls: [access-api]
-  waitFor: [http://debezium-mongo-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 requests:
@@ -177,7 +176,6 @@ requests:
   secretEnv:
     ConnectionStrings__requestsdb: { secret: procure-connection-strings, key: requestsdb }
   calls: [access-api, approvals-api, suppliers-api]
-  waitFor: [http://debezium-requestsdb-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 # Purchasing: orders to the supplier (the simulators) with the simulator key; the supplier's webhooks are signed with the shared secret.
@@ -197,7 +195,6 @@ purchasing:
     SupplierClient__ApiKey: { secret: procure-api-keys, key: simulator-api-key }
     Webhooks__Sources__supplier__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
   calls: [access-api]
-  waitFor: [http://debezium-purchasingdb-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 # The Assistant: assistantdb (pgvector) plus the chat history on MongoDB (assistantchatdb, captured by debezium-mongo). The model provider
@@ -217,9 +214,6 @@ assistant:
     ConnectionStrings__assistantdb: { secret: procure-connection-strings, key: assistantdb }
     ConnectionStrings__assistantchatdb: { secret: procure-connection-strings, key: assistantchatdb }
   calls: [access-api, requests-api, approvals-api, budgets-api, suppliers-api]
-  waitFor:
-    - http://debezium-assistantdb-0.debezium:8080/q/health
-    - http://debezium-mongo-0.debezium:8080/q/health
   migration: { enabled: true }
 
 invoicing:
@@ -238,7 +232,6 @@ invoicing:
     ErpClient__ApiKey: { secret: procure-api-keys, key: simulator-api-key }
     Webhooks__Sources__supplier__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
   calls: [access-api, assistant-api]
-  waitFor: [http://debezium-invoicingdb-0.debezium:8080/q/health]
   migration: { enabled: true }
 
 # Notifications: no database (no migration, no Debezium). Emails through Mailpit; the links point at the app's public host. The status

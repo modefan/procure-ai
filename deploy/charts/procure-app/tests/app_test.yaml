@@ -33,9 +33,11 @@ tests:
       - equal:
           path: metadata.annotations["argocd.argoproj.io/sync-wave"]
           value: "-1"
+      # No retry inside the Job (plan 08 ruling 9): Argo CD's sync retries (3) are the retry loop, so a failing migration fails the sync,
+      # and turns the root Degraded, within minutes.
       - equal:
           path: spec.backoffLimit
-          value: 6
+          value: 0
       # The same image and environment as the app, plus --migrate.
       - equal:
           path: spec.template.spec.containers[0].image

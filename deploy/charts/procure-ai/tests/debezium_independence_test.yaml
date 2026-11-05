@@ -1,0 +1,24 @@
+# Plan 08 ruling 8: no API pod waits for its Debezium Server. A Debezium outage must not keep an API from starting at its next pod restart
+# (the outbox and the API need only Postgres and RabbitMQ; CDC catches up from the replication slot). The AppHost keeps its WaitFor.
+suite: debezium independence
+templates:
+  - charts/access/templates/deployment.yaml
+  - charts/approvals/templates/deployment.yaml
+  - charts/assistant/templates/deployment.yaml
+  - charts/audit/templates/deployment.yaml
+  - charts/budgets/templates/deployment.yaml
+  - charts/invoicing/templates/deployment.yaml
+  - charts/notifications/templates/deployment.yaml
+  - charts/purchasing/templates/deployment.yaml
+  - charts/requests/templates/deployment.yaml
+  - charts/suppliers/templates/deployment.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: api pods do not wait for debezium
+    asserts:
+      # The only init containers procure-app renders are the waitFor ones (wait-<n>), so none at all means no wait.
+      - notExists:
+          path: spec.template.spec.initContainers
+      - notMatchRegexRaw:
+          pattern: debezium
