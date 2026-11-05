@@ -41,15 +41,6 @@ tests:
               secretKeyRef:
                 name: procure-keycloak
                 key: dashboard-secret
-      # Scope openid only: the realm has no `profile` client scope (Keycloak refuses "openid profile", the handler's default); the
-      # client's own mappers put name, preferred_username and dashboard_roles into the ID token.
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: Authentication__Schemes__OpenIdConnect__Scope__0
-            value: openid
-      - notExists:
-          path: spec.template.spec.containers[0].env[?(@.name == "Authentication__Schemes__OpenIdConnect__Scope__1")]
       # Only users with the aspire-dashboard client role dashboard-viewer (claim dashboard_roles, realm mapper).
       - contains:
           path: spec.template.spec.containers[0].env

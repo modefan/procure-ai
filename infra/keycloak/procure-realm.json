@@ -276,6 +276,15 @@
   ],
   "clientScopes": [
     {
+      "name": "profile",
+      "description": "Defined so a request for the standard profile scope is valid (the Aspire dashboard always asks for it); no mappers",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
       "name": "procure-api",
       "description": "Audience, name and roles claims for the procurement APIs (the tenant claim comes from the organization scope)",
       "protocol": "openid-connect",
@@ -525,7 +534,7 @@
       "serviceAccountsEnabled": false,
       "frontchannelLogout": false,
       "redirectUris": [
-        "${KC_DASHBOARD_BASE_URL:https://localhost}/signin-oidc"
+        "${KC_DASHBOARD_BASE_URL:https://localhost}/"
       ],
       "webOrigins": [],
       "attributes": {
@@ -586,7 +595,7 @@
         }
       ],
       "defaultClientScopes": [],
-      "optionalClientScopes": []
+      "optionalClientScopes": ["profile"]
     }
   ]
 }

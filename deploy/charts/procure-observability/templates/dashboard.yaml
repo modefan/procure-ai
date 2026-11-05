@@ -75,11 +75,8 @@ spec:
                 secretKeyRef:
                   name: {{ $d.oidc.secretName }}
                   key: {{ $d.oidc.secretKey }}
-            # Scope openid only (configuration replaces the handler's default "openid profile"): the realm has no `profile` client scope, and
-            # the aspire-dashboard client's own mappers put name, preferred_username and dashboard_roles into the ID token. The callback
-            # path is fixed by the dashboard to "/" (redirect URI https://<host>/, procure-realm.json).
-            - name: Authentication__Schemes__OpenIdConnect__Scope__0
-              value: openid
+            # The dashboard fixes the callback path to "/" and asks for "openid profile"; the realm's aspire-dashboard client allows
+            # https://<host>/ and has the (mapper-less) profile scope as optional (procure-realm.json).
             - name: Dashboard__Frontend__OpenIdConnect__RequiredClaimType
               value: {{ $d.oidc.requiredClaimType }}
             - name: Dashboard__Frontend__OpenIdConnect__RequiredClaimValue

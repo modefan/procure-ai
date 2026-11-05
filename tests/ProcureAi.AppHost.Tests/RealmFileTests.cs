@@ -27,7 +27,10 @@ public sealed class RealmFileTests
         dashboard.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse();
         dashboard.GetProperty("serviceAccountsEnabled").GetBoolean().ShouldBeFalse();
         dashboard.GetProperty("attributes").GetProperty("pkce.code.challenge.method").GetString().ShouldBe("S256");
-        Strings(dashboard, "redirectUris").ShouldBe([$"{DashboardBaseUrl}/signin-oidc"]);
+        // The Aspire dashboard (13.6) fixes its OIDC callback path to "/" in code (found in plan 07 Task 7), so its redirect URI is <base>/
+        Strings(dashboard, "redirectUris").ShouldBe([$"{DashboardBaseUrl}/"]);
+        // It always asks for "openid profile" (configuration cannot drop profile), so the realm has a `profile` scope, optional here.
+        Strings(dashboard, "optionalClientScopes").ShouldBe(["profile"]);
         dashboard.GetProperty("attributes").GetProperty("post.logout.redirect.uris").GetString()
             .ShouldBe($"{DashboardBaseUrl}/signout-callback-oidc");
         // No procure-api audience: its tokens are for the dashboard only.
@@ -50,6 +53,17 @@ public sealed class RealmFileTests
                 && dashboardRoles.EnumerateArray().Any(r => r.GetString() == "dashboard-viewer"))
             .Select(u => u.GetProperty("username").GetString());
         viewers.ShouldBe(["admin@acme.test"]);
+    }
+
+    [Fact]
+    public void Realm_profile_scope_exists_and_maps_nothing()
+    {
+        // Keycloak refuses a request for a scope the realm does not define ("Invalid scopes: openid profile"). The realm's own clientScopes
+        // list replaces Keycloak's built-in ones, so `profile` is defined here, without mappers: every client keeps exactly the claims its
+        // own mappers (or procure-api) give, and tokens only gain "profile" in their scope claim.
+        var profile = Realm.GetProperty("clientScopes").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "profile");
+        profile.GetProperty("protocol").GetString().ShouldBe("openid-connect");
+        profile.TryGetProperty("protocolMappers", out var mappers).ShouldBeFalse($"profile has mappers: {mappers}");
     }
 
     [Fact]
