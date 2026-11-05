@@ -92,7 +92,8 @@ service:
         $container = $f.BaseName
         $dir = Join-Path $pods "procure_$container-0_00000000-0000-0000-0000-000000000001/$container"
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        Copy-Item $f.FullName (Join-Path $dir '0.log')
+        # LF line ends, as containerd writes them (a Windows checkout may have CRLF).
+        [System.IO.File]::WriteAllText((Join-Path $dir '0.log'), ((Get-Content $f.FullName -Raw) -replace "`r`n", "`n"))
         $expected += @(Get-Content $f.FullName | Where-Object { $_.Trim() -ne '' }).Count
     }
     New-Item -ItemType Directory -Path (Join-Path $work 'out') | Out-Null
