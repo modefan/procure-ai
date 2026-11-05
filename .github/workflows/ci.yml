@@ -204,6 +204,10 @@ jobs:
           helm unittest deploy/charts/procure-platform deploy/charts/procure-app deploy/charts/procure-ai
           deploy/charts/procure-observability
 
+      - name: Collector log redaction (pinned collector image over sample logs)
+        shell: pwsh
+        run: ./deploy/charts/procure-observability/tests/collector/Test-CollectorRedaction.ps1
+
       - name: kubeconform -strict
         run: |
           set -euo pipefail

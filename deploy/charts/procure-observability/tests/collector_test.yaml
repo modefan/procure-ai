@@ -38,12 +38,12 @@ tests:
           path: data.relay
           pattern: '/var/log/pods/(?:argocd|kube-system|observability)_'
 
-  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to the dashboard
+  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to the dashboard (logs also through transform/redact)
     template: charts/opentelemetry-collector/templates/configmap-agent.yaml
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
       - matchRegex:
           path: data.relay
           pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/background-db\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
@@ -61,6 +61,23 @@ tests:
       - notMatchRegex:
           path: data.relay
           pattern: '- debug'
+
+  # Personal data (usernames, e-mail and IP addresses) in the platform's own logs is masked before the dashboard sees it (CLAUDE.md
+  # "Observability": logs carry trace ID, tenant and user ID, never personal data). The behaviour is tested against the real collector
+  # image in tests/collector/Test-CollectorRedaction.ps1; this test only pins the wiring.
+  - it: logs pipeline runs transform/redact before export
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact\s*\n\s*- batch\s*\n'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)transform/redact:.*?log_statements:'
+      # The traces and metrics pipelines have no use for it.
+      - notMatchRegex:
+          path: data.relay
+          pattern: '(?s)(traces|metrics):\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact'
 
   # Background database and cache calls without a parent (Wolverine's durability polling, Audit's pgaudit reader, the Redis backplane,
   # Mongo health pings) are ~30 root traces a second; they filled the dashboard's trace limit in under three minutes and evicted every

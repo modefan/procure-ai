@@ -169,6 +169,17 @@ Two tests carry `[Trait("Target", "AppHost")]` and only run against the AppHost:
 `Live_connection_is_a_websocket_through_the_gateway` only runs against a deployment: under the AppHost the browser's hub connection
 currently falls back to long polling (live updates still work), behind Traefik it is a real WebSocket.
 
+## Personal data in collected logs
+
+The Collector reads the pod logs of Postgres (incl. pgaudit), Keycloak, RabbitMQ, MongoDB, Redis and Debezium. Keycloak's `LOGIN_ERROR`
+events hold the typed username and the client's IP address, and Postgres and RabbitMQ log client addresses, so a `transform/redact`
+processor in the logs pipeline (after `k8sattributes`) masks them with `***` before the dashboard sees them: values of `username=`,
+`email=`, `ipAddress=`, `login_hint=`, e-mail addresses, IPv4 and IPv6 addresses. Event types, realm, error codes, user IDs (UUIDs),
+timestamps and hex IDs stay, so an incident can still be followed. The same processor gives pgaudit lines severity INFO. The behaviour is
+tested against the pinned collector image over sample logs in the real formats:
+`pwsh deploy/charts/procure-observability/tests/collector/Test-CollectorRedaction.ps1` (needs Docker; CI job `charts` runs it).
+A RabbitMQ node name such as `rabbit@rabbitmq-0.rabbitmq.procure.svc` looks like an e-mail address and is masked too.
+
 ## Measured memory
 
 Measured 2026-11-05 on the 10 GiB node with everything deployed (plan 07 complete, observability on): `docker stats` of the k3d node and

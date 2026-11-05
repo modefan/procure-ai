@@ -174,6 +174,28 @@ opentelemetry-collector:
             - k8s.deployment.name
             - k8s.statefulset.name
             - k8s.job.name
+      # Personal data never reaches the dashboard (CLAUDE.md "Observability"): the platform's own logs (Keycloak's LOGIN_ERROR events hold the
+      # typed username and the client's IP address, Postgres and RabbitMQ log client addresses) are masked with ***, not dropped, so an
+      # incident can still be followed: event type, realm, error code, user IDs (UUIDs), timestamps and hex IDs stay. Masked, in this order:
+      #   1. the values of username=, email=, ipAddress= and login_hint= (quoted as in Keycloak's `username="x"` or bare),
+      #   2. e-mail addresses anywhere,
+      #   3. IPv4 addresses,
+      #   4. IPv6 addresses: only forms with eight groups or a `::` (so `12:06:41`, `ab12:cd34:ef56`, UUIDs and hashes stay), after a
+      #      character that cannot belong to an address; the character is kept ($1).
+      # Applies to the apps' OTLP logs too (their string bodies only; they already carry no personal data). The pgaudit statements
+      # (Postgres console: `LOG:  AUDIT: SESSION,...`) get severity INFO: the Postgres console has no level the container parser reads,
+      # and the dashboard would show them as unspecified. Tested against the real image: tests/collector/Test-CollectorRedaction.ps1.
+      transform/redact:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - 'set(severity_text, "INFO") where IsString(body) and IsMatch(body.string, "\\sLOG:\\s+AUDIT: ")'
+              - 'set(severity_number, SEVERITY_NUMBER_INFO) where IsString(body) and IsMatch(body.string, "\\sLOG:\\s+AUDIT: ")'
+              - 'replace_pattern(body.string, "(?i)\\b(username|email|ipAddress|login_hint)=(\"?)[^\",\\s&]*", "$1=$2***") where IsString(body)'
+              - 'replace_pattern(body.string, "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "***") where IsString(body)'
+              - 'replace_pattern(body.string, "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b", "***") where IsString(body)'
+              - 'replace_pattern(body.string, "(^|[^0-9A-Za-z:.])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?|::[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})", "$1***") where IsString(body)'
       # Background database and cache calls without a parent span (Wolverine's durability polling, Audit's pgaudit reader, the Redis
       # backplane, Mongo health pings): ~30 root traces a second filled the dashboard's trace limit in under three minutes and evicted
       # every request's trace. Only those root spans are dropped; database spans inside a request's trace stay. (A processor beyond the
@@ -197,7 +219,7 @@ opentelemetry-collector:
       pipelines:
         logs:
           receivers: [otlp, filelog]
-          processors: [memory_limiter, k8sattributes, batch]
+          processors: [memory_limiter, k8sattributes, transform/redact, batch]
           exporters: [otlp]
         metrics:
           receivers: [otlp]
