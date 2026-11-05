@@ -8,16 +8,25 @@
 \set app_role :service '_app'
 \set cdc_role :service '_cdc'
 
+-- A password variable that is unset, or set but empty (PASSWORD '' would silently clear the password), fails the run.
 \if :{?app_password}
+SELECT :'app_password' = '' AS app_password_empty \gset
 \else
+\set app_password_empty true
+\endif
+\if :app_password_empty
 SELECT set_config('procureai.missing', :'app_role', false) \gset
-DO $missing$ BEGIN RAISE EXCEPTION 'roles.sql: no password for role % (its environment variable DB_<SERVICE>_PASSWORD is not set)', current_setting('procureai.missing'); END $missing$;
+DO $missing$ BEGIN RAISE EXCEPTION 'roles.sql: no password for role % (its environment variable DB_<SERVICE>_PASSWORD is not set or empty)', current_setting('procureai.missing'); END $missing$;
 \endif
 \if :capture
 \if :{?cdc_password}
+SELECT :'cdc_password' = '' AS cdc_password_empty \gset
 \else
+\set cdc_password_empty true
+\endif
+\if :cdc_password_empty
 SELECT set_config('procureai.missing', :'cdc_role', false) \gset
-DO $missing$ BEGIN RAISE EXCEPTION 'roles.sql: no password for role % (its environment variable DB_<SERVICE>_CDC_PASSWORD is not set)', current_setting('procureai.missing'); END $missing$;
+DO $missing$ BEGIN RAISE EXCEPTION 'roles.sql: no password for role % (its environment variable DB_<SERVICE>_CDC_PASSWORD is not set or empty)', current_setting('procureai.missing'); END $missing$;
 \endif
 \endif
 
@@ -43,6 +52,8 @@ ALTER DATABASE :"database" RESET procureai.cdc_role;
 
 \connect :"database"
 SET client_min_messages = warning;
+-- A new session: never log the text of a failing statement (an ALTER ROLE ... PASSWORD in plain text; see roles.sql).
+SET log_min_error_statement = panic;
 SELECT set_config('procureai.app_role', :'app_role', false), set_config('procureai.cdc_role', CASE WHEN :'capture' THEN :'cdc_role' ELSE '' END, false) \gset
 
 -- Ownership from the superuser to the service's role (a volume made before this script; a no-op afterwards). Left alone: the system

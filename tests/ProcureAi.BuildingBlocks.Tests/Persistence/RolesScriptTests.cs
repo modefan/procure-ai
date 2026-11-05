@@ -33,6 +33,95 @@ public sealed class RolesScriptTests(PostgresFixture postgres) : IClassFixture<P
         await postgres.RunRolesScriptAsync();
     }
 
+    /// <summary>An empty password variable (set, but to nothing) would clear the role's password with <c>PASSWORD ''</c>: it fails like a missing one.</summary>
+    [Theory]
+    [InlineData("DB_REQUESTS_PASSWORD", "no password for role requests_app")]
+    [InlineData("DB_REQUESTS_CDC_PASSWORD", "no password for role requests_cdc")]
+    [InlineData("DB_AUDIT_LOG_READER_PASSWORD", "no password for role audit_log_reader")]
+    public async Task Fails_on_an_empty_password(string variable, string expected)
+    {
+        var environment = PostgresFixture.RolesScriptEnvironment();
+        environment[variable] = "";
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(() => postgres.RunRolesScriptAsync(environment));
+
+        failure.Message.ShouldContain(expected);
+        failure.Message.ShouldContain("is not set or empty");
+        await postgres.RunRolesScriptAsync();
+    }
+
+    /// <summary>
+    /// A failing statement is logged with its text (log_min_error_statement=error), which for an ALTER ROLE ... PASSWORD would put the password
+    /// into the csvlog Audit's log reader and the collector read. Every session of the scripts turns that off: roles.sql before its first
+    /// statement and after its <c>\connect</c>, roles-database.sql after its <c>\connect</c> (roles-pgaudit.sql runs in that session).
+    /// </summary>
+    [Fact]
+    public void Every_session_of_the_scripts_keeps_failing_statements_out_of_the_log()
+    {
+        const string Set = "SET log_min_error_statement = panic;";
+        string[] Lines(string file) =>
+            File.ReadAllLines(Path.Combine(PostgresFixture.RepoRoot(), "infra", "postgres", file)).Select(l => l.Trim()).ToArray();
+
+        var roles = Lines("roles.sql");
+        var firstStatement = Array.FindIndex(roles, l => l.Length > 0 && !l.StartsWith("--", StringComparison.Ordinal) && !l.StartsWith('\\') &&!l.StartsWith("SET ", StringComparison.Ordinal));
+        Array.IndexOf(roles, Set).ShouldBeInRange(0, firstStatement - 1, "roles.sql sets it before any other statement");
+        foreach (var file in new[] { "roles.sql", "roles-database.sql", "roles-pgaudit.sql" })
+        {
+            var lines = Lines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("\\connect", StringComparison.Ordinal) || lines[i].StartsWith("\\c ",StringComparison.Ordinal))
+                {
+                    lines.Skip(i + 1).Take(3).ShouldContain(Set, $"{file}: the new session of '{lines[i]}' sets it");
+                }
+            }
+        }
+    }
+
+    /// <summary>What the setting buys: with it a failing ALTER ROLE ... PASSWORD leaves no STATEMENT line with the password in the server log.</summary>
+    [Fact]
+    public async Task A_failing_password_statement_does_not_reach_the_server_log()
+    {
+        var hidden = $"hidden-{Guid.NewGuid():N}";
+        var shown = $"shown-{Guid.NewGuid():N}";
+        var admin = new NpgsqlConnectionStringBuilder(postgres.ConnectionString("postgres")) { Pooling = false }.ConnectionString;
+        await using (var connection = new NpgsqlConnection(admin))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await using (var set = new NpgsqlCommand("SET log_min_error_statement = panic", connection))
+            {
+                await set.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            }
+
+            await Should.ThrowAsync<PostgresException>(async () =>
+            {
+                await using var alter = new NpgsqlCommand($"ALTER ROLE no_such_role_m3 PASSWORD '{hidden}'", connection);
+                await alter.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            });
+        }
+
+        // The control, after it: without the setting the same failure logs the statement with the password.
+        await using (var connection = new NpgsqlConnection(admin))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await Should.ThrowAsync<PostgresException>(async () =>
+            {
+                await using var alter = new NpgsqlCommand($"ALTER ROLE no_such_role_m3 PASSWORD '{shown}'", connection);
+                await alter.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            });
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        string log;
+        while (!(log = await postgres.ConsoleAsync()).Contains(shown, StringComparison.Ordinal) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+        }
+
+        log.ShouldContain(shown, Case.Sensitive, "the control's statement reached the log (so the check below means something)");
+        log.ShouldNotContain(hidden, Case.Sensitive);
+    }
+
     /// <summary>
     /// A data volume from before plan 08 Task 4: purchasingdb owned by postgres with tables, a serial and an identity sequence, a free sequence,
     /// a view, a function, an enum, the publication and Wolverine's schema, all owned by postgres, and the old role <c>debezium</c> with its

@@ -29,6 +29,10 @@
 \set ON_ERROR_STOP on
 \set QUIET on
 SET client_min_messages = warning;
+-- A statement that fails is logged with its text (log_min_error_statement=error by default), and an ALTER ROLE ... PASSWORD would put the
+-- password in plain text into the csvlog that audit_log_reader and the log collector read. Never log statement texts of this session
+-- (the error itself is still logged). Every \connect starts a new session, so roles-database.sql sets it again after each one.
+SET log_min_error_statement = panic;
 
 \set service access
 \set database accessdb
@@ -108,6 +112,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- The old shared replication role: its grants went with DROP OWNED in every database above. Should it still hold a privilege somewhere
 -- else (a database not listed here), it stays, without login, and the script says so instead of failing the deployment.
 \connect postgres
+SET log_min_error_statement = panic;
 DO $drop$
 BEGIN
     IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'debezium') THEN

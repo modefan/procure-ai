@@ -12,8 +12,12 @@
 \unset reader_password
 \getenv reader_password DB_AUDIT_LOG_READER_PASSWORD
 \if :{?reader_password}
+SELECT :'reader_password' = '' AS reader_password_empty \gset
 \else
-DO $missing$ BEGIN RAISE EXCEPTION 'roles.sql: no password for role audit_log_reader (DB_AUDIT_LOG_READER_PASSWORD is not set)'; END $missing$;
+\set reader_password_empty true
+\endif
+\if :reader_password_empty
+DO $missing$ BEGIN RAISE EXCEPTION 'roles.sql: no password for role audit_log_reader (DB_AUDIT_LOG_READER_PASSWORD is not set or empty)'; END $missing$;
 \endif
 
 SELECT 'CREATE ROLE audit_log_reader' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'audit_log_reader') \gexec
