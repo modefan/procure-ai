@@ -113,9 +113,11 @@ service:
         Start-Sleep -Seconds 2
         if (Test-Path $outFile) {
             $records = @()
-            foreach ($line in Get-Content $outFile) {
+            try { $content = @(Get-Content $outFile -ErrorAction Stop) } catch { continue }
+            foreach ($line in $content) {
                 if ($line.Trim() -eq '') { continue }
-                $doc = $line | ConvertFrom-Json
+                # The exporter may be mid-write: a truncated last line is skipped now and read whole on the next poll.
+                try { $doc = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
                 foreach ($rl in $doc.resourceLogs) { foreach ($sl in $rl.scopeLogs) { foreach ($r in $sl.logRecords) {
                     $records += [pscustomobject]@{ Body = $r.body.stringValue; Severity = $r.severityText }
                 } } }
@@ -133,9 +135,15 @@ service:
 
     # 4. Personal data is gone.
     foreach ($secret in 'mallory.invented', 'dana.invented', 'admin.invented', 'erin.invented', 'buyer.invented', 'example.com',
-                        '203.0.113.', '2001:db8') {
+                        '203.0.113.', '2001:db8', 'Mary', 'Jane', 'Zed', 'Display', 'Hinted', 'hinted.bare', 'ffff') {
         Assert-That (-not $all.Contains($secret)) "output holds no '$secret'"
     }
+    Assert-That ($all -match '(?m)auth_type="code", username="\*\*\*"\s*$') 'a quoted username with a space is masked whole'
+    Assert-That ($all -match 'email="\*\*\*", username="\*\*\*"') 'a quoted display-name e-mail and username are masked whole'
+    Assert-That ($all -match 'login_hint="\*\*\*"') 'a quoted login_hint is masked whole'
+    Assert-That ($all -match '(?m)login_hint="\*\*\*"\s*$') 'a bare login_hint is masked'
+    Assert-That ($all -match 'client \*\*\*:44321 rejected for realm procure \(error=forwarded_not_trusted\)') 'an IPv4 with a port inside a Keycloak line is masked, the rest stays'
+    Assert-That ($all -match 'email="\*\*\*", username="\*\*\*"\s*$' -or $all -match '(?m)error="user_not_found", email="\*\*\*", username="\*\*\*"\s*$') 'bare email and username are masked'
     Assert-That ($all -match 'username="\*\*\*"') 'username is masked as ***'
     Assert-That ($all -match 'ipAddress="\*\*\*"') 'ipAddress is masked as ***'
     Assert-That ($all -match 'host=\*\*\* port=51234') 'a Postgres host IPv4 is masked'

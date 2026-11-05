@@ -178,6 +178,7 @@ processor in the logs pipeline (after `k8sattributes`) masks them with `***` bef
 timestamps and hex IDs stay, so an incident can still be followed. The same processor gives pgaudit lines severity INFO. The behaviour is
 tested against the pinned collector image over sample logs in the real formats:
 `pwsh deploy/charts/procure-observability/tests/collector/Test-CollectorRedaction.ps1` (needs Docker; CI job `charts` runs it).
+Limit: only `key=value` text is masked; JSON-style bodies (`"username":"x"`) are not. Quoted values may contain spaces (`username="Mary Jane"`).
 A RabbitMQ node name such as `rabbit@rabbitmq-0.rabbitmq.procure.svc` looks like an e-mail address and is masked too.
 
 ## Measured memory
