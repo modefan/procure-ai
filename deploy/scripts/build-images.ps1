@@ -151,7 +151,8 @@ if ($Registry) {
 
 if ($ImportTo) {
     Write-Host "== k3d image import into cluster '$ImportTo'"
-    $names = if ($Registry) { $built | ForEach-Object { "$Registry/$_" } } else { $built }
+    # @(...): with one image (-Only) the pipeline yields a plain string, which splats to nothing ("no valid images specified").
+    $names = @(if ($Registry) { $built | ForEach-Object { "$Registry/$_" } } else { $built })
     Run 'k3d image import' { k3d image import @names --cluster $ImportTo }
 }
 
