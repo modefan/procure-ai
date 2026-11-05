@@ -42,7 +42,7 @@ tests:
           pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
       - matchRegex:
           path: data.relay
-          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/background-db\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
       - matchRegex:
           path: data.relay
           pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
@@ -57,6 +57,16 @@ tests:
       - notMatchRegex:
           path: data.relay
           pattern: '- debug'
+
+  # Background database and cache calls without a parent (Wolverine's durability polling, Audit's pgaudit reader, the Redis backplane,
+  # Mongo health pings) are ~30 root traces a second; they filled the dashboard's trace limit in under three minutes and evicted every
+  # request's trace. Only those root spans are dropped; database spans inside a request's trace stay.
+  - it: collector drops background database root spans only
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)filter/background-db:\s*\n\s*error_mode: ignore\s*\n\s*traces:\s*\n\s*span:\s*\n\s*- IsRootSpan\(\) and \(attributes\["db\.system\.name"\] != nil or attributes\["db\.system"\]\s+!= nil\)\s*\n'
 
   - it: collector reads pod logs read-only through group 0, not as root
     template: charts/opentelemetry-collector/templates/daemonset.yaml

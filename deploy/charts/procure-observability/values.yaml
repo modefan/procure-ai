@@ -173,7 +173,15 @@ opentelemetry-collector:
             - k8s.deployment.name
             - k8s.statefulset.name
             - k8s.job.name
-            - container.image.tag
+      # Background database and cache calls without a parent span (Wolverine's durability polling, Audit's pgaudit reader, the Redis
+      # backplane, Mongo health pings): ~30 root traces a second filled the dashboard's trace limit in under three minutes and evicted
+      # every request's trace. Only those root spans are dropped; database spans inside a request's trace stay. (A processor beyond the
+      # plan's memory_limiter, k8sattributes, batch; plan 07 Task 7 report.)
+      filter/background-db:
+        error_mode: ignore
+        traces:
+          span:
+            - IsRootSpan() and (attributes["db.system.name"] != nil or attributes["db.system"] != nil)
       batch: {}
     exporters:
       otlp:
@@ -196,5 +204,5 @@ opentelemetry-collector:
           exporters: [otlp]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, k8sattributes, batch]
+          processors: [memory_limiter, filter/background-db, k8sattributes, batch]
           exporters: [otlp]
