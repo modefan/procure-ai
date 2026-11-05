@@ -1,0 +1,74 @@
+# The db-roles Job (plan 08 ruling 6): roles.sql from our postgres image as the superuser and users.js as MongoDB root, before the apps'
+# migrations (a wave-1 Sync hook of the platform), every service password from Secret procure-db-roles in the environment.
+suite: db-roles
+templates:
+  - db-roles-job.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: is a wave-1 sync hook that reruns on every sync
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - matchRegex: { path: metadata.name, pattern: "^db-roles-[0-9]+$" }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/hook"]', value: Sync }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/hook-delete-policy"]', value: BeforeHookCreation }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-wave"]', value: "1" }
+
+  - it: runs roles.sql from our postgres image as the superuser
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - equal: { path: 'spec.template.spec.containers[0].name', value: postgres-roles }
+      - equal: { path: 'spec.template.spec.containers[0].image', value: procure-ai-postgres:abc1234 }
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'exec psql -v ON_ERROR_STOP=1 -h postgres -p 5432 -d postgres -f /procureai/roles.sql'
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: PGPASSWORD, valueFrom: { secretKeyRef: { name: procure-postgres, key: password } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DB_REQUESTS_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: requests-password } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DB_REQUESTS_CDC_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: requests-cdc-password } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DB_AUDIT_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: audit-password } } }
+      # Audit has no Debezium, so no replication role.
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DB_AUDIT_CDC_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: audit-cdc-password } } }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DB_AUDIT_LOG_READER_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: audit-log-reader-password } } }
+
+  - it: runs users.js as MongoDB root over TLS with the captured databases
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - equal: { path: 'spec.template.spec.containers[1].name', value: mongo-users }
+      - equal: { path: 'spec.template.spec.containers[1].image', value: docker.io/library/mongo:8.3 }
+      - matchRegex:
+          path: spec.template.spec.containers[1].args[0]
+          pattern: 'tls=true&tlsCAFile=/etc/procure-ca/ca.crt'
+      - matchRegex:
+          path: spec.template.spec.containers[1].args[0]
+          pattern: 'mongosh --quiet --norc "[$]uri" /etc/db-roles/users.js'
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content: { name: DB_SUPPLIERS_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: suppliers-password } } }
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content: { name: DB_ASSISTANT_MONGO_PASSWORD, valueFrom: { secretKeyRef: { name: procure-db-roles, key: assistant-mongo-password } } }
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content: { name: DEBEZIUM_MONGO_PASSWORD, valueFrom: { secretKeyRef: { name: procure-debezium, key: mongo-password } } }
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content: { name: DEBEZIUM_MONGO_DATABASES, value: "suppliersdb,assistantchatdb" }
+
+  - it: the users script comes from a ConfigMap made before the hook
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - equal: { path: metadata.name, value: db-roles-mongo-users }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-wave"]', value: "0" }
+      - matchRegex: { path: 'data["users.js"]', pattern: "ensureUser\('suppliers_app'" }

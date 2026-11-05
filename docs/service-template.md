@@ -281,10 +281,11 @@ For a service that holds no business data of its own (Notifications: live pushes
   Routing keys on exchange `cdc` are `<database>.public.<table>`.
 - **The migration creates the publication and grants**: in the service's first CDC migration call
   `migrationBuilder.EnableCdc("table", ...)` (and `DisableCdc` in `Down`). It creates `dbz_publication` if missing, adds the
-  tables, sets `REPLICA IDENTITY FULL` and grants `SELECT` to `debezium`; idempotent, and it fails when the `debezium` role is
-  missing. Always include `audit_entries`; never the Wolverine tables.
+  tables, sets `REPLICA IDENTITY FULL` and grants `SELECT` to the database's replication role (`<name>_cdc`, named by the database
+  setting `procureai.cdc_role` that `infra/postgres/roles.sql` sets); idempotent, and it fails when the database names no replication
+  role. Always include `audit_entries`; never the Wolverine tables.
 - **The heartbeat table**: also call `migrationBuilder.EnableHeartbeat()` (after `EnableCdc`; `DisableHeartbeat` in `Down`). It creates
-  `debezium_heartbeat` (one row) in the publication and lets `debezium` update it; Debezium's heartbeat (`heartbeat.action.query`, every
+  `debezium_heartbeat` (one row) in the publication and lets the replication role update it; Debezium's heartbeat (`heartbeat.action.query`, every
   `Debezium:HeartbeatIntervalMs`) updates that row, so the slot of a database nobody writes to still moves and does not hold back the
   server's WAL (Postgres caps what a stuck slot may keep with `max_slot_wal_keep_size`). Do not add it to `CapturedTables`; Audit ignores it.
 - **Nothing precedes the capture**: Debezium runs with `snapshot.mode=no_data` (only changes after its slot exists), so the
@@ -295,7 +296,15 @@ For a service that holds no business data of its own (Notifications: live pushes
   `CaptureAuditEntries`, which also adds `audit_entries` for databases created before it was captured). Dev note: an old
   `debezium-data` Docker volume from the single-Debezium days is now unused; remove it with `docker volume rm`
   (Aspire prefixes the name with the project, check `docker volume ls`).
-- Aspire creates the databases; the Postgres init script only creates the `debezium` role. Debezium starts after the
+- **Least privilege (plan 08 ruling 6)**: every service connects as its own role `<name>_app` (password parameter `db-<name>-password`),
+  which owns its database and every object in it and may not connect to any other service's database; each Debezium replicates as
+  `<name>_cdc` (`db-<name>-cdc-password`: `REPLICATION`, `SELECT` on the published tables, `SELECT, UPDATE` on the heartbeat row).
+  `infra/postgres/roles.sql` (as the superuser, idempotent) makes them on every start before any migration: the one-shot AppHost container
+  `postgres-roles` (every Postgres `-migrate` waits for it to complete), the platform chart's `db-roles` Job, and `PostgresFixture` in the
+  tests. A new Postgres service needs a block in `roles.sql` (AppHost.Tests checks it), its password in `dbRoles.postgresServices` of the
+  platform chart and in the GitOps repo's `bootstrap/new-secrets.ps1`. Extensions need the superuser: create them in `roles.sql` (as for
+  `vector`), a migration's `CREATE EXTENSION IF NOT EXISTS` then only notices that it exists.
+- Aspire creates the databases (and `roles.sql` creates them where nothing else does, in Kubernetes). Debezium starts after the
   service's `-migrate` resource finished.
 - Tests: `DebeziumFixture(network, postgres).StartAsync(database, tables...)` in `ProcureAi.Testing`, same mechanism.
   A test project that reads other services' changes (Audit) adds their databases with
@@ -329,11 +338,13 @@ For a service that holds no business data of its own (Notifications: live pushes
   `DEBEZIUM_SOURCE_MONGODB_USER`/`_PASSWORD` and `DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST`. Routing keys are
   `mongo.<database>.<collection>`; the APIs wait for it to be healthy (no data snapshot, as for Postgres).
 - **Least privilege (plan 07 Task 4)**: it connects as the MongoDB user `debezium` (password parameter `debezium-mongo-password`), never root.
-  The first MongoDB service's migration (Suppliers, which runs with root rights) creates or updates it on every run (`CreateDebeziumUser`,
-  `DebeziumMongoUser.EnsureAsync`; settings `Mongo:DebeziumPassword` and `Mongo:DebeziumDatabases`, which the AppHost fills from every
-  captured database): `read` on each captured database plus the role `debeziumChangeStreams` (cluster-wide `find` + `changeStream`, which a
-  deployment-wide change stream needs, and `listDatabases`). It cannot write, nor manage users. A new captured MongoDB database needs no code:
-  the AppHost adds it to `Mongo:DebeziumDatabases`, and the chart's `debezium.mongo.collections` must list its collections too.
+  `infra/mongo/users.js` (as root, on every start before the migrations: the AppHost's one-shot `mongo-users`, the chart's `db-roles` Job;
+  Suppliers' migration until plan 08 Task 4) creates or updates it: `read` on each captured database (`DEBEZIUM_MONGO_DATABASES`, which the
+  AppHost fills from every captured collection) plus the role `debeziumChangeStreams` (cluster-wide `find` + `changeStream`, which a
+  deployment-wide change stream needs, and `listDatabases`). It cannot write, nor manage users. The same script gives each MongoDB database
+  its own user (`suppliers_app`, `assistant_app`: `readWrite` on that database only), which the services connect as. A new captured MongoDB
+  database needs no code for Debezium, but the chart's `debezium.mongo.collections` must list its collections too; a new MongoDB service
+  database needs a user in `users.js`.
 - **No transaction ID to match, so every write is stamped**: `TenantCollection<T>` sets `_audit: { userId, correlationId, at }`
   (`AuditStamp`, BuildingBlocks.Persistence.Mongo) on every insert and replace of an `IAuditedDocument`, and before a delete it stamps
   the documents `deleting: true` (a delete event carries no document) and then deletes only the documents carrying that stamp (a document

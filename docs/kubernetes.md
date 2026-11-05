@@ -26,7 +26,9 @@ flowchart LR
         mongo --> dbz
         dbz --> rabbit
         apis -.->|OTLP| collector[OpenTelemetry Collector<br/>DaemonSet] -.-> dashboard
-        migrate[name-migrate Jobs<br/>Sync hooks] --> pg
+        roles[db-roles Job<br/>roles.sql, users.js] --> pg
+        roles --> mongo
+        migrate[name-migrate Jobs<br/>Sync hooks, as name_app] --> pg
         seed[demo-seed Job<br/>demo-reset CronJob] --> gateway
     end
     git[(GitHub: procure-ai charts<br/>procure-ai-gitops values)] -->|SSH deploy keys| argocdctl[Argo CD controller]
@@ -103,6 +105,29 @@ only these connect to their `http` port (plan 08 ruling 5):
 Kubelet probes come from the node and are not affected (Keycloak's management port 9000 is otherwise closed to every pod).
 `tests/Test-Smoke.ps1` checks it with a curl pod that sends `X-Forwarded-For: 203.0.113.9`: refused straight to either Service, 200
 through Traefik. Traefik's own trust of forwarded headers is part of the hosted setup.
+
+### Database roles (plan 08 ruling 6)
+
+No app connects to Postgres as the superuser or to MongoDB as root. Each service has its own role, and each Debezium Server its own
+replication role; pgaudit therefore shows which service ran a statement (`tests/Test-Smoke.ps1` checks that the latest `CREATE TABLE` in
+every service database was run by that service's role).
+
+| Role or user | What it may do | Password (Secret `procure-db-roles`, from the AppHost user secret) |
+|---|---|---|
+| `<service>_app` (Postgres: access, approvals, assistant, audit, budgets, invoicing, purchasing, requests) | Owns `<service>db` and every object in it (migrations, `TRUNCATE audit_entries` for the demo reset); `CONNECT` to no other database; no superuser, createdb, createrole, replication | `<service>-password` (`db-<service>-password`) |
+| `<service>_cdc` (every database a Debezium reads) | `LOGIN REPLICATION`, `CONNECT` to its database, `SELECT` on the published tables, `SELECT, UPDATE` on `debezium_heartbeat` | `<service>-cdc-password` (`db-<service>-cdc-password`) |
+| `audit_log_reader` | `SELECT` on the seven `pgaudit.log_<day>` file_fdw tables of `auditdb` | `audit-log-reader-password` |
+| `suppliers_app`, `assistant_app` (MongoDB) | `readWrite` on `suppliersdb` / `assistantchatdb` only | `suppliers-password`, `assistant-mongo-password` (`db-assistant-mongo-password`) |
+| `debezium` (MongoDB) | `read` on the captured databases plus change streams | `procure-debezium` `mongo-password` |
+| `keycloak` | Owns `keycloakdb` (init script, unchanged) | `procure-keycloak` `db-password` |
+
+The platform's `db-roles` Job (a Sync hook in wave 1, rerun on every sync) runs `/procureai/roles.sql` from our postgres image and
+`infra/mongo/users.js` (the chart's copy `files/mongo-users.js`) as superuser and root. Both are idempotent: they create the service
+databases when missing (the migrations no longer get the superuser's password to do it), set every password (a rotated user secret
+reaches the cluster with `bootstrap/new-secrets.ps1` and the next sync; restart the pods of that service), and on a volume from before plan
+08 move the ownership of every database object from the superuser to the service's role. The platform syncs before the apps, so the
+migrations (Sync hooks of `procure-ai`) always find their roles. Extensions that need the superuser (`vector`, `file_fdw`) come from
+`roles.sql` too.
 
 TLS ends at Traefik with a wildcard certificate from a local CA (`bootstrap/new-local-ca.ps1` in the GitOps repo, kept in
 `%USERPROFILE%\.procure-ai\local-ca\`). The CA carries critical X.509 name constraints: it may only sign `localtest.me` and below,

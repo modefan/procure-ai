@@ -3,8 +3,8 @@ using MongoDB.Driver;
 namespace ProcureAi.Suppliers.IntegrationTests;
 
 /// <summary>
-/// MongoDB (single-node replica set), RabbitMQ and Redis for the Suppliers tests, with the database created and demo-seeded by the real
-/// <c>--migrate</c> run of the API, as the deployment does it.
+/// MongoDB (single-node replica set, its users from infra/mongo/users.js), RabbitMQ and Redis for the Suppliers tests, with the database
+/// created and demo-seeded by the real <c>--migrate</c> run of the API as suppliers_app, as the deployment does it.
 /// </summary>
 public sealed class SuppliersInfra : IAsyncLifetime
 {
@@ -15,7 +15,8 @@ public sealed class SuppliersInfra : IAsyncLifetime
     private readonly RabbitFixture _rabbit = new();
     private readonly RedisFixture _redis = new();
 
-    public string DatabaseConnectionString => _mongo.ConnectionStringFor(Database);
+    /// <summary>suppliersdb as Suppliers' own user suppliers_app, as the service connects.</summary>
+    public string DatabaseConnectionString => _mongo.AppConnectionStringFor(Database);
 
     public string RabbitConnectionString => _rabbit.ConnectionString;
 
@@ -36,32 +37,19 @@ public sealed class SuppliersInfra : IAsyncLifetime
         await MigrateAsync();
     }
 
-    /// <summary>The databases the <c>debezium</c> MongoDB user may read, as the AppHost passes them (every captured MongoDB database).</summary>
-    public static readonly string[] DebeziumDatabases = [Database, "assistantchatdb"];
-
-    /// <summary>The password --migrate gives the <c>debezium</c> MongoDB user (<c>Mongo:DebeziumPassword</c>; generated per run).</summary>
-    public string DebeziumPassword { get; set; } = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
-
     /// <summary>
-    /// Runs the real <c>Suppliers.Api --migrate</c> with the demo seed (it can be run again: it must not change the result). As under the
-    /// AppHost it also creates the least-privilege <c>debezium</c> user (plan 07 Task 4) with <see cref="DebeziumPassword"/>.
+    /// Runs the real <c>Suppliers.Api --migrate</c> with the demo seed (it can be run again: it must not change the result), as Suppliers' own
+    /// user suppliers_app (readWrite on suppliersdb only, created by infra/mongo/users.js when the MongoDB fixture started), as deployed.
     /// </summary>
-    public Task MigrateAsync()
-    {
-        var environment = new Dictionary<string, string> { ["Mongo__DebeziumPassword"] = DebeziumPassword };
-        for (var i = 0; i < DebeziumDatabases.Length; i++)
-        {
-            environment[$"Mongo__DebeziumDatabases__{i}"] = DebeziumDatabases[i];
-        }
-
-        return ApiMigrateProcess.RunAsync(
-            ApiAssembly, Database, DatabaseConnectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true, environment: environment);
-    }
-
-    /// <summary>Runs <c>--migrate</c> with exactly these settings (no Debezium user settings unless given), e.g. to check it refuses to run.</summary>
-    public Task MigrateWithAsync(IReadOnlyDictionary<string, string> environment) =>
+    public Task MigrateAsync() =>
         ApiMigrateProcess.RunAsync(
-            ApiAssembly, Database, DatabaseConnectionString, RabbitConnectionString, RedisConnectionString, demoSeed: false, environment: environment);
+            ApiAssembly, Database, DatabaseConnectionString, RabbitConnectionString, RedisConnectionString, demoSeed: true);
+
+    /// <summary>Runs infra/mongo/users.js again (as root), e.g. with a changed password or without one (see <see cref="MongoUsers"/>).</summary>
+    public Task<string> RunUsersScriptAsync(IReadOnlyDictionary<string, string>? environment = null) => _mongo.RunUsersScriptAsync(environment);
+
+    /// <summary>A connection string for <paramref name="database"/> as <paramref name="user"/>.</summary>
+    public string ConnectionStringFor(string database, string user, string password) => _mongo.ConnectionStringFor(database, user, password);
 
     /// <summary>A new client signed in as another user of the admin database (the caller disposes it).</summary>
     public MongoClient ClientAs(string user, string password) => _mongo.ClientAs(user, password);

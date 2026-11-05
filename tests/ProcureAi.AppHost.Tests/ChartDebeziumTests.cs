@@ -38,7 +38,7 @@ public sealed class ChartDebeziumTests
             foreach (var key in new[]
             {
                 "DEBEZIUM_SOURCE_DATABASE_DBNAME", "DEBEZIUM_SOURCE_TOPIC_PREFIX", "DEBEZIUM_SOURCE_SLOT_NAME", "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST",
-                "DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", "DEBEZIUM_SOURCE_MONGODB_USER",
+                "DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", "DEBEZIUM_SOURCE_MONGODB_USER", "DEBEZIUM_SOURCE_DATABASE_USER",
                 ServiceResources.HeartbeatIntervalEnvironmentVariable, ServiceResources.HeartbeatActionQueryEnvironmentVariable,
             })
             {

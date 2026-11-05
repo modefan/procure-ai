@@ -9,16 +9,17 @@ using Shouldly;
 namespace ProcureAi.Audit.IntegrationTests;
 
 /// <summary>
-/// The pgaudit summary (plan 06 ruling 14): the Postgres server writes csvlog, the <c>--migrate</c> run creates the <c>file_fdw</c> table
-/// <c>pgaudit.log_mon</c> ... <c>log_sun</c> in <c>auditdb</c> (readable by <c>audit_log_reader</c> only), and Audit summarises its pgaudit lines into the
-/// <c>pgaudit</c> status section. The log is the whole server's, so each test looks for the statements it ran itself.
+/// The pgaudit summary (plan 06 ruling 14): the Postgres server writes csvlog, infra/postgres/roles.sql (as the superuser, before the
+/// migrations; plan 08 Task 4) creates the <c>file_fdw</c> tables <c>pgaudit.log_mon</c> ... <c>log_sun</c> in <c>auditdb</c> (readable by
+/// <c>audit_log_reader</c> only), and Audit summarises its pgaudit lines into the <c>pgaudit</c> status section. The log is the whole server's,
+/// so each test looks for the statements it ran itself.
 /// </summary>
 [Collection(AuditCollection.Name)]
 public sealed class PgAuditSummaryTests(AuditApp app)
 {
     private static readonly TimeSpan LogTimeout = TimeSpan.FromSeconds(15);
 
-    private string Superuser => new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString).Username!;
+    private string Superuser => new NpgsqlConnectionStringBuilder(app.Infra.SuperuserConnectionString).Username!;
 
     [Fact]
     public async Task Ddl_by_superuser_appears_in_summary()
@@ -149,8 +150,16 @@ public sealed class PgAuditSummaryTests(AuditApp app)
         var options = ReaderOptions();
         options.Schema = "pgaudit_missing";
         options.LogFileTemplate = "log/no-such-file-{0}.csv";
-        await PgAuditLogSetup.EnsureAsync(
-            app.Infra.DbConnectionString, app.Infra.AuditLogConnectionString, options.Schema, options.LogFileTemplate, TestContext.Current.CancellationToken);
+        var tables = string.Concat(PgAuditLogSetup.Weekdays.Select(day => $"""
+            CREATE FOREIGN TABLE {options.Schema}.{PgAuditLogSetup.TableName(day)} (log_time timestamp(3) with time zone, user_name text,
+                database_name text, process_id integer, connection_from text, session_id text, session_line_num bigint, command_tag text,
+                session_start_time timestamp with time zone, virtual_transaction_id text, transaction_id bigint, error_severity text,
+                sql_state_code text, message text, detail text, hint text, internal_query text, internal_query_pos integer, context text,
+                query text, query_pos integer, location text, application_name text, backend_type text, leader_pid integer, query_id bigint)
+                SERVER pgaudit_log OPTIONS (filename '{string.Format(System.Globalization.CultureInfo.InvariantCulture, options.LogFileTemplate, day)}', format 'csv');
+            GRANT SELECT ON {options.Schema}.{PgAuditLogSetup.TableName(day)} TO audit_log_reader;
+            """));
+        await ExecuteAsSuperuserAsync($"CREATE SCHEMA {options.Schema}; GRANT USAGE ON SCHEMA {options.Schema} TO audit_log_reader; {tables}");
         try
         {
             var summary = await new PgAuditReader(app.Infra.AuditLogConnectionString, options, TimeProvider.System)
@@ -168,105 +177,86 @@ public sealed class PgAuditSummaryTests(AuditApp app)
         // The real file is still read.
         var real = await new PgAuditReader(app.Infra.AuditLogConnectionString, ReaderOptions(), TimeProvider.System)
             .ReadAsync(TestContext.Current.CancellationToken);
-        real.Counts.ShouldNotBeEmpty("the migration's own DDL is in today's log");
+        real.Counts.ShouldNotBeEmpty("roles.sql's and the migration's own DDL is in today's log");
     }
 
     [Fact]
-    public async Task Migration_fails_when_audit_log_reader_equals_migration_user()
+    public async Task Roles_script_fails_without_the_reader_password()
     {
-        var migrationUser = new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString);
-        var reader = new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString) { Username = migrationUser.Username!.ToUpperInvariant(), Password = "other" };
-        var options = ReaderOptions();
+        var failure = await Should.ThrowAsync<InvalidOperationException>(() =>
+            app.Infra.Postgres.RunRolesScriptAsync(PostgresFixture.RolesScriptEnvironment(without: "DB_AUDIT_LOG_READER_PASSWORD")));
 
-        var failure = await Should.ThrowAsync<InvalidOperationException>(() => PgAuditLogSetup.EnsureAsync(
-            app.Infra.DbConnectionString, reader.ConnectionString, options.Schema, options.LogFileTemplate, TestContext.Current.CancellationToken));
-
-        failure.Message.ShouldContain("migration");
-        // The migration user's password and rights are untouched.
-        (await ScalarAsync(app.Infra.DbConnectionString, "SELECT 1")).ShouldBe(1);
+        failure.Message.ShouldContain("DB_AUDIT_LOG_READER_PASSWORD is not set");
+        // The reader's password and rights are untouched.
+        (await ScalarAsync(app.Infra.AuditLogConnectionString, "SELECT 1")).ShouldBe(1);
     }
 
+    /// <summary>
+    /// roles.sql runs on every start: a second run with a new reader password applies it (the old one stops working), and the leftovers of an
+    /// earlier version (the reader in pg_read_server_files, owning a log_today table) are taken away. Back to the test password afterwards.
+    /// </summary>
     [Fact]
-    public async Task Setup_runs_again_with_an_existing_role_and_tables_and_a_new_password()
+    public async Task Roles_script_runs_again_with_an_existing_role_and_tables_and_a_new_password()
     {
-        // A reader role and schema of its own, so the real reader keeps its password.
-        var role = $"audit_log_reader_{Guid.NewGuid():N}"[..28];
-        const string schema = "pgaudit_twice";
-        string Reader(string password) => new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString)
-        {
-            Username = role,
-            Password = password,
-            Pooling = false,
-        }.ConnectionString;
-
+        string Reader(string password) => new NpgsqlConnectionStringBuilder(app.Infra.AuditLogConnectionString) { Password = password, Pooling = false }.ConnectionString;
         var options = ReaderOptions();
-        options.Schema = schema;
+        var newPassword = $"second-{Guid.NewGuid():N}";
         try
         {
-            // An earlier version's leftovers: the role in pg_read_server_files, owning a log_today table.
-            await ExecuteAsSuperuserAsync($"""
-                CREATE ROLE {role} LOGIN PASSWORD 'first'; GRANT pg_read_server_files TO {role};
-                CREATE SCHEMA {schema};
-                CREATE FOREIGN TABLE {schema}.log_today (line text) SERVER pgaudit_log OPTIONS (filename 'log/postgresql-Mon.csv');
-                ALTER FOREIGN TABLE {schema}.log_today OWNER TO {role};
+            await ExecuteAsSuperuserAsync("""
+                GRANT pg_read_server_files TO audit_log_reader;
+                CREATE FOREIGN TABLE pgaudit.log_today (line text) SERVER pgaudit_log OPTIONS (filename 'log/postgresql-Mon.csv');
+                ALTER FOREIGN TABLE pgaudit.log_today OWNER TO audit_log_reader;
                 """);
+            var environment = PostgresFixture.RolesScriptEnvironment();
+            await app.Infra.Postgres.RunRolesScriptAsync(environment);
+            environment["DB_AUDIT_LOG_READER_PASSWORD"] = newPassword;
+            await app.Infra.Postgres.RunRolesScriptAsync(environment);
 
-            await PgAuditLogSetup.EnsureAsync(app.Infra.DbConnectionString, Reader("first"), schema, options.LogFileTemplate, TestContext.Current.CancellationToken);
-            await PgAuditLogSetup.EnsureAsync(app.Infra.DbConnectionString, Reader("second"), schema, options.LogFileTemplate, TestContext.Current.CancellationToken);
-
-            var summary = await new PgAuditReader(Reader("second"), options, TimeProvider.System).ReadAsync(TestContext.Current.CancellationToken);
+            var summary = await new PgAuditReader(Reader(newPassword), options, TimeProvider.System).ReadAsync(TestContext.Current.CancellationToken);
             summary.Counts.ShouldNotBeEmpty();
-            var old = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(Reader("first"), "SELECT 1"));
+            var old = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(Reader(AuditInfraFixture.AuditLogReaderTestPassword), "SELECT 1"));
             old.SqlState.ShouldBe(PostgresErrorCodes.InvalidPassword);
-            (await ScalarAsync(app.Infra.DbConnectionString, $"SELECT pg_has_role('{role}', 'pg_read_server_files', 'MEMBER')")).ShouldBe(false);
-            (await ScalarAsync(app.Infra.DbConnectionString, $"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relkind = 'f'"))
+            (await ScalarAsync(app.Infra.SuperuserConnectionString, "SELECT pg_has_role('audit_log_reader', 'pg_read_server_files', 'MEMBER')")).ShouldBe(false);
+            (await ScalarAsync(app.Infra.SuperuserConnectionString, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'pgaudit' AND c.relkind = 'f'"))
                 .ShouldBe(7L, "log_mon ... log_sun, the old log_today is gone");
-            (await ScalarAsync(app.Infra.DbConnectionString, $"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = '{schema}' AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = '{role}')"))
+            (await ScalarAsync(app.Infra.SuperuserConnectionString, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'pgaudit' AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = 'audit_log_reader')"))
                 .ShouldBe(0L);
         }
         finally
         {
-            await ExecuteAsSuperuserAsync($"DROP SCHEMA IF EXISTS {schema} CASCADE; REVOKE CONNECT ON DATABASE auditdb FROM {role}; DROP ROLE IF EXISTS {role}");
+            await app.Infra.Postgres.RunRolesScriptAsync();
         }
     }
 
+    /// <summary>
+    /// Audit's own role (<c>audit_app</c>, the owner of auditdb, which the app and its migration connect as) reads no server file and cannot
+    /// touch the log tables: they stay the superuser's (roles.sql), in a schema audit_app has no rights on.
+    /// </summary>
     [Fact]
     public async Task Audit_app_role_cannot_read_server_files()
     {
-        // A role like the one the Audit app would use in a deployment (no superuser, no pg_read_server_files), even with the schema open to it.
-        var appRole = $"audit_app_{Guid.NewGuid():N}"[..24];
-        const string appPassword = "test-only-app-role";
-        await ExecuteAsSuperuserAsync(
-            $"CREATE ROLE {appRole} LOGIN PASSWORD '{appPassword}'; GRANT CONNECT ON DATABASE auditdb TO {appRole}; GRANT USAGE ON SCHEMA pgaudit TO {appRole}");
-        try
-        {
-            var appConnection = new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString)
-            {
-                Username = appRole,
-                Password = appPassword,
-                Pooling = false,
-            }.ConnectionString;
+        var appConnection = new NpgsqlConnectionStringBuilder(app.Infra.DbConnectionString) { Pooling = false }.ConnectionString;
+        new NpgsqlConnectionStringBuilder(appConnection).Username.ShouldBe("audit_app");
 
-            foreach (var sql in new[]
-                     {
-                         "SELECT count(*) FROM pgaudit.log_mon",
-                         "SELECT pg_read_file('postmaster.pid')",
-                         "CREATE TEMP TABLE leak (line text); COPY leak FROM '/etc/passwd'",
-                     })
-            {
-                var denied = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(appConnection, sql), sql);
-                denied.SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege, sql);
-            }
-
-            // audit_log_reader can.
-            var today = await TodaysTableAsync();
-            await Should.NotThrowAsync(() => ExecuteAsync(app.Infra.AuditLogConnectionString, $"SELECT count(*) FROM {today}"));
-            new NpgsqlConnectionStringBuilder(app.Infra.AuditLogConnectionString).Username.ShouldBe("audit_log_reader");
-        }
-        finally
+        foreach (var sql in new[]
+                 {
+                     "SELECT count(*) FROM pgaudit.log_mon",
+                     "SELECT pg_read_file('postmaster.pid')",
+                     "CREATE TEMP TABLE leak (line text); COPY leak FROM '/etc/passwd'",
+                     "CREATE FOREIGN TABLE public.leak (line text) SERVER pgaudit_log OPTIONS (filename 'pg_hba.conf')",
+                     "ALTER FOREIGN TABLE pgaudit.log_mon OPTIONS (SET filename 'pg_hba.conf')",
+                     "DROP SCHEMA pgaudit CASCADE",
+                 })
         {
-            await ExecuteAsSuperuserAsync($"REVOKE ALL ON SCHEMA pgaudit FROM {appRole}; REVOKE CONNECT ON DATABASE auditdb FROM {appRole}; DROP ROLE {appRole}");
+            var denied = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(appConnection, sql), sql);
+            denied.SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege, sql);
         }
+
+        // audit_log_reader can.
+        var today = await TodaysTableAsync();
+        await Should.NotThrowAsync(() => ExecuteAsync(app.Infra.AuditLogConnectionString, $"SELECT count(*) FROM {today}"));
+        new NpgsqlConnectionStringBuilder(app.Infra.AuditLogConnectionString).Username.ShouldBe("audit_log_reader");
     }
 
     [Fact]
@@ -401,7 +391,7 @@ public sealed class PgAuditSummaryTests(AuditApp app)
             $"The pgaudit summary did not show the statement. Latest: {string.Join(" | ", summary.Latest.Select(l => l.Text))}");
     }
 
-    private Task ExecuteAsSuperuserAsync(string sql) => ExecuteAsync(app.Infra.DbConnectionString, sql);
+    private Task ExecuteAsSuperuserAsync(string sql) => ExecuteAsync(app.Infra.SuperuserConnectionString, sql);
 
     /// <summary>The table over today's file (the weekday in the server's log_timezone, as Postgres names its files).</summary>
     private async Task<string> TodaysTableAsync() =>

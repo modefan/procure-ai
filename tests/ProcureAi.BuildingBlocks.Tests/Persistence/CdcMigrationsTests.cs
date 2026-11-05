@@ -7,11 +7,15 @@ using Testcontainers.PostgreSql;
 
 namespace ProcureAi.BuildingBlocks.Tests.Persistence;
 
-/// <summary>The SQL of <see cref="CdcMigrations"/>, run against real Postgres (the project's image: it has the debezium role).</summary>
+/// <summary>
+/// The SQL of <see cref="CdcMigrations"/>, run against real Postgres (the project's image). Each test database names the fixture's replication
+/// role <see cref="PostgresFixture.TestCdcRole"/> in <see cref="CdcMigrations.CdcRoleSetting"/>, as roles.sql names <c>&lt;service&gt;_cdc</c>.
+/// </summary>
 public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     private const string Provider = "Npgsql.EntityFrameworkCore.PostgreSQL";
     private const string PlainPostgresImage = "pgvector/pgvector:pg17";
+    private const string Cdc = PostgresFixture.TestCdcRole;
 
     private static string[] Sql(Action<MigrationBuilder> build)
     {
@@ -64,9 +68,9 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
             .ShouldBe(["order_lines", "orders"]);
         (await QueryAsync(db, "SELECT relreplident::text FROM pg_class WHERE relname IN ('orders', 'order_lines')"))
             .ShouldAllBe(r => r == "f");
-        (await QueryAsync(db, "SELECT has_table_privilege('debezium', 'public.orders', 'SELECT')::text")).ShouldBe(["true"]);
-        (await QueryAsync(db, "SELECT has_table_privilege('debezium', 'public.order_lines', 'SELECT')::text")).ShouldBe(["true"]);
-        (await QueryAsync(db, "SELECT has_schema_privilege('debezium', 'public', 'USAGE')::text")).ShouldBe(["true"]);
+        (await QueryAsync(db, $"SELECT has_table_privilege('{Cdc}', 'public.orders', 'SELECT')::text")).ShouldBe(["true"]);
+        (await QueryAsync(db, $"SELECT has_table_privilege('{Cdc}', 'public.order_lines', 'SELECT')::text")).ShouldBe(["true"]);
+        (await QueryAsync(db, $"SELECT has_schema_privilege('{Cdc}', 'public', 'USAGE')::text")).ShouldBe(["true"]);
     }
 
     [Fact]
@@ -89,8 +93,8 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
         await ExecuteAsync(
             db,
             "CREATE PUBLICATION dbz_publication FOR TABLE orders;",
-            "GRANT USAGE ON SCHEMA public TO debezium;",
-            "GRANT SELECT ON orders TO debezium;");
+            $"GRANT USAGE ON SCHEMA public TO {Cdc};",
+            $"GRANT SELECT ON orders TO {Cdc};");
 
         await ExecuteAsync(db, Sql(b => b.EnableCdc("orders", "order_lines")));
 
@@ -111,7 +115,7 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
     }
 
     /// <summary>
-    /// Plan 08 Task 1: the heartbeat table, its one row, in the publication, and the debezium role may run the heartbeat action query
+    /// Plan 08 Task 1: the heartbeat table, its one row, in the publication, and the replication role may run the heartbeat action query
     /// (the role is not a superuser). Idempotent; Down removes it again.
     /// </summary>
     [Fact]
@@ -129,7 +133,7 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
         (await QueryAsync(db, $"SELECT id::text FROM {CdcMigrations.HeartbeatTable}")).ShouldBe(["1"]);
         await ExecuteAsync(
             db,
-            $"SET ROLE {CdcMigrations.DebeziumRole}; UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1; RESET ROLE;");
+            $"SET ROLE {Cdc}; UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1; RESET ROLE;");
 
         await ExecuteAsync(db, Sql(b => b.DisableHeartbeat()));
         (await QueryAsync(db, "SELECT tablename FROM pg_publication_tables WHERE pubname = 'dbz_publication'")).ShouldBe(["orders"]);
@@ -154,10 +158,45 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
         await ExecuteAsync(db, "SELECT pg_drop_replication_slot('debezium_other');");
     }
 
+    /// <summary>
+    /// A grant that a later migration adds reaches the role the database names, so Debezium can read a newly captured table at once (plan 08
+    /// Task 4: <c>&lt;service&gt;_cdc</c>, not a role fixed in code).
+    /// </summary>
     [Fact]
-    public async Task Fails_without_debezium_role()
+    public async Task Grants_go_to_the_replication_role_the_database_names()
     {
-        // A plain server: no init script, so no debezium role.
+        var db = await NewDatabaseWithTablesAsync("cdc_named_role");
+        var admin = new NpgsqlConnectionStringBuilder(db) { Database = "postgres" }.ConnectionString;
+        await ExecuteAsync(admin, "CREATE ROLE cdc_named_cdc LOGIN REPLICATION", $"ALTER DATABASE cdc_named_role SET {CdcMigrations.CdcRoleSetting} = 'cdc_named_cdc'");
+
+        // A new session sees the database setting (pooled ones keep the one they started with).
+        var fresh = new NpgsqlConnectionStringBuilder(db) { Pooling = false }.ConnectionString;
+        await ExecuteAsync(fresh, Sql(b => b.EnableCdc("orders")));
+        await ExecuteAsync(fresh, Sql(b => b.EnableCdc("order_lines")));
+
+        (await QueryAsync(fresh, "SELECT has_table_privilege('cdc_named_cdc', 'public.order_lines', 'SELECT')::text")).ShouldBe(["true"]);
+        (await QueryAsync(fresh, $"SELECT has_table_privilege('{Cdc}', 'public.order_lines', 'SELECT')::text")).ShouldBe(["false"]);
+        NpgsqlConnection.ClearAllPools();
+        await ExecuteAsync(admin, "DROP DATABASE cdc_named_role WITH (FORCE)", "DROP ROLE cdc_named_cdc");
+    }
+
+    [Fact]
+    public async Task Fails_when_the_database_names_no_replication_role()
+    {
+        var db = await NewDatabaseWithTablesAsync("cdc_not_a_replication_role");
+        var admin = new NpgsqlConnectionStringBuilder(db) { Database = "postgres" }.ConnectionString;
+        await ExecuteAsync(admin, $"ALTER DATABASE cdc_not_a_replication_role SET {CdcMigrations.CdcRoleSetting} = 'postgres_is_no_cdc_role'");
+
+        var fresh = new NpgsqlConnectionStringBuilder(db) { Pooling = false }.ConnectionString;
+        var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(fresh, Sql(b => b.EnableCdc("orders"))));
+
+        failure.MessageText.ShouldContain("No replication role for database cdc_not_a_replication_role");
+    }
+
+    [Fact]
+    public async Task Fails_without_a_replication_role()
+    {
+        // A plain server: roles.sql never ran, so the database names no replication role.
         await using var plain = new PostgreSqlBuilder(PlainPostgresImage)
             .WithCreateParameterModifier(p => TestLimits.Apply(p, "Postgres"))
             .Build();
@@ -167,6 +206,6 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
 
         var failure = await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(connectionString, Sql(b => b.EnableCdc("orders"))));
 
-        failure.MessageText.ShouldContain("debezium");
+        failure.MessageText.ShouldContain(CdcMigrations.CdcRoleSetting);
     }
 }

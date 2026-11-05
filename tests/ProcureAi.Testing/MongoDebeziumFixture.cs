@@ -13,7 +13,7 @@ namespace ProcureAi.Testing;
 /// infra/debezium/application-mongo.properties plus environment variables (connection string, captured collections), with the caps of
 /// the <c>Debezium</c> section of tests/testcontainers.settings.json. MongoDB and RabbitMQ (with the <c>cdc</c> exchange) must be reachable
 /// on <paramref name="network"/> as <c>mongo</c> and <c>rabbitmq</c>. It connects as the least-privilege user <paramref name="user"/>
-/// (<see cref="ProcureAi.BuildingBlocks.Persistence.Mongo.DebeziumMongoUser"/>, created by the caller first), as deployed (plan 07 Task 4).
+/// (<see cref="MongoUsers.Debezium"/>, created by infra/mongo/users.js first), as deployed (plan 07 Task 4).
 /// </summary>
 public sealed class MongoDebeziumFixture(INetwork network, MongoFixture mongo, string user, string password) : IAsyncDisposable
 {

@@ -22,8 +22,8 @@ public sealed class AuditInfraFixture() : ServiceInfraFixture("auditdb")
     /// <summary>Where the Audit Api's appsettings live (the test output folder also gets the Requests Api's).</summary>
     public const string ContentRoot = "src/Services/Audit/ProcureAi.Audit.Api";
 
-    /// <summary>A throwaway test value for the <c>audit_log_reader</c> role the migration creates. Not a secret.</summary>
-    public const string AuditLogReaderTestPassword = "test-only-audit-log-reader";
+    /// <summary>The test password roles.sql gives <c>audit_log_reader</c> (PostgresFixture). Not a secret.</summary>
+    public static readonly string AuditLogReaderTestPassword = PostgresFixture.TestPassword("audit_log_reader");
 
     /// <summary><c>auditdb</c> as <c>audit_log_reader</c>, the role that reads the server's audit log (<c>ConnectionStrings:auditlog</c>).</summary>
     public string AuditLogConnectionString => new Npgsql.NpgsqlConnectionStringBuilder(DbConnectionString)

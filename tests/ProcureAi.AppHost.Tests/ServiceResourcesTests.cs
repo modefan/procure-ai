@@ -526,7 +526,7 @@ public sealed class ServiceResourcesTests
         var shared = new SharedResources(
             builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
             builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
-            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), UseDataVolumes: false);
         #pragma warning restore ASPIREMONGODB001
 
         // A valid database name, so only the "no capture without Postgres" rule can throw (an empty name would throw anyway).
@@ -568,7 +568,7 @@ public sealed class ServiceResourcesTests
         var secret = builder.AddParameter("secret", secret: true);
         var shared = new SharedResources(
             postgres, rabbit, redis, mongo, keycloak, ReferenceExpression.Create($"http://keycloak/realms/procure"),
-            secret.Resource, secret.Resource, secret.Resource, null, limits, secret.Resource, UseDataVolumes: false);
+            secret.Resource, secret.Resource, secret.Resource, null, limits, UseDataVolumes: false);
 
         var api = builder.AddProcureAiService<MongoServiceProject>(
             new ServiceSpec("suppliers", "suppliersdb", CapturedTables: [], GatewayCluster: "suppliers", ApiRoutePrefix: "/api/suppliers", Store: ServiceStore.MongoDB),
@@ -607,7 +607,7 @@ public sealed class ServiceResourcesTests
         var shared = new SharedResources(
             builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
             builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
-            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false);
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), UseDataVolumes: false);
         #pragma warning restore ASPIREMONGODB001
 
         var refused = Should.Throw<ArgumentException>(() => builder.AddProcureAiService<MongoServiceProject>(
@@ -629,7 +629,7 @@ public sealed class ServiceResourcesTests
         var shared = new SharedResources(
             builder.AddPostgres("postgres"), builder.AddRabbitMQ("rabbitmq"), builder.AddRedis("redis"), builder.AddMongoDB("mongo").WithReplicaSet("rs0"),
             builder.AddContainer("keycloak", "keycloak"), ReferenceExpression.Create($"http://keycloak"),
-            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), secret.Resource, UseDataVolumes: false,
+            secret.Resource, secret.Resource, secret.Resource, null, ResourcesOptions.Load(builder.Configuration), UseDataVolumes: false,
             DebeziumMongoPassword: secret.Resource);
         #pragma warning restore ASPIREMONGODB001
 
@@ -701,11 +701,11 @@ public sealed class ServiceResourcesTests
 
     /// <summary>
     /// Plan 07 Task 4: debezium-mongo connects as the least-privilege MongoDB user <c>debezium</c> (password parameter
-    /// <c>debezium-mongo-password</c>), not as root: the connection string carries no credentials. Suppliers' migration, which runs with the
-    /// server's root rights, creates the user with the same password and read rights on every captured MongoDB database.
+    /// <c>debezium-mongo-password</c>), not as root: the connection string carries no credentials. mongo-users (infra/mongo/users.js, as root;
+    /// Suppliers' migration until plan 08 Task 4) creates the user with the same password and read rights on every captured MongoDB database.
     /// </summary>
     [Fact]
-    public async Task Debezium_mongo_connects_as_the_debezium_user_that_suppliers_migrate_creates()
+    public async Task Debezium_mongo_connects_as_the_debezium_user_that_mongo_users_creates()
     {
         await using var scope = await ModelScope.BuildAsync();
         var model = scope.Model;
@@ -719,14 +719,14 @@ public sealed class ServiceResourcesTests
         connection.ShouldStartWith("mongodb://mongo:27017/");
         connection.ShouldNotContain("@");
 
+        var users = await EnvironmentOfAsync(model.Resources.OfType<ContainerResource>().Single(r => r.Name == ServiceResources.MongoUsersName));
+        users["DEBEZIUM_MONGO_PASSWORD"].ShouldBeSameAs(password);
+        users.ShouldContainKeyAndValue("DEBEZIUM_MONGO_DATABASES", "suppliersdb,assistantchatdb");
         var suppliers = await EnvironmentOfAsync(model.Resources.OfType<ProjectResource>().Single(r => r.Name == "suppliers-migrate"));
-        suppliers["Mongo__DebeziumPassword"].ShouldBeSameAs(password);
-        suppliers.ShouldContainKeyAndValue("Mongo__DebeziumDatabases__0", "suppliersdb");
-        suppliers.ShouldContainKeyAndValue("Mongo__DebeziumDatabases__1", "assistantchatdb");
-        suppliers.ShouldNotContainKey("Mongo__DebeziumDatabases__2");
+        suppliers.Keys.ShouldNotContain(k => k.StartsWith("Mongo__Debezium", StringComparison.Ordinal), "the migration no longer creates the user");
 
         // Nothing else gets the password.
-        foreach (var resource in model.Resources.Where(r => r.Name is not "suppliers-migrate" and not "debezium-mongo"))
+        foreach (var resource in model.Resources.Where(r => r.Name is not ServiceResources.MongoUsersName and not "debezium-mongo"))
         {
             (await EnvironmentOfAsync(resource)).Values.ShouldNotContain(v => ReferenceEquals(v, password), resource.Name);
         }
@@ -1177,13 +1177,204 @@ public sealed class ServiceResourcesTests
             var cpus = texts.IndexOf("--cpus");
             memory.ShouldBeGreaterThanOrEqualTo(0, $"{container.Name} has a memory cap");
             cpus.ShouldBeGreaterThanOrEqualTo(0, $"{container.Name} has a CPU cap");
+            if (SetupContainers.Contains(container.Name))
+            {
+                // The one-shot setup containers end before any migration starts (every migration waits for their completion), and every
+                // Debezium Server waits for a migration: they never run next to the Debeziums, so they are not added to the running total.
+                continue;
+            }
+
             totalMemoryMb += long.Parse(texts[memory + 1].TrimEnd('m'), System.Globalization.CultureInfo.InvariantCulture);
             totalCpus += double.Parse(texts[cpus + 1], System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        foreach (var migrate in model.Resources.OfType<ProjectResource>().Where(r => r.Name.EndsWith(ServiceResources.MigrateSuffix, StringComparison.Ordinal)))
+        {
+            migrate.Annotations.OfType<WaitAnnotation>()
+                .ShouldContain(w => SetupContainers.Contains(w.Resource.Name) && w.WaitType == WaitType.WaitForCompletion, migrate.Name);
+        }
+
+        foreach (var debezium in containers.Where(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)))
+        {
+            debezium.Annotations.OfType<WaitAnnotation>()
+                .ShouldContain(w => w.Resource.Name.EndsWith(ServiceResources.MigrateSuffix, StringComparison.Ordinal) && w.WaitType == WaitType.WaitForCompletion, debezium.Name);
         }
 
         containers.Count(c => c.Name.StartsWith("debezium-", StringComparison.Ordinal)).ShouldBe(8, "one Debezium per captured Postgres database and one for MongoDB");
         totalMemoryMb.ShouldBeLessThanOrEqualTo(8 * 1024, "container memory caps in MB");
         totalCpus.ShouldBeLessThanOrEqualTo(8.0, "container CPU caps");
+    }
+
+    private static readonly string[] SetupContainers = [ServiceResources.PostgresRolesName, ServiceResources.MongoUsersName];
+
+    /// <summary>The services with a Postgres database (their roles come from infra/postgres/roles.sql) and whether a Debezium captures it.</summary>
+    private static readonly (string Service, string Database, bool Captured)[] PostgresServices =
+    [
+        ("access", "accessdb", true), ("approvals", "approvalsdb", true), ("assistant", "assistantdb", true), ("audit", "auditdb", false),
+        ("budgets", "budgetsdb", true), ("invoicing", "invoicingdb", true), ("purchasing", "purchasingdb", true), ("requests", "requestsdb", true),
+    ];
+
+    /// <summary>
+    /// Plan 08 ruling 6: every service connects to its database as its own role (<c>&lt;service&gt;_app</c>, password parameter
+    /// <c>db-&lt;service&gt;-password</c>), never as the Postgres superuser or the MongoDB root user. No project resource gets the superuser's or
+    /// root's password at all (not even through Aspire's <c>&lt;DB&gt;_PASSWORD</c> reference properties): only the servers themselves and the
+    /// one-shot setup containers that create the roles.
+    /// </summary>
+    [Fact]
+    public async Task Every_service_connects_as_its_own_role()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var superPasswords = new[] { "postgres-password", "mongo-password" };
+        var checkedStrings = 0;
+        foreach (var project in model.Resources.OfType<ProjectResource>())
+        {
+            var env = await EnvironmentOfAsync(project);
+            var service = project.Name.Split('-')[0];
+            foreach (var (name, value) in env.Where(kv => kv.Key.StartsWith("ConnectionStrings__", StringComparison.Ordinal)))
+            {
+                var database = name["ConnectionStrings__".Length..];
+                if (database is "rabbitmq" or "redis" or ServiceResources.AuditLogConnectionName)
+                {
+                    continue;
+                }
+
+                var expression = value.ShouldBeOfType<ReferenceExpression>($"{project.Name} {name}").ValueExpression;
+                if (expression.StartsWith("mongodb://", StringComparison.Ordinal))
+                {
+                    expression.ShouldStartWith($"mongodb://{service}_app:{{db-{service}-{(database == "assistantchatdb" ? "mongo-" : "")}password.value}}@", Case.Sensitive, $"{project.Name} {name}");
+                    expression.ShouldContain("authSource=admin", Case.Sensitive);
+                }
+                else
+                {
+                    expression.ShouldContain($"Username={service}_app;", Case.Sensitive, $"{project.Name} {name}");
+                    expression.ShouldContain($"Password={{db-{service}-password.value}};", Case.Sensitive, $"{project.Name} {name}");
+                    expression.ShouldEndWith($"Database={database}", Case.Sensitive, $"{project.Name} {name}");
+                }
+
+                expression.ShouldNotContain("Username=postgres", Case.Insensitive);
+                expression.ShouldNotContain("admin:", Case.Sensitive);
+                checkedStrings++;
+            }
+
+            foreach (var (name, value) in env)
+            {
+                foreach (var password in superPasswords)
+                {
+                    var text = value switch
+                    {
+                        IManifestExpressionProvider provider => provider.ValueExpression,
+                        _ => value.ToString() ?? "",
+                    };
+                    text.ShouldNotContain($"{{{password}.value}}", Case.Sensitive, $"{project.Name} {name} must not carry the server's own password");
+                }
+            }
+        }
+
+        // 8 Postgres services and 2 MongoDB databases, each on its migrate and its api.
+        checkedStrings.ShouldBe(20);
+    }
+
+    /// <summary>
+    /// postgres-roles runs infra/postgres/roles.sql (bind-mounted, as the superuser from PGUSER / PGPASSWORD) once the server and every
+    /// service database exist, and before every Postgres migration; it gets every role's password, each the very parameter the service or
+    /// its Debezium logs in with. roles.sql names every Postgres service of the AppHost (a new service must be added there too).
+    /// </summary>
+    [Fact]
+    public async Task Postgres_roles_runs_roles_sql_with_every_password_before_every_migration()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var roles = model.Resources.OfType<ContainerResource>().Single(r => r.Name == ServiceResources.PostgresRolesName);
+        var env = await EnvironmentOfAsync(roles);
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "infra", "postgres", "roles.sql")).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        roles.Annotations.OfType<ContainerMountAnnotation>().Select(m => m.Target).ShouldBe(
+            ["/procureai/roles.sql", "/procureai/roles-database.sql", "/procureai/roles-pgaudit.sql"], ignoreOrder: true);
+        roles.Annotations.OfType<ContainerMountAnnotation>().ShouldAllBe(m => m.IsReadOnly);
+        env["PGPASSWORD"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("postgres-password");
+        env.ShouldContainKey("PGUSER");
+        var args = new List<object>();
+        foreach (var annotation in roles.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(new CommandLineArgsCallbackContext(args, roles, CancellationToken.None));
+        }
+
+        string.Join(' ', args.Select(a => a.ToString())).ShouldBe("-v ON_ERROR_STOP=1 -h postgres -p 5432 -d postgres -f /procureai/roles.sql");
+        roles.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource.Name == "postgres" && w.WaitType == WaitType.WaitUntilHealthy);
+        env["DB_AUDIT_LOG_READER_PASSWORD"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("audit-log-reader-password");
+
+        foreach (var (service, database, captured) in PostgresServices)
+        {
+            script.ShouldContain($"\\set service {service}\n\\set database {database}\n\\set capture {(captured ? "true" : "false")}\n", Case.Sensitive, $"roles.sql block of {service}");
+            var app = env[$"DB_{service.ToUpperInvariant()}_PASSWORD"].ShouldBeOfType<ParameterResource>();
+            app.Name.ShouldBe($"db-{service}-password");
+            app.Secret.ShouldBeTrue();
+            script.ShouldContain($"\\getenv app_password DB_{service.ToUpperInvariant()}_PASSWORD");
+            roles.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource.Name == database, $"postgres-roles waits for {database}");
+            var migrate = model.Resources.OfType<ProjectResource>().Single(r => r.Name == service + ServiceResources.MigrateSuffix);
+            migrate.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == roles && w.WaitType == WaitType.WaitForCompletion, migrate.Name);
+
+            if (captured)
+            {
+                var cdc = env[$"DB_{service.ToUpperInvariant()}_CDC_PASSWORD"].ShouldBeOfType<ParameterResource>();
+                cdc.Name.ShouldBe($"db-{service}-cdc-password");
+                cdc.Secret.ShouldBeTrue();
+                script.ShouldContain($"\\getenv cdc_password DB_{service.ToUpperInvariant()}_CDC_PASSWORD");
+                var debezium = await EnvironmentOfAsync(model.Resources.OfType<ContainerResource>().Single(r => r.Name == "debezium-" + database));
+                debezium.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_USER", $"{service}_cdc");
+                debezium["DEBEZIUM_SOURCE_DATABASE_PASSWORD"].ShouldBeSameAs(cdc, $"debezium-{database} logs in with the password roles.sql sets");
+            }
+            else
+            {
+                env.ShouldNotContainKey($"DB_{service.ToUpperInvariant()}_CDC_PASSWORD");
+            }
+        }
+
+        env.Keys.Count(k => k.StartsWith("DB_", StringComparison.Ordinal)).ShouldBe(PostgresServices.Length + PostgresServices.Count(s => s.Captured) + 1);
+    }
+
+    /// <summary>
+    /// mongo-users runs infra/mongo/users.js (bind-mounted, mongosh in the mongo resource's image, as root from MONGO_USER / MONGO_PASSWORD)
+    /// before the MongoDB migrations, with each MongoDB user's password parameter.
+    /// </summary>
+    [Fact]
+    public async Task Mongo_users_runs_users_js_with_every_password_before_the_mongo_migrations()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var model = scope.Model;
+        var users = model.Resources.OfType<ContainerResource>().Single(r => r.Name == ServiceResources.MongoUsersName);
+        var env = await EnvironmentOfAsync(users);
+
+        users.Annotations.OfType<ContainerMountAnnotation>().Single().Target.ShouldBe("/procureai/users.js");
+        AppHostImage(model, ServiceResources.MongoUsersName).ShouldBe(AppHostImage(model, ResourceNames.Mongo));
+        env["MONGO_PASSWORD"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("mongo-password");
+        env.ShouldContainKey("MONGO_USER");
+        env["DB_SUPPLIERS_PASSWORD"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("db-suppliers-password");
+        env["DB_ASSISTANT_MONGO_PASSWORD"].ShouldBeOfType<ParameterResource>().Name.ShouldBe("db-assistant-mongo-password");
+        users.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource.Name == ResourceNames.Mongo && w.WaitType == WaitType.WaitUntilHealthy);
+        foreach (var migrate in new[] { "suppliers-migrate", "assistant-migrate" })
+        {
+            model.Resources.OfType<ProjectResource>().Single(r => r.Name == migrate).Annotations.OfType<WaitAnnotation>()
+                .ShouldContain(w => w.Resource == users && w.WaitType == WaitType.WaitForCompletion, migrate);
+        }
+
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "infra", "mongo", "users.js"));
+        script.ShouldContain("ensureUser('suppliers_app', required('DB_SUPPLIERS_PASSWORD'), [{ role: 'readWrite', db: 'suppliersdb' }]);");
+        script.ShouldContain("ensureUser('assistant_app', required('DB_ASSISTANT_MONGO_PASSWORD'), [{ role: 'readWrite', db: 'assistantchatdb' }]);");
+    }
+
+    /// <summary>
+    /// The chart's db-roles Job mounts its MongoDB users script from the chart (a chart cannot read files outside its folder): it must be the
+    /// very infra/mongo/users.js the AppHost runs (line endings aside). Postgres needs no copy: the Job runs roles.sql from our image.
+    /// </summary>
+    [Fact]
+    public void Chart_mongo_users_script_is_infra_mongo_users_js()
+    {
+        static string Read(params string[] path) =>
+            File.ReadAllText(Path.Combine([RepoRoot(), .. path])).Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
+
+        Read("deploy", "charts", "procure-platform", "files", "mongo-users.js").ShouldBe(Read("infra", "mongo", "users.js"));
     }
 
     /// <summary>

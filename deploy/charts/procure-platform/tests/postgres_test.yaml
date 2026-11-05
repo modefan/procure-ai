@@ -94,7 +94,8 @@ tests:
               secretKeyRef:
                 name: procure-keycloak
                 key: db-password
-      - contains:
+      # The replication roles come from the db-roles Job (roles.sql), not from an init script: no Debezium password here.
+      - notContains:
           path: spec.template.spec.containers[0].env
           content:
             name: DEBEZIUM_PASSWORD

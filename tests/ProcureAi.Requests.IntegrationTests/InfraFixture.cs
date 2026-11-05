@@ -23,7 +23,14 @@ public sealed class InfraFixture : IAsyncLifetime
     private RedisFixture? _redis;
     private DebeziumFixture? _debezium;
 
+    /// <summary>requestsdb as Requests' own role requests_app (infra/postgres/roles.sql, plan 08 ruling 6), as the service connects.</summary>
     public string RequestsDbConnectionString { get; private set; } = "";
+
+    /// <summary>requestsdb as the server's superuser, for what a test does behind the app's back.</summary>
+    public string RequestsDbSuperuserConnectionString => _postgres!.ConnectionString(RequestsDb);
+
+    /// <summary>The Postgres server.</summary>
+    public PostgresFixture Postgres => _postgres ?? throw new InvalidOperationException("The fixture has not started.");
 
     /// <summary>
     /// The Access service the API's permission checks ask. Every test uses a tenant of its own, so the one stub (with a matrix
@@ -56,7 +63,7 @@ public sealed class InfraFixture : IAsyncLifetime
         Approvals = await StubApprovalsServer.StartAsync();
         Suppliers = await StubSuppliersServer.StartAsync();
 
-        // The init script only creates the debezium role; the database (as in the AppHost, where Aspire creates it) comes here.
+        // roles.sql (run by the Postgres fixture) made requestsdb and its roles; this gives a fresh one, as requests_app.
         RequestsDbConnectionString = await _postgres.CreateDatabaseAsync(RequestsDb);
         await DeclareCdcExchangeAsync();
         await RequestsDatabase.MigrateAsync(RequestsDbConnectionString);

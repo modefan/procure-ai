@@ -46,6 +46,8 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
     {
         var limits = TestLimits.Section("Debezium");
         var slot = "debezium_" + database;
+        // As deployed: the database's own replication role (<service>_cdc from roles.sql), or the fixture's test role for other databases.
+        var (user, password) = PostgresFixture.CdcLoginFor(database);
         var builder = new ContainerBuilder(Image);
         if (OffsetsVolume is not null)
         {
@@ -59,7 +61,8 @@ public sealed class DebeziumFixture(INetwork network, PostgresFixture postgres) 
                 "/debezium/config/application.properties",
                 AccessMode.ReadOnly)
             .WithEnvironment("JAVA_OPTS", limits["JavaOpts"])
-            .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_PASSWORD", PostgresFixture.DebeziumTestPassword)
+            .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_USER", user)
+            .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_PASSWORD", password)
             .WithEnvironment("DEBEZIUM_SOURCE_DATABASE_DBNAME", database)
             .WithEnvironment("DEBEZIUM_SOURCE_TOPIC_PREFIX", database)
             .WithEnvironment("DEBEZIUM_SOURCE_SLOT_NAME", slot)

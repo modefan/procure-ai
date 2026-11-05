@@ -1,0 +1,160 @@
+{{- $pgService := list }}
+{{- range .Values.debezium.postgres }}{{ $pgService = append $pgService (trimSuffix "db" .database) }}{{ end }}
+{{- $mongoDatabases := list }}
+{{- range .Values.debezium.mongo.collections }}{{ $mongoDatabases = append $mongoDatabases (first (splitList "." .)) }}{{ end }}
+# Per-service least-privilege database users (plan 08 ruling 6), as the AppHost's one-shot containers postgres-roles and mongo-users do it:
+#   postgres-roles  psql in our postgres image runs its /procureai/roles.sql as the superuser: every service database (created here when
+#                   missing; the migrations no longer create theirs) owned by its own role <service>_app, a replication role
+#                   <service>_cdc per Debezium Server, Audit's audit_log_reader and its log tables, the extensions; existing objects move
+#                   from the superuser to the service's role.
+#   mongo-users     mongosh runs infra/mongo/users.js (files/mongo-users.js, the same bytes; AppHost.Tests checks it) as root: one user per
+#                   database (suppliers_app, assistant_app) and debezium-mongo's user debezium.
+# Both are idempotent and run on every sync: a Sync hook in wave 1 of the platform (after Postgres and MongoDB, wave 0, are up; next to
+# mongo-init, so mongo-users retries until the member is PRIMARY), and the platform syncs before the apps, whose migrations (Sync hooks of
+# procure-ai) connect as those roles (controller ruling P1). Under Helm a plain Job per revision, like the other bootstrap Jobs.
+# Passwords: Secret procure-db-roles (bootstrap/new-secrets.ps1 in the GitOps repo, from the AppHost user secrets db-<service>-password,
+# db-<service>-cdc-password, db-assistant-mongo-password, audit-log-reader-password), into the environment only, never argv.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-roles-mongo-users
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "db-roles") | nindent 4 }}
+  annotations:
+    # Before the hook Job that mounts it (wave 1).
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  users.js: |-
+    {{- .Files.Get "files/mongo-users.js" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "procure-platform.bootstrapJobName" (dict "root" $ "base" "db-roles") }}
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "db-roles") | nindent 4 }}
+  annotations:
+    {{- include "procure-platform.bootstrapJob" . | nindent 4 }}
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "procure-platform.labels" (dict "root" $ "name" "db-roles") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      # uid 999: the postgres user of our image and the mongodb user of the mongo image.
+      {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 999 "gid" 999) | nindent 6 }}
+      containers:
+        - name: postgres-roles
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" .Values.postgres.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+              for attempt in $(seq 1 60); do
+                if pg_isready -h postgres -p 5432 -q; then break; fi
+                if [ "$attempt" -eq 60 ]; then echo "postgres not ready after 60 tries" >&2; exit 1; fi
+                echo "waiting for postgres"; sleep 2
+              done
+              exec psql -v ON_ERROR_STOP=1 -h postgres -p 5432 -d postgres -f /procureai/roles.sql
+          env:
+            - name: PGUSER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-postgres
+                  key: password
+            - name: HOME
+              value: /tmp
+            {{- range .Values.dbRoles.postgresServices }}
+            - name: {{ printf "DB_%s_PASSWORD" (upper .) }}
+              valueFrom:
+                secretKeyRef:
+                  name: procure-db-roles
+                  key: {{ printf "%s-password" . }}
+            {{- if has . $pgService }}
+            - name: {{ printf "DB_%s_CDC_PASSWORD" (upper .) }}
+              valueFrom:
+                secretKeyRef:
+                  name: procure-db-roles
+                  key: {{ printf "%s-cdc-password" . }}
+            {{- end }}
+            {{- end }}
+            - name: DB_AUDIT_LOG_READER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-db-roles
+                  key: audit-log-reader-password
+          resources:
+            {{- toYaml .Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: mongo-users
+          image: {{ .Values.mongo.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+              uri='mongodb://mongo:27017/?directConnection=true&tls=true&tlsCAFile=/etc/procure-ca/ca.crt&serverSelectionTimeoutMS=5000'
+              for attempt in $(seq 1 60); do
+                if mongosh --quiet --norc "$uri" /etc/db-roles/users.js; then exit 0; fi
+                echo "attempt $attempt failed; retrying in 5 s"
+                sleep 5
+              done
+              exit 1
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-mongo
+                  key: username
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-mongo
+                  key: password
+            {{- range .Values.dbRoles.mongoUsers }}
+            - name: {{ .env }}
+              valueFrom:
+                secretKeyRef:
+                  name: procure-db-roles
+                  key: {{ .key }}
+            {{- end }}
+            - name: DEBEZIUM_MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-debezium
+                  key: mongo-password
+            - name: DEBEZIUM_MONGO_DATABASES
+              value: {{ $mongoDatabases | uniq | join "," | quote }}
+            - name: HOME
+              value: /tmp
+          resources:
+            {{- toYaml .Values.mongoshResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: mongo-users
+              mountPath: /etc/db-roles
+              readOnly: true
+            - name: procure-ca
+              mountPath: /etc/procure-ca
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: mongo-users
+          configMap:
+            name: db-roles-mongo-users
+        - name: procure-ca
+          configMap:
+            name: procure-ca

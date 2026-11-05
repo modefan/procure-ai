@@ -74,21 +74,21 @@ tests:
   - it: migration-only settings stay out of the app
     set:
       migration.secretEnv:
-        Mongo__DebeziumPassword: { secret: procure-debezium, key: mongo-password }
+        Migration__OnlySecret: { secret: some-secret, key: only-key }
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: Mongo__DebeziumPassword
+            name: Migration__OnlySecret
             valueFrom:
-              secretKeyRef: { name: procure-debezium, key: mongo-password }
+              secretKeyRef: { name: some-secret, key: only-key }
         template: migrate-job.yaml
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
-            name: Mongo__DebeziumPassword
+            name: Migration__OnlySecret
             valueFrom:
-              secretKeyRef: { name: procure-debezium, key: mongo-password }
+              secretKeyRef: { name: some-secret, key: only-key }
         template: deployment.yaml
 
   - it: no migration job unless enabled
@@ -101,38 +101,20 @@ tests:
 
   - it: the migration has a deadline
     template: migrate-job.yaml
-    set:
-      migration.createPostgresDatabase: requestsdb
     asserts:
       - equal:
           path: spec.activeDeadlineSeconds
           value: 900
-      - contains:
-          path: spec.template.spec.initContainers[0].env
-          content:
-            name: WAIT_TRIES
-            value: "60"
-      - matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: 'tries" -ge "\$WAIT_TRIES" \]; then .*exit 1'
 
-  - it: a postgres migration creates its database first
+  # Plan 08 Task 4: the database and its owner role come from the platform's db-roles Job; the migration connects as the service's own role
+  # and never gets the superuser's password (no create-database step any more).
+  - it: the migration creates no database and has no superuser password
     template: migrate-job.yaml
-    set:
-      migration.createPostgresDatabase: requestsdb
     asserts:
-      - equal:
-          path: spec.template.spec.initContainers[0].name
-          value: create-database
-      - equal:
-          path: spec.template.spec.initContainers[0].image
-          value: procure-ai-postgres:abc1234
-      - contains:
-          path: spec.template.spec.initContainers[0].env
-          content:
-            name: PGPASSWORD
-            valueFrom:
-              secretKeyRef: { name: procure-postgres, key: password }
+      - notExists:
+          path: spec.template.spec.initContainers
+      - notExists:
+          path: $..secretKeyRef[?(@.name == "procure-postgres")]
 
   - it: deployment is wave 0
     template: deployment.yaml
@@ -330,19 +312,6 @@ tests:
           path: $..configMap.optional
       - notExists:
           path: $..secret.optional
-
-  - it: the migration's psql takes the postgres platform image's own tag (plan 07 Task 6)
-    template: migrate-job.yaml
-    set:
-      migration.createPostgresDatabase: requestsdb
-      global.imageTags.postgres: 0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
-    asserts:
-      - equal:
-          path: spec.template.spec.initContainers[0].image
-          value: procure-ai-postgres:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: procure-ai-requests-api:abc1234
 
   - it: deployments take the global rollout strategy unless they set their own
     template: deployment.yaml

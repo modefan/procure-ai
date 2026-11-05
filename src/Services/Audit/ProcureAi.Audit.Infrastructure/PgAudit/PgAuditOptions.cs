@@ -12,18 +12,18 @@ public sealed partial class PgAuditOptions : IValidatableObject
 
     /// <summary>
     /// The connection string (<c>ConnectionStrings:&lt;name&gt;</c>) to <c>auditdb</c> as the role <c>audit_log_reader</c>, the only role that
-    /// may read the log. The <c>--migrate</c> run creates that role with this connection string's user name and password.
+    /// may read the log. infra/postgres/roles-pgaudit.sql creates that role (password: the AppHost parameter audit-log-reader-password).
     /// </summary>
     [Required]
     public string ConnectionName { get; set; } = "";
 
-    /// <summary>The schema of the seven weekday tables (<c>pgaudit</c>) in <c>auditdb</c>; a plain lower-case identifier (it goes into SQL).</summary>
+    /// <summary>The schema of the seven weekday tables (<c>pgaudit</c>, as infra/postgres/roles-pgaudit.sql makes them) in <c>auditdb</c>; a plain lower-case identifier (it goes into SQL).</summary>
     [Required]
     [RegularExpression("^[a-z_][a-z0-9_]{0,62}$", ErrorMessage = "Schema must be a plain lower-case identifier.")]
     public string Schema { get; set; } = "";
 
     /// <summary>
-    /// Each weekday's log file (the <c>--migrate</c> run creates one table per weekday over it), relative to the server's data directory; <c>{0}</c> is the weekday (<c>Mon</c> ... <c>Sun</c>, in the server's
+    /// Each weekday's log file (infra/postgres/roles-pgaudit.sql creates one table per weekday over it, with these defaults), relative to the server's data directory; <c>{0}</c> is the weekday (<c>Mon</c> ... <c>Sun</c>, in the server's
     /// <c>log_timezone</c>), as <c>log_filename=postgresql-%a.log</c> names it (the csvlog gets <c>.csv</c> instead of <c>.log</c>).
     /// </summary>
     [Required]

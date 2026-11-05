@@ -40,9 +40,8 @@ var keycloakDemoLoginSecret = builder.AddParameter(
 // (the cluster's Secret procure-keycloak is made from this same user secret). Generated on the first run, like the demo login secret.
 var keycloakDashboardSecret = builder.AddParameter(
     "keycloak-dashboard-secret", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
-var debeziumPassword = builder.AddParameter("debezium-password", secret: true);
-// Password of the least-privilege MongoDB user `debezium` that debezium-mongo connects as (plan 07 Task 4); Suppliers' --migrate creates the
-// user with it. Generated on the first run and kept in the AppHost user secrets (the cluster's Secret procure-debezium is made from it).
+// Password of the least-privilege MongoDB user `debezium` that debezium-mongo connects as (plan 07 Task 4); mongo-users (infra/mongo/users.js)
+// creates the user with it. Generated on the first run and kept in the AppHost user secrets (the cluster's Secret procure-debezium is made from it).
 var debeziumMongoPassword = builder.AddParameter(
     "debezium-mongo-password", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 // SHA-256 (hex) of the one admin API key; services compare in constant time.
@@ -54,7 +53,8 @@ var adminApiKey = builder.AddParameter("admin-api-key", secret: true);
 var simulatorApiKey = builder.AddParameter("simulator-api-key", secret: true);
 var supplierWebhookSecret = builder.AddParameter("supplier-webhook-secret", secret: true);
 // The password of `audit_log_reader`, the Postgres role Audit reads the server's audit log with (plan 06 ruling 14). Generated on the first
-// run and kept in the AppHost user secrets; Audit's --migrate sets it on the role every run, so changing it needs nothing else.
+// run and kept in the AppHost user secrets; postgres-roles (infra/postgres/roles.sql) sets it on the role every run, so changing it needs
+// nothing else. The services' own roles get their passwords the same way (db-<service>-password, db-<service>-cdc-password; ServiceResources).
 var auditLogReaderPassword = builder.AddParameter(
     "audit-log-reader-password", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
 
@@ -65,7 +65,6 @@ const string PostgresVolumeTarget = "/var/lib/postgresql/data";
 const string PostgresDataDirectory = PostgresVolumeTarget + "/pgdata";
 var postgres = builder.AddPostgres(ResourceNames.Postgres)
     .WithDockerfile("../../../infra/postgres")
-    .WithEnvironment("DEBEZIUM_PASSWORD", debeziumPassword)
     .WithArgs(
         "-c", "wal_level=logical",
         "-c", "shared_preload_libraries=pgaudit",
@@ -164,12 +163,13 @@ var mailpit = builder.AddContainer(ResourceNames.Mailpit, "axllent/mailpit", "v1
 
 // The services, each added the same way: database, `<name>-migrate` (`--migrate`: schema, Wolverine message store, demo
 // seed; runs first), `<name>-api` (waits for the migration) and, when it captures tables, `debezium-<db>` (Postgres) or the shared
-// `debezium-mongo` (MongoDB collections). See ServiceResources.cs.
+// `debezium-mongo` (MongoDB collections). Each connects as its own database role or user (<name>_app, plan 08 ruling 6), made by the
+// one-shot `postgres-roles` (infra/postgres/roles.sql) and `mongo-users` (infra/mongo/users.js) before any migration. See ServiceResources.cs.
 // Access comes first: every other service calls it (CallsServices adds the reference and the wait).
 var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
-    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes, debeziumSelfHeal,
+    postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, useDataVolumes, debeziumSelfHeal,
     debeziumMongoPassword.Resource, debeziumHeartbeatIntervalMs);
 
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(

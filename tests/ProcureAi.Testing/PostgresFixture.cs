@@ -7,14 +7,46 @@ namespace ProcureAi.Testing;
 
 /// <summary>
 /// One Postgres for a test run: the project's custom image (logical WAL + pgaudit, built once from infra/postgres)
-/// with the memory and CPU caps of the AppHost's Postgres resource.
+/// with the memory and CPU caps of the AppHost's Postgres resource. Once the server is up the fixture runs the image's
+/// <c>/procureai/roles.sql</c> as deployed (plan 08 ruling 6): every service database with its own roles <c>&lt;service&gt;_app</c> and
+/// <c>&lt;service&gt;_cdc</c> (test passwords, <see cref="TestPassword"/>), and Audit's log reader and log tables.
+/// <see cref="CreateDatabaseAsync"/> hands out a service database (<see cref="ServiceDatabases"/>) as its <c>_app</c> role, like the
+/// deployment; any other database as the superuser, captured as <see cref="TestCdcRole"/>.
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    // A throwaway test value for the image's init script (it needs some password for the debezium role). Not a secret.
+    /// <summary>The replication role of a database that is not a service database (tests with a database of their own).</summary>
+    public const string TestCdcRole = "test_cdc";
+
+    /// <summary>A throwaway test value for <see cref="TestCdcRole"/>. Not a secret.</summary>
     public const string DebeziumTestPassword = "test-only-debezium";
 
-    // The image's init script creates the debezium role; the server only accepts TCP connections once the script is done.
+    /// <summary>The service databases of infra/postgres/roles.sql: service name to database. Captured ones also have <c>&lt;service&gt;_cdc</c>.</summary>
+    public static readonly IReadOnlyDictionary<string, string> ServiceDatabases = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["access"] = "accessdb", ["approvals"] = "approvalsdb", ["assistant"] = "assistantdb", ["audit"] = "auditdb",
+        ["budgets"] = "budgetsdb", ["invoicing"] = "invoicingdb", ["purchasing"] = "purchasingdb", ["requests"] = "requestsdb",
+    };
+
+    /// <summary>The services without a Debezium Server (no <c>_cdc</c> role).</summary>
+    private static readonly HashSet<string> Uncaptured = new(StringComparer.Ordinal) { "audit" };
+
+    /// <summary><c>CdcMigrations.CdcRoleSetting</c> (not every test project references BuildingBlocks.Persistence).</summary>
+    private const string CdcRoleSetting = "procureai.cdc_role";
+
+    /// <summary>The password the fixture gives a role of roles.sql (<c>requests_app</c>, <c>requests_cdc</c>, <c>audit_log_reader</c>). Not a secret.</summary>
+    public static string TestPassword(string role) => "test-only-" + role;
+
+    /// <summary>The service of a service database (<c>requestsdb</c> -> <c>requests</c>), or null for any other database.</summary>
+    public static string? ServiceOf(string database) =>
+        ServiceDatabases.Where(kv => kv.Value == database).Select(kv => kv.Key).FirstOrDefault();
+
+    /// <summary>The role and password Debezium logs in with for <paramref name="database"/>: its <c>_cdc</c> role, or <see cref="TestCdcRole"/>.</summary>
+    public static (string Role, string Password) CdcLoginFor(string database) =>
+        ServiceOf(database) is { } service && !Uncaptured.Contains(service)
+            ? (service + "_cdc", TestPassword(service + "_cdc"))
+            : (TestCdcRole, DebeziumTestPassword);
+
     private const string ImageName = "procureai-test-postgres:latest";
 
     private static readonly TimeSpan InitScriptTimeout = TimeSpan.FromSeconds(90);
@@ -55,7 +87,6 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         var pg = TestLimits.Section("Postgres");
         var builder = new PostgreSqlBuilder(image)
-            .WithEnvironment("DEBEZIUM_PASSWORD", DebeziumTestPassword)
             .WithCommand(
                 "-c", "wal_level=logical",
                 "-c", "shared_preload_libraries=pgaudit",
@@ -80,9 +111,57 @@ public sealed class PostgresFixture : IAsyncLifetime
         await WaitForInitScriptAsync();
     }
 
-    /// <summary>Connection string for a database on this server.</summary>
+    /// <summary>Connection string for a database on this server, as the superuser.</summary>
     public string ConnectionString(string database) =>
         new NpgsqlConnectionStringBuilder(_container!.GetConnectionString()) { Database = database }.ConnectionString;
+
+    /// <summary>Connection string for <paramref name="database"/> as <paramref name="role"/> (a role of roles.sql: its test password).</summary>
+    public string ConnectionStringAs(string role, string database) =>
+        new NpgsqlConnectionStringBuilder(ConnectionString(database)) { Username = role, Password = TestPassword(role) }.ConnectionString;
+
+    /// <summary>
+    /// The environment roles.sql reads its passwords from (DB_&lt;SERVICE&gt;_PASSWORD, DB_&lt;SERVICE&gt;_CDC_PASSWORD,
+    /// DB_AUDIT_LOG_READER_PASSWORD), with the test passwords. A test may leave some out (<paramref name="without"/>).
+    /// </summary>
+    public static Dictionary<string, string> RolesScriptEnvironment(params string[] without)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var service in ServiceDatabases.Keys)
+        {
+            environment[$"DB_{service.ToUpperInvariant()}_PASSWORD"] = TestPassword(service + "_app");
+            if (!Uncaptured.Contains(service))
+            {
+                environment[$"DB_{service.ToUpperInvariant()}_CDC_PASSWORD"] = TestPassword(service + "_cdc");
+            }
+        }
+
+        environment["DB_AUDIT_LOG_READER_PASSWORD"] = TestPassword("audit_log_reader");
+        foreach (var name in without)
+        {
+            environment.Remove(name);
+        }
+
+        return environment;
+    }
+
+    /// <summary>
+    /// Runs the image's <c>/procureai/roles.sql</c> with psql as the superuser, as the AppHost's postgres-roles container and the chart's
+    /// db-roles Job do, with <paramref name="environment"/> only (default: <see cref="RolesScriptEnvironment"/>). Returns psql's output;
+    /// throws with it when psql fails.
+    /// </summary>
+    public async Task<string> RunRolesScriptAsync(IReadOnlyDictionary<string, string>? environment = null)
+    {
+        var command = new List<string> { "env", "-i", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" };
+        command.AddRange((environment ?? RolesScriptEnvironment()).Select(kv => $"{kv.Key}={kv.Value}"));
+        command.AddRange(["psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-f", "/procureai/roles.sql"]);
+        var result = await _container!.ExecAsync(command);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"roles.sql failed ({result.ExitCode}): {result.Stderr} {result.Stdout}");
+        }
+
+        return result.Stdout + result.Stderr;
+    }
 
     /// <summary>What the container wrote to its console (stdout and stderr) so far.</summary>
     public async Task<string> ConsoleAsync()
@@ -91,13 +170,33 @@ public sealed class PostgresFixture : IAsyncLifetime
         return stdout + stderr;
     }
 
-    /// <summary>Creates an empty database (dropping a leftover of the same name) and returns its connection string.</summary>
+    /// <summary>
+    /// Creates an empty database (dropping a leftover of the same name) and returns its connection string. A service database
+    /// (<see cref="ServiceDatabases"/>) is made by roles.sql, as deployed, and the connection string is its <c>_app</c> role's; any other
+    /// database is the superuser's, with <see cref="TestCdcRole"/> as its replication role (<c>procureai.cdc_role</c>).
+    /// </summary>
     public async Task<string> CreateDatabaseAsync(string name)
     {
-        await using var connection = new NpgsqlConnection(AdminConnectionString);
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE); CREATE DATABASE \"{name}\"", connection);
-        await command.ExecuteNonQueryAsync();
+        await using (var connection = new NpgsqlConnection(AdminConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", connection);
+            await drop.ExecuteNonQueryAsync();
+            if (ServiceOf(name) is null)
+            {
+                await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
+                await create.ExecuteNonQueryAsync();
+                await using var setting = new NpgsqlCommand($"ALTER DATABASE \"{name}\" SET {CdcRoleSetting} = '{TestCdcRole}'", connection);
+                await setting.ExecuteNonQueryAsync();
+            }
+        }
+
+        if (ServiceOf(name) is { } service)
+        {
+            await RunRolesScriptAsync();
+            return ConnectionStringAs(service + "_app", name);
+        }
+
         return ConnectionString(name);
     }
 
@@ -121,6 +220,8 @@ public sealed class PostgresFixture : IAsyncLifetime
         return dir?.FullName ?? throw new InvalidOperationException("ProcureAi.slnx not found above the test output folder.");
     }
 
+    // The server accepts TCP connections once the image's first-start initialisation is done; then come the roles, as deployed, and the
+    // replication role of the tests' own databases.
     private async Task WaitForInitScriptAsync()
     {
         var deadline = DateTime.UtcNow + InitScriptTimeout;
@@ -130,23 +231,18 @@ public sealed class PostgresFixture : IAsyncLifetime
             {
                 await using var connection = new NpgsqlConnection(AdminConnectionString);
                 await connection.OpenAsync();
-                await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_roles WHERE rolname = 'debezium'", connection);
-                if ((long)(await command.ExecuteScalarAsync())! > 0)
-                {
-                    return;
-                }
-
-                if (DateTime.UtcNow >= deadline)
-                {
-                    throw new TimeoutException("The Postgres init script did not create the debezium role in time.");
-                }
-
-                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                break;
             }
             catch (Exception) when (DateTime.UtcNow < deadline)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(500));
             }
         }
+
+        await RunRolesScriptAsync();
+        await using var setup = new NpgsqlConnection(AdminConnectionString);
+        await setup.OpenAsync();
+        await using var role = new NpgsqlCommand($"CREATE ROLE {TestCdcRole} WITH LOGIN REPLICATION PASSWORD '{DebeziumTestPassword}'", setup);
+        await role.ExecuteNonQueryAsync();
     }
 }

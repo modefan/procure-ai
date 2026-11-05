@@ -189,7 +189,7 @@ public static class DependencyInjection
         services.AddStatusContributor<PgAuditContributor>();
     }
 
-    /// <summary>The connection string of <c>audit_log_reader</c>; the <c>--migrate</c> run creates the role from it.</summary>
+    /// <summary>The connection string of <c>audit_log_reader</c> (infra/postgres/roles.sql creates the role with this password).</summary>
     public static string AuditLogConnectionString(IConfiguration configuration, PgAuditOptions options) =>
         configuration.GetConnectionString(options.ConnectionName)
         ?? throw new InvalidOperationException($"Connection string {options.ConnectionName} (the audit log reader) is not configured.");

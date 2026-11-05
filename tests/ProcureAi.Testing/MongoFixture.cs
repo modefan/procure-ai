@@ -6,7 +6,8 @@ namespace ProcureAi.Testing;
 
 /// <summary>
 /// One MongoDB for a test run, started as a <b>single-node replica set</b> like the AppHost's Mongo resource (change streams and
-/// transactions need a replica set), with that resource's memory and CPU caps and WiredTiger cache size.
+/// transactions need a replica set), with that resource's memory and CPU caps and WiredTiger cache size. Once it is PRIMARY the fixture runs
+/// infra/mongo/users.js as deployed (plan 08 ruling 6), so the users of <see cref="MongoUsers"/> exist with their test passwords.
 /// </summary>
 public sealed class MongoFixture : IAsyncLifetime
 {
@@ -31,7 +32,47 @@ public sealed class MongoFixture : IAsyncLifetime
     /// <summary>Connection string of the server, with the replica set and direct connection the container needs.</summary>
     public string ConnectionString => _container!.GetConnectionString();
 
-    /// <summary>Connection string that opens <paramref name="database"/> on this server.</summary>
+    /// <summary>
+    /// Connection string that opens <paramref name="database"/> as the user that owns it (<see cref="MongoUsers.UserOf"/>: suppliersdb as
+    /// suppliers_app, assistantchatdb as assistant_app), as the services connect; any other database as root.
+    /// </summary>
+    public string AppConnectionStringFor(string database) =>
+        MongoUsers.UserOf.TryGetValue(database, out var user) ? ConnectionStringFor(database, user, MongoUsers.TestPassword(user)) : ConnectionStringFor(database);
+
+    /// <summary>Connection string that opens <paramref name="database"/> as <paramref name="user"/> (a user of the admin database).</summary>
+    public string ConnectionStringFor(string database, string user, string password) =>
+        new MongoUrlBuilder(ConnectionString)
+        {
+            DatabaseName = database, Username = user, Password = password, AuthenticationSource = "admin",
+        }.ToMongoUrl().ToString();
+
+    /// <summary>
+    /// Runs infra/mongo/users.js in the container with mongosh, signed in as root, with only <paramref name="environment"/> (default:
+    /// <see cref="MongoUsers.ScriptEnvironment"/>) besides the root sign-in, as the AppHost's mongo-users container and the chart's db-roles
+    /// Job do. Returns mongosh's output; throws with it when the script fails.
+    /// </summary>
+    public async Task<string> RunUsersScriptAsync(IReadOnlyDictionary<string, string>? environment = null)
+    {
+        var script = await File.ReadAllBytesAsync(Path.Combine(PostgresFixture.RepoRoot(), "infra", "mongo", "users.js"));
+        await _container!.CopyAsync(script, "/tmp/procureai-users.js");
+        var root = new MongoUrl(ConnectionString);
+        var command = new List<string>
+        {
+            "env", "-i", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp",
+            $"MONGO_USER={root.Username}", $"MONGO_PASSWORD={root.Password}",
+        };
+        command.AddRange((environment ?? MongoUsers.ScriptEnvironment()).Select(kv => $"{kv.Key}={kv.Value}"));
+        command.AddRange(["mongosh", "--quiet", "--norc", $"mongodb://127.0.0.1:{ContainerPort}/?directConnection=true", "/tmp/procureai-users.js"]);
+        var result = await _container.ExecAsync(command);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"users.js failed ({result.ExitCode}): {result.Stderr} {result.Stdout}");
+        }
+
+        return result.Stdout + result.Stderr;
+    }
+
+    /// <summary>Connection string that opens <paramref name="database"/> on this server, as root.</summary>
     public string ConnectionStringFor(string database)
     {
         var url = new MongoUrlBuilder(ConnectionString) { DatabaseName = database };
@@ -67,6 +108,8 @@ public sealed class MongoFixture : IAsyncLifetime
         {
             throw new InvalidOperationException("The MongoDB test container is not the PRIMARY of a replica set.");
         }
+
+        await RunUsersScriptAsync();
     }
 
     /// <summary>

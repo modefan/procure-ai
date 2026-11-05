@@ -165,14 +165,14 @@ public sealed class MongoCdcTests(AuditApp app)
     public async Task Mongo_cdc_works_as_least_privilege_debezium_user()
     {
         var mongo = await app.EnsureMongoCdcAsync();
-        app.Infra.MongoDebezium.User.ShouldBe(DebeziumMongoUser.UserName);
+        app.Infra.MongoDebezium.User.ShouldBe(MongoUsers.Debezium);
 
         var operations = await (await mongo.Client.GetDatabase("admin").AggregateAsync<BsonDocument>(
             new[] { new BsonDocument("$currentOp", new BsonDocument { ["allUsers"] = true, ["idleCursors"] = true }) },
             cancellationToken: Ct)).ToListAsync(Ct);
         var changeStreams = operations.Where(op => op.ToJson().Contains("$changeStream", StringComparison.Ordinal)).ToList();
         changeStreams.ShouldNotBeEmpty();
-        changeStreams.ShouldAllBe(op => op["effectiveUsers"].AsBsonArray.Single()["user"].AsString == DebeziumMongoUser.UserName);
+        changeStreams.ShouldAllBe(op => op["effectiveUsers"].AsBsonArray.Single()["user"].AsString == MongoUsers.Debezium);
 
         var tenant = AuditApp.NewTenant();
         var key = $"{tenant}:least-privilege";

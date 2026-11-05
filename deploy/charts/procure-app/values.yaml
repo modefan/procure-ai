@@ -5,7 +5,7 @@ global:
   # Registry prefix ("" for images imported into k3d, ghcr.io/modefan once CI publishes) and tag (full commit SHA, or local-<sha7>).
   imageRegistry: ""
   imageTag: ""
-  # Per image (repository without procure-ai-), overriding imageTag; e.g. postgres (the psql of the migration's create-database step) is
+  # Per image (repository without procure-ai-), overriding imageTag; e.g. a platform image used by an app (none since plan 08 Task 4) is
   # a platform image tagged by its build context (plan 07 Task 6).
   imageTags: {}
   # Rollout strategy of every Deployment unless an app sets its own `strategy` (envs/local: no surge pods, the node has no room for them).
@@ -34,7 +34,6 @@ global:
   sharedEnv: {}
   sharedSecretEnv: {}
   # Images of the helper init containers.
-  postgresImage: procure-ai-postgres       # our image (psql for create-database)
   curlImage: docker.io/curlimages/curl:8.23.0
   helperResources:
     limits: { memory: 128Mi, cpu: 500m }
@@ -67,16 +66,12 @@ migration:
   name: ""
   # DemoSeed__Enabled of the migration (the AppHost sets true; off by default here).
   demoSeed: '{{ .Values.global.demo.seed }}'
-  # Settings only the migration gets (e.g. the debezium MongoDB user's password for Suppliers).
+  # Settings only the migration gets.
   env: {}
   secretEnv: {}
-  # A Postgres database to create before migrating, as the AppHost's AddDatabase does ("" for none; MongoDB creates its own).
-  createPostgresDatabase: ""
   backoffLimit: 6
   # The whole Job (every attempt) must finish within this; then it fails and the sync stops with it.
   activeDeadlineSeconds: 900
-  # create-database: pg_isready attempts 2 s apart before an attempt fails.
-  postgresWaitTries: 60
 
 ingress:
   enabled: false

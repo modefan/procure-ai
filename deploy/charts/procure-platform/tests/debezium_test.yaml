@@ -57,12 +57,27 @@ tests:
           path: spec.template.spec.containers[0].env
           content: { name: DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST, value: public.purchase_requests }
         documentIndex: 2
+      # Each instance replicates as its database's own role (plan 08 ruling 6), with that role's password.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_DATABASE_USER, value: access_cdc }
+        documentIndex: 1
       - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: DEBEZIUM_SOURCE_DATABASE_PASSWORD
-            valueFrom: { secretKeyRef: { name: procure-debezium, key: postgres-password } }
+            valueFrom: { secretKeyRef: { name: procure-db-roles, key: access-cdc-password } }
         documentIndex: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_DATABASE_USER, value: requests_cdc }
+        documentIndex: 2
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DEBEZIUM_SOURCE_DATABASE_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-db-roles, key: requests-cdc-password } }
+        documentIndex: 2
       - contains:
           path: spec.template.spec.containers[0].env
           content: { name: DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST, value: suppliersdb.suppliers }

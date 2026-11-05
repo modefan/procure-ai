@@ -11,7 +11,6 @@ set:
   secretEnv:
     ConnectionStrings__requestsdb: { secret: procure-connection-strings, key: requestsdb }
   migration.enabled: true
-  migration.createPostgresDatabase: requestsdb
   waitFor: [http://debezium-requestsdb-0.debezium:8080/q/health]
 tests:
   - it: every container has requests and limits

@@ -45,10 +45,10 @@ namespace ProcureAi.Requests.Infrastructure.Migrations
                 column: "transaction_id");
 
             // Change data capture: Debezium Server reads this database through the publication dbz_publication. EnableCdc
-            // creates it if missing and adds the tables with REPLICA IDENTITY FULL and the debezium grants (idempotent; it
-            // fails if the debezium role is missing). The audit_entries rows are captured too (they reach the Audit service
-            // through Debezium, with the same transaction ID as the business change); the wolverine schema is not. Needs the
-            // role that owns the tables: the database superuser in the AppHost and in the tests.
+            // creates it if missing and adds the tables with REPLICA IDENTITY FULL and the replication role's grants (idempotent;
+            // it fails if the database names no replication role). The audit_entries rows are captured too (they reach the Audit
+            // service through Debezium, with the same transaction ID as the business change); the wolverine schema is not. Needs
+            // the role that owns the tables: requests_app (infra/postgres/roles.sql, plan 08 Task 4).
             migrationBuilder.EnableCdc(CapturedTables);
         }
 

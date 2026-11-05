@@ -21,6 +21,12 @@ public sealed class ResourcesOptions
     [Required, ValidateObjectMembers] public RabbitMqLimits RabbitMq { get; set; } = null!;
     [Required, ValidateObjectMembers] public RedisLimits Redis { get; set; } = null!;
     [Required, ValidateObjectMembers] public ContainerLimits Mailpit { get; set; } = null!;
+
+    /// <summary>
+    /// The one-shot setup containers <c>postgres-roles</c> (psql) and <c>mongo-users</c> (mongosh), each. They finish before any migration
+    /// starts, so before every Debezium Server: they never run next to the rest of Debezium's budget.
+    /// </summary>
+    [Required, ValidateObjectMembers] public ContainerLimits DbSetup { get; set; } = null!;
     [Required, ValidateObjectMembers] public DotNetLimits DotNet { get; set; } = null!;
     [Required, ValidateObjectMembers] public AngularLimits Angular { get; set; } = null!;
 

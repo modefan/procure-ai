@@ -1,6 +1,5 @@
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Networks;
-using ProcureAi.BuildingBlocks.Persistence.Mongo;
 using RabbitMQ.Client;
 
 namespace ProcureAi.Testing;
@@ -29,8 +28,17 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
     private readonly SemaphoreSlim _mongoLock = new(1, 1);
     private readonly List<DebeziumFixture> _otherDebeziums = [];
 
-    /// <summary>The service's database, migrated by <see cref="MigrateAsync"/>.</summary>
+    /// <summary>
+    /// The service's database, migrated by <see cref="MigrateAsync"/>, as the service's own role <c>&lt;service&gt;_app</c> (infra/postgres/roles.sql,
+    /// plan 08 ruling 6), as the service connects when deployed.
+    /// </summary>
     public string DbConnectionString { get; private set; } = "";
+
+    /// <summary>The service's database as the server's superuser, for what a test does behind the app's back (roles, server settings).</summary>
+    public string SuperuserConnectionString => _postgres!.ConnectionString(databaseName);
+
+    /// <summary>The Postgres server (e.g. to connect as another role, or run roles.sql again).</summary>
+    public PostgresFixture Postgres => _postgres ?? throw new InvalidOperationException("The fixture has not started.");
 
     public string RabbitConnectionString => _rabbit!.ConnectionString;
 
@@ -45,8 +53,11 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
     /// <summary>The MongoDB server (only when <see cref="UsesMongo"/>).</summary>
     public MongoFixture Mongo => _mongo ?? throw new InvalidOperationException($"{GetType().Name} does not use MongoDB (override {nameof(UsesMongo)}).");
 
-    /// <summary>A connection string that opens <paramref name="database"/> on the MongoDB server (only when <see cref="UsesMongo"/>).</summary>
-    public string MongoConnectionStringFor(string database) => Mongo.ConnectionStringFor(database);
+    /// <summary>
+    /// A connection string that opens <paramref name="database"/> on the MongoDB server (only when <see cref="UsesMongo"/>): as its own user
+    /// for a service database (assistantchatdb as assistant_app), as root for any other.
+    /// </summary>
+    public string MongoConnectionStringFor(string database) => Mongo.AppConnectionStringFor(database);
 
     /// <summary>Migrates (and seeds, if the service wants that in tests) a database on the running infrastructure.</summary>
     protected abstract Task MigrateAsync(string connectionString);
@@ -69,7 +80,7 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
 
         await Task.WhenAll(starting);
 
-        // The init script only creates the debezium role; the database (as in the AppHost, where Aspire creates it) comes here.
+        // roles.sql (run by the Postgres fixture) made the service database and its roles; this gives a fresh one, as the service's role.
         DbConnectionString = await _postgres.CreateDatabaseAsync(databaseName);
         await DeclareCdcExchangeAsync();
         await MigrateAsync(DbConnectionString);
@@ -137,12 +148,13 @@ public abstract class ServiceInfraFixture(string databaseName, params string[] c
 
             if (_mongoDebezium is null)
             {
-                // As deployed: Debezium connects as the least-privilege user `debezium`, created the way Suppliers' --migrate creates it,
-                // with read rights on exactly the captured databases.
-                var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+                // As deployed: Debezium connects as the least-privilege user `debezium` of infra/mongo/users.js, with read rights on exactly
+                // the captured databases (the script runs again with them).
                 var databases = collections.Select(c => c.Split('.', 2)[0]).Distinct(StringComparer.Ordinal).ToArray();
-                await DebeziumMongoUser.EnsureAsync(_mongo.Client, password, databases, CancellationToken.None);
-                var debezium = new MongoDebeziumFixture(_network!, _mongo, DebeziumMongoUser.UserName, password);
+                var environment = MongoUsers.ScriptEnvironment();
+                environment["DEBEZIUM_MONGO_DATABASES"] = string.Join(',', databases);
+                await _mongo.RunUsersScriptAsync(environment);
+                var debezium = new MongoDebeziumFixture(_network!, _mongo, MongoUsers.Debezium, MongoUsers.TestPassword(MongoUsers.Debezium));
                 _mongoDebezium = debezium;
                 await debezium.StartAsync(collections);
             }

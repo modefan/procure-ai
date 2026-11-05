@@ -5,6 +5,8 @@
 # watches the whole replica set). Our image procure-ai-debezium (infra/debezium) holds both properties files; what differs per instance comes
 # as environment variables, as in the AppHost. The offsets live on a 1 Gi volume per instance, exactly as long as the instance.
 #
+# Each Postgres instance replicates as its database's own role <service>_cdc (plan 08 ruling 6), made by the db-roles Job.
+#
 # Self-healing of a lost offset is OFF here (the AppHost turns it on for local runs only): a dropped slot or a reset database must fail
 # loudly in a deployment instead of silently leaving a CDC gap.
 #
@@ -35,8 +37,10 @@ spec:
       targetPort: http
       protocol: TCP
 {{- range .Values.debezium.postgres }}
+{{- $service := trimSuffix "db" .database }}
 {{- $env := list
-  (dict "name" "DEBEZIUM_SOURCE_DATABASE_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" "procure-debezium" "key" "postgres-password")))
+  (dict "name" "DEBEZIUM_SOURCE_DATABASE_USER" "value" (printf "%s_cdc" $service))
+  (dict "name" "DEBEZIUM_SOURCE_DATABASE_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" "procure-db-roles" "key" (printf "%s-cdc-password" $service))))
   (dict "name" "DEBEZIUM_SOURCE_DATABASE_DBNAME" "value" .database)
   (dict "name" "DEBEZIUM_SOURCE_TOPIC_PREFIX" "value" .database)
   (dict "name" "DEBEZIUM_SOURCE_SLOT_NAME" "value" (printf "debezium_%s" .database))

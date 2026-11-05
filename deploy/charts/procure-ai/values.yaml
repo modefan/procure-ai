@@ -10,8 +10,8 @@ global:
   imageRegistry: ""
   # The app revision (full commit SHA), or local-<sha7> for images built on the PC. Required.
   imageTag: ""
-  # Per image tags (name without procure-ai-) that override imageTag: the platform image postgres (psql in the migrations) is tagged by
-  # its build context; the GitOps repo's release.yaml sets platformImageTags (plan 07 Task 6).
+  # Per image tags (name without procure-ai-) that override imageTag (the GitOps repo's release.yaml sets platformImageTags, plan 07
+  # Task 6; no app image uses one since the migrations stopped running psql, plan 08 Task 4).
   imageTags: {}
   # Rollout strategy of every app Deployment (procure-app); envs/local sets maxSurge 0 so a deploy never needs room for extra pods.
   deploymentStrategy: {}
@@ -35,7 +35,6 @@ global:
     heapHardLimit: "0x10000000"
     gcServer: "0"
     gcConserveMemory: "5"
-  postgresImage: procure-ai-postgres
   curlImage: docker.io/curlimages/curl:8.23.0
   helperResources:
     limits: { memory: 128Mi, cpu: 500m }
@@ -98,7 +97,7 @@ access:
     Keycloak__DemoOrganization: demo
     Keycloak__AdminClientId: procure-access-admin
   waitFor: [http://debezium-accessdb-0.debezium:8080/q/health]
-  migration: { enabled: true, createPostgresDatabase: accessdb }
+  migration: { enabled: true }
 
 budgets:
   name: budgets-api
@@ -113,7 +112,7 @@ budgets:
     ConnectionStrings__budgetsdb: { secret: procure-connection-strings, key: budgetsdb }
   calls: [access-api]
   waitFor: [http://debezium-budgetsdb-0.debezium:8080/q/health]
-  migration: { enabled: true, createPostgresDatabase: budgetsdb }
+  migration: { enabled: true }
 
 approvals:
   name: approvals-api
@@ -128,9 +127,10 @@ approvals:
     ConnectionStrings__approvalsdb: { secret: procure-connection-strings, key: approvalsdb }
   calls: [access-api]
   waitFor: [http://debezium-approvalsdb-0.debezium:8080/q/health]
-  migration: { enabled: true, createPostgresDatabase: approvalsdb }
+  migration: { enabled: true }
 
-# Audit (Marten): nothing of its own is captured. It reads the server's pgaudit log as audit_log_reader (its --migrate creates the role).
+# Audit (Marten): nothing of its own is captured. It reads the server's pgaudit log as audit_log_reader (the platform's db-roles Job creates
+# the role and the log tables).
 audit:
   name: audit-api
   # Peak working set 144 MiB (RSS 249) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
@@ -144,10 +144,10 @@ audit:
     ConnectionStrings__auditdb: { secret: procure-connection-strings, key: auditdb }
     ConnectionStrings__auditlog: { secret: procure-connection-strings, key: auditlog }
   calls: [access-api]
-  migration: { enabled: true, createPostgresDatabase: auditdb }
+  migration: { enabled: true }
 
-# Suppliers (MongoDB): no message store. Its --migrate (as the server's root) creates the least-privilege `debezium` user of
-# debezium-mongo, with read on every captured MongoDB database (plan 07 Task 4: it fails on purpose without these).
+# Suppliers (MongoDB): no message store. It connects as suppliers_app (readWrite on suppliersdb only); the users, debezium-mongo's too,
+# come from the platform's db-roles Job (infra/mongo/users.js, plan 08 Task 4).
 suppliers:
   name: suppliers-api
   # Peak working set 125 MiB (RSS 228) over two demo resets on k3d with pre-generated Wolverine code (plan 07 Task 5b);
@@ -163,13 +163,7 @@ suppliers:
     ConnectionStrings__suppliersdb: { secret: procure-connection-strings, key: suppliersdb }
   calls: [access-api]
   waitFor: [http://debezium-mongo-0.debezium:8080/q/health]
-  migration:
-    enabled: true
-    env:
-      Mongo__DebeziumDatabases__0: suppliersdb
-      Mongo__DebeziumDatabases__1: assistantchatdb
-    secretEnv:
-      Mongo__DebeziumPassword: { secret: procure-debezium, key: mongo-password }
+  migration: { enabled: true }
 
 requests:
   name: requests-api
@@ -184,7 +178,7 @@ requests:
     ConnectionStrings__requestsdb: { secret: procure-connection-strings, key: requestsdb }
   calls: [access-api, approvals-api, suppliers-api]
   waitFor: [http://debezium-requestsdb-0.debezium:8080/q/health]
-  migration: { enabled: true, createPostgresDatabase: requestsdb }
+  migration: { enabled: true }
 
 # Purchasing: orders to the supplier (the simulators) with the simulator key; the supplier's webhooks are signed with the shared secret.
 purchasing:
@@ -204,7 +198,7 @@ purchasing:
     Webhooks__Sources__supplier__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
   calls: [access-api]
   waitFor: [http://debezium-purchasingdb-0.debezium:8080/q/health]
-  migration: { enabled: true, createPostgresDatabase: purchasingdb }
+  migration: { enabled: true }
 
 # The Assistant: assistantdb (pgvector) plus the chat history on MongoDB (assistantchatdb, captured by debezium-mongo). The model provider
 # is configuration (AI__*): none here, so the Fake provider runs (no key, no account) until plan 08 adds a real one.
@@ -226,7 +220,7 @@ assistant:
   waitFor:
     - http://debezium-assistantdb-0.debezium:8080/q/health
     - http://debezium-mongo-0.debezium:8080/q/health
-  migration: { enabled: true, createPostgresDatabase: assistantdb }
+  migration: { enabled: true }
 
 invoicing:
   name: invoicing-api
@@ -245,7 +239,7 @@ invoicing:
     Webhooks__Sources__supplier__Secret: { secret: procure-api-keys, key: supplier-webhook-secret }
   calls: [access-api, assistant-api]
   waitFor: [http://debezium-invoicingdb-0.debezium:8080/q/health]
-  migration: { enabled: true, createPostgresDatabase: invoicingdb }
+  migration: { enabled: true }
 
 # Notifications: no database (no migration, no Debezium). Emails through Mailpit; the links point at the app's public host. The status
 # screen expects a snapshot from every service API.

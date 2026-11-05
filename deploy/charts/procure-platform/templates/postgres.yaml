@@ -1,8 +1,9 @@
 {{- $r := .Values.appHostResources.Postgres }}
 {{- $labels := dict "root" $ "name" "postgres" }}
 # Postgres: our image (pgvector pg17 + pgaudit), with the AppHost's server arguments (AppHost.cs). One server for every service database
-# and keycloakdb (role keycloak from infra/postgres/initdb/02-keycloak.sh). The databases of the services are created by their
-# migrations; each migration also creates its own publication for Debezium (CdcMigrations.EnableCdc).
+# and keycloakdb (role keycloak from infra/postgres/initdb/02-keycloak.sh). The databases of the services and their roles come from the
+# db-roles Job (the image's /procureai/roles.sql, plan 08 ruling 6); each migration creates its own publication for Debezium
+# (CdcMigrations.EnableCdc).
 apiVersion: v1
 kind: Service
 metadata:
@@ -85,12 +86,6 @@ spec:
             # PGDATA in a subfolder of the mount (initdb needs an empty folder; the volume root holds lost+found on some filesystems).
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
-            # initdb/01-debezium.sh: the replication role Debezium logs in as.
-            - name: DEBEZIUM_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: procure-debezium
-                  key: postgres-password
             # initdb/02-keycloak.sh: role keycloak and database keycloakdb.
             - name: KEYCLOAK_DB_PASSWORD
               valueFrom:
