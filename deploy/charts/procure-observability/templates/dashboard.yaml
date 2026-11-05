@@ -63,6 +63,9 @@ spec:
               value: http://+:18888
             - name: DOTNET_DASHBOARD_OTLP_ENDPOINT_URL
               value: http://+:18889
+            # The address the browser uses (Traefik, TLS): Blazor's WebSocket Origin check allows it.
+            - name: Dashboard__Frontend__PublicUrl
+              value: {{ printf "https://%s" .Values.hosts.dashboard }}
             # Browser sign-in with Keycloak (code flow + PKCE, confidential client).
             - name: Dashboard__Frontend__AuthMode
               value: OpenIdConnect

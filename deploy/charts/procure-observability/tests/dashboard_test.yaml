@@ -72,6 +72,19 @@ tests:
   # Security-guidance finding on the first commit: the dashboard API (telemetry API /api/telemetry and the MCP server, Dashboard:Api in
   # 13.6) has its own auth mode and is not needed here, so it is switched off (both keys 13.6.2 reads: Dashboard:Api:Disabled and
   # Dashboard:Api:Enabled), and its MCP port 18891 is neither a container port nor in the Service.
+  # Its public address behind Traefik: without it the dashboard rejected Blazor's WebSocket (Origin https://<host> not allowed) and
+  # fell back to long polling.
+  - it: dashboard knows its public url
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Dashboard__Frontend__PublicUrl
+            value: https://dashboard.procure.localtest.me
+
   - it: dashboard api and mcp server are disabled
     documentSelector:
       path: kind
