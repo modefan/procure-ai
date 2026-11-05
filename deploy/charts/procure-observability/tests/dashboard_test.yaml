@@ -165,3 +165,27 @@ tests:
               port: 18889
               targetPort: otlp-grpc
               protocol: TCP
+
+  # Plan 08 Task 6: the SQLite telemetry database (in /tmp) filled the 64Mi emptyDir and the pod was evicted about every 10 minutes. /tmp is
+  # sized for the measured bound, and the metric points per dimension are capped for real.
+  - it: dashboard keeps its telemetry database on a sized tmp emptyDir
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir:
+              sizeLimit: 256Mi
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Dashboard__TelemetryLimits__MaxMetricsCount
+            value: "200"

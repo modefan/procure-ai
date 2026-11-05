@@ -141,9 +141,10 @@ spec:
               mountPath: {{ $d.caTrust.mountPath }}
               readOnly: true
       volumes:
+        # The dashboard's SQLite telemetry database (values.yaml dashboard.tmpSizeLimit).
         - name: tmp
           emptyDir:
-            sizeLimit: 64Mi
+            sizeLimit: {{ $d.tmpSizeLimit }}
         - name: procure-ca
           configMap:
             name: {{ $d.caTrust.configMap }}

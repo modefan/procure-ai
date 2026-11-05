@@ -28,12 +28,18 @@ dashboard:
     secretKey: dashboard-secret
     requiredClaimType: dashboard_roles
     requiredClaimValue: dashboard-viewer
-  # The dashboard keeps telemetry in memory (lost on restart, CLAUDE.md "Observability" known limits). Caps per resource, smaller than
-  # the defaults (10 000) to keep the pod within its limit on the 10 GB node.
+  # Dashboard 13.6 keeps telemetry in a SQLite database (persistence mode None, the standalone default: a temporary database, gone with the
+  # pod; CLAUDE.md "Observability" known limits) in /tmp (a temporary directory: Dashboard:Data:Directory applies to the persistent modes
+  # only, checked on 13.6.2), the `tmp` emptyDir below. Logs and traces are capped in total, metric points per
+  # dimension (about 1 200 dimensions here). Measured on k3d (plan 08 Task 6): 5 000 logs ~4 MB, 5 000 traces ~50 MB, about 300 metric
+  # points a minute; the plan 07 cap of 20 000 points per dimension was in effect no cap, and the database outgrew the 64Mi /tmp in 10-20
+  # minutes (the pod was evicted). 200 points per dimension (hours of history at the apps' 60 s export) bound it to roughly 75 MB.
   telemetryLimits:
     maxLogCount: 5000
     maxTraceCount: 5000
-    maxMetricsCount: 20000
+    maxMetricsCount: 200
+  # /tmp's emptyDir (on the node's disk, not memory): the database, about twice the measured bound of the caps above.
+  tmpSizeLimit: 256Mi
   # The .NET GC heap cap (as the apps' DOTNET_GCHeapHardLimit): 288 MiB of the 384 MiB limit.
   heapHardLimit: "0x12000000"
   resources:
