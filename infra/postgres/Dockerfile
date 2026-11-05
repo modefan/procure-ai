@@ -1,6 +1,9 @@
 # Postgres 17 with pgvector (from the base image) plus pgaudit.
 # Logical WAL, pgaudit, logging and memory settings are passed as server arguments by the Aspire AppHost.
-FROM pgvector/pgvector:pg17
+# Pinned by digest (the multi-arch index of pg17 on 2026-11-05, plan 08 Task 6): the platform image's tag is the tree hash of infra/postgres,
+# so a floating base would change the image under an unchanged tag. To move on: docker buildx imagetools inspect pgvector/pgvector:pg17,
+# put the new index digest here (the tag changes with it and the platform rolls Postgres).
+FROM pgvector/pgvector:pg17@sha256:7d0a41464797aeb9862dfdc0bbf1526b82cfd324cdd8036df19e3545f4a9ccb8
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends postgresql-17-pgaudit \
