@@ -191,6 +191,27 @@ public sealed class AssistantServiceTests(AssistantApp app)
         }
     }
 
+    [Fact]
+    public async Task Vector_data_source_carries_the_max_pool_size()
+    {
+        // EF Core with UseVector() builds a data source (an Npgsql pool) of its own; the pool budget (AppHost.Tests
+        // ServiceResourcesTests.Pool_sizes_fit_max_connections) counts it at Database:MaxPoolSize, so the cap must reach it. The test database's
+        // own string says nothing about pooling (Npgsql's default is 100); ServiceHost adds Database:MaxPoolSize (default 10).
+        await using var scope = app.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AssistantDbContext>();
+        var connection = (Npgsql.NpgsqlConnection)db.Database.GetDbConnection();
+        await db.Database.OpenConnectionAsync(Ct);
+        try
+        {
+            new Npgsql.NpgsqlConnectionStringBuilder(connection.ConnectionString).MaxPoolSize
+                .ShouldBe(new ProcureAi.BuildingBlocks.Web.Options.DatabaseOptions().MaxPoolSize);
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync();
+        }
+    }
+
     private AssistantDbContext NewDbContext() =>
         new(new DbContextOptionsBuilder<AssistantDbContext>()
             .UseNpgsql(app.Infra.DbConnectionString, npgsql => npgsql.UseVector())

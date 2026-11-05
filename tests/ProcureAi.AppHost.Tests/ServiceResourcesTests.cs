@@ -75,7 +75,7 @@ public sealed class ServiceResourcesTests
         ["invoicing-api"] = 2,   // plain/EF Core + Wolverine
         ["requests-api"] = 2,    // plain/EF Core + Wolverine
         ["audit-api"] = 2,       // plain connections + Marten (its Wolverine store is Marten's)
-        ["assistant-api"] = 3,   // plain + EF Core with UseVector() (own data source) + Wolverine
+        ["assistant-api"] = 3,   // plain + EF Core with UseVector() (own data source; its cap: AssistantServiceTests.Vector_data_source_carries_the_max_pool_size) + Wolverine
     };
 
     /// <summary>
@@ -89,6 +89,15 @@ public sealed class ServiceResourcesTests
                 $"'{service}' uses Postgres but has no entry in PoolsPerService. Count its Npgsql pools (plain/EF Core, Wolverine's message store, " +
                 "Marten, an EF Core UseVector() data source), add them, and check that Pool_sizes_fit_max_connections still holds.");
 
+    /// <summary>
+    /// The worst case: every pool of every Postgres API full at once, plus Debezium, Keycloak and the reserved connections. Assumptions
+    /// (plan 08 Task 6, carry-over 30): one replica per service (values.yaml has no replicas above 1), and no overlap of old and new pods:
+    /// a deploy's migration Jobs (Sync hooks, all at once) run while the old API pods still hold their pools, and the chart's maxSurge 0
+    /// (envs/local) replaces a pod only after the old one is gone. A migration opens at most its plain/EF Core pool, so the overlap would add
+    /// up to one pool per service; measured on the cluster, idle pools stay far below their cap (Npgsql prunes idle connections). If replicas
+    /// ever exceed 1, or a surge is allowed, add the extra pods (and the migrations) to this sum. Wolverine's listener connections come from
+    /// its message store's pool and are inside its cap.
+    /// </summary>
     [Fact]
     public async Task Pool_sizes_fit_max_connections()
     {
@@ -668,7 +677,7 @@ public sealed class ServiceResourcesTests
         // (Aspire keeps the mode in an internal annotation, a record that prints its value.)
         model.Resources.OfType<MongoDBServerResource>().Single().Annotations
             .Single(a => a.GetType().Name == "MongoDBServerTlsModeAnnotation").ToString()!.ShouldContain("PreferTls");
-        env.ShouldContainKeyAndValue("JAVA_OPTS", "-Xmx256m");
+        env.ShouldContainKeyAndValue("JAVA_OPTS", "-Xmx256m -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m -Xss512k -XX:MaxMetaspaceSize=128m");
         env.ShouldContainKey(ServiceResources.SelfHealEnvironmentVariable);
         env.ShouldContainKey("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME");
         env.ShouldContainKey("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD");

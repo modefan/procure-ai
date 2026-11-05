@@ -34,7 +34,7 @@ appHostResources:
   Postgres: { MemoryMb: 768, Cpus: 1, SharedBuffers: 128MB, WorkMem: 4MB, MaxConnections: 200, PoolSizePerService: 8, ReservedConnections: 30 }
   Mongo: { MemoryMb: 512, Cpus: 1, WiredTigerCacheGb: 0.25 }
   Keycloak: { MemoryMb: 768, Cpus: 1, JavaHeapOpts: "-Xms256m -Xmx512m" }
-  Debezium: { MemoryMb: 512, Cpus: 0.3, JavaOpts: "-Xmx256m" }
+  Debezium: { MemoryMb: 512, Cpus: 0.3, JavaOpts: "-Xmx256m -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m -Xss512k -XX:MaxMetaspaceSize=128m" }
   RabbitMq: { MemoryMb: 384, Cpus: 1, VmMemoryHighWatermarkAbsolute: 256MiB }
   Redis: { MemoryMb: 192, Cpus: 1, MaxMemory: 128mb, MaxMemoryPolicy: volatile-ttl }
   Mailpit: { MemoryMb: 64, Cpus: 0.5 }
