@@ -58,6 +58,9 @@ postgres:
   image: procure-ai-postgres   # our image (infra/postgres): pgvector pg17 + pgaudit + initdb scripts
   user: postgres               # the superuser; its password is Secret procure-postgres (key password)
   storage: 5Gi
+  # max_slot_wal_keep_size: the most WAL one replication slot may hold back. Past it Postgres invalidates the slot (Debezium then fails
+  # loudly) instead of filling the volume above. Debezium's heartbeats keep idle slots far below it.
+  maxSlotWalKeepSize: 1GB
 
 mongo:
   image: docker.io/library/mongo:8.3
@@ -88,6 +91,10 @@ mailpit:
 debezium:
   image: procure-ai-debezium   # our image (infra/debezium): quay.io/debezium/server plus both properties files
   storage: 1Gi                 # the offsets (/debezium/data), one volume per instance
+  # Heartbeats of the Postgres instances: every interval Debezium runs the action query in its database (the table is in the publication,
+  # so an idle database still moves its replication slot). Same values as the AppHost (Debezium:HeartbeatIntervalMs; ChartDebeziumTests).
+  heartbeatIntervalMs: 60000
+  heartbeatActionQuery: UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1
   # What Debezium captures: the same as the AppHost's ServiceSpecs (CapturedTables), checked by AppHost.Tests ChartDebeziumTests.
   # One StatefulSet debezium-<database> per entry; each service's migration creates the publication dbz_publication with these tables.
   postgres:

@@ -283,6 +283,10 @@ For a service that holds no business data of its own (Notifications: live pushes
   `migrationBuilder.EnableCdc("table", ...)` (and `DisableCdc` in `Down`). It creates `dbz_publication` if missing, adds the
   tables, sets `REPLICA IDENTITY FULL` and grants `SELECT` to `debezium`; idempotent, and it fails when the `debezium` role is
   missing. Always include `audit_entries`; never the Wolverine tables.
+- **The heartbeat table**: also call `migrationBuilder.EnableHeartbeat()` (after `EnableCdc`; `DisableHeartbeat` in `Down`). It creates
+  `debezium_heartbeat` (one row) in the publication and lets `debezium` update it; Debezium's heartbeat (`heartbeat.action.query`, every
+  `Debezium:HeartbeatIntervalMs`) updates that row, so the slot of a database nobody writes to still moves and does not hold back the
+  server's WAL (Postgres caps what a stuck slot may keep with `max_slot_wal_keep_size`). Do not add it to `CapturedTables`; Audit ignores it.
 - **Nothing precedes the capture**: Debezium runs with `snapshot.mode=no_data` (only changes after its slot exists), so the
   `<name>-api` resource waits for `debezium-<database>` to be healthy (`/q/health`). The demo seed written by `--migrate`
   runs before Debezium starts and is deliberately **not** captured (seed data is not a user action).

@@ -111,6 +111,42 @@ tests:
           value: StatefulSet
           matchMany: true
 
+  # Heartbeats (plan 08 Task 1): an idle database still moves its slot. Every heartbeat updates the one row of debezium_heartbeat (in each
+  # service's publication), so Debezium receives a change and confirms its LSN to Postgres, which can then recycle the WAL behind it.
+  - it: debezium sets heartbeat action query
+    documentSelector:
+      path: metadata.name
+      value: debezium-requestsdb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_HEARTBEAT_INTERVAL_MS, value: "60000" }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_HEARTBEAT_ACTION_QUERY, value: "UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1" }
+
+  - it: the heartbeat interval comes from values
+    set:
+      debezium.heartbeatIntervalMs: 10000
+    documentSelector:
+      path: metadata.name
+      value: debezium-accessdb
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_HEARTBEAT_INTERVAL_MS, value: "10000" }
+
+  # The MongoDB connector has no replication slot (change streams); its heartbeat settings would name a Postgres table.
+  - it: debezium mongo has no heartbeat action query
+    documentSelector:
+      path: metadata.name
+      value: debezium-mongo
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: DEBEZIUM_SOURCE_HEARTBEAT_ACTION_QUERY }
+          any: true
+
   - it: debezium mongo uses tls and a truststore
     documentSelector:
       path: metadata.name

@@ -17,6 +17,13 @@ public static class DebeziumChangeHandler
         DebeziumChange change, IDataChangeStore store, IMessageBus bus, IOptions<AuditOptions> options, ILogger<DebeziumChange> logger,
         CancellationToken cancellationToken)
     {
+        if (change.IsHeartbeat)
+        {
+            // Debezium's heartbeat (it moves the replication slot of an idle database); not published today (not in the include list),
+            // and never stored should it be.
+            return;
+        }
+
         var audit = options.Value;
         if (change.IsInterceptorEntry)
         {

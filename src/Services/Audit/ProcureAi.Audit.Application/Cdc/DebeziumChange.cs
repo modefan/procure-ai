@@ -40,6 +40,16 @@ public sealed record DebeziumChange(
 
     private bool IsInterceptorInsert => Source.Table == InterceptorEntry.SourceTable && Operation == "c" && Row is not null;
 
+    /// <summary>
+    /// The table Debezium's heartbeat updates in every captured database (CdcMigrations.HeartbeatTable in BuildingBlocks.Persistence;
+    /// plan 08 Task 1). It is in each publication only so an idle database's replication slot moves; nobody changes it.
+    /// </summary>
+    public const string HeartbeatTable = "debezium_heartbeat";
+
+    /// <summary>A change of Debezium's own heartbeat row: never a data change, never "outside the app".</summary>
+    [JsonIgnore]
+    public bool IsHeartbeat => Source.Table == HeartbeatTable;
+
     /// <summary>A change of one row (not a truncate or a logical message, which name no row).</summary>
     [JsonIgnore]
     public bool IsRowChange => Operations.ContainsKey(Operation) && Row is not null && Source.TransactionId is not null && Source.Lsn is not null;

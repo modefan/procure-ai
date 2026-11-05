@@ -39,6 +39,7 @@ public sealed class ChartDebeziumTests
             {
                 "DEBEZIUM_SOURCE_DATABASE_DBNAME", "DEBEZIUM_SOURCE_TOPIC_PREFIX", "DEBEZIUM_SOURCE_SLOT_NAME", "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST",
                 "DEBEZIUM_SOURCE_COLLECTION_INCLUDE_LIST", "DEBEZIUM_SOURCE_MONGODB_USER",
+                ServiceResources.HeartbeatIntervalEnvironmentVariable, ServiceResources.HeartbeatActionQueryEnvironmentVariable,
             })
             {
                 if (expected.TryGetValue(key, out var value))
@@ -51,9 +52,47 @@ public sealed class ChartDebeziumTests
                 }
             }
 
+            // Every Postgres Debezium beats (plan 08 Task 1): an idle database must still move its replication slot.
+            if (expected.ContainsKey("DEBEZIUM_SOURCE_DATABASE_DBNAME"))
+            {
+                expected.ShouldContainKeyAndValue(ServiceResources.HeartbeatActionQueryEnvironmentVariable, ServiceResources.HeartbeatActionQuery, name);
+                expected.ShouldContainKey(ServiceResources.HeartbeatIntervalEnvironmentVariable, name);
+            }
+
             // The deployment fails loudly on a lost offset (plan 07: self-heal off in Kubernetes), whatever the local AppHost does.
             actual.ShouldContainKeyAndValue(ServiceResources.SelfHealEnvironmentVariable, "false", name);
         }
+    }
+
+    /// <summary>
+    /// Plan 08 Task 1: the cluster's Postgres caps the WAL a replication slot may hold back exactly as the AppHost's does
+    /// (<c>max_slot_wal_keep_size</c>, AppHost <c>Postgres:MaxSlotWalKeepSize</c>, chart <c>postgres.maxSlotWalKeepSize</c>).
+    /// </summary>
+    [Fact]
+    public async Task Chart_postgres_caps_slot_wal_like_apphost()
+    {
+        var helm = FindOnPath("helm");
+        if (helm is null)
+        {
+            Assert.Skip("helm is not on PATH: the chart's Postgres cannot be rendered (CI's charts job and the PC have it).");
+        }
+
+        await using var scope = await ServiceResourcesTests.ModelScope.BuildAsync();
+        var postgres = scope.Model.Resources.OfType<ContainerResource>().Single(r => r.Name == "postgres");
+        var args = new List<object>();
+        var context = new CommandLineArgsCallbackContext(args, postgres, CancellationToken.None);
+        foreach (var annotation in postgres.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(context);
+        }
+
+        var setting = args.Select(a => a.ToString()!).SingleOrDefault(a => a.StartsWith("max_slot_wal_keep_size=", StringComparison.Ordinal));
+        setting.ShouldNotBeNull("the AppHost's Postgres has no max_slot_wal_keep_size");
+        setting.ShouldNotBe("max_slot_wal_keep_size=-1");
+
+        var rendered = await RenderAsync(helm, "templates/postgres.yaml");
+        rendered.Split('\n').Select(l => l.Trim())
+            .ShouldContain($"- {setting}", "the chart's Postgres runs with the AppHost's max_slot_wal_keep_size");
     }
 
     private static async Task<string> RenderAsync(string helm, string template)

@@ -282,6 +282,33 @@ public sealed class CdcTests(AuditApp app)
         metric.Sum(("database", database)).ShouldBe(2);
     }
 
+    /// <summary>
+    /// Debezium's heartbeat (plan 08 Task 1) updates the one row of <c>debezium_heartbeat</c> in every captured database each interval. The
+    /// table is in the publication (so the slot moves), not a change anyone made: it must never become a data change or an "outside the
+    /// app" alert. A real change of the same database, sent after it through the broker, shows the heartbeat was consumed by then.
+    /// </summary>
+    [Fact]
+    public async Task Heartbeat_changes_are_not_stored()
+    {
+        using var metric = new CounterRecorder(OutsideAppMetric);
+        var database = NewDatabase();
+        var heartbeat = SyntheticTransaction.New(database, AuditApp.NewTenant()) with { Table = "debezium_heartbeat", HasTenantColumn = false };
+        var control = SyntheticTransaction.New(database, AuditApp.NewTenant());
+
+        await PublishAsync(heartbeat.ChangeRoutingKey, heartbeat.ChangeJson());
+        await PublishAsync(control.ChangeRoutingKey, control.ChangeJson());
+        await app.WaitForAsync<DataChange>(
+            q => q.Where(c => c.Id == control.ChangeId), found => found.Count == 1 && found[0].Attribution.Kind == AttributionKind.OutsideApp, AfterGrace);
+
+        (await app.QueryAsync<DataChange>(q => q.Where(c => c.Database == database && c.Table == "debezium_heartbeat"))).ShouldBeEmpty();
+        (await app.QueryAsync<OutsideAppAlert>(q => q.Where(a => a.Database == database && a.Table == "debezium_heartbeat"))).ShouldBeEmpty();
+        metric.Sum(("database", database), ("table", "debezium_heartbeat")).ShouldBe(0);
+
+        // Also when handed straight to the handler (no broker in between).
+        await InvokeAsync(heartbeat.ChangeJson());
+        (await app.QueryAsync<DataChange>(q => q.Where(c => c.Database == database && c.Table == "debezium_heartbeat"))).ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Redelivered_change_is_stored_once()
     {

@@ -55,9 +55,9 @@ public sealed class AssistantServiceTests(AssistantApp app)
                 .ShouldBe(1L, table);
         }
 
-        // Debezium's publication has the documents and the audit rows only (never chunks, file bytes or Wolverine's tables).
+        // Debezium's publication has the documents, the audit rows and the heartbeat row only (never chunks, file bytes or Wolverine's tables).
         (await app.ColumnAsync("SELECT tablename::text FROM pg_publication_tables WHERE pubname = 'dbz_publication' ORDER BY tablename"))
-            .ShouldBe(["audit_entries", "policy_documents"]);
+            .ShouldBe(["audit_entries", "debezium_heartbeat", "policy_documents"]);
         // Wolverine's outbox and inbox, created by --migrate (the API never changes the schema at startup in production).
         (await app.ScalarAsync<long>(
                 "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wolverine' AND table_name = 'wolverine_incoming_envelopes'"))

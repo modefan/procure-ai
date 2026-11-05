@@ -45,6 +45,61 @@ public static class CdcMigrations
         return migrationBuilder;
     }
 
+    /// <summary>
+    /// The table Debezium's heartbeat updates (<c>heartbeat.action.query</c> in infra/debezium/application.properties, the AppHost and the
+    /// chart): one row, <c>id = 1</c>. Audit ignores its changes.
+    /// </summary>
+    public const string HeartbeatTable = "debezium_heartbeat";
+
+    /// <summary>
+    /// Creates <see cref="HeartbeatTable"/> with its one row, adds it to the publication and lets <c>debezium</c> update it. Debezium's
+    /// heartbeat updates that row every interval; because the table is in the publication, even a database whose captured tables never
+    /// change sends Debezium a change, Debezium confirms its LSN and Postgres can recycle the WAL behind the replication slot (Postgres 15+
+    /// skips empty transactions, so an update of an unpublished table would not move the slot). Idempotent; run after
+    /// <see cref="EnableCdc"/> (it needs the publication and the role).
+    /// </summary>
+    public static MigrationBuilder EnableHeartbeat(this MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.Sql($$"""
+            DO $cdc$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{DebeziumRole}}') THEN
+                    RAISE EXCEPTION 'The role {{DebeziumRole}} does not exist: change data capture cannot be set up (see infra/postgres/initdb).';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '{{PublicationName}}') THEN
+                    CREATE PUBLICATION {{PublicationName}};
+                END IF;
+                CREATE TABLE IF NOT EXISTS public.{{HeartbeatTable}} (id int PRIMARY KEY, beat_at timestamptz NOT NULL);
+                INSERT INTO public.{{HeartbeatTable}} (id, beat_at) VALUES (1, now()) ON CONFLICT (id) DO NOTHING;
+                IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
+                               WHERE pubname = '{{PublicationName}}' AND schemaname = 'public' AND tablename = '{{HeartbeatTable}}') THEN
+                    ALTER PUBLICATION {{PublicationName}} ADD TABLE public.{{HeartbeatTable}};
+                END IF;
+                GRANT USAGE ON SCHEMA public TO {{DebeziumRole}};
+                GRANT SELECT, UPDATE ON public.{{HeartbeatTable}} TO {{DebeziumRole}};
+            END
+            $cdc$;
+            """);
+        return migrationBuilder;
+    }
+
+    /// <summary>Reverses <see cref="EnableHeartbeat"/>: the table leaves the publication and is dropped.</summary>
+    public static MigrationBuilder DisableHeartbeat(this MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.Sql($$"""
+            DO $cdc$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_publication_tables
+                           WHERE pubname = '{{PublicationName}}' AND schemaname = 'public' AND tablename = '{{HeartbeatTable}}') THEN
+                    ALTER PUBLICATION {{PublicationName}} DROP TABLE public.{{HeartbeatTable}};
+                END IF;
+                DROP TABLE IF EXISTS public.{{HeartbeatTable}};
+            END
+            $cdc$;
+            """);
+        return migrationBuilder;
+    }
+
     /// <summary>Reverses <see cref="EnableCdc"/> for <paramref name="tables"/>. The publication itself stays (other tables may use it).</summary>
     public static MigrationBuilder DisableCdc(this MigrationBuilder migrationBuilder, params string[] tables)
     {

@@ -69,6 +69,11 @@ spec:
             - {{ printf "work_mem=%s" $r.WorkMem }}
             - -c
             - {{ printf "max_connections=%v" $r.MaxConnections }}
+            # Seven-plus logical replication slots (one per Debezium) share this server. A slot holds back WAL until its Debezium confirms it;
+            # past this much WAL Postgres invalidates the slot (wal_status lost) rather than fill the disk. Debezium's heartbeats keep idle
+            # slots moving (debezium.heartbeatIntervalMs), so only a Debezium that is down or stuck can reach the cap; it then fails loudly.
+            - -c
+            - {{ printf "max_slot_wal_keep_size=%s" (required "postgres.maxSlotWalKeepSize is required" .Values.postgres.maxSlotWalKeepSize) }}
           env:
             - name: POSTGRES_USER
               value: {{ .Values.postgres.user | quote }}

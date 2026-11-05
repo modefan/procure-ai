@@ -117,6 +117,11 @@ the node without draining it, so Postgres recovers from its WAL at the next star
 replication slot may fall back to its last checkpoint, which only means a few changes are decoded again; Audit stores each change once.
 `tests/Test-RestartKeepsData.ps1` checks that nothing is lost or doubled.
 
+Seven Debezium replication slots share the one Postgres. Each Debezium beats every `debezium.heartbeatIntervalMs` (an update of
+`debezium_heartbeat` in its database), so an idle database's slot keeps up with the WAL; `postgres.maxSlotWalKeepSize` (1GB) caps what a
+slot whose Debezium is down may hold back (past it Postgres invalidates the slot and that Debezium fails loudly: drop the slot, delete its offsets
+and restart it, accepting a CDC gap). `tests/Test-WalSlotsAdvance.ps1` in the GitOps repo checks both.
+
 ## How a push deploys
 
 ```text

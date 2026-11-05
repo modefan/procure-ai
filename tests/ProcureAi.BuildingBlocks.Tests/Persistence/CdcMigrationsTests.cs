@@ -110,6 +110,32 @@ public sealed class CdcMigrationsTests(PostgresFixture postgres) : IClassFixture
         (await QueryAsync(db, "SELECT relreplident::text FROM pg_class WHERE relname = 'order_lines'")).ShouldBe(["d"]);
     }
 
+    /// <summary>
+    /// Plan 08 Task 1: the heartbeat table, its one row, in the publication, and the debezium role may run the heartbeat action query
+    /// (the role is not a superuser). Idempotent; Down removes it again.
+    /// </summary>
+    [Fact]
+    public async Task Heartbeat_table_is_published_and_debezium_can_beat()
+    {
+        var db = await NewDatabaseWithTablesAsync("cdc_heartbeat");
+        await ExecuteAsync(db, Sql(b => b.EnableCdc("orders")));
+        var heartbeat = Sql(b => b.EnableHeartbeat());
+
+        await ExecuteAsync(db, heartbeat);
+        await ExecuteAsync(db, heartbeat);
+
+        (await QueryAsync(db, "SELECT tablename FROM pg_publication_tables WHERE pubname = 'dbz_publication' ORDER BY 1"))
+            .ShouldBe([CdcMigrations.HeartbeatTable, "orders"]);
+        (await QueryAsync(db, $"SELECT id::text FROM {CdcMigrations.HeartbeatTable}")).ShouldBe(["1"]);
+        await ExecuteAsync(
+            db,
+            $"SET ROLE {CdcMigrations.DebeziumRole}; UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1; RESET ROLE;");
+
+        await ExecuteAsync(db, Sql(b => b.DisableHeartbeat()));
+        (await QueryAsync(db, "SELECT tablename FROM pg_publication_tables WHERE pubname = 'dbz_publication'")).ShouldBe(["orders"]);
+        (await QueryAsync(db, $"SELECT count(*)::text FROM pg_class WHERE relname = '{CdcMigrations.HeartbeatTable}'")).ShouldBe(["0"]);
+    }
+
     [Fact]
     public async Task Drops_an_inactive_legacy_replication_slot_and_keeps_others()
     {

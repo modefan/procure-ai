@@ -292,7 +292,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
             m => m.RoutingKey == "requestsdb.public.purchase_requests"
                  && m.After.GetProperty("id").GetString() == created.Id.ToString(),
             CdcTimeout);
-        // Deterministic part: only the business tables and audit_entries are in the publication (wolverine.* is not).
+        // Deterministic part: only the business tables, audit_entries and debezium_heartbeat are in the publication (wolverine.* is not).
         await using (var connection = new NpgsqlConnection(infra.RequestsDbConnectionString))
         {
             await connection.OpenAsync();
@@ -305,7 +305,7 @@ public sealed class AuditTests(InfraFixture infra) : IAsyncLifetime
                 tables.Add(reader.GetString(0));
             }
 
-            tables.ShouldBe(["public.audit_entries", "public.purchase_requests", "public.request_lines"]);
+            tables.ShouldBe(["public.audit_entries", "public.debezium_heartbeat", "public.purchase_requests", "public.request_lines"]);
         }
 
         // And what Debezium actually sent for that transaction carries nothing from the wolverine schema.

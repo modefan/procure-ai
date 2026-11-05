@@ -11,6 +11,11 @@
 # What to capture: debezium.postgres and debezium.mongo in values.yaml, the same tables and collections as the AppHost's ServiceSpecs
 # (AppHost.Tests ChartDebeziumTests renders this template and compares).
 #
+# Heartbeats (Postgres instances only): every debezium.heartbeatIntervalMs Debezium runs debezium.heartbeatActionQuery, an update of the one
+# row of debezium_heartbeat in its database. That table is in each service's publication (CdcMigrations.EnableHeartbeat), so even a
+# database nobody writes to sends Debezium a change, Debezium confirms its LSN and Postgres can recycle the WAL behind the slot
+# (postgres.maxSlotWalKeepSize caps what a stuck slot may hold). Audit ignores the heartbeat table's changes.
+#
 # Nobody connects to Debezium; this headless Service only governs the StatefulSets' pod names.
 apiVersion: v1
 kind: Service
@@ -36,6 +41,8 @@ spec:
   (dict "name" "DEBEZIUM_SOURCE_TOPIC_PREFIX" "value" .database)
   (dict "name" "DEBEZIUM_SOURCE_SLOT_NAME" "value" (printf "debezium_%s" .database))
   (dict "name" "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST" "value" (include "procure-platform.debeziumTables" .tables))
+  (dict "name" "DEBEZIUM_SOURCE_HEARTBEAT_INTERVAL_MS" "value" (toString $.Values.debezium.heartbeatIntervalMs))
+  (dict "name" "DEBEZIUM_SOURCE_HEARTBEAT_ACTION_QUERY" "value" $.Values.debezium.heartbeatActionQuery)
 }}
 ---
 {{- include "procure-platform.debezium" (dict "root" $ "name" (printf "debezium-%s" .database) "image" $image "javaOpts" $r.JavaOpts "env" $env "mongo" false) }}

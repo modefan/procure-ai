@@ -43,6 +43,27 @@ tests:
             name: PGDATA
             value: /var/lib/postgresql/data/pgdata
 
+  # Seven-plus logical replication slots share this server: a slot whose Debezium falls behind (or stops) must not fill the disk. Past this
+  # cap Postgres invalidates the slot (wal_status lost) instead; Debezium then fails loudly (self-heal is off in deployments).
+  - it: postgres sets max_slot_wal_keep_size
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: max_slot_wal_keep_size=1GB
+  - it: max_slot_wal_keep_size comes from values
+    set:
+      postgres.maxSlotWalKeepSize: 3GB
+    documentSelector:
+      path: kind
+      value: StatefulSet
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: max_slot_wal_keep_size=3GB
+
   - it: postgres keeps its data on a local-path volume of the size in values
     set:
       postgres.storage: 7Gi

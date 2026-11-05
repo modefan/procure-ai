@@ -10,6 +10,14 @@ var useDataVolumes = builder.Configuration.GetValue("Persistence:UseDataVolumes"
 // Off unless configured (appsettings.json turns it on for local runs): a Debezium whose stored offset is gone drops it and
 // streams from a new slot, leaving a CDC gap. Deployments must opt in explicitly. See ServiceResources.AddDebeziumFor.
 var debeziumSelfHeal = builder.Configuration.GetValue("Debezium:SelfHealLostOffsets", false);
+// Every interval each Postgres Debezium updates the one row of debezium_heartbeat in its database (in the publication), so an idle database
+// still moves its replication slot (plan 08 Task 1). The chart's debezium.heartbeatIntervalMs has the same value (ChartDebeziumTests).
+var debeziumHeartbeatIntervalMs = builder.Configuration.GetValue<int?>("Debezium:HeartbeatIntervalMs")
+    ?? throw new InvalidOperationException("Configuration Debezium:HeartbeatIntervalMs is required.");
+// The most WAL one replication slot may hold back (max_slot_wal_keep_size); past it Postgres invalidates the slot instead of filling the
+// disk. The chart's postgres.maxSlotWalKeepSize has the same value (ChartDebeziumTests).
+var maxSlotWalKeepSize = builder.Configuration["Postgres:MaxSlotWalKeepSize"]
+    ?? throw new InvalidOperationException("Configuration Postgres:MaxSlotWalKeepSize is required.");
 
 // Parameters. Secrets come from AppHost user secrets (never the repo); see DEMO PASSWORDS.txt.
 var keycloakAdmin = builder.AddParameter("keycloak-admin");
@@ -72,7 +80,8 @@ var postgres = builder.AddPostgres(ResourceNames.Postgres)
         "-c", "log_rotation_age=1d",
         "-c", $"shared_buffers={limits.Postgres.SharedBuffers}",
         "-c", $"work_mem={limits.Postgres.WorkMem}",
-        "-c", $"max_connections={limits.Postgres.MaxConnections}")
+        "-c", $"max_connections={limits.Postgres.MaxConnections}",
+        "-c", $"max_slot_wal_keep_size={maxSlotWalKeepSize}")
     // PGDATA in a subfolder of the mount (as the image docs advise for mounted volumes): initdb needs an empty folder,
     // and volumes made by earlier versions hold an empty "data" folder.
     .WithEnvironment("PGDATA", PostgresDataDirectory)
@@ -161,7 +170,7 @@ var otlpEndpoint = builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"];
 var keycloakAuthority = ReferenceExpression.Create($"{keycloak.GetEndpoint("http")}/realms/procure");
 var shared = new SharedResources(
     postgres, rabbitmq, redis, mongo, keycloak, keycloakAuthority, adminApiKeySha256.Resource, keycloakInternalSecret.Resource, keycloakAccessAdminSecret.Resource, otlpEndpoint, limits, debeziumPassword.Resource, useDataVolumes, debeziumSelfHeal,
-    debeziumMongoPassword.Resource);
+    debeziumMongoPassword.Resource, debeziumHeartbeatIntervalMs);
 
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
     new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),

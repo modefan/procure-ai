@@ -40,6 +40,8 @@ public sealed record ServiceSpec(
 /// <param name="OtlpEndpoint">The Aspire dashboard's OTLP endpoint (the Serilog OpenTelemetry sink has no environment fallback).</param>
 /// <param name="DebeziumMongoPassword">Password of the least-privilege MongoDB user <c>debezium</c> (secret parameter
 /// <c>debezium-mongo-password</c>) that <c>debezium-mongo</c> connects as; required once a service captures MongoDB collections.</param>
+/// <param name="DebeziumHeartbeatIntervalMs">Config <c>Debezium:HeartbeatIntervalMs</c>: how often each Postgres Debezium runs
+/// <see cref="ServiceResources.HeartbeatActionQuery"/>. Null: application.properties' default.</param>
 public sealed record SharedResources(
     IResourceBuilder<PostgresServerResource> Postgres,
     IResourceBuilder<RabbitMQServerResource> RabbitMq,
@@ -55,7 +57,8 @@ public sealed record SharedResources(
     ParameterResource DebeziumPassword,
     bool UseDataVolumes,
     bool DebeziumSelfHealLostOffsets = false,
-    ParameterResource? DebeziumMongoPassword = null);
+    ParameterResource? DebeziumMongoPassword = null,
+    int? DebeziumHeartbeatIntervalMs = null);
 
 public static class ServiceResources
 {
@@ -82,6 +85,16 @@ public static class ServiceResources
 
     /// <summary>Overrides <c>debezium.source.snapshot.mode.configuration.based.snapshot.on.data.error</c> of application.properties.</summary>
     public const string SelfHealEnvironmentVariable = "DEBEZIUM_SOURCE_SNAPSHOT_MODE_CONFIGURATION_BASED_SNAPSHOT_ON_DATA_ERROR";
+
+    /// <summary>
+    /// Debezium's heartbeat action (plan 08 Task 1): an update of the one row of <c>debezium_heartbeat</c>, which every service's migration
+    /// adds to its publication (CdcMigrations.EnableHeartbeat). The change reaches Debezium, which confirms its LSN, so an idle database's
+    /// replication slot does not hold back the server's WAL. The chart's <c>debezium.heartbeatActionQuery</c> is the same.
+    /// </summary>
+    public const string HeartbeatActionQuery = "UPDATE debezium_heartbeat SET beat_at = now() WHERE id = 1";
+
+    public const string HeartbeatIntervalEnvironmentVariable = "DEBEZIUM_SOURCE_HEARTBEAT_INTERVAL_MS";
+    public const string HeartbeatActionQueryEnvironmentVariable = "DEBEZIUM_SOURCE_HEARTBEAT_ACTION_QUERY";
 
     /// <summary>
     /// Adds a service the one way every service is added: its database, a short-lived <c>&lt;name&gt;-migrate</c> resource (neither for a
@@ -255,12 +268,18 @@ public static class ServiceResources
             // reset database is normal. A reset leaves a CDC gap: changes between the lost position and the restart are not audited.
             .WithEnvironment(SelfHealEnvironmentVariable, shared.DebeziumSelfHealLostOffsets ? "true" : "false")
             .WithEnvironment("DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST", string.Join(',', tables.Select(t => "public." + t)))
+            .WithEnvironment(HeartbeatActionQueryEnvironmentVariable, HeartbeatActionQuery)
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_USERNAME", shared.RabbitMq.Resource.UserNameReference)
             .WithEnvironment("DEBEZIUM_SINK_RABBITMQ_CONNECTION_PASSWORD", shared.RabbitMq.Resource.PasswordParameter)
             .WithHttpHealthCheck("/q/health")
             .WaitForCompletion(migrate)
             .WaitFor(shared.RabbitMq)
             .WithContainerLimits(shared.Limits.Debezium);
+        if (shared.DebeziumHeartbeatIntervalMs is { } heartbeatIntervalMs)
+        {
+            debezium.WithEnvironment(HeartbeatIntervalEnvironmentVariable, heartbeatIntervalMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         if (shared.UseDataVolumes)
         {
             // The offsets (last WAL position read) must live exactly as long as the database they point into. Postgres's
