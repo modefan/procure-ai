@@ -10,7 +10,7 @@ stays the way to develop and debug; the cluster is how the system is deployed.
 ```mermaid
 flowchart LR
     browser[Browser] -->|https, *.procure.localtest.me| traefik[Traefik ingress<br/>local CA certificate]
-    subgraph k3d["k3d cluster procure (1 node, 10 GB, 8 CPUs)"]
+    subgraph k3d["k3d cluster procure (1 node, 10 GiB, 8 CPUs)"]
         traefik --> web[web<br/>nginx + Angular]
         traefik --> gateway[gateway<br/>YARP, BFF, SignalR]
         traefik --> keycloak[Keycloak<br/>production mode]
@@ -64,6 +64,11 @@ All hostnames are under `*.localtest.me`, which resolves to 127.0.0.1, so no hos
 | `https://argocd.procure.localtest.me` | Argo CD (user `admin`, password in Secret `argocd/argocd-initial-admin-secret`) |
 | `https://mail.procure.localtest.me` | Mailpit (the demo's outgoing mail) |
 
+The cluster publishes its ports on the PC's loopback address only (`127.0.0.1:80`, `127.0.0.1:443` and the Kubernetes API on
+`127.0.0.1:6550`, `bootstrap/new-cluster.ps1`), never on the PC's network interfaces: Mailpit, Keycloak's admin console and Argo CD have
+no protection meant for a network, so nobody else on the LAN or Wi-Fi may reach them. `tests/Test-BootstrapIsIdempotent.ps1` and
+`tests/Test-Smoke.ps1` fail when a port listens on anything but 127.0.0.1 or ::1.
+
 TLS ends at Traefik with a wildcard certificate from a local CA (`bootstrap/new-local-ca.ps1` in the GitOps repo, kept in
 `%USERPROFILE%\.procure-ai\local-ca\`). Pods trust the CA through the ConfigMap `procure-ca` (`SSL_CERT_DIR`), and CoreDNS answers
 `auth.procure.localtest.me` with the Traefik service, so the APIs validate tokens against the same issuer URL the browser uses.
@@ -96,7 +101,7 @@ AppHost at the same time** (`k3d cluster stop procure` first): both need most of
 In the GitOps repo:
 
 ```powershell
-./bootstrap/new-cluster.ps1      # k3d cluster `procure`: 1 server, 10 GB, 8 CPUs; CoreDNS rewrite; namespaces
+./bootstrap/new-cluster.ps1      # k3d cluster `procure`: 1 server, 10 GiB, 8 CPUs; CoreDNS rewrite; namespaces
 ./bootstrap/new-local-ca.ps1     # local CA, wildcard and MongoDB certificates, TLS Secrets, ConfigMap procure-ca
 ./bootstrap/new-secrets.ps1      # Kubernetes Secrets from the AppHost user secrets (+ GHCR pull secret from `gh auth token`)
 ./bootstrap/install-argocd.ps1   # deploy keys, Argo CD, repository Secrets, the root Application
@@ -161,13 +166,13 @@ currently falls back to long polling (live updates still work), behind Traefik i
 
 ## Measured memory
 
-Measured 2026-11-05 on the 10 GB node with everything deployed (plan 07 complete, observability on): `docker stats` of the k3d node and
+Measured 2026-11-05 on the 10 GiB node with everything deployed (plan 07 complete, observability on): `docker stats` of the k3d node and
 the sum of `kubectl top pods -A`.
 
 | State | Node (docker stats) | Sum of pod working sets | Windows free (32 GB PC, Docker Desktop running) |
 |---|---|---|---|
-| Idle, after a demo reset | 8.14 GiB of 10 | 6.4 GiB | 8.7 GB |
-| After the end-to-end suite (full procurement flow, chaos, AI screens) | 8.85 GiB of 10 | 6.8 GiB | 7.4 GB |
+| Idle, after a demo reset | 8.14 GiB of 10 | 6.4 GiB | 8.7 GiB |
+| After the end-to-end suite (full procurement flow, chaos, AI screens) | 8.85 GiB of 10 | 6.8 GiB | 7.4 GiB |
 
 The largest pods: Keycloak about 0.55 GiB, Postgres about 0.37 GiB, each Debezium Server about 0.3 GiB (eight of them, 2.5 GiB together),
 MongoDB about 0.32 GiB, each service API 0.12 to 0.26 GiB (Wolverine's pre-generated code, `docs/generated-code.md`), Argo CD about

@@ -577,7 +577,9 @@ public sealed class CdcTests(AuditApp app)
     /// <summary>
     /// Plan 06 carry-over 10 (plan 07 Task 0a): an alert without a tenant (here a request line: the table has no tenant column and the
     /// change no interceptor row) is listed for every tenant's admin, so its text names the table, the operation and the key, never a
-    /// value of the row. The same holds for the pgaudit lines, which never have a tenant.
+    /// value of the row. The same holds for the pgaudit lines, which never have a tenant: a DDL statement that carries the same value (a
+    /// column default) is logged by pgaudit, and its item names only the command and the object. The value is unique to this run, and the
+    /// test first checks that both the changed row and the logged statement really hold it, so a leak into either item text fails here.
     /// </summary>
     [Fact]
     public async Task Tenantless_alert_text_has_no_row_values()
@@ -590,7 +592,10 @@ public sealed class CdcTests(AuditApp app)
             found => found.Count == 1 && found[0].Attribution.Kind == AttributionKind.App);
         var oldPrice = await ScalarAsync<decimal>(
             app.RequestsDbConnectionString, "SELECT unit_price_excl_vat FROM request_lines WHERE request_id = @id", ("id", id));
-        const decimal newPrice = 98765.43m;
+        // Unique per run (cents from a GUID), so no other test's row or statement can hold it.
+        var newPrice = 80000m + (Math.Abs(Guid.NewGuid().GetHashCode()) % 1_000_000) / 100m;
+        oldPrice.ShouldNotBe(newPrice);
+        var leak = Format(newPrice);
 
         await ExecuteAsync(
             app.RequestsDbConnectionString, "UPDATE request_lines SET unit_price_excl_vat = @price WHERE request_id = @id", ("price", newPrice), ("id", id));
@@ -601,23 +606,44 @@ public sealed class CdcTests(AuditApp app)
             found => found.Count == 1 && found[0].Attribution.Kind == AttributionKind.OutsideApp,
             AfterGrace)).Single();
         outside.TenantId.ShouldBeNull("no tenant column and no interceptor row");
+        outside.After.ShouldNotBeNull().ShouldContain(leak, Case.Sensitive, "the stored change holds the new value, so an alert built from it could leak it");
 
-        await using var scope = app.Services.CreateAsyncScope();
-        var contributors = scope.ServiceProvider.GetServices<ProcureAi.BuildingBlocks.Application.Status.IStatusContributor>().ToList();
-        var audit = await contributors.Single(c => c.Name == "audit").CollectAsync(Ct);
-        var item = audit.Items.Where(i => i.Text.Contains(key)).ShouldHaveSingleItem();
-        item.TenantId.ShouldBeNull();
-        item.Text.ShouldBe($"request_lines ({AuditApp.RequestsDb}) changed outside the app, row {key} (update)");
-
-        var pgaudit = await contributors.Single(c => c.Name == "pgaudit").CollectAsync(Ct);
-        oldPrice.ShouldNotBe(newPrice);
-        string[] values = [Format(oldPrice), Format(newPrice)];
-        foreach (var text in audit.Items.Concat(pgaudit.Items).Where(i => i.TenantId is null).Select(i => i.Text))
+        // pgaudit logs DDL (pgaudit.log = ddl,role), not the UPDATE: a statement with the value in it, in the same database.
+        var probe = $"leak_probe_{Guid.NewGuid():N}"[..30];
+        await ExecuteAsync(app.RequestsDbConnectionString, $"CREATE TABLE {probe} (price numeric(18,2) DEFAULT {leak})");
+        try
         {
-            foreach (var value in values)
+            await using var scope = app.Services.CreateAsyncScope();
+            var contributors = scope.ServiceProvider.GetServices<ProcureAi.BuildingBlocks.Application.Status.IStatusContributor>().ToList();
+            var audit = await contributors.Single(c => c.Name == "audit").CollectAsync(Ct);
+            var item = audit.Items.Where(i => i.Text.Contains(key)).ShouldHaveSingleItem();
+            item.TenantId.ShouldBeNull();
+            item.Text.ShouldBe($"request_lines ({AuditApp.RequestsDb}) changed outside the app, row {key} (update)");
+
+            var pgauditContributor = contributors.Single(c => c.Name == "pgaudit");
+            var pgaudit = await pgauditContributor.CollectAsync(Ct);
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            while (!pgaudit.Items.Any(i => i.Text.Contains(probe)) && DateTime.UtcNow < deadline)
             {
-                text.ShouldNotContain(value, Case.Sensitive, "a tenant-less alert never shows a row value");
+                await Task.Delay(TimeSpan.FromMilliseconds(500), Ct);
+                pgaudit = await pgauditContributor.CollectAsync(Ct);
             }
+
+            var reader = scope.ServiceProvider.GetRequiredService<ProcureAi.Audit.Application.Abstractions.IPgAuditReader>();
+            var logged = (await reader.ReadAsync(Ct)).Latest.Where(l => l.Text.Contains(probe)).ShouldHaveSingleItem();
+            logged.Text.ShouldContain(leak, Case.Sensitive, "the logged statement holds the value, so an item built from it could leak it");
+            var probeItem = pgaudit.Items.Where(i => i.Text.Contains(probe)).ShouldHaveSingleItem();
+            probeItem.TenantId.ShouldBeNull();
+
+            foreach (var text in audit.Items.Concat(pgaudit.Items).Where(i => i.TenantId is null).Select(i => i.Text))
+            {
+                text.ShouldNotContain(leak, Case.Sensitive, "a tenant-less alert never shows a row value");
+                text.ShouldNotContain(Format(oldPrice), Case.Sensitive, "a tenant-less alert never shows a row value");
+            }
+        }
+        finally
+        {
+            await ExecuteAsync(app.RequestsDbConnectionString, $"DROP TABLE IF EXISTS {probe}");
         }
     }
 

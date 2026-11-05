@@ -1,11 +1,16 @@
 namespace Microsoft.Extensions.Hosting;
 
 /// <summary>
-/// Hides the values of a request's query string in what leaves the process (plan 07 Task 0a, plan 06 carry-over 18): a query may carry a
-/// credential, such as the single-use ticket of a tenant switch (<c>/bff/switch-tenant/challenge?ticket=…</c>). Every value becomes
-/// <c>***</c> and the names stay, so <c>?ticket=abc&amp;page=2</c> reads <c>?ticket=***&amp;page=***</c>: a log or trace still shows which
-/// parameters a request had. All values, not a list of known secret names, so a new parameter can never leak by being forgotten. Used for
-/// the server span's <c>url.query</c> (here) and the request log's <c>QueryString</c> (BuildingBlocks' Serilog setup).
+/// Masks the values of an incoming request's query string (plan 07 Task 0a, plan 06 carry-over 18): a query may carry a credential, such as
+/// the single-use ticket of a tenant switch (<c>/bff/switch-tenant/challenge?ticket=…</c>). Every value becomes <c>***</c> and the names
+/// stay, so <c>?ticket=abc&amp;page=2</c> reads <c>?ticket=***&amp;page=***</c>: a log or trace still shows which parameters a request had.
+/// All values, not a list of known secret names, so a new parameter can never leak by being forgotten.
+/// <para>
+/// Applied in exactly two places: the ASP.NET Core server span's <c>url.query</c> (here) and the <c>QueryString</c> property of ASP.NET
+/// Core's request log (<c>Request starting</c> / <c>Request finished</c>, BuildingBlocks' Serilog setup). Not covered by this class:
+/// outgoing HttpClient spans (<c>url.full</c>; OpenTelemetry's HttpClient instrumentation masks query values there with its own default,
+/// <c>Redacted</c>), HttpClient's own request logs, YARP's forwarding log at the gateway, and any other log line that writes a URL itself.
+/// </para>
 /// </summary>
 public static class QueryStringRedaction
 {

@@ -43,7 +43,7 @@
     Pre-generated Wolverine (and Marten) code (plan 07 Task 5b, docs/generated-code.md). Every service API commits the code JasperFx
     generates for its handlers under Internal/Generated, compiled into the API; the images run Wolverine:TypeLoadMode=Static on it, so
     Roslyn never loads in a deployed service. Regenerate after changing a handler, a saga, a message or Marten's document setup:
-      dotnet build src/Services/<S>/ProcureAi.<S>.Api -t:Build;WriteGeneratedCode
+      dotnet build src/Services/<S>/ProcureAi.<S>.Api "-t:Build;WriteGeneratedCode"
     The target runs the built API with `codegen write` and the same placeholder settings as the OpenAPI step (the host is built, never
     started; nothing connects). GeneratedCodeDirectory redirects the output (ArchitectureTests GeneratedCodeTests compares a fresh copy
     with the committed one).

@@ -93,24 +93,30 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     /// <summary>
     /// The status item names the object, never the statement (plan 07 Task 0a): pgaudit's object name, or else the one identifier after the
     /// command (session logging leaves the object fields empty for DDL). Values later in the statement (a default, a literal) never show.
+    /// The item is built from the real statement text, and each case names a part of that statement (<paramref name="leak"/>) that must
+    /// not reach the item, so an item that showed the statement fails here.
     /// </summary>
     [Theory]
-    [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,\"CREATE TABLE IF NOT EXISTS public.x (id int)\",<not logged>", "public.x")]
-    [InlineData("SESSION,1,1,DDL,ALTER TABLE,,,ALTER TABLE budgets ALTER COLUMN amount SET DEFAULT 5000,<not logged>", "budgets")]
-    [InlineData("SESSION,1,1,DDL,CREATE INDEX,,,CREATE INDEX CONCURRENTLY ix_a ON t (a),<not logged>", "ix_a")]
-    [InlineData("SESSION,1,1,ROLE,CREATE ROLE,,,CREATE ROLE probe LOGIN PASSWORD <REDACTED>,<not logged>", "probe")]
-    [InlineData("SESSION,1,1,DDL,CREATE TABLE,TABLE,public.y,create table y (id int),<not logged>", "public.y")]
-    [InlineData("SESSION,1,1,FUNCTION,DO,,,DO $$ BEGIN PERFORM 5000; END $$,<not logged>", "")]
-    [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,/* note */ CREATE TABLE z (id int),<not logged>", "")]
-    public void Status_item_names_only_the_object(string message, string expected)
+    [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,\"CREATE TABLE IF NOT EXISTS public.x (id int)\",<not logged>", "public.x", "(id int)")]
+    [InlineData("SESSION,1,1,DDL,ALTER TABLE,,,ALTER TABLE budgets ALTER COLUMN amount SET DEFAULT 5000,<not logged>", "budgets", "5000")]
+    [InlineData("SESSION,1,1,DDL,ALTER TABLE,,,ALTER TABLE suppliers ALTER COLUMN token SET DEFAULT 'secret-default',<not logged>", "suppliers", "secret-default")]
+    [InlineData("SESSION,1,1,DDL,CREATE INDEX,,,CREATE INDEX CONCURRENTLY ix_a ON t (a),<not logged>", "ix_a", "ON t (a)")]
+    [InlineData("SESSION,1,1,ROLE,CREATE ROLE,,,CREATE ROLE probe LOGIN PASSWORD <REDACTED>,<not logged>", "probe", "PASSWORD")]
+    [InlineData("SESSION,1,1,DDL,CREATE TABLE,TABLE,public.y,create table y (id int),<not logged>", "public.y", "(id int)")]
+    [InlineData("SESSION,1,1,FUNCTION,DO,,,DO $$ BEGIN PERFORM 5000; END $$,<not logged>", "", "5000")]
+    [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,/* note */ CREATE TABLE z (id int),<not logged>", "", "note")]
+    public void Status_item_names_only_the_object(string message, string expected, string leak)
     {
         var fields = PgAuditMessage.Fields("AUDIT: " + message);
+        var statementText = fields[PgAuditMessage.Statement];
+        statementText.ShouldContain(leak, Case.Sensitive, "the case's leak must be in the statement, or the check below proves nothing");
 
         PgAuditMessage.ObjectOf(fields).ShouldBe(expected);
+        var command = fields[PgAuditMessage.Command];
         var text = PgAuditContributor.Text(new PgAuditStatement(
-            DateTimeOffset.UtcNow, "dale", "budgetsdb", fields[PgAuditMessage.Class], fields[PgAuditMessage.Command], "statement", expected));
-        text.ShouldNotContain("5000");
-        text.ShouldNotContain("secret");
+            DateTimeOffset.UtcNow, "dale", "budgetsdb", fields[PgAuditMessage.Class], command, statementText, expected));
+        text.ShouldBe(expected.Length == 0 ? $"dale in budgetsdb: {command}" : $"dale in budgetsdb: {command} {expected}");
+        text.ShouldNotContain(leak, Case.Sensitive);
     }
 
     [Fact]

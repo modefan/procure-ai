@@ -377,18 +377,18 @@ plus the working sets of the .NET processes):**
 
 | Part | Memory |
 |---|---|
-| Containers: eight Debezium Servers (0.28 to 0.31 GB each: seven Postgres databases and MongoDB) | 2.4 GB |
-| Containers: Keycloak 0.67, MongoDB 0.40, Postgres with pgvector and pgaudit 0.34, RabbitMQ 0.15, Mailpit and Redis 0.04 | 1.6 GB |
-| **All containers** | **3.9 GB** |
-| Ten services (Requests 0.48, Invoicing 0.48, Purchasing 0.48, Notifications 0.44, Approvals 0.38, Suppliers 0.38, Assistant 0.35, Access 0.33, Budgets 0.32, Audit 0.31) | 3.9 GB |
-| Gateway 0.17, simulators 0.11, AppHost 0.20 | 0.5 GB |
-| **All .NET processes of the system** | **4.3 GB** |
-| Local development only: Aspire's DCP and its proxies (1.7), the `dotnet run` launchers and the Angular dev server | about 3 GB |
+| Containers: eight Debezium Servers (0.28 to 0.31 GiB each: seven Postgres databases and MongoDB) | 2.4 GiB |
+| Containers: Keycloak 0.67, MongoDB 0.40, Postgres with pgvector and pgaudit 0.34, RabbitMQ 0.15, Mailpit and Redis 0.04 | 1.6 GiB |
+| **All containers** | **3.9 GiB** |
+| Ten services (Requests 0.48, Invoicing 0.48, Purchasing 0.48, Notifications 0.44, Approvals 0.38, Suppliers 0.38, Assistant 0.35, Access 0.33, Budgets 0.32, Audit 0.31) | 3.9 GiB |
+| Gateway 0.17, simulators 0.11, AppHost 0.20 | 0.5 GiB |
+| **All .NET processes of the system** | **4.3 GiB** |
+| Local development only: Aspire's DCP and its proxies (1.7), the `dotnet run` launchers and the Angular dev server | about 3 GiB |
 
-So the system itself needs about 8.2 GB (the eighth Debezium Server, for MongoDB, adds about 0.3 GB); a deployment without the local
-tooling fits a 16 GB VM. Running it locally under Aspire takes about 11 GB. Postgres runs with `max_connections` 200 locally
+So the system itself needs about 8.2 GiB (the eighth Debezium Server, for MongoDB, adds about 0.3 GiB); a deployment without the local
+tooling fits a 16 GB VM. Running it locally under Aspire takes about 11 GiB. Postgres runs with `max_connections` 200 locally
 (`Resources:Postgres:MaxConnections`): ten services with a few connection pools each went past the default of 100 during the seed. The
-figures above were measured just before that change, with 100; the extra idle connections add little (Postgres used 0.34 of its 0.75 GB
+figures above were measured just before that change, with 100; the extra idle connections add little (Postgres used 0.34 of its 0.75 GiB
 cap with about 115 connections open).
 
 ## Run it on Kubernetes
@@ -399,7 +399,7 @@ deployed revision there, images on GitHub Container Registry. A push to `main` b
 revision to the GitOps repo, and Argo CD runs every service's migration Job before it rolls the pods (a failing migration leaves the
 old pods serving). Four bootstrap scripts in the GitOps repo create the cluster, a local CA, the Secrets (from the AppHost user secrets)
 and Argo CD; then the app is at https://procure.localtest.me, Keycloak at https://auth.procure.localtest.me and the Aspire dashboard at
-https://dashboard.procure.localtest.me. It fits a 10 GB node (about 8.9 GB used after a full end-to-end run).
+https://dashboard.procure.localtest.me. It fits a 10 GiB node (about 8.85 GiB used after a full end-to-end run).
 
 Architecture of the deployment, bootstrap, hostnames and certificates, versions, how a push deploys, the cluster tests, measured memory
 and troubleshooting: [docs/kubernetes.md](docs/kubernetes.md).
