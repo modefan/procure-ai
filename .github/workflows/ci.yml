@@ -183,8 +183,13 @@ jobs:
           sudo install /tmp/kubeconform /usr/local/bin/kubeconform
           helm version --short && helm unittest --help > /dev/null && kubeconform -v
 
-      - name: Build the umbrella's dependencies
-        run: helm dependency build deploy/charts/procure-ai --skip-refresh
+      - name: Build the charts' dependencies
+        run: |
+          set -euo pipefail
+          helm dependency build deploy/charts/procure-ai --skip-refresh
+          # The observability chart depends on the official collector chart (version and digest pinned in its Chart.lock).
+          helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          helm dependency build deploy/charts/procure-observability
 
       - name: helm lint
         run: |
@@ -192,9 +197,12 @@ jobs:
           helm lint deploy/charts/procure-platform --set global.imageTag=ci
           helm lint deploy/charts/procure-app --set global.imageTag=ci --set name=ci-api --set image.repository=procure-ai-ci
           helm lint deploy/charts/procure-ai --set global.imageTag=ci --set global.demo.seed=true --set global.demo.reset=true
+          helm lint deploy/charts/procure-observability
 
       - name: helm unittest
-        run: helm unittest deploy/charts/procure-platform deploy/charts/procure-app deploy/charts/procure-ai
+        run: >-
+          helm unittest deploy/charts/procure-platform deploy/charts/procure-app deploy/charts/procure-ai
+          deploy/charts/procure-observability
 
       - name: kubeconform -strict
         run: |
@@ -207,6 +215,8 @@ jobs:
             | kubeconform -strict -summary
           helm template procure-ai deploy/charts/procure-ai --namespace procure --set global.imageTag=ci \
               --set global.demo.seed=true --set global.demo.reset=true \
+            | kubeconform -strict -summary
+          helm template observability deploy/charts/procure-observability --namespace observability \
             | kubeconform -strict -summary
 
   images:

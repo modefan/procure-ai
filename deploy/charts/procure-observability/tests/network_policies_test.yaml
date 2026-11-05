@@ -1,0 +1,108 @@
+# Network policies of namespace observability (ingress only, as in procure).
+suite: network policies
+templates:
+  - network-policies.yaml
+release:
+  name: observability
+  namespace: observability
+tests:
+  - it: default deny network policy exists
+    documentSelector:
+      path: metadata.name
+      value: default-deny-ingress
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value: {}
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress]
+      - notExists:
+          path: spec.ingress
+
+  # The dashboard's OTLP port has no key (Dashboard__Otlp__AuthMode=Unsecured), so the collector is the only client allowed.
+  - it: only the collector reaches the otlp port
+    documentSelector:
+      path: metadata.name
+      value: allow-collector-to-dashboard-otlp
+    asserts:
+      - equal:
+          path: spec.podSelector
+          value:
+            matchLabels:
+              app.kubernetes.io/name: aspire-dashboard
+              app.kubernetes.io/instance: observability
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: opentelemetry-collector
+                      app.kubernetes.io/instance: observability
+              ports:
+                - port: otlp-grpc
+                  protocol: TCP
+
+  - it: no other policy opens the dashboard's otlp ports
+    asserts:
+      - notExists:
+          path: spec.ingress[*].ports[?(@.port == "otlp-grpc" || @.port == 18889 || @.port == 18890)]
+        documentSelector:
+          path: metadata.name
+          value: allow-traefik-to-dashboard
+      - notExists:
+          path: spec.ingress[*].ports[?(@.port == "otlp-grpc" || @.port == 18889 || @.port == 18890)]
+        documentSelector:
+          path: metadata.name
+          value: allow-procure-to-collector-otlp
+      # Never an ingress rule without `from` (that would admit every pod of every namespace).
+      - notExists:
+          path: spec.ingress[?(!@.from)]
+
+  - it: traefik reaches only the dashboard frontend
+    documentSelector:
+      path: metadata.name
+      value: allow-traefik-to-dashboard
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: aspire-dashboard
+            app.kubernetes.io/instance: observability
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: kube-system
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: traefik
+              ports:
+                - port: http
+                  protocol: TCP
+
+  - it: the apps in procure reach the collector's otlp ports only
+    documentSelector:
+      path: metadata.name
+      value: allow-procure-to-collector-otlp
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: opentelemetry-collector
+            app.kubernetes.io/instance: observability
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: procure
+              ports:
+                - port: 4317
+                  protocol: TCP
+                - port: 4318
+                  protocol: TCP

@@ -1,0 +1,77 @@
+# Rules every pod of the chart follows (plan 07 Global Constraints): requests and limits, non-root with a read-only root filesystem,
+# no privilege escalation, no capabilities, no optional Secret. Exceptions of the collector (documented in values.yaml): it keeps its
+# service account token (k8sattributes reads pods and namespaces) and has group 0 as a supplemental group (read the pod logs).
+suite: every pod
+templates:
+  - dashboard.yaml
+  - charts/opentelemetry-collector/templates/daemonset.yaml
+  - charts/opentelemetry-collector/templates/configmap-agent.yaml
+release:
+  name: observability
+  namespace: observability
+tests:
+  - it: every container has requests and limits
+    asserts:
+      - notExists:
+          path: $..spec.containers[?(!@.resources.limits.memory)]
+      - notExists:
+          path: $..spec.containers[?(!@.resources.limits.cpu)]
+      - notExists:
+          path: $..spec.containers[?(!@.resources.requests.memory)]
+      - notExists:
+          path: $..spec.containers[?(!@.resources.requests.cpu)]
+
+  - it: no secretKeyRef is optional
+    asserts:
+      - notExists:
+          path: $..secretKeyRef.optional
+      - notExists:
+          path: $..configMap.optional
+
+  - it: pods run as non-root with read-only root fs
+    asserts:
+      - notExists:
+          path: $..template[?(!@.spec.securityContext.runAsNonRoot)]
+      - notExists:
+          path: $..template[?(@.spec.securityContext.runAsNonRoot == false)]
+      - notExists:
+          path: $..template[?(!@.spec.securityContext.runAsUser)]
+      - notExists:
+          path: $..template[?(@.spec.securityContext.runAsUser == 0)]
+      - notExists:
+          path: $..template[?(@.spec.securityContext.runAsGroup == 0)]
+      - notExists:
+          path: $..template[?(!@.spec.securityContext.seccompProfile.type)]
+      - notExists:
+          path: $..spec.containers[?(!@.securityContext.readOnlyRootFilesystem)]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.readOnlyRootFilesystem == false)]
+      - notExists:
+          path: $..spec.containers[?(!@.securityContext.allowPrivilegeEscalation)]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.allowPrivilegeEscalation == true)]
+      - notExists:
+          path: $..spec.containers[?(!@.securityContext.capabilities.drop[0])]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.capabilities.drop[0] != "ALL")]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.capabilities.add)]
+      - notExists:
+          path: $..spec.containers[?(@.securityContext.privileged == true)]
+      # hostPath only for the pod logs, read-only (collector_test.yaml); no host network, PID or ports.
+      - notExists:
+          path: $..template.spec[?(@.hostNetwork == true)]
+      - notExists:
+          path: $..template.spec[?(@.hostPID == true)]
+      - notExists:
+          path: $..spec.volumes[?(@.hostPath && @.name != "varlogpods")]
+
+  - it: the dashboard has no service account token
+    template: dashboard.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false

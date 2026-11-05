@@ -1,0 +1,104 @@
+# The OpenTelemetry Collector (subchart opentelemetry-collector, DaemonSet): its rendered configuration and pod.
+suite: collector
+templates:
+  - charts/opentelemetry-collector/templates/configmap-agent.yaml
+  - charts/opentelemetry-collector/templates/daemonset.yaml
+  - charts/opentelemetry-collector/templates/service.yaml
+release:
+  name: observability
+  namespace: observability
+tests:
+  # The .NET apps send their logs by OTLP; their pod logs (container `app`) would show every line twice. Only the platform's
+  # containers are read from /var/log/pods.
+  - it: collector excludes dotnet pod logs
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)receivers:.*file_?log:'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)include:\s*\n\s*- /var/log/pods/procure_postgres-\*_\*/postgres/\*\.log\s*\n\s*- /var/log/pods/procure_keycloak-\*_\*/keycloak/\*\.log\s*\n\s*- /var/log/pods/procure_rabbitmq-\*_\*/rabbitmq/\*\.log\s*\n\s*- /var/log/pods/procure_mongo-\*_\*/mongo/\*\.log\s*\n\s*- /var/log/pods/procure_redis-\*_\*/redis/\*\.log\s*\n\s*- /var/log/pods/procure_debezium-\*_\*/debezium/\*\.log\s*\n'
+      # No catch-all pattern, and nothing that could match an app's container (`app`) or another namespace.
+      - notMatchRegex:
+          path: data.relay
+          pattern: '/var/log/pods/\*'
+      - notMatchRegex:
+          path: data.relay
+          pattern: '/app/'
+      - notMatchRegex:
+          path: data.relay
+          pattern: '/var/log/pods/(?:argocd|kube-system|observability)_'
+
+  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to the dashboard
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+      - matchRegex:
+          path: data.relay
+          pattern: 'endpoint: aspire-dashboard\.observability:18889'
+      # Nothing else listens: no jaeger, zipkin or prometheus receiver (the chart's unused `debug: {}` exporter stays defined, Helm
+      # cannot null an empty-map default of a subchart; no pipeline uses it, so the collector never starts it).
+      - notMatchRegex:
+          path: data.relay
+          pattern: 'jaeger|zipkin|prometheus:'
+      - notMatchRegex:
+          path: data.relay
+          pattern: '- debug'
+
+  - it: collector reads pod logs read-only through group 0, not as root
+    template: charts/opentelemetry-collector/templates/daemonset.yaml
+    asserts:
+      - isKind:
+          of: DaemonSet
+      - equal:
+          path: metadata.name
+          value: collector-agent
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: varlogpods
+            hostPath:
+              path: /var/log/pods
+              type: Directory
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: varlogpods
+            mountPath: /var/log/pods
+            readOnly: true
+      # The preset's extra /var/lib/docker/containers mount is not needed (containerd writes the files under /var/log/pods).
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name == "varlibdockercontainers")]
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.supplementalGroups
+          value: [0]
+      - notExists:
+          path: spec.template.spec.containers[0].ports[?(@.hostPort)]
+
+  - it: collector service is collector.observability with the otlp ports only
+    template: charts/opentelemetry-collector/templates/service.yaml
+    asserts:
+      - equal:
+          path: metadata.name
+          value: collector
+      - lengthEqual:
+          path: spec.ports
+          count: 2
+      - equal:
+          path: spec.ports[0].port
+          value: 4317
+      - equal:
+          path: spec.ports[1].port
+          value: 4318

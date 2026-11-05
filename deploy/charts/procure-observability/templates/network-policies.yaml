@@ -1,0 +1,89 @@
+{{- if .Values.networkPolicies.enabled }}
+{{- $labels := dict "root" $ "name" "network-policies" }}
+{{- $dashboard := dict "root" $ "name" "aspire-dashboard" }}
+# Network policies of namespace observability (enforced by k3s's built-in policy controller). Ingress only, as in procure; egress stays
+# open (the dashboard reaches Keycloak through Traefik, the collector the API server and the dashboard).
+#
+# 1. Nothing may connect to a pod in observability unless a policy below allows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 2. The apps in procure send OTLP (gRPC 4317, HTTP 4318) to the collector; nothing else of the collector is reachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-procure-to-collector-otlp
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "procure-observability.collectorSelector" $ | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.appNamespace }}
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+---
+# 3. The dashboard's OTLP port has no key (Dashboard__Otlp__AuthMode=Unsecured): only the collector may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-collector-to-dashboard-otlp
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "procure-observability.selector" $dashboard | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "procure-observability.collectorSelector" $ | nindent 14 }}
+      ports:
+        - port: otlp-grpc
+          protocol: TCP
+---
+# 4. Traefik (kube-system) may reach the dashboard's frontend (port http), nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-dashboard
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "procure-observability.selector" $dashboard | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: procure-observability
+description: >-
+  Logs, traces and metrics of ProcureAI in Kubernetes (CLAUDE.md "Observability"): the official OpenTelemetry Collector as a DaemonSet
+  (OTLP from the apps; the pod logs of Postgres incl. pgaudit, Keycloak, RabbitMQ, MongoDB, Redis and Debezium) exporting to the
+  standalone Aspire dashboard, which signs users in with Keycloak (client aspire-dashboard, role dashboard-viewer only).
+type: application
+version: 0.1.0
+appVersion: "plan07"
+dependencies:
+  # Pinned; the chart renames deprecated component names itself (rewriteDeprecatedComponentNames), so values use the classic names.
+  - name: opentelemetry-collector
+    version: 0.178.2
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts

@@ -1,0 +1,131 @@
+# The standalone Aspire dashboard.
+suite: dashboard
+templates:
+  - dashboard.yaml
+release:
+  name: observability
+  namespace: observability
+tests:
+  - it: dashboard uses oidc
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - equal:
+          path: metadata.name
+          value: aspire-dashboard
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^mcr\.microsoft\.com/dotnet/aspire-dashboard:\d+\.\d+\.\d+$'
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Dashboard__Frontend__AuthMode
+            value: OpenIdConnect
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Authentication__Schemes__OpenIdConnect__Authority
+            value: https://auth.procure.localtest.me/realms/procure
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Authentication__Schemes__OpenIdConnect__ClientId
+            value: aspire-dashboard
+      # The client secret from Secret procure-keycloak (bootstrap/new-secrets.ps1 copies only this key into namespace observability).
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Authentication__Schemes__OpenIdConnect__ClientSecret
+            valueFrom:
+              secretKeyRef:
+                name: procure-keycloak
+                key: dashboard-secret
+      # Only users with the aspire-dashboard client role dashboard-viewer (claim dashboard_roles, realm mapper).
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Dashboard__Frontend__OpenIdConnect__RequiredClaimType
+            value: dashboard_roles
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Dashboard__Frontend__OpenIdConnect__RequiredClaimValue
+            value: dashboard-viewer
+      # OTLP without a key: only the collector can reach the port (network-policies.yaml).
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Dashboard__Otlp__AuthMode
+            value: Unsecured
+      # TLS ends at Traefik: the redirect URI must be https://<host>/signin-oidc.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+            value: "true"
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name == "Dashboard__Frontend__AuthMode" && @.value == "Unsecured")]
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name == "ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS")]
+
+  - it: dashboard trusts the local CA (Keycloak's certificate)
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SSL_CERT_DIR
+            value: /etc/ssl/certs:/etc/procure-ca
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: procure-ca
+            configMap:
+              name: procure-ca
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: procure-ca
+            mountPath: /etc/procure-ca
+            readOnly: true
+
+  - it: dashboard ingress is dashboard.procure.localtest.me on the frontend port
+    documentSelector:
+      path: kind
+      value: Ingress
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: dashboard.procure.localtest.me
+      - equal:
+          path: spec.tls[0].hosts
+          value: [dashboard.procure.localtest.me]
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service
+          value:
+            name: aspire-dashboard
+            port:
+              name: http
+
+  - it: dashboard service exposes the frontend and the otlp grpc port only
+    documentSelector:
+      path: kind
+      value: Service
+    asserts:
+      - equal:
+          path: metadata.name
+          value: aspire-dashboard
+      - equal:
+          path: spec.ports
+          value:
+            - name: http
+              port: 18888
+              targetPort: http
+              protocol: TCP
+            - name: otlp-grpc
+              port: 18889
+              targetPort: otlp-grpc
+              protocol: TCP

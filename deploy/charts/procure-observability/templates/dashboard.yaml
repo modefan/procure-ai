@@ -1,0 +1,160 @@
+{{- $d := .Values.dashboard }}
+{{- $labels := dict "root" $ "name" "aspire-dashboard" }}
+# The standalone Aspire dashboard: frontend on 18888 behind Traefik (Keycloak OIDC, dashboard-viewer only), OTLP gRPC on 18889 for the
+# collector (no key; network-policies.yaml lets only the collector in). Telemetry is kept in memory and lost on restart (CLAUDE.md).
+apiVersion: v1
+kind: Service
+metadata:
+  name: aspire-dashboard
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  selector:
+    {{- include "procure-observability.selector" $labels | nindent 4 }}
+  ports:
+    - name: http
+      port: 18888
+      targetPort: http
+      protocol: TCP
+    - name: otlp-grpc
+      port: 18889
+      targetPort: otlp-grpc
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aspire-dashboard
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  # One pod at a time: in-memory telemetry and data protection keys are per pod, and the node has no room for a surge pod.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-observability.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-observability.labels" $labels | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $d.uid }}
+        runAsGroup: {{ $d.uid }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dashboard
+          image: {{ $d.image | quote }}
+          imagePullPolicy: {{ $d.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 18888
+              protocol: TCP
+            - name: otlp-grpc
+              containerPort: 18889
+              protocol: TCP
+          env:
+            - name: ASPNETCORE_URLS
+              value: http://+:18888
+            - name: DOTNET_DASHBOARD_OTLP_ENDPOINT_URL
+              value: http://+:18889
+            # Browser sign-in with Keycloak (code flow + PKCE, confidential client).
+            - name: Dashboard__Frontend__AuthMode
+              value: OpenIdConnect
+            - name: Authentication__Schemes__OpenIdConnect__Authority
+              value: {{ printf "https://%s/realms/procure" .Values.hosts.keycloak }}
+            - name: Authentication__Schemes__OpenIdConnect__ClientId
+              value: {{ $d.oidc.clientId }}
+            - name: Authentication__Schemes__OpenIdConnect__ClientSecret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $d.oidc.secretName }}
+                  key: {{ $d.oidc.secretKey }}
+            - name: Dashboard__Frontend__OpenIdConnect__RequiredClaimType
+              value: {{ $d.oidc.requiredClaimType }}
+            - name: Dashboard__Frontend__OpenIdConnect__RequiredClaimValue
+              value: {{ $d.oidc.requiredClaimValue }}
+            - name: Dashboard__Frontend__OpenIdConnect__NameClaimType
+              value: name
+            - name: Dashboard__Frontend__OpenIdConnect__UsernameClaimType
+              value: preferred_username
+            # TLS ends at Traefik: trust X-Forwarded-Proto/Host so the redirect URI is https://<host>/signin-oidc.
+            - name: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+              value: "true"
+            # OTLP without an API key: only the collector may connect (network-policies.yaml).
+            - name: Dashboard__Otlp__AuthMode
+              value: Unsecured
+            - name: Dashboard__TelemetryLimits__MaxLogCount
+              value: {{ $d.telemetryLimits.maxLogCount | quote }}
+            - name: Dashboard__TelemetryLimits__MaxTraceCount
+              value: {{ $d.telemetryLimits.maxTraceCount | quote }}
+            - name: Dashboard__TelemetryLimits__MaxMetricsCount
+              value: {{ $d.telemetryLimits.maxMetricsCount | quote }}
+            - name: DOTNET_GCHeapHardLimit
+              value: {{ $d.heapHardLimit | quote }}
+            # Keycloak's certificate is issued by the local CA (plan 07 ruling 8).
+            - name: SSL_CERT_DIR
+              value: {{ printf "/etc/ssl/certs:%s" $d.caTrust.mountPath }}
+          resources:
+            {{- toYaml $d.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: procure-ca
+              mountPath: {{ $d.caTrust.mountPath }}
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: procure-ca
+          configMap:
+            name: {{ $d.caTrust.configMap }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aspire-dashboard
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  # No secretName: Traefik serves its default certificate (the local CA's TLSStore, bootstrap/new-local-ca.ps1).
+  tls:
+    - hosts:
+        - {{ .Values.hosts.dashboard }}
+  rules:
+    - host: {{ .Values.hosts.dashboard }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aspire-dashboard
+                port:
+                  name: http

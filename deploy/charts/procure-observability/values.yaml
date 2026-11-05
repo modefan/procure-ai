@@ -1,0 +1,197 @@
+# procure-observability: the OpenTelemetry Collector (DaemonSet) and the standalone Aspire dashboard in namespace observability
+# (CLAUDE.md "Observability": code only knows OTLP; in Kubernetes the services send to a Collector, which forwards to the dashboard).
+# The apps' OTLP endpoint is http://collector.observability:4317 (procure-ai umbrella values, global.sharedEnv.telemetry).
+# Environment values come from the GitOps repo's envs/<env>/observability.yaml. No secrets here: the dashboard's Keycloak client secret
+# is Secret procure-keycloak (key dashboard-secret) in this namespace, created by the GitOps repo's bootstrap/new-secrets.ps1.
+
+hosts:
+  # The dashboard as the browser opens it (the aspire-dashboard client's redirect URI, procure-platform hosts.dashboard).
+  dashboard: dashboard.procure.localtest.me
+  # Keycloak; the issuer https://<keycloak>/realms/procure, which pods reach through the CoreDNS rewrite (plan 07 ruling 8).
+  keycloak: auth.procure.localtest.me
+
+ingressClassName: traefik
+
+# The namespace whose pods send OTLP (the apps) and whose platform pods' logs the collector reads.
+appNamespace: procure
+
+dashboard:
+  # Current Aspire release (MCR mcr.microsoft.com/dotnet/aspire-dashboard), pinned; the AppHost uses Aspire 13.6.x too.
+  image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6.2
+  imagePullPolicy: IfNotPresent
+  # The image's app user (chiseled .NET images: APP_UID 1654).
+  uid: 1654
+  # Keycloak client (realm procure-realm.json): confidential, code + PKCE, role dashboard-viewer emitted as claim dashboard_roles.
+  oidc:
+    clientId: aspire-dashboard
+    secretName: procure-keycloak
+    secretKey: dashboard-secret
+    requiredClaimType: dashboard_roles
+    requiredClaimValue: dashboard-viewer
+  # The dashboard keeps telemetry in memory (lost on restart, CLAUDE.md "Observability" known limits). Caps per resource, smaller than
+  # the defaults (10 000) to keep the pod within its limit on the 10 GB node.
+  telemetryLimits:
+    maxLogCount: 5000
+    maxTraceCount: 5000
+    maxMetricsCount: 20000
+  # The .NET GC heap cap (as the apps' DOTNET_GCHeapHardLimit): 288 MiB of the 384 MiB limit.
+  heapHardLimit: "0x12000000"
+  resources:
+    limits: { memory: 384Mi, cpu: 500m }
+    requests: { memory: 192Mi, cpu: 50m }
+  caTrust:
+    configMap: procure-ca
+    mountPath: /etc/procure-ca
+
+networkPolicies:
+  enabled: true
+
+# The official OpenTelemetry Collector chart (dependency in Chart.yaml).
+opentelemetry-collector:
+  mode: daemonset
+  # Service and DaemonSet `collector`, so the apps reach collector.observability:4317.
+  fullnameOverride: collector
+  image:
+    # The Kubernetes distribution: otlp, filelog, k8sattributes, memory_limiter, batch and the otlp exporter, no more. Tag = the chart's
+    # appVersion.
+    repository: otel/opentelemetry-collector-k8s
+    tag: 0.163.2
+  command:
+    name: otelcol-k8s
+
+  # k8sattributes: the preset adds the processor's settings and the RBAC (read pods, namespaces, replicasets of this node).
+  presets:
+    kubernetesAttributes:
+      enabled: true
+
+  # Exception to the chart rules (documented, plan 07 Global Constraints): the pod logs on the node are root:root with mode 0640 under a
+  # 0750 directory, so the collector runs as its non-root user (10001) with group 0 as a supplemental group, which grants read access and
+  # nothing else (no capability, no root user, read-only mount). It keeps its service account token for k8sattributes.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    supplementalGroups: [0]
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+
+  extraVolumes:
+    - name: varlogpods
+      hostPath:
+        path: /var/log/pods
+        type: Directory
+  extraVolumeMounts:
+    - name: varlogpods
+      mountPath: /var/log/pods
+      readOnly: true
+
+  # Measured on the local cluster (plan 07 Task 7 report). GOMEMLIMIT follows the limit (useGOMEMLIMIT), memory_limiter 80 % of it.
+  resources:
+    limits: { memory: 192Mi, cpu: 500m }
+    requests: { memory: 96Mi, cpu: 50m }
+
+  # Only OTLP is received (no jaeger, zipkin), and not on host ports: the apps use the Service.
+  ports:
+    otlp:
+      hostPort: 0
+    otlp-http:
+      hostPort: 0
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+  service:
+    enabled: true
+
+  # The whole collector configuration (not merged with the chart's `config` defaults: jaeger, zipkin, prometheus and debug cannot be
+  # removed from a subchart's defaults with null, helm/helm#12879; the chart documents alternateConfig for this). The presets still add
+  # their parts (k8sattributes). Classic component names; the chart renames them (rewriteDeprecatedComponentNames).
+  alternateConfig:
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+      # The platform's containers only: the .NET apps (container `app`) send their logs by OTLP, so their pod logs would show twice.
+      # Postgres's console carries the pgaudit lines (AUDIT: SESSION,...). The file path is
+      # /var/log/pods/<namespace>_<pod>_<pod uid>/<container>/<restart>.log.
+      filelog:
+        include:
+          - /var/log/pods/procure_postgres-*_*/postgres/*.log
+          - /var/log/pods/procure_keycloak-*_*/keycloak/*.log
+          - /var/log/pods/procure_rabbitmq-*_*/rabbitmq/*.log
+          - /var/log/pods/procure_mongo-*_*/mongo/*.log
+          - /var/log/pods/procure_redis-*_*/redis/*.log
+          - /var/log/pods/procure_debezium-*_*/debezium/*.log
+        # From the start of each file: the dashboard keeps telemetry in memory only, so after a restart it shows the platform's start-up
+        # (incl. the migrations' pgaudit DDL lines). Cost: a restart of the collector alone sends those lines again.
+        start_at: beginning
+        include_file_path: false
+        include_file_name: false
+        operators:
+          # CRI format; sets resource k8s.namespace.name, k8s.pod.name, k8s.pod.uid, k8s.container.name, k8s.container.restart_count.
+          - type: container
+            id: container-parser
+          # The dashboard groups by service.name / service.instance.id: postgres, keycloak, ..., debezium (one instance per pod).
+          - type: copy
+            from: resource["k8s.container.name"]
+            to: resource["service.name"]
+          - type: copy
+            from: resource["k8s.pod.name"]
+            to: resource["service.instance.id"]
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      # The preset's list without service.* (it would rename the apps' services after their Kubernetes labels; the apps set
+      # OTEL_SERVICE_NAME, the pod logs get theirs from the filelog operators above).
+      k8sattributes:
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.node.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.job.name
+            - container.image.tag
+      batch: {}
+    exporters:
+      otlp:
+        endpoint: aspire-dashboard.observability:18889
+        tls:
+          insecure: true
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          level: none
+      pipelines:
+        logs:
+          receivers: [otlp, filelog]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp]
