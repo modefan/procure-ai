@@ -83,8 +83,9 @@ spec:
               value: name
             - name: Dashboard__Frontend__OpenIdConnect__UsernameClaimType
               value: preferred_username
-            # TLS ends at Traefik: trust X-Forwarded-Proto/Host so the redirect URI is https://<host>/signin-oidc.
-            - name: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+            # TLS ends at Traefik: trust X-Forwarded-Proto/Host so the redirect URI is https://<host>/signin-oidc. The dashboard reads its own
+            # switch, not ASPNETCORE_FORWARDEDHEADERS_ENABLED (with that one Keycloak refused the http:// redirect URI).
+            - name: ASPIRE_DASHBOARD_FORWARDEDHEADERS_ENABLED
               value: "true"
             # OTLP without an API key: only the collector may connect (network-policies.yaml).
             - name: Dashboard__Otlp__AuthMode

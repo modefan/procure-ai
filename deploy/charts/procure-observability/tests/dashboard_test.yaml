@@ -58,11 +58,11 @@ tests:
           content:
             name: Dashboard__Otlp__AuthMode
             value: Unsecured
-      # TLS ends at Traefik: the redirect URI must be https://<host>/signin-oidc.
+      # TLS ends at Traefik: the redirect URI must be https://<host>/signin-oidc (the dashboard ignores ASPNETCORE_FORWARDEDHEADERS_ENABLED; it reads its own switch).
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+            name: ASPIRE_DASHBOARD_FORWARDEDHEADERS_ENABLED
             value: "true"
       - notExists:
           path: spec.template.spec.containers[0].env[?(@.name == "Dashboard__Frontend__AuthMode" && @.value == "Unsecured")]
