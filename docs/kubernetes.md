@@ -107,7 +107,10 @@ cluster that takes about 10 to 15 minutes, pods may restart while their dependen
 this from a deleted cluster and checks that it converges on its own. Every bootstrap script is safe to run again; after changing an
 AppHost user secret, rerun `new-secrets.ps1` and restart the pods that use it.
 
-Stop and start the cluster with `k3d cluster stop procure` / `k3d cluster start procure`; data is kept on the node's volumes.
+Stop and start the cluster with `k3d cluster stop procure` / `k3d cluster start procure`; data is kept on the node's volumes. k3d stops
+the node without draining it, so Postgres recovers from its WAL at the next start (safe: committed data is in the WAL) and a Debezium
+replication slot may fall back to its last checkpoint, which only means a few changes are decoded again; Audit stores each change once.
+`tests/Test-RestartKeepsData.ps1` checks that nothing is lost or doubled.
 
 ## How a push deploys
 
@@ -152,7 +155,9 @@ dotnet run --project tests/ProcureAi.EndToEndTests -- -trait- "Target=AppHost"
 
 Two tests carry `[Trait("Target", "AppHost")]` and only run against the AppHost: `Restarting_notifications_shows_reconnecting_then_live`
 (it stops and starts a resource with the AppHost's commands; on the cluster Argo CD's self-heal would undo a scale to zero) and
-`Stop_keeps_partial_answer` (it needs the slow Fake model stream only the test AppHost configures).
+`Stop_keeps_partial_answer` (it needs the slow Fake model stream only the test AppHost configures). The other way round,
+`Live_connection_is_a_websocket_through_the_gateway` only runs against a deployment: under the AppHost the browser's hub connection
+currently falls back to long polling (live updates still work), behind Traefik it is a real WebSocket.
 
 ## Measured memory
 
