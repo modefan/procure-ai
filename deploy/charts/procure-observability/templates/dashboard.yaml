@@ -75,6 +75,9 @@ spec:
                 secretKeyRef:
                   name: {{ $d.oidc.secretName }}
                   key: {{ $d.oidc.secretKey }}
+            # The realm's redirect URI (procure-realm.json); without it the dashboard sends https://<host>/ and Keycloak refuses it.
+            - name: Authentication__Schemes__OpenIdConnect__CallbackPath
+              value: /signin-oidc
             - name: Dashboard__Frontend__OpenIdConnect__RequiredClaimType
               value: {{ $d.oidc.requiredClaimType }}
             - name: Dashboard__Frontend__OpenIdConnect__RequiredClaimValue
