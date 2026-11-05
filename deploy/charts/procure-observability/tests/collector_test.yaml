@@ -19,6 +19,10 @@ tests:
       - matchRegex:
           path: data.relay
           pattern: '(?s)include:\s*\n\s*- /var/log/pods/procure_postgres-\*_\*/postgres/\*\.log\s*\n\s*- /var/log/pods/procure_keycloak-\*_\*/keycloak/\*\.log\s*\n\s*- /var/log/pods/procure_rabbitmq-\*_\*/rabbitmq/\*\.log\s*\n\s*- /var/log/pods/procure_mongo-\*_\*/mongo/\*\.log\s*\n\s*- /var/log/pods/procure_redis-\*_\*/redis/\*\.log\s*\n\s*- /var/log/pods/procure_debezium-\*_\*/debezium/\*\.log\s*\n'
+      # The container parser takes namespace, pod and container from the file path (it fails every line without it, seen on the cluster).
+      - matchRegex:
+          path: data.relay
+          pattern: 'include_file_path: true'
       # No catch-all pattern, and nothing that could match an app's container (`app`) or another namespace.
       - notMatchRegex:
           path: data.relay
