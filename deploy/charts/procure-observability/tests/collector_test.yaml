@@ -23,6 +23,10 @@ tests:
       - matchRegex:
           path: data.relay
           pattern: 'include_file_path: true'
+      # New lines only (reading the files from the start flooded the dashboard's log limit with old history).
+      - matchRegex:
+          path: data.relay
+          pattern: 'start_at: end'
       # No catch-all pattern, and nothing that could match an app's container (`app`) or another namespace.
       - notMatchRegex:
           path: data.relay

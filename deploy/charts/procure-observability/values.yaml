@@ -137,9 +137,10 @@ opentelemetry-collector:
           - /var/log/pods/procure_mongo-*_*/mongo/*.log
           - /var/log/pods/procure_redis-*_*/redis/*.log
           - /var/log/pods/procure_debezium-*_*/debezium/*.log
-        # From the start of each file: the dashboard keeps telemetry in memory only, so after a restart it shows the platform's start-up
-        # (incl. the migrations' pgaudit DDL lines). Cost: a restart of the collector alone sends those lines again.
-        start_at: beginning
+        # New lines only. From the start of each file, the six platform logs (with earlier container runs) filled the dashboard's log limit
+        # with old history and evicted the apps' logs. Every deploy's migration Jobs write fresh pgaudit DDL lines. Cost: lines written while
+        # the collector restarts are not shown (no checkpoint storage: it would need a writable hostPath).
+        start_at: end
         # The container parser reads namespace, pod and container from the path (log.file.path); removed again after it.
         include_file_path: true
         include_file_name: false
