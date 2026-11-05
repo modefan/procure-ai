@@ -202,10 +202,38 @@ cluster that takes about 10 to 15 minutes, pods may restart while their dependen
 this from a deleted cluster and checks that it converges on its own. Every bootstrap script is safe to run again; after changing an
 AppHost user secret, rerun `new-secrets.ps1` and restart the pods that use it.
 
+### Changing the shape of a Secret
+
+`new-secrets.ps1` never removes a key on its own: a key a Secret has on the cluster but the script no longer writes is kept with its live
+value, and the script names it ("stale key(s) kept"). Pods of the previous revision may still reference it, and a pod that restarts into
+a missing key hangs in `CreateContainerConfigError` (plan 08 Task 4 hit this: a removed `procure-debezium/postgres-password`). When a push
+adds, renames or drops Secret keys:
+
+1. Push the change; for a new key run `new-secrets.ps1` first (it adds the key and keeps the old ones), so the new pods find it.
+2. Wait until Argo CD has synced the new revision and every pod rolled (`kubectl -n argocd get applications`: all Synced and Healthy;
+   `kubectl -n procure get pods`: no pod older than the sync that uses the old key).
+3. Only then run `new-secrets.ps1 -Prune`: it removes the keys the script no longer writes (and Secrets it retired) and names them.
+
+Never run `new-secrets.ps1 -Prune` while Argo CD is still syncing. `tests/Test-BootstrapIsIdempotent.ps1` checks both behaviours.
+
+**A StatefulSet rollout is stuck.** A StatefulSet replaces its pods one at a time and never replaces a pod that has not become Ready
+(`OrderedReady`): if the old pod crash-loops or sits in `CreateContainerConfigError` (a missing Secret key, a bad image), the new spec is
+never rolled out, and an Argo CD sync waiting for it stays Progressing. Fix the cause (for a missing key: `new-secrets.ps1` without
+`-Prune`), then delete the pod that never became Ready (`kubectl -n procure delete pod <name>-0`); the StatefulSet recreates it at the new
+revision. Pods that wait for it (an API in `Init` before ruling 8) follow on their own.
+
 Stop and start the cluster with `k3d cluster stop procure` / `k3d cluster start procure`; data is kept on the node's volumes. k3d stops
 the node without draining it, so Postgres recovers from its WAL at the next start (safe: committed data is in the WAL) and a Debezium
 replication slot may fall back to its last checkpoint, which only means a few changes are decoded again; Audit stores each change once.
-`tests/Test-RestartKeepsData.ps1` checks that nothing is lost or doubled.
+`tests/Test-RestartKeepsData.ps1` checks that nothing is lost or doubled. On k3d this is accepted: there is no node shutdown to hook into
+(the container is stopped), and scaling Postgres down first would be undone by Argo CD's self-heal. A real host (the hosted VM, plan 08
+Task 11) stops cleanly instead: kubelet graceful node shutdown, `--kubelet-arg=shutdown-grace-period=90s` and
+`--kubelet-arg=shutdown-grace-period-critical-pods=30s` on k3s (systemd delays the power-off until the pods got their SIGTERM, so
+Postgres runs a shutdown checkpoint), or a stop script that suspends Argo CD's auto-sync, scales the apps and then the platform to zero and
+only then stops k3s.
+
+CPU: the kubelet reports the PC's 16 CPUs while `docker update --cpus 8` throttles the node to 8. The pods' CPU requests add up to about
+1.5 CPUs, so scheduling is not affected; a CPU limit above 8 cores in total only means pods share the 8 when all are busy.
 
 Seven Debezium replication slots share the one Postgres. Each Debezium beats every `debezium.heartbeatIntervalMs` (an update of
 `debezium_heartbeat` in its database), so an idle database's slot keeps up with the WAL; `postgres.maxSlotWalKeepSize` (1GB) caps what a
@@ -226,8 +254,9 @@ push to procure-ai main
   -> PostSync: demo-seed tops up the demo data
 ```
 
-A failing migration stops the sync before wave 0, so the old pods keep serving; Argo CD retries the sync and the root Application
-reports the app as not Healthy. Roll back by setting an older `appRevision` (and `platformImageTags`) in `envs/local/release.yaml`.
+A failing migration stops the sync before wave 0, so the old pods keep serving. Argo CD retries the sync three times (10 s, 20 s, 40 s
+apart; the migration Jobs do not retry their pods), then the sync is Failed and the root Application turns `Degraded` (its health check
+for Applications, plan 08 ruling 9), within about five minutes. Roll back by setting an older `appRevision` (and `platformImageTags`) in `envs/local/release.yaml`.
 Both behaviours are checked on the cluster by `tests/Test-Upgrade.ps1` in the GitOps repo.
 
 ## Tests on the cluster
@@ -239,7 +268,7 @@ All in the GitOps repo's `tests/` unless noted. They need the cluster running an
 | `Test-FreshCluster.ps1` | From a deleted cluster, the bootstrap plus Argo CD converge on their own within 15 minutes, nothing crash-loops, then the smoke checks pass (`-WatchOnly`: only watch the running cluster) |
 | `Test-Smoke.ps1` | Gateway and Keycloak through Traefik, demo login and BFF cookie, seeded data with the admin key, the dashboard's sign-in (only `dashboard-viewer` gets in) and its API being off, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For` |
 | `Test-LocalCa.ps1` | The local CA's name constraints (no cluster needed) |
-| `Test-Upgrade.ps1` | A new revision reruns every migration Job before the pods change; a revision whose Requests migration fails keeps the old pods serving (throwaway branches, restored afterwards) |
+| `Test-Upgrade.ps1` | A new revision reruns every migration Job before the pods change; a revision whose Requests migration fails keeps the old pods serving and turns the root Application `Degraded` within 5 minutes (throwaway branches, restored afterwards) |
 | `Test-RestartKeepsData.ps1` | `k3d cluster stop/start` and deleted Postgres and MongoDB pods keep every row, document and Debezium position; a new change still reaches the data change log within 30 s |
 | End-to-end tests (this repo) | The browser suite against `https://procure.localtest.me` (below) |
 
@@ -315,4 +344,12 @@ API server.
 - **The PC gets slow.** Watch Windows' free memory; stop the cluster (`k3d cluster stop procure`) and run `wsl --shutdown` to give Docker
   Desktop's memory back to Windows.
 - **A sync is stuck after a failed migration.** Fix the migration and deploy a new revision, or roll `appRevision` back. Argo CD retries a
-  failed sync up to ten times with backoff; the Argo CD UI shows the failing hook and its log.
+  failed sync three times, then the root shows `Degraded`; it does not retry the same revision again on its own. The Argo CD UI shows the
+  failing hook and its log (`kubectl -n procure logs job/<name>-migrate`).
+- **A Debezium Server is down.** The APIs do not wait for it (plan 08 ruling 8): they and their outboxes need only Postgres and RabbitMQ,
+  so they keep serving and restart normally. Its replication slot keeps the changes (up to `postgres.maxSlotWalKeepSize`), and it catches
+  up when it is back. The outage shows on the system status page and as a `platform` Application that is not Healthy. Under the AppHost the
+  APIs still wait for their Debezium (`WaitFor`), so a local run starts in a known order.
+- **The Aspire dashboard restarts.** Its telemetry lives in a SQLite database in `/tmp` (lost with the pod). `/tmp` is a 256Mi emptyDir
+  and the caps (`dashboard.telemetryLimits` in the chart) bound the database to well below that; an `Evicted` event naming the `tmp`
+  emptyDir means the caps no longer fit the volume (`kubectl -n observability get events`).
