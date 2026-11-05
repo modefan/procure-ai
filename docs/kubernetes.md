@@ -135,8 +135,8 @@ applies the file to the running Keycloak. A change made by hand in the admin con
 ### Database roles (plan 08 ruling 6)
 
 No app connects to Postgres as the superuser or to MongoDB as root. Each service has its own role, and each Debezium Server its own
-replication role; pgaudit therefore shows which service ran a statement (`tests/Test-Smoke.ps1` checks that the latest `CREATE TABLE` in
-every service database was run by that service's role).
+replication role; pgaudit therefore shows which service ran a statement (`tests/Test-Smoke.ps1` checks that every `CREATE TABLE` in a
+service database since `roles.sql` first ran in the logged week was run by that service's role, in at least five databases).
 
 | Role or user | What it may do | Password (Secret `procure-db-roles`, from the AppHost user secret) |
 |---|---|---|
