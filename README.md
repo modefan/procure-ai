@@ -391,6 +391,19 @@ tooling fits a 16 GB VM. Running it locally under Aspire takes about 11 GB. Post
 figures above were measured just before that change, with 100; the extra idle connections add little (Postgres used 0.34 of its 0.75 GB
 cap with about 115 connections open).
 
+## Run it on Kubernetes
+
+The same system also runs on a local single-node Kubernetes cluster (k3d), deployed by **Argo CD** from the GitOps repo
+[procure-ai-gitops](https://github.com/modefan/procure-ai-gitops): Helm charts here (`deploy/charts/`), environment values and the
+deployed revision there, images on GitHub Container Registry. A push to `main` builds and publishes the images, CI commits the new
+revision to the GitOps repo, and Argo CD runs every service's migration Job before it rolls the pods (a failing migration leaves the
+old pods serving). Four bootstrap scripts in the GitOps repo create the cluster, a local CA, the Secrets (from the AppHost user secrets)
+and Argo CD; then the app is at https://procure.localtest.me, Keycloak at https://auth.procure.localtest.me and the Aspire dashboard at
+https://dashboard.procure.localtest.me. It fits a 10 GB node (about 8.9 GB used after a full end-to-end run).
+
+Architecture of the deployment, bootstrap, hostnames and certificates, versions, how a push deploys, the cluster tests, measured memory
+and troubleshooting: [docs/kubernetes.md](docs/kubernetes.md).
+
 ## Demo users
 
 **One click:** the welcome page shows **Try a demo role** buttons. Each signs you in as one demo user, no password typed.
