@@ -14,8 +14,8 @@ spec:
   policyTypes:
     - Ingress
 ---
-# 2. Pods in procure may reach each other (services, databases, broker, Keycloak). Pods of other namespaces may not: a pod in `default`
-#    or `observability` cannot open postgres:5432.
+# 2. Pods in procure may reach each other (services, databases, broker). Pods of other namespaces may not: a pod in `default` or
+#    `observability` cannot open postgres:5432. Not the pods that trust forwarded headers (gateway, Keycloak): see 4.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -23,7 +23,15 @@ metadata:
   labels:
     {{- include "procure-platform.labels" (dict "root" $ "name" "network-policies") | nindent 4 }}
 spec:
+  {{- with .Values.networkPolicies.forwardedHeaderTrusting }}
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: NotIn
+        values: {{ keys . | sortAlpha | toJson }}
+  {{- else }}
   podSelector: {}
+  {{- end }}
   policyTypes:
     - Ingress
   ingress:
@@ -55,4 +63,37 @@ spec:
       ports:
         - port: http
           protocol: TCP
+{{- range $name, $callers := .Values.networkPolicies.forwardedHeaderTrusting }}
+---
+# 4. {{ $name }} trusts X-Forwarded-* from the pod network (plan 08 ruling 5), so only Traefik and its listed direct callers may connect to
+#    its http port; another pod could otherwise send any X-Forwarded-For. Nothing else of the pod (e.g. Keycloak's management port) is open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-direct-callers-{{ $name }}
+  labels:
+    {{- include "procure-platform.labels" (dict "root" $ "name" "network-policies") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        {{- range $callers }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}
 {{- end }}

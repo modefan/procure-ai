@@ -1,0 +1,21 @@
+# Plan 08 Task 3: who reaches Keycloak how. Tokens and discovery go to the public issuer host (through Traefik, CoreDNS rewrite), the
+# admin REST API stays inside the cluster: Keycloak's ingress may serve only /realms/ and /resources/ (keycloak.ingress.publicPathsOnly).
+suite: keycloak callers
+templates:
+  - charts/access/templates/deployment.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: access calls the keycloak admin api on the in-cluster service, not through the ingress
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Keycloak__AdminBaseUrl
+            value: http://keycloak:8080
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: Auth__Authority
+            value: https://auth.procure.localtest.me/realms/procure

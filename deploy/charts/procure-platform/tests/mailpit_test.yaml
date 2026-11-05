@@ -1,0 +1,37 @@
+suite: mailpit
+templates:
+  - mailpit.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: mailpit's web UI is published at its host by default (local)
+    asserts:
+      - hasDocuments:
+          count: 3
+      - equal:
+          path: spec.rules[0].host
+          value: mail.procure.localtest.me
+        documentSelector: { path: kind, value: Ingress }
+      - equal:
+          path: spec.template.metadata.labels["procure.ai/ingress-backend"]
+          value: "true"
+        documentSelector: { path: kind, value: Deployment }
+
+  # Plan 08 ruling 4: no public Mailpit on a hosted VM; Traefik may not reach it either (the NetworkPolicy follows the label).
+  - it: mailpit has no ingress when disabled
+    set:
+      mailpit.ingress.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2
+      - notExists:
+          path: spec.template.metadata.labels["procure.ai/ingress-backend"]
+        documentSelector: { path: kind, value: Deployment }
+      # SMTP for Notifications stays.
+      - equal:
+          path: spec.ports[0]
+          value: { name: smtp, port: 1025, targetPort: smtp, protocol: TCP }
+        documentSelector: { path: kind, value: Service }
+      - notExists:
+          path: spec.rules
+        documentSelector: { path: kind, value: Deployment }

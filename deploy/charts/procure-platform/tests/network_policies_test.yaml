@@ -61,3 +61,62 @@ tests:
           path: $..namespaceSelector.matchLabels[?(@ == "observability")]
       - notExists:
           path: spec.ingress[?(@.from[0].ipBlock)]
+
+  # Plan 08 ruling 5: the gateway and Keycloak trust X-Forwarded-* from the pod network, so only Traefik (and the in-cluster callers
+  # that need them directly) may connect to them; any other pod could otherwise claim any client IP.
+  - it: only traefik reaches the gateway and keycloak http ports
+    asserts:
+      # The namespace-wide rule leaves them out ...
+      - equal:
+          path: spec.podSelector
+          value:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: NotIn
+                values: [gateway, keycloak]
+        documentSelector: { path: metadata.name, value: allow-same-namespace }
+      # ... and each gets its own: Traefik plus its named direct callers, on the http port only.
+      - equal:
+          path: spec
+          value:
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: gateway
+            policyTypes: [Ingress]
+            ingress:
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: kube-system
+                    podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: traefik
+                  - podSelector:
+                      matchLabels:
+                        app.kubernetes.io/component: demo-data
+                ports:
+                  - port: http
+                    protocol: TCP
+        documentSelector: { path: metadata.name, value: allow-direct-callers-gateway }
+      - equal:
+          path: spec
+          value:
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: keycloak
+            policyTypes: [Ingress]
+            ingress:
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: kube-system
+                    podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: traefik
+                  - podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: access-api
+                ports:
+                  - port: http
+                    protocol: TCP
+        documentSelector: { path: metadata.name, value: allow-direct-callers-keycloak }

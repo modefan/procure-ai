@@ -92,3 +92,43 @@ tests:
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.name
           value: http
+      - equal:
+          path: spec.rules[0].http.paths
+          value:
+            - path: /
+              pathType: Prefix
+              backend:
+                service:
+                  name: keycloak
+                  port:
+                    name: http
+
+  # Plan 08 ruling 4: on a public host only Keycloak's documented public paths are routed (no /admin, no welcome page, no /js);
+  # the admin console and REST API stay inside the cluster (Access calls them on the Service, kcadm in the pod).
+  - it: keycloak ingress serves only realms and resources when publicPathsOnly
+    set:
+      keycloak.ingress.publicPathsOnly: true
+    documentSelector:
+      path: kind
+      value: Ingress
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: auth.procure.localtest.me
+      - equal:
+          path: spec.rules[0].http.paths
+          value:
+            - path: /realms/
+              pathType: Prefix
+              backend:
+                service:
+                  name: keycloak
+                  port:
+                    name: http
+            - path: /resources/
+              pathType: Prefix
+              backend:
+                service:
+                  name: keycloak
+                  port:
+                    name: http

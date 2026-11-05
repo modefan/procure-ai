@@ -1,6 +1,8 @@
 {{- $r := .Values.appHostResources.Mailpit }}
 {{- $labels := dict "root" $ "name" "mailpit" }}
-# Mailpit: catches every email Notifications sends (SMTP 1025); its web UI (8025) shows them at https://<hosts.mailpit>.
+# Mailpit: catches every email Notifications sends (SMTP 1025); its web UI (8025) shows them at https://<hosts.mailpit>. The UI has no
+# login: with mailpit.ingress.enabled false (a public host, plan 08 ruling 4) there is no Ingress and Traefik may not reach the pod either;
+# open it with `kubectl port-forward svc/mailpit 8025`.
 apiVersion: v1
 kind: Service
 metadata:
@@ -37,8 +39,10 @@ spec:
     metadata:
       labels:
         {{- include "procure-platform.labels" $labels | nindent 8 }}
+        {{- if .Values.mailpit.ingress.enabled }}
         # Traefik may reach its http port (network-policies.yaml); SMTP stays inside the namespace.
         procure.ai/ingress-backend: "true"
+        {{- end }}
     spec:
       # The image runs as root by default; it needs no privileges.
       {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 1000 "gid" 1000) | nindent 6 }}
@@ -74,6 +78,7 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 128Mi
+{{- if .Values.mailpit.ingress.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -97,3 +102,4 @@ spec:
                 name: mailpit
                 port:
                   name: http
+{{- end }}

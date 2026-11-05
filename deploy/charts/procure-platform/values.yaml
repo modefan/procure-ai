@@ -82,11 +82,18 @@ keycloak:
   image: procure-ai-keycloak   # our image (infra/keycloak): kc.sh build --db=postgres --health-enabled=true, realm baked in
   database: keycloakdb         # role keycloak, created by infra/postgres/initdb/02-keycloak.sh
   dbUser: keycloak
-  # Keycloak trusts X-Forwarded-* only from these (Traefik's pods; k3s pod CIDR).
+  # Keycloak trusts X-Forwarded-* only from these (Traefik's pods; k3s pod CIDR). Only Traefik and Access may connect (networkPolicies).
   proxyTrustedAddresses: 10.42.0.0/16
+  ingress:
+    # true: the ingress routes only Keycloak's public paths /realms/ and /resources/ (plan 08 ruling 4: a public host). The admin console
+    # and REST API are then reached inside the cluster only (Access on the Service; kcadm in the pod). false (local): every path.
+    publicPathsOnly: false
 
 mailpit:
   image: docker.io/axllent/mailpit:v1.32.0
+  ingress:
+    # The web UI at https://<hosts.mailpit> (no login). false on a public host (plan 08 ruling 4): no Ingress, kubectl port-forward instead.
+    enabled: true
 
 debezium:
   image: procure-ai-debezium   # our image (infra/debezium): quay.io/debezium/server plus both properties files
@@ -119,3 +126,14 @@ curl:
 
 networkPolicies:
   enabled: true
+  # Pods that trust X-Forwarded-* from the whole pod network (the gateway: ForwardedHeaders__KnownNetworks__0; Keycloak:
+  # keycloak.proxyTrustedAddresses). Any pod that can connect to them could claim any client address (rate limits, audit, Keycloak's
+  # brute-force detection), so the namespace-wide rule leaves them out and only Traefik (kube-system) plus the callers listed here
+  # (pod labels in namespace procure) reach their http port (plan 08 ruling 5). Kubelet probes come from the node and are not affected.
+  forwardedHeaderTrusting:
+    # The demo seed and the nightly reset (procure-ai templates/demo-data.yaml) call the gateway's Service with the admin key.
+    gateway:
+      - { app.kubernetes.io/component: demo-data }
+    # Access calls the Keycloak admin REST API on the Service (Keycloak__AdminBaseUrl), which the public ingress may not route.
+    keycloak:
+      - { app.kubernetes.io/name: access-api }

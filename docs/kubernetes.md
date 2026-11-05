@@ -69,9 +69,47 @@ The cluster publishes its ports on the PC's loopback address only (`127.0.0.1:80
 no protection meant for a network, so nobody else on the LAN or Wi-Fi may reach them. `tests/Test-BootstrapIsIdempotent.ps1` and
 `tests/Test-Smoke.ps1` fail when a port listens on anything but 127.0.0.1 or ::1.
 
+### Admin surfaces on a public host
+
+Locally every host above is published. For a public host (plan 08 ruling 4) values switches close the surfaces that have no login of
+their own or are not meant for the internet; the defaults keep today's local behaviour:
+
+| Switch (default) | Where | When off / on |
+|---|---|---|
+| `mailpit.ingress.enabled` (`true`) | procure-platform | No Mailpit Ingress, and Traefik may not reach the pod. Open the UI with `kubectl -n procure port-forward svc/mailpit 8025` |
+| `keycloak.ingress.publicPathsOnly` (`false`) | procure-platform | The Keycloak Ingress routes only `/realms/` and `/resources/` (Keycloak's public paths): no admin console, no admin REST API, no welcome page. Admin work with `kcadm.sh` in the pod ("Troubleshooting") |
+| `argocd.adminEnabled` (`true`) | GitOps `apps/values.yaml`, set in `envs/<env>/apps.yaml` | Argo CD's `admin` user is disabled (no password login; use `argocd --core` or kubectl) |
+| `argocd.ingressEnabled` (`true`) | same | No Argo CD Ingress; `kubectl -n argocd port-forward svc/argocd-server 8080:80` |
+
+Who calls Keycloak on which path: browsers (login pages, `/realms/procure/protocol/openid-connect/*`, themes under `/resources/`), the
+gateway (OIDC and the demo login's token request), every service API (discovery, keys, client-credentials tokens), the Aspire dashboard
+(OIDC) and Swagger UI's Authorize dialog all use `/realms/procure/...` on the public host, so they work with `publicPathsOnly`. Only
+Access calls the admin REST API (`/admin/realms/procure/...`, self-registration): it uses Keycloak's Service `http://keycloak:8080` in
+both modes (`Keycloak__AdminBaseUrl`). The token it gets there still carries the public issuer (Keycloak's hostname is fixed by
+`KC_HOSTNAME`), which is what the admin API checks.
+
+### Who may connect to the gateway and Keycloak
+
+The gateway (`ForwardedHeaders__KnownNetworks__0`) and Keycloak (`KC_PROXY_TRUSTED_ADDRESSES`) trust `X-Forwarded-For`/`-Proto` from the
+whole pod network (`10.42.0.0/16`), because Traefik's pod address is not fixed. So the NetworkPolicies of `procure-platform`
+(`networkPolicies.forwardedHeaderTrusting`) leave both out of the namespace-wide "pods of `procure` may reach each other" rule and let
+only these connect to their `http` port (plan 08 ruling 5):
+
+| Pod | May be reached directly by | Why |
+|---|---|---|
+| gateway | Traefik (kube-system), the `demo-data` Jobs | The demo seed and reset call `http://gateway:8080` with the admin key |
+| Keycloak | Traefik, `access-api` | The admin REST API (above). Every other pod reaches Keycloak by its public name, which CoreDNS answers with Traefik |
+
+Kubelet probes come from the node and are not affected (Keycloak's management port 9000 is otherwise closed to every pod).
+`tests/Test-Smoke.ps1` checks it with a curl pod that sends `X-Forwarded-For: 203.0.113.9`: refused straight to either Service, 200
+through Traefik. Traefik's own trust of forwarded headers is part of the hosted setup.
+
 TLS ends at Traefik with a wildcard certificate from a local CA (`bootstrap/new-local-ca.ps1` in the GitOps repo, kept in
-`%USERPROFILE%\.procure-ai\local-ca\`). Pods trust the CA through the ConfigMap `procure-ca` (`SSL_CERT_DIR`), and CoreDNS answers
-`auth.procure.localtest.me` with the Traefik service, so the APIs validate tokens against the same issuer URL the browser uses.
+`%USERPROFILE%\.procure-ai\local-ca\`). The CA carries critical X.509 name constraints: it may only sign `localtest.me` and below,
+MongoDB's in-cluster names (`mongo`, `mongo.procure`, `mongo.procure.svc`, `procure.svc.cluster.local` and below, `localhost`) and
+`127.0.0.1`, so even an imported CA cannot vouch for another site (`tests/Test-LocalCa.ps1`). An older CA without them is replaced by
+the next `new-local-ca.ps1` run, with every certificate; then restart the pods that read them (or recreate the cluster). Pods trust the
+CA through the ConfigMap `procure-ca` (`SSL_CERT_DIR`), and CoreDNS answers `auth.procure.localtest.me` with the Traefik service, so the APIs validate tokens against the same issuer URL the browser uses.
 
 Browsers show a certificate warning until the CA is trusted. `bootstrap/trust-local-ca.ps1` adds it to the current Windows user's
 certificate store (run it yourself; `-Remove` undoes it). On a PC with TLS-inspecting antivirus (ESET here) .NET and PowerShell clients
@@ -95,7 +133,7 @@ ignore certificate errors.
 ## Bootstrap a cluster
 
 Prerequisites: Docker Desktop, `k3d`, `kubectl`, `helm`, `gh` (signed in), the .NET SDK, and the AppHost user secrets (see "Run it
-locally" in the README; the cluster's Secrets are made from them). Ports 80 and 443 must be free. **Never run the cluster and the Aspire
+locally" in the README; the cluster's Secrets are made from them). Ports 80, 443 and 6550 on 127.0.0.1 must be free. **Never run the cluster and the Aspire
 AppHost at the same time** (`k3d cluster stop procure` first): both need most of a 32 GB PC.
 
 In the GitOps repo:
@@ -147,7 +185,8 @@ All in the GitOps repo's `tests/` unless noted. They need the cluster running an
 | Check | What it proves |
 |---|---|
 | `Test-FreshCluster.ps1` | From a deleted cluster, the bootstrap plus Argo CD converge on their own within 15 minutes, nothing crash-loops, then the smoke checks pass (`-WatchOnly`: only watch the running cluster) |
-| `Test-Smoke.ps1` | Gateway and Keycloak through Traefik, demo login and BFF cookie, seeded data with the admin key, the dashboard's sign-in (only `dashboard-viewer` gets in) and its API being off |
+| `Test-Smoke.ps1` | Gateway and Keycloak through Traefik, demo login and BFF cookie, seeded data with the admin key, the dashboard's sign-in (only `dashboard-viewer` gets in) and its API being off, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For` |
+| `Test-LocalCa.ps1` | The local CA's name constraints (no cluster needed) |
 | `Test-Upgrade.ps1` | A new revision reruns every migration Job before the pods change; a revision whose Requests migration fails keeps the old pods serving (throwaway branches, restored afterwards) |
 | `Test-RestartKeepsData.ps1` | `k3d cluster stop/start` and deleted Postgres and MongoDB pods keep every row, document and Debezium position; a new change still reaches the data change log within 30 s |
 | End-to-end tests (this repo) | The browser suite against `https://procure.localtest.me` (below) |
