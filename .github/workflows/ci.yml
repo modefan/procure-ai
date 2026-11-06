@@ -321,10 +321,10 @@ jobs:
         run: test -f ../procure-ai-gitops/envs/local/procure-ai.yaml
 
       # Everything but InfrastructureStartsTests (which starts the AppHost's containers: dotnet job, long suites). --fail-skips: a test that
-      # skips because helm is missing fails here.
+      # skips because helm is missing fails here (MTP needs the value: "--fail-skips on").
       - name: AppHost model and chart parity tests
         run: >-
-          dotnet test --project tests/ProcureAi.AppHost.Tests -c Release --no-build --timeout 10m --fail-skips
+          dotnet test --project tests/ProcureAi.AppHost.Tests -c Release --no-build --timeout 10m --fail-skips on
           --filter-not-class ProcureAi.AppHost.Tests.InfrastructureStartsTests
 
   images:
