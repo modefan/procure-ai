@@ -34,8 +34,8 @@ on:
         default: full
       only:
         description: >-
-          Run only these .NET test projects (space-separated names, e.g. ProcureAi.Suppliers.IntegrationTests); "e2e" in the list
-          runs the system and end-to-end tests. Empty: everything.
+          Run only these .NET test projects (space-separated names, e.g. ProcureAi.Suppliers.IntegrationTests). Empty: all of them.
+          ("e2e" selects the system and end-to-end tests, which are off while E2E-OFF.)
         type: string
         default: ""
   schedule:
@@ -59,7 +59,7 @@ env:
 
 jobs:
   weekly-gate:
-    # Only for the weekly run: skip everything when main has not moved since the commit the last weekly run saw, or moved only by docs
+    # Only for the weekly run: skip everything when main has not moved since the commit the last weekly run tested, or moved only by docs
     # (the same paths push ignores), so a quiet week costs one minute instead of a full run. Fails CLOSED: if GitHub cannot be asked,
     # the week is skipped with an error annotation (a weekly run is cheap to start by hand; an unwanted one is not). A push never runs
     # this job, so it adds nothing to a push's minutes.
@@ -79,22 +79,34 @@ jobs:
         run: |
           set -uo pipefail
           skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
-          # The newest earlier weekly run that was not cancelled (a skipped-everything run counts: it saw that commit).
-          if ! last="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event schedule --branch main -L 10 \
-              --json databaseId,headSha,conclusion \
-              --jq "[.[] | select(.databaseId != ${GITHUB_RUN_ID} and .conclusion != \"cancelled\" and .conclusion != \"\")][0].headSha // \"\"")"; then
+          # The commit of the newest earlier weekly run that actually RAN the suites (its .NET job was not skipped or cancelled). A week the
+          # gate skipped (main unchanged, docs only, or a fail-closed skip) does not count, so code that arrived before a fail-closed
+          # skip is still compared, and tested, the next week.
+          if ! runs="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event schedule --branch main -L 20 \
+              --json databaseId,headSha --jq ".[] | select(.databaseId != ${GITHUB_RUN_ID}) | \"\(.databaseId) \(.headSha)\"")"; then
             echo "::error::Could not list the earlier weekly runs; skipping this week (fail closed). Start the full run by hand if needed."
             skip "skipped: gh run list failed"
           fi
+          last=""
+          while read -r id sha; do
+            [ -n "$id" ] || continue
+            if ! ran="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" \
+                --jq '[.jobs[] | select(.name | startswith("Build and test")) | .conclusion] | first // ""')"; then
+              echo "::error::Could not read the jobs of weekly run $id; skipping this week (fail closed)."
+              skip "skipped: gh api jobs failed"
+            fi
+            case "$ran" in success|failure|timed_out) last="$sha"; break ;; esac
+          done <<< "$runs"
           if [ -z "$last" ]; then
-            echo "No earlier weekly run: running the full suites."; echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+            echo "No earlier weekly run ran the suites: running them."; echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if [ "$last" = "$GITHUB_SHA" ]; then skip "main is still at $GITHUB_SHA, seen by the last weekly run: skipping."; fi
-          # Files changed since then (the compare API lists at most 300; a full list counts as code).
-          if ! files="$(gh api "repos/$GITHUB_REPOSITORY/compare/$last...$GITHUB_SHA" --jq '.files[].filename')"; then
+          if [ "$last" = "$GITHUB_SHA" ]; then skip "main is still at $GITHUB_SHA, tested by the last weekly run: skipping."; fi
+          # Files changed since then. The compare API returns at most 300 files in all; 300 or more counts as code.
+          if ! files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$last...$GITHUB_SHA?per_page=100" --jq '.files[].filename')"; then
             echo "::error::Could not compare $last...$GITHUB_SHA; skipping this week (fail closed). Start the full run by hand if needed."
             skip "skipped: compare failed"
           fi
+          files="$(printf '%s\n' "$files" | sort -u)"
           total="$(printf '%s\n' "$files" | grep -c . || true)"
           code="$(printf '%s\n' "$files" | grep -v -E '^[^/]*\.md$|^docs/|^\.github/ISSUE_TEMPLATE/' | grep -c . || true)"
           if [ "$code" -eq 0 ] && [ "$total" -lt 300 ]; then
