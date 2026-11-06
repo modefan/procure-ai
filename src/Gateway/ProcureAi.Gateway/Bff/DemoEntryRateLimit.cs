@@ -28,14 +28,17 @@ public static class DemoEntryRateLimit
         services.AddOptions<RateLimiterOptions>()
             .Configure<IOptions<DemoEntryRateLimitOptions>>((limiter, options) =>
             {
-                // One global limiter per endpoint, shared by every client partition of that endpoint (the options are a singleton).
-                var globals = new ConcurrentDictionary<string, FixedWindowRateLimiter>(StringComparer.Ordinal);
+                // One global limiter per endpoint, shared by every client partition of that endpoint (the options are a singleton). Lazy, so
+                // two first requests in parallel cannot each build one (the loser's replenishment timer would leak and the two would count
+                // against different windows).
+                var globals = new ConcurrentDictionary<string, Lazy<FixedWindowRateLimiter>>(StringComparer.Ordinal);
                 limiter.AddPolicy(PolicyName, http =>
                 {
                     var settings = options.Value;
                     // The endpoint, not the path: /BFF/Demo-Login/ reaches the same endpoint and must not get an allowance of its own.
                     var endpoint = http.GetEndpoint()?.DisplayName ?? string.Empty;
-                    var global = globals.GetOrAdd(endpoint, _ => new FixedWindowRateLimiter(Window(settings.GlobalPermitLimit, settings.Window)));
+                    var global = globals.GetOrAdd(endpoint, _ => new Lazy<FixedWindowRateLimiter>(
+                        () => new FixedWindowRateLimiter(Window(settings.GlobalPermitLimit, settings.Window)))).Value;
                     return RateLimitPartition.Get(
                         $"{endpoint}|{ClientKey(http.Connection.RemoteIpAddress, settings.Ipv6PrefixLength)}",
                         _ => new ClientAndGlobalLimiter(new FixedWindowRateLimiter(Window(settings.PermitLimit, settings.Window)), global));
@@ -85,8 +88,11 @@ public static class DemoEntryRateLimit
     /// A client's own limiter in front of the endpoint's global one. The client's is asked first, so a client over its own limit never
     /// spends the global allowance (one noisy client cannot lock everyone out). A full global window refuses before the client's permit is
     /// taken. Disposing it disposes only the client's limiter (the middleware drops idle partitions); the global one lives with the policy.
+    /// A fixed-window lease gives nothing back when disposed: a permit taken stays spent for the window. So two races cost a permit that
+    /// was not used: at a global window turnover, a client over its own limit spends one global permit; when clients race for the last
+    /// global permits, the losers spend a client permit. Both are bounded to the requests in the race. Public for its tests.
     /// </summary>
-    private sealed class ClientAndGlobalLimiter(RateLimiter client, RateLimiter global) : RateLimiter
+    public sealed class ClientAndGlobalLimiter(RateLimiter client, RateLimiter global) : RateLimiter
     {
         public override TimeSpan? IdleDuration => client.IdleDuration;
 
@@ -100,7 +106,7 @@ public static class DemoEntryRateLimit
             if (global.GetStatistics()?.CurrentAvailablePermits < permitCount)
             {
                 // Looks full. The window may have just turned over, so ask it: refused is the common case; granted, the client's own
-                // limit still applies below (a grant must never skip it).
+                // limit still applies below (a grant must never skip it), and if the client is refused that global permit stays spent.
                 globalLease = global.AttemptAcquire(permitCount);
                 if (!globalLease.IsAcquired)
                 {
@@ -111,14 +117,14 @@ public static class DemoEntryRateLimit
             var clientLease = client.AttemptAcquire(permitCount);
             if (!clientLease.IsAcquired)
             {
-                globalLease?.Dispose();
+                globalLease?.Dispose(); // releases the lease; the global permit stays spent (fixed window)
                 return clientLease;
             }
 
             globalLease ??= global.AttemptAcquire(permitCount);
             if (!globalLease.IsAcquired)
             {
-                clientLease.Dispose();
+                clientLease.Dispose(); // the client permit stays spent (fixed window): bounded to a race for the last global permits
                 return globalLease;
             }
 
