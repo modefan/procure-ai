@@ -578,3 +578,7 @@ suites move back to every push and the system and end-to-end tests are switched 
 - **Libraries that went commercial are avoided:** Wolverine instead of MassTransit v9, Mapperly instead of
   AutoMapper, plain handlers instead of MediatR, Shouldly instead of FluentAssertions, and YARP with ASP.NET Core's
   OIDC handlers instead of Duende BFF.
+
+## Licence
+
+[MIT](LICENSE). Third-party packages keep their own licences (all MIT, Apache 2.0, BSD or similar; checked in plan 08).
