@@ -27,7 +27,8 @@ public sealed class DemoEntryRateLimitOptions : IValidatableObject
 
     /// <summary>
     /// The IPv6 prefix that counts as one client: a host picks its own interface identifier (the low 64 bits) and can rotate it at will, so
-    /// keying on the full address would give one machine unlimited allowances.
+    /// keying on the full address would give one machine unlimited allowances. Trade-off: the holder of a larger block (a /48 has 65 536 /64s)
+    /// is in effect limited only by <see cref="GlobalPermitLimit"/>, and can spend it for everyone (docs/kubernetes.md, "Demo login answers 429").
     /// </summary>
     [Range(1, 128)]
     public int Ipv6PrefixLength { get; set; } = 64;

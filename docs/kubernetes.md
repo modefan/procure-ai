@@ -227,8 +227,8 @@ the node without draining it, so Postgres recovers from its WAL at the next star
 replication slot may fall back to its last checkpoint, which only means a few changes are decoded again; Audit stores each change once.
 `tests/Test-RestartKeepsData.ps1` checks that nothing is lost or doubled. On k3d this is accepted: there is no node shutdown to hook into
 (the container is stopped), and scaling Postgres down first would be undone by Argo CD's self-heal. A real host (the hosted VM, plan 08
-Task 11) stops cleanly instead: kubelet graceful node shutdown, `--kubelet-arg=shutdown-grace-period=90s` and
-`--kubelet-arg=shutdown-grace-period-critical-pods=30s` on k3s (systemd delays the power-off until the pods got their SIGTERM, so
+Task 11) stops cleanly instead: kubelet graceful node shutdown, `--kubelet-arg=shutdown-grace-period=60s` and
+`--kubelet-arg=shutdown-grace-period-critical-pods=20s` on k3s (plan 08 ruling 10) (systemd delays the power-off until the pods got their SIGTERM, so
 Postgres runs a shutdown checkpoint), or a stop script that suspends Argo CD's auto-sync, scales the apps and then the platform to zero and
 only then stops k3s.
 
@@ -350,6 +350,12 @@ API server.
   so they keep serving and restart normally. Its replication slot keeps the changes (up to `postgres.maxSlotWalKeepSize`), and it catches
   up when it is back. The outage shows on the system status page and as a `platform` Application that is not Healthy. Under the AppHost the
   APIs still wait for their Debezium (`WaitFor`), so a local run starts in a known order.
+- **Demo login answers 429.** The gateway's `demo-entry` limit (`RateLimiting:DemoEntry`) allows 30 demo logins and 30 tenant switches
+  a minute per client and 300 a minute over every client together. A client is an IPv4 address or an IPv6 /64, because a host chooses
+  the low 64 bits of its IPv6 address itself. The trade-off: whoever holds a larger IPv6 block (a /48 is common for IPv6 customers) has
+  65 536 /64s, so their per-client limit is in effect unlimited and only the global 300 a minute caps them. That cap is also what such a
+  caller can use up to lock every reviewer out of demo login, one minute at a time (the cost to Keycloak stays bounded). The gateway's
+  general per-IP limiter (`RateLimiting:PermitLimit`) still keys on the full IPv6 address.
 - **The Aspire dashboard restarts.** Its telemetry lives in a SQLite database in `/tmp` (lost with the pod). `/tmp` is a 512Mi emptyDir
   and the caps (`dashboard.telemetryLimits` in the chart) should level the database off near 200 MiB (measured growth: values.yaml); an `Evicted` event naming the `tmp`
   emptyDir means the caps no longer fit the volume (`kubectl -n observability get events`).
