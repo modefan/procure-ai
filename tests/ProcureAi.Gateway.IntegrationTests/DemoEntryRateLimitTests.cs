@@ -36,7 +36,7 @@ public sealed class DemoEntryRateLimitTests(KeycloakFixture keycloak, RedisFixtu
         }
     }
 
-    /// <summary>Demo login on, and the demo-entry limit as the gateway's appsettings.json sets it (the null removes the test host's lift).</summary>
+    /// <summary>Demo login on, and the demo-entry limit as the gateway's appsettings.json sets it (the nulls remove the test host's lifts).</summary>
     private async Task<GatewayHost> StartAsync(Dictionary<string, string?>? more = null)
     {
         var settings = new Dictionary<string, string?>
@@ -45,6 +45,7 @@ public sealed class DemoEntryRateLimitTests(KeycloakFixture keycloak, RedisFixtu
             ["DemoLogin:ClientSecret"] = keycloak.DemoLoginSecret,
             ["DemoLogin:Password"] = keycloak.DemoPassword,
             ["RateLimiting:DemoEntry:PermitLimit"] = null,
+            ["RateLimiting:DemoEntry:GlobalPermitLimit"] = null,
         };
         foreach (var (key, value) in more ?? [])
         {
@@ -167,6 +168,7 @@ public sealed class DemoEntryRateLimitTests(KeycloakFixture keycloak, RedisFixtu
         ShouldBeLimited(refused);
         otherClient.StatusCode.ShouldBe(HttpStatusCode.NoContent, "another client behind the same proxy has its own allowance");
     }
+
     [Fact]
     public async Task Ten_logins_from_one_ip_within_a_minute_succeed()
     {

@@ -85,6 +85,7 @@ public sealed class GatewayHost : IAsyncDisposable
             ["RateLimiting:PermitLimit"] = "100000",
             // Tests sign in and switch many times from the one test client address; DemoEntryRateLimitTests use the real limit.
             ["RateLimiting:DemoEntry:PermitLimit"] = "100000",
+            ["RateLimiting:DemoEntry:GlobalPermitLimit"] = "100000",
             ["ReverseProxy:Clusters:requests:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:budgets:Destinations:d1:Address"] = stub.Url,
             ["ReverseProxy:Clusters:approvals:Destinations:d1:Address"] = stub.Url,

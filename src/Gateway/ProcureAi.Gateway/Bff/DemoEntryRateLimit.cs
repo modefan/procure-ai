@@ -96,18 +96,26 @@ public static class DemoEntryRateLimit
         {
             // No queue (QueueLimit 0), and the middleware calls AcquireAsync after a refused AttemptAcquire: checking the global window's
             // free permits first means neither call takes a client permit while the global window is full.
+            RateLimitLease? globalLease = null;
             if (global.GetStatistics()?.CurrentAvailablePermits < permitCount)
             {
-                return global.AttemptAcquire(permitCount);
+                // Looks full. The window may have just turned over, so ask it: refused is the common case; granted, the client's own
+                // limit still applies below (a grant must never skip it).
+                globalLease = global.AttemptAcquire(permitCount);
+                if (!globalLease.IsAcquired)
+                {
+                    return globalLease;
+                }
             }
 
             var clientLease = client.AttemptAcquire(permitCount);
             if (!clientLease.IsAcquired)
             {
+                globalLease?.Dispose();
                 return clientLease;
             }
 
-            var globalLease = global.AttemptAcquire(permitCount);
+            globalLease ??= global.AttemptAcquire(permitCount);
             if (!globalLease.IsAcquired)
             {
                 clientLease.Dispose();
