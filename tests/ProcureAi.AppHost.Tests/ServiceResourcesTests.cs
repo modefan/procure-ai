@@ -1374,6 +1374,20 @@ public sealed class ServiceResourcesTests
     }
 
     /// <summary>
+    /// MongoDB 8 exits at start on Linux kernel 6.19+ (SERVER-121912; GitHub's runners) unless glibc keeps rseq: the AppHost's mongo sets
+    /// the same workaround as the test fixture and the platform chart (its helm-unittest checks the chart).
+    /// </summary>
+    [Fact]
+    public async Task Mongo_starts_on_kernel_6_19_and_newer()
+    {
+        await using var scope = await ModelScope.BuildAsync();
+        var mongo = scope.Model.Resources.OfType<ContainerResource>().Single(r => r.Name == ResourceNames.Mongo);
+        var env = await EnvironmentOfAsync(mongo);
+
+        env["GLIBC_TUNABLES"].ShouldBe("glibc.pthread.rseq=1");
+    }
+
+    /// <summary>
     /// The chart's db-roles Job mounts its MongoDB users script from the chart (a chart cannot read files outside its folder): it must be the
     /// very infra/mongo/users.js the AppHost runs (line endings aside). Postgres needs no copy: the Job runs roles.sql from our image.
     /// </summary>

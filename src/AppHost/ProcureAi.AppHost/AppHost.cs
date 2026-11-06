@@ -103,6 +103,9 @@ var mongo = builder.AddMongoDB(ResourceNames.Mongo)
     .WithTlsMode(MongoDBTlsMode.PreferTls)
 #pragma warning restore ASPIREMONGODB001
     .WithArgs("--wiredTigerCacheSizeGB", limits.Mongo.WiredTigerCacheGb.ToString(System.Globalization.CultureInfo.InvariantCulture))
+    // MongoDB 8 refuses to start on Linux kernel 6.19+ (SERVER-121912, its TCMalloc's rseq use; GitHub's runners have 6.19). With glibc
+    // keeping rseq, TCMalloc uses per-thread caches and mongod starts. The chart's mongod and the test fixture set the same.
+    .WithEnvironment("GLIBC_TUNABLES", "glibc.pthread.rseq=1")
     .WithContainerLimits(limits.Mongo);
 if (useDataVolumes)
 {

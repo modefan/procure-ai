@@ -92,6 +92,9 @@ public sealed class MongoFixture : IAsyncLifetime
             // Testcontainers starts mongod with --replSet and initiates the set itself once it is up.
             .WithReplicaSet(ReplicaSetName)
             .WithCommand("--wiredTigerCacheSizeGB", limits["WiredTigerCacheGb"]!)
+            // MongoDB 8 refuses to start on Linux kernel 6.19+ (SERVER-121912: its TCMalloc's rseq use); with glibc owning rseq it uses
+            // per-thread caches and starts. GitHub's runners have 6.19; the same setting as the AppHost and the chart.
+            .WithEnvironment(MongoKernelWorkaround.Variable, MongoKernelWorkaround.Value)
             .WithCreateParameterModifier(p => TestLimits.Apply(p, "Mongo"));
         if (Network is not null)
         {
@@ -99,7 +102,17 @@ public sealed class MongoFixture : IAsyncLifetime
         }
 
         _container = builder.Build();
-        await _container.StartAsync();
+        try
+        {
+            await _container.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            // A mongod that exits during start only shows as "container is not running"; its own output says why.
+            var (stdout, stderr) = await _container.GetLogsAsync();
+            throw new InvalidOperationException($"The MongoDB test container did not start. mongod output:\n{Tail(stdout)}\n{Tail(stderr)}", ex);
+        }
+
         Client = new MongoClient(ConnectionString);
 
         // The tests assert on the replica set the AppHost runs; fail loudly if the container is not one (e.g. a command override dropped --replSet).
@@ -111,6 +124,8 @@ public sealed class MongoFixture : IAsyncLifetime
 
         await RunUsersScriptAsync();
     }
+
+    private static string Tail(string log) => log.Length <= 6000 ? log : log[^6000..];
 
     /// <summary>
     /// A connection string for another container on <see cref="Network"/> (Debezium): the server by its alias, without credentials (Debezium

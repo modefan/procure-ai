@@ -4,10 +4,10 @@ name: CI
 # account (2 000 a month on GitHub Free; each job is rounded up to the whole minute):
 #   - every push to main: build, warnings as errors, client and generated-code drift, the fast suites (unit and architecture tests,
 #     the Angular specs, the container-less AppHost tests with the chart parity checks against the GitOps repo, the chart checks) and
-#     the image builds;
+#     the image builds and image tests;
 #   - nightly (schedule, skipped when main has not moved since the last nightly) and by hand (workflow_dispatch, any branch): all of
-#     that plus the long suites: the Testcontainers integration tests, the AppHost infrastructure test, the image tests, the system
-#     tests and the Playwright end-to-end tests.
+#     that plus the long suites: the Testcontainers integration tests, the AppHost infrastructure test, the system tests and the
+#     Playwright end-to-end tests. A hand-started run can be narrowed with the `only` input (fewer minutes while fixing one suite).
 # Measured minutes and the arithmetic: README "Tests and CI". Once the repos are public (unlimited minutes), the long suites move to
 # every push: set FULL below to "true" for push too (plan 08 Task 17).
 # publish.yml only follows a green CI run of a *push* to main, so a nightly or hand-started run never publishes or deploys anything.
@@ -16,6 +16,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      only:
+        description: >-
+          Run only these .NET test projects (space-separated names, e.g. ProcureAi.Suppliers.IntegrationTests); "e2e" in the list
+          runs the system and end-to-end tests. Empty: everything.
+        type: string
+        default: ""
   schedule:
     # 23:37 UTC (01:37 in Johannesburg).
     - cron: "37 23 * * *"
@@ -98,6 +105,14 @@ jobs:
           ls "$HOME/.aspnet/dev-certs/trust"
           echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
 
+      # The AppHost infrastructure test starts the AppHost, whose web-installer runs npm install (package.json engines, engine-strict).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: env.FULL == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: src/Web/procure-ai-web/package-lock.json
+
       - uses: ./.github/actions/ci-secrets
 
       - name: Build
@@ -113,6 +128,7 @@ jobs:
         timeout-minutes: 50
         env:
           LONG: ProcureAi.BuildingBlocks.Tests
+          ONLY: ${{ inputs.only }}
         run: |
           set -o pipefail
           status=0
@@ -126,6 +142,7 @@ jobs:
             long=false
             case "$name" in *.IntegrationTests|ProcureAi.AppHost.Tests) long=true ;; esac
             for l in $LONG; do [ "$name" = "$l" ] && long=true; done
+            if [ -n "$ONLY" ] && ! printf ' %s ' "$ONLY" | grep -q " $name "; then continue; fi
             if [ "$long" = true ] && [ "$FULL" != true ]; then
               summary+="$name: not run on push (long suite: nightly and by hand)"$'\n'
               continue
@@ -328,7 +345,7 @@ jobs:
           --filter-not-class ProcureAi.AppHost.Tests.InfrastructureStartsTests
 
   images:
-    name: Container images (build; tests nightly)
+    name: Container images (build and test, no push)
     needs: [nightly-gate]
     if: ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
@@ -352,9 +369,8 @@ jobs:
         shell: pwsh
         run: ./deploy/scripts/build-images.ps1 -Tag ci
 
-      # Starts the images (Keycloak against a throwaway Postgres, nginx, the .NET apps without configuration). Long suite.
+      # Starts the images (Keycloak against a throwaway Postgres, nginx, the .NET apps without configuration). About a minute: every push.
       - name: Test the images
-        if: env.FULL == 'true'
         shell: pwsh
         run: ./deploy/scripts/test-images.ps1 -Tag ci
 
@@ -364,6 +380,7 @@ jobs:
     # Long suites: only when FULL is true, and only after the build and the other suites passed.
     if: >-
       ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' && github.event_name != 'push' &&
+      (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
       needs.dotnet.result == 'success' && needs.web.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60

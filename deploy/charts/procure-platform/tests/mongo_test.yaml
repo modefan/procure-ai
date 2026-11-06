@@ -29,6 +29,12 @@ tests:
             - --tlsAllowConnectionsWithoutCertificates
             - --wiredTigerCacheSizeGB
             - "0.25"
+      # MongoDB 8 starts on Linux kernel 6.19+ only with glibc keeping rseq (SERVER-121912).
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLIBC_TUNABLES
+            value: glibc.pthread.rseq=1
       # The keyfile comes from the Secret through an init container that makes it owner-read-only (mongod refuses a group-readable one).
       - equal:
           path: spec.template.spec.initContainers[1].name
