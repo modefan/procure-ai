@@ -423,6 +423,29 @@ jobs:
           ls "$HOME/.aspnet/dev-certs/trust"
           echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
 
+      # The private-repo runner has 2 CPUs and 8 GB. The whole AppHost (about 20 containers and 13 .NET processes) needs more: without
+      # swap the runner itself was killed ("The runner has received a shutdown signal") a few minutes into the system tests.
+      - name: Add swap (the whole AppHost needs more than the runner's 8 GB)
+        run: |
+          set -euo pipefail
+          dir=/mnt; [ -w "$dir" ] || sudo test -d "$dir" || dir=/
+          sudo swapoff -a || true
+          sudo fallocate -l 12G "$dir/procure-swapfile"
+          sudo chmod 600 "$dir/procure-swapfile"
+          sudo mkswap "$dir/procure-swapfile" > /dev/null
+          sudo swapon "$dir/procure-swapfile"
+          nproc; free -m; df -h "$dir"
+
+      - name: Log memory every 30 s (printed at the end)
+        run: |
+          cat > "$RUNNER_TEMP/memlog.sh" <<'SCRIPT'
+          while :; do
+            echo "$(date -u +%T) $(free -m | awk '/Mem:/ {print "mem used", $3, "avail", $7} /Swap:/ {print "swap used", $3}' | xargs)"
+            sleep 30
+          done
+          SCRIPT
+          nohup bash "$RUNNER_TEMP/memlog.sh" > "$RUNNER_TEMP/memory.log" 2>&1 &
+
       - uses: ./.github/actions/ci-secrets
 
       - name: Build
@@ -445,6 +468,10 @@ jobs:
         run: >
           dotnet test --project tests/ProcureAi.EndToEndTests -c Release --no-build --timeout 30m
           --report-xunit-trx --results-directory "$RUNNER_TEMP/trx-e2e"
+
+      - name: Memory during the run
+        if: always()
+        run: cat "$RUNNER_TEMP/memory.log" || true
 
       - name: Upload test results and Playwright output
         if: failure() || cancelled()
