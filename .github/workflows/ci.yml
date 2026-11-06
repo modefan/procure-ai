@@ -1,12 +1,28 @@
 name: CI
 
+# Which suites run when (plan 08 ruling 14). The repo is private, so every job minute counts against the free Actions minutes of the
+# account (2 000 a month on GitHub Free; each job is rounded up to the whole minute):
+#   - every push to main: build, warnings as errors, client and generated-code drift, the fast suites (unit and architecture tests,
+#     the Angular specs, the container-less AppHost tests with the chart parity checks against the GitOps repo, the chart checks) and
+#     the image builds;
+#   - nightly (schedule, skipped when main has not moved since the last nightly) and by hand (workflow_dispatch, any branch): all of
+#     that plus the long suites: the Testcontainers integration tests, the AppHost infrastructure test, the image tests, the system
+#     tests and the Playwright end-to-end tests.
+# Measured minutes and the arithmetic: README "Tests and CI". Once the repos are public (unlimited minutes), the long suites move to
+# every push: set FULL below to "true" for push too (plan 08 Task 17).
+# publish.yml only follows a green CI run of a *push* to main, so a nightly or hand-started run never publishes or deploys anything.
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # 23:37 UTC (01:37 in Johannesburg).
+    - cron: "37 23 * * *"
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A newer push cancels an older push's run; a push never cancels a running nightly or hand-started full run (their own group).
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && 'push' || 'full' }}
   cancel-in-progress: true
 
 permissions:
@@ -15,14 +31,45 @@ permissions:
 env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  # "true": run the long suites too (nightly and by hand); "false" on push while the repo is private (ruling 14).
+  FULL: ${{ github.event_name != 'push' }}
 
 jobs:
+  nightly-gate:
+    # Only for the nightly run: skip everything when main still points at the commit the last nightly run tested (a quiet day costs one
+    # minute instead of a full run). A push never runs this job, so it adds nothing to a push's minutes.
+    name: Nightly gate (skip if main has not moved)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      skip: ${{ steps.gate.outputs.skip }}
+    steps:
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The newest earlier nightly run that was not cancelled (a skipped-everything run counts: it saw the same commit).
+          last="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event schedule --branch main -L 10 \
+            --json databaseId,headSha,conclusion \
+            --jq "[.[] | select(.databaseId != ${GITHUB_RUN_ID} and .conclusion != \"cancelled\" and .conclusion != \"\")][0].headSha // \"\"")"
+          if [ "$last" = "$GITHUB_SHA" ]; then
+            echo "main is still at $GITHUB_SHA, tested by the last nightly run: skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main moved (last nightly tested '${last:-none}', now $GITHUB_SHA): running the full suites."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
   dotnet:
     name: Build and test (.NET)
+    needs: [nightly-gate]
+    if: ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    # TESTS DISABLED IN CI until the app is done (Dale's call, 2026-10-26): Claude runs every suite locally before each push.
-    # Re-enable by removing the `if: false` lines (marked TESTS-OFF) and fix whatever fails.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -37,14 +84,14 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Docker Hub login (avoids pull rate limits)
-        if: false # TESTS-OFF
+        if: env.FULL == 'true'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Trust the ASP.NET Core dev certificate (the Aspire gateway health check uses HTTPS)
-        if: false # TESTS-OFF
+        if: env.FULL == 'true'
         run: |
           # Exit code 4 only means "not trusted system-wide"; the OpenSSL trust directory below is what .NET uses on Linux.
           dotnet dev-certs https --trust || true
@@ -53,32 +100,19 @@ jobs:
 
       - uses: ./.github/actions/ci-secrets
 
-      # The same check as tests/ProcureAi.ArchitectureTests/NodeVersionTests, here so it runs while the tests are off: one Node patch in
-      # .nvmrc (setup-node) and every FROM node: of the web image, and npm enforces package.json engines (plan 07 carry-over 31).
-      - name: Node version drift (.nvmrc = web Dockerfile)
-        shell: bash
-        run: |
-          nvmrc="$(tr -d '[:space:]' < .nvmrc)"
-          tags="$(sed -n -E 's/^FROM[[:space:]]+node:([0-9.]+).*/\1/p' src/Web/procure-ai-web/Dockerfile)"
-          if [ -z "$tags" ]; then echo "::error::no FROM node: in src/Web/procure-ai-web/Dockerfile"; exit 1; fi
-          for tag in $tags; do
-            if [ "$tag" != "$nvmrc" ]; then
-              echo "::error::src/Web/procure-ai-web/Dockerfile uses node:$tag but .nvmrc says $nvmrc"; exit 1
-            fi
-          done
-          grep -qx 'engine-strict=true' src/Web/procure-ai-web/.npmrc || { echo "::error::src/Web/procure-ai-web/.npmrc must set engine-strict=true"; exit 1; }
-          echo "Node $nvmrc in .nvmrc and the web Dockerfile"
-
       - name: Build
         run: dotnet build ProcureAi.slnx -c Release -warnaserror -m:4
 
       # One project at a time: the container-based suites must never run concurrently.
       # Safety nets: every project gets its own test timeout (MTP --timeout), so a hang fails that project by name
       # instead of silently using up the job timeout; the step itself is bounded below the job timeout.
+      # Long suites (containers): every *.IntegrationTests project, the projects in LONG below and the AppHost infrastructure test; they
+      # run only when FULL is true. ProcureAi.AppHost.Tests' container-less tests run in the charts job (helm and the GitOps repo are there).
       - name: Test
-        if: false # TESTS-OFF
         shell: bash
-        timeout-minutes: 35
+        timeout-minutes: 50
+        env:
+          LONG: ProcureAi.BuildingBlocks.Tests
         run: |
           set -o pipefail
           status=0
@@ -89,10 +123,19 @@ jobs:
             case "$name" in *Tests) ;; *) continue ;; esac
             # The end-to-end projects start the whole AppHost; they run in the e2e job instead.
             if [ "$name" = "ProcureAi.EndToEndTests" ] || [ "$name" = "ProcureAi.SystemTests" ]; then continue; fi
+            long=false
+            case "$name" in *.IntegrationTests|ProcureAi.AppHost.Tests) long=true ;; esac
+            for l in $LONG; do [ "$name" = "$l" ] && long=true; done
+            if [ "$long" = true ] && [ "$FULL" != true ]; then
+              summary+="$name: not run on push (long suite: nightly and by hand)"$'\n'
+              continue
+            fi
+            filter=()
+            if [ "$name" = "ProcureAi.AppHost.Tests" ]; then filter=(--filter-class ProcureAi.AppHost.Tests.InfrastructureStartsTests); fi
             echo "::group::$name"
             start=$SECONDS
             result=passed
-            dotnet test --project "$project" -c Release --no-build --timeout 12m \
+            dotnet test --project "$project" -c Release --no-build --timeout 12m "${filter[@]}" \
               --report-xunit-trx --results-directory "$RUNNER_TEMP/trx" || { status=1; result=FAILED; }
             echo "::endgroup::"
             line="$name: $result in $((SECONDS - start)) s"
@@ -113,6 +156,8 @@ jobs:
 
   web:
     name: Angular build, test and client drift
+    needs: [nightly-gate]
+    if: ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -141,7 +186,6 @@ jobs:
       - run: npm ci
       - run: npx ng build
       - run: npx ng test --watch=false
-        if: false # TESTS-OFF
 
       # Every Api project writes its openapi/<name>-v1.json when built, and WriteGeneratedCode rewrites its pre-generated Wolverine code
       # (Internal/Generated, run by the images in Static mode: docs/generated-code.md). The list is discovered, so a new service is
@@ -178,16 +222,34 @@ jobs:
           fi
 
   charts:
-    # Chart checks (plan 07 ruling 9): seconds, no containers, so not behind TESTS-OFF. Tool versions pinned as on the PC (plan 07 Task 2).
-    name: Helm charts (lint, unittest, kubeconform)
+    # Chart checks (plan 07 ruling 9) and the AppHost's container-less tests, including the chart parity guards (ChartParityTests,
+    # PlatformChartTests, ChartDebeziumTests; plan 07 final review M3): no containers, every push. Tool versions pinned as on the PC
+    # (plan 07 Task 2). The GitOps repo is checked out next to this one (procure-ai-gitops beside procure-ai, as on the PC), so the
+    # parity tests also render the umbrella with envs/local/procure-ai.yaml; it is read with a read-only deploy key (repository secret
+    # GITOPS_READ_KEY_CI, deploy key "procure-ai CI charts job (read-only)"; no key is needed once the GitOps repo is public).
+    name: Helm charts and AppHost model tests
+    needs: [nightly-gate]
+    if: ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       HELM_VERSION: v3.20.0
       HELM_UNITTEST_VERSION: v1.2.1
       KUBECONFORM_VERSION: v0.8.0
+    defaults:
+      run:
+        working-directory: procure-ai
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: procure-ai
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/procure-ai-gitops
+          ssh-key: ${{ secrets.GITOPS_READ_KEY_CI }}
+          persist-credentials: false
+          path: procure-ai-gitops
 
       - name: Install Helm, helm-unittest and kubeconform
         run: |
@@ -239,8 +301,36 @@ jobs:
           helm template observability deploy/charts/procure-observability --namespace observability \
             | kubeconform -strict -summary
 
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: procure-ai/global.json
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('procure-ai/Directory.Packages.props', 'procure-ai/global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - uses: ./procure-ai/.github/actions/ci-secrets
+
+      - name: Build the AppHost tests
+        run: dotnet build tests/ProcureAi.AppHost.Tests -c Release -warnaserror -m:4
+
+      # The parity tests use the GitOps env file only when they find it; fail here instead of letting them silently check less.
+      - name: GitOps env file is beside the repo
+        run: test -f ../procure-ai-gitops/envs/local/procure-ai.yaml
+
+      # Everything but InfrastructureStartsTests (which starts the AppHost's containers: dotnet job, long suites). --fail-skips: a test that
+      # skips because helm is missing fails here.
+      - name: AppHost model and chart parity tests
+        run: >-
+          dotnet test --project tests/ProcureAi.AppHost.Tests -c Release --no-build --timeout 10m --fail-skips
+          --filter-not-class ProcureAi.AppHost.Tests.InfrastructureStartsTests
+
   images:
-    name: Container images (build only, no push)
+    name: Container images (build; tests nightly)
+    needs: [nightly-gate]
+    if: ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # Builds every image of deploy/scripts/build-images.ps1 to prove they build; nothing is pushed and no secret is needed
@@ -262,18 +352,21 @@ jobs:
         shell: pwsh
         run: ./deploy/scripts/build-images.ps1 -Tag ci
 
-      # Starts the images (Keycloak against a throwaway Postgres, nginx, the .NET apps without configuration).
+      # Starts the images (Keycloak against a throwaway Postgres, nginx, the .NET apps without configuration). Long suite.
       - name: Test the images
-        if: false # TESTS-OFF
+        if: env.FULL == 'true'
         shell: pwsh
         run: ./deploy/scripts/test-images.ps1 -Tag ci
 
   e2e:
-    name: End-to-end (Playwright)
-    if: false # TESTS-OFF
-    needs: [dotnet, web]
+    name: System and end-to-end tests (nightly)
+    needs: [nightly-gate, dotnet, web]
+    # Long suites: only when FULL is true, and only after the build and the other suites passed.
+    if: >-
+      ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' && github.event_name != 'push' &&
+      needs.dotnet.result == 'success' && needs.web.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       REQUIRE_E2E: "1"
     steps:
@@ -311,7 +404,9 @@ jobs:
       - uses: ./.github/actions/ci-secrets
 
       - name: Build
-        run: dotnet build tests/ProcureAi.EndToEndTests -c Release -warnaserror -m:4
+        run: |
+          dotnet build tests/ProcureAi.EndToEndTests -c Release -warnaserror -m:4
+          dotnet build tests/ProcureAi.SystemTests -c Release -warnaserror -m:4
 
       - name: Install Playwright browser and OS dependencies
         shell: pwsh
@@ -319,10 +414,12 @@ jobs:
 
       # The whole system through the services' own APIs (starts the AppHost); one after the other with Playwright, never together.
       - name: System tests (whole system through the AppHost)
-        if: false # TESTS-OFF
-        run: dotnet run --project tests/ProcureAi.SystemTests -c Release
+        timeout-minutes: 20
+        run: dotnet run --project tests/ProcureAi.SystemTests -c Release --no-build
 
       - name: End-to-end tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 35
         run: >
           dotnet test --project tests/ProcureAi.EndToEndTests -c Release --no-build --timeout 30m
           --report-xunit-trx --results-directory "$RUNNER_TEMP/trx-e2e"

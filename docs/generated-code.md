@@ -49,7 +49,7 @@ an API project is generated too, not only the ones in the service's Application 
 
 ## The guards
 
-**CI (build-time, runs while tests are off):** the client-drift job of `.github/workflows/ci.yml` builds every API with
+**CI (build-time, every push):** the client-drift job of `.github/workflows/ci.yml` builds every API with
 `-t:Build;WriteGeneratedCode` and fails when `Internal/Generated` differs from what is committed (new, deleted or changed files, via
 `git status --porcelain`) or when an API has no generated code. A stale file that no longer compiles fails the build itself.
 

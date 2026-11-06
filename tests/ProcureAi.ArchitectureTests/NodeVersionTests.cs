@@ -7,8 +7,7 @@ namespace ProcureAi.ArchitectureTests;
 /// <summary>
 /// One Node version everywhere (plan 07 carry-over 31): <c>.nvmrc</c> (CI's <c>setup-node</c>, local nvm) is the source; the web image's
 /// build stage uses the same patch, the web app's <c>engines</c> range allows it, and npm enforces that range (<c>engine-strict</c>), so
-/// a wrong Node fails <c>npm ci</c> instead of building with another runtime. CI's build job runs the same check as a shell step
-/// while the tests are off.
+/// a wrong Node fails <c>npm ci</c> instead of building with another runtime. Runs on every push in CI (fast suites).
 /// </summary>
 public sealed partial class NodeVersionTests
 {
