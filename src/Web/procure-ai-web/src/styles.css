@@ -256,8 +256,8 @@
     background:
       linear-gradient(white 30%, rgb(255 255 255 / 0)) center top / 100% 2.5rem no-repeat local,
       linear-gradient(rgb(255 255 255 / 0), white 70%) center bottom / 100% 2.5rem no-repeat local,
-      radial-gradient(farthest-side at 50% 0, rgb(15 23 42 / 0.18), rgb(15 23 42 / 0)) center top / 100% 0.75rem no-repeat scroll,
-      radial-gradient(farthest-side at 50% 100%, rgb(15 23 42 / 0.18), rgb(15 23 42 / 0)) center bottom / 100% 0.75rem no-repeat scroll;
+      radial-gradient(farthest-side at 50% 0, rgb(15 23 42 / 0.28), rgb(15 23 42 / 0)) center top / 100% 1rem no-repeat scroll,
+      radial-gradient(farthest-side at 50% 100%, rgb(15 23 42 / 0.28), rgb(15 23 42 / 0)) center bottom / 100% 1rem no-repeat scroll;
     background-color: white;
   }
 }

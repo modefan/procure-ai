@@ -286,9 +286,9 @@ dotnet run --project tests/ProcureAi.EndToEndTests -- -trait- "Target=AppHost"
 
 Two tests carry `[Trait("Target", "AppHost")]` and only run against the AppHost: `Restarting_notifications_shows_reconnecting_then_live`
 (it stops and starts a resource with the AppHost's commands; on the cluster Argo CD's self-heal would undo a scale to zero) and
-`Stop_keeps_partial_answer` (it needs the slow Fake model stream only the test AppHost configures). The other way round,
-`Live_connection_is_a_websocket_through_the_gateway` only runs against a deployment: under the AppHost the browser's hub connection
-currently falls back to long polling (live updates still work), behind Traefik it is a real WebSocket.
+`Stop_keeps_partial_answer` (it needs the slow Fake model stream only the test AppHost configures).
+`Live_connection_is_a_websocket_through_the_gateway` runs on both: behind Traefik the hub socket is an HTTP/1.1 upgrade, under the AppHost
+the browser talks HTTP/2 straight to the gateway and opens it as an extended CONNECT (RFC 8441).
 
 ## Personal data in collected logs
 
