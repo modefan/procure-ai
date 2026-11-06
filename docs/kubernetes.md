@@ -185,7 +185,7 @@ ignore certificate errors.
 ## Bootstrap a cluster
 
 Prerequisites: Docker Desktop, `k3d`, `kubectl`, `helm`, `gh` (signed in), the .NET SDK, and the AppHost user secrets (see "Run it
-locally" in the README; the cluster's Secrets are made from them). Ports 80, 443 and 6550 on 127.0.0.1 must be free. **Never run the cluster and the Aspire
+locally" in the README and docs/local-run.md; the cluster's Secrets are made from them). Ports 80, 443 and 6550 on 127.0.0.1 must be free. **Never run the cluster and the Aspire
 AppHost at the same time** (`k3d cluster stop procure` first): both need most of a 32 GB PC.
 
 In the GitOps repo:

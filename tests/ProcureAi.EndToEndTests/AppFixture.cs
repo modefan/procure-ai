@@ -27,6 +27,22 @@ public sealed class AppFixture : IAsyncLifetime
     /// <summary>Keycloak's public URL in external target mode (optional).</summary>
     public const string KeycloakUrlVariable = "PROCUREAI_E2E_KEYCLOAK_URL";
 
+    /// <summary>
+    /// Optional: a folder to record a video of every browser page into (<c>&lt;test&gt;-&lt;variant&gt;.&lt;start&gt;-&lt;end&gt;.webm</c>, Unix
+    /// milliseconds of the page's start and the context's end, so the pages of several people can be cut into one story). The README's
+    /// full-flow GIF is made from these (docs/readme-assets.md).
+    /// </summary>
+    public const string VideoDirectoryVariable = "PROCUREAI_E2E_VIDEO_DIR";
+
+    /// <summary>Optional: milliseconds Playwright waits before each browser action (Playwright's SlowMo), so a recorded video can be followed.</summary>
+    public const string SlowMoVariable = "PROCUREAI_E2E_SLOW_MO_MS";
+
+    private static BrowserTypeLaunchOptions LaunchOptions() => new()
+    {
+        Headless = true,
+        SlowMo = float.TryParse(Environment.GetEnvironmentVariable(SlowMoVariable), System.Globalization.CultureInfo.InvariantCulture, out var ms) ? ms : null,
+    };
+
     /// <summary>The kubectl context of the external target, for the tests that change data behind the app's back (default k3d-procure).</summary>
     public const string KubeContextVariable = "PROCUREAI_E2E_KUBE_CONTEXT";
 
@@ -94,7 +110,7 @@ public sealed class AppFixture : IAsyncLifetime
             throw new InvalidOperationException($"playwright install chromium failed with exit code {exit}");
         }
         _playwright = await Playwright.CreateAsync();
-        Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        Browser = await _playwright.Chromium.LaunchAsync(LaunchOptions());
 
         // xUnit does not reliably call DisposeAsync after a failed InitializeAsync, so clean up here and rethrow.
         try
@@ -150,7 +166,7 @@ public sealed class AppFixture : IAsyncLifetime
             throw new InvalidOperationException($"playwright install chromium failed with exit code {exit}");
         }
         _playwright = await Playwright.CreateAsync();
-        Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        Browser = await _playwright.Chromium.LaunchAsync(LaunchOptions());
 
         try
         {
@@ -232,10 +248,16 @@ public sealed class AppFixture : IAsyncLifetime
     {
         // Theory cases share one method name, so their traces and screenshots need the arguments in the name.
         testName = ArtifactName(variant is null ? testName : $"{testName}-{variant}");
-        var context = await Browser.NewContextAsync(
-            new BrowserNewContextOptions { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 1280, Height = 800 } });
+        var options = new BrowserNewContextOptions { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 1280, Height = 800 } };
+        var videoDirectory = Environment.GetEnvironmentVariable(VideoDirectoryVariable);
+        if (!string.IsNullOrWhiteSpace(videoDirectory))
+        {
+            options.RecordVideoDir = Path.Combine(videoDirectory, "raw");
+            options.RecordVideoSize = new() { Width = 1280, Height = 800 };
+        }
+        var context = await Browser.NewContextAsync(options);
         await context.Tracing.StartAsync(new TracingStartOptions { Screenshots = true, Snapshots = true, Sources = false });
-        return new TracedContext(context, testName);
+        return new TracedContext(context, testName, string.IsNullOrWhiteSpace(videoDirectory) ? null : videoDirectory);
     }
 
     /// <summary>
@@ -592,9 +614,18 @@ public sealed class EndToEndCollection : ICollectionFixture<AppFixture>
 }
 
 /// <summary>A browser context that writes its trace and final screenshots to <see cref="AppFixture.ArtifactsDirectory"/> when disposed.</summary>
-public sealed class TracedContext(IBrowserContext context, string testName) : IAsyncDisposable
+public sealed class TracedContext(IBrowserContext context, string testName, string? videoDirectory = null) : IAsyncDisposable
 {
-    public Task<IPage> NewPageAsync() => context.NewPageAsync();
+    private long _pageStarted;
+
+    public Task<IPage> NewPageAsync()
+    {
+        if (_pageStarted == 0)
+        {
+            _pageStarted = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
+        return context.NewPageAsync();
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -619,7 +650,28 @@ public sealed class TracedContext(IBrowserContext context, string testName) : IA
         finally
         {
             // Always release the browser context, whatever the diagnostics did.
+            var videos = videoDirectory is null ? [] : context.Pages.Select(p => p.Video).OfType<IVideo>().ToList();
+            var ended = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             await context.CloseAsync();
+            await SaveVideosAsync(videos, ended);
+        }
+    }
+
+    /// <summary>Saves the opt-in page videos (<see cref="AppFixture.VideoDirectoryVariable"/>); never fails the test.</summary>
+    private async Task SaveVideosAsync(List<IVideo> videos, long ended)
+    {
+        for (var i = 0; i < videos.Count; i++)
+        {
+            try
+            {
+                var suffix = i == 0 ? "" : $"-page{i + 1}";
+                await videos[i].SaveAsAsync(Path.Combine(videoDirectory!, $"{testName}{suffix}.{_pageStarted}-{ended}.webm"));
+                await videos[i].DeleteAsync();
+            }
+            catch (Exception)
+            {
+                // A video is a nice-to-have, like the trace.
+            }
         }
     }
 }

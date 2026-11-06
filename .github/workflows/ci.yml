@@ -13,7 +13,7 @@ name: CI
 #     narrowed with the `only` input, or run the push profile with `profile: push`.
 # AT GO-PUBLIC (plan 08 Task 17; public repos have unlimited minutes): the long suites move back to every push. Set FULL below to "true"
 # for push too, drop the images job's condition and the paths-ignore, and keep the weekly schedule only if wanted.
-# Measured minutes and the arithmetic: README "Tests and CI" and the plan 08 Task 14 report.
+# Measured minutes and the arithmetic: docs/testing.md and the plan 08 Task 14 report.
 # publish.yml only follows a green CI run of a *push* to main, so a weekly or hand-started run never publishes or deploys anything.
 
 on:
