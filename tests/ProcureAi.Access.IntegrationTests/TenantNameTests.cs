@@ -21,10 +21,10 @@ public sealed class TenantNameTests(AccessInfraFixture infra, LazyKeycloak lazyK
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static async Task<MeDto> MeAsync(HttpClient client, string tenant)
+    private static async Task<MeDto> MeAsync(HttpClient client, string tenant, string user = DemoUsers.Maria)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/access/me");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateToken(DemoUsers.Maria, tenant, "manager"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateToken(user, tenant, "manager"));
         using var response = await client.SendAsync(request, Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
         return (await response.Content.ReadFromJsonAsync<MeDto>(Json, Ct))!;
@@ -59,6 +59,30 @@ public sealed class TenantNameTests(AccessInfraFixture infra, LazyKeycloak lazyK
             using var client = offline.CreateClient();
             (await MeAsync(client, tenant)).TenantName.ShouldBe("Initech Holdings");
         }
+    }
+
+    [Fact]
+    public async Task Parallel_first_reads_store_one_tenant_row_and_all_succeed()
+    {
+        // Review M1: several first reads of an unnamed tenant at once (two Access instances, three callers each) all find the
+        // organization and try to insert the row; the losers' primary key conflict must not turn into a 500.
+        var keycloak = await lazyKeycloak.GetAsync();
+        var tenant = $"n{Guid.NewGuid():N}"[..12];
+        await keycloak.CreateOrganizationAsync(tenant, "Parallel Partners");
+        await infra.CreateTenantAsync(tenant);
+
+        await using var first = new AccessApiFactory(infra, keycloak);
+        await using var second = new AccessApiFactory(infra, keycloak);
+        using var a = first.CreateClient();
+        using var b = second.CreateClient();
+        // A different caller each: identical GETs would be coalesced into one execution (and served from the 1 s cache).
+        var reads = Enumerable.Range(0, 6).Select(i => MeAsync(i % 2 == 0 ? a : b, tenant, $"parallel-{i}")).ToList();
+
+        var results = await Task.WhenAll(reads);
+
+        results.ShouldAllBe(me => me.TenantName == "Parallel Partners");
+        await using var db = new AccessDbContext(new DbContextOptionsBuilder<AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options);
+        (await db.Tenants.CountAsync(t => t.Id == tenant, Ct)).ShouldBe(1);
     }
 
     [Fact]
