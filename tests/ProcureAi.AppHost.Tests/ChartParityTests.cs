@@ -194,7 +194,8 @@ public sealed partial class ChartParityTests
         foreach (var (label, rendered) in await Helm.RenderUmbrellaVariantsAsync(helm))
         {
             var containers = RenderedChart.Containers(rendered);
-            containers.Count.ShouldBeGreaterThan(30, label);
+            // The apps, their migration Jobs and the demo data: 24 on 2026-11-06 (the waitFor init containers went with plan 08 ruling 8).
+            containers.Count.ShouldBeGreaterThan(20, label);
             containers.Where(c => !ResourcesBlock().IsMatch(c.Block)).Select(c => c.Name)
                 .ShouldBeEmpty($"{label}: containers without memory and cpu requests and limits");
         }
