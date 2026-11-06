@@ -489,11 +489,13 @@ gateway. The assistant's retrieval is measured on every run (hit@6 on 34 questio
 the build if any of the services' OpenAPI documents (found by convention, so a new service is covered
 automatically) or the generated Angular clients differ from what is committed. **While the repo is private**, every Actions
 minute counts against the free 2 000 a month, so CI splits the suites (`.github/workflows/ci.yml`): every push that changes more than
-docs runs the build, the drift checks, the unit and architecture tests, the Vitest specs and the chart checks with the AppHost's chart
+the root Markdown files or `docs/` runs the build, the drift checks, the unit and architecture tests, the Vitest specs and the chart checks with the AppHost's chart
 parity tests (the GitOps repo checked out beside it), about 15 billed minutes plus about 8 for publishing (images and deploy). The long suites (image
-builds and image tests, Testcontainers integration tests, the AppHost tests, the system tests and Playwright) run weekly when `main` has
-moved and on demand (`workflow_dispatch`, optionally narrowed to some projects); the .NET suites alone take about 45 minutes. **When
-the repo goes public** (unlimited minutes) the long suites move back to every push. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
+builds and image tests, Testcontainers integration tests and the AppHost tests) run weekly when `main` has moved by more than docs
+and on demand (`workflow_dispatch`, optionally narrowed to some projects); the .NET suites alone take about 45 minutes. The system
+tests and the Playwright end-to-end tests are **off in CI until fixed**: the private repo's 8 GB runner was killed while the whole
+AppHost started, so they run locally before pushes for now. **When the repo goes public** (unlimited minutes, a 16 GB runner) the long
+suites move back to every push and the system and end-to-end tests are switched back on. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
 
 ## Design decisions
 

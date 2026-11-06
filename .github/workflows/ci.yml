@@ -8,8 +8,9 @@ name: CI
 #     specs, the chart checks with the AppHost's chart parity tests against the charts and the GitOps repo);
 #   - weekly (schedule, skipped when main has not moved since the last weekly run) and by hand (workflow_dispatch, any branch): all of
 #     that plus the long suites: the container image builds and image tests (publish.yml builds the same images after every push), the
-#     Testcontainers integration tests, the AppHost tests (model and infrastructure), the system tests and the Playwright end-to-end
-#     tests. A hand-started run can be narrowed with the `only` input, or run the push profile with `profile: push`.
+#     Testcontainers integration tests and the AppHost tests (model and infrastructure). The system and Playwright end-to-end tests are
+#     OFF (E2E-OFF, job e2e) until the private runner's kill is fixed; they come back at go-public. A hand-started run can be
+#     narrowed with the `only` input, or run the push profile with `profile: push`.
 # AT GO-PUBLIC (plan 08 Task 17; public repos have unlimited minutes): the long suites move back to every push. Set FULL below to "true"
 # for push too, drop the images job's condition and the paths-ignore, and keep the weekly schedule only if wanted.
 # Measured minutes and the arithmetic: README "Tests and CI" and the plan 08 Task 14 report.
@@ -18,9 +19,10 @@ name: CI
 on:
   push:
     branches: [main]
-    # Docs-only pushes run no CI (and therefore no publish).
+    # Docs-only pushes run no CI (and therefore no publish). Only the root *.md files ("*" never crosses "/"): Markdown elsewhere can be
+    # app content (infra/seed policy documents, test fixtures) and must still be built, tested and published.
     paths-ignore:
-      - "**/*.md"
+      - "*.md"
       - "docs/**"
       - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
@@ -41,8 +43,9 @@ on:
     - cron: "0 0 * * 0"
 
 concurrency:
-  # A newer push cancels an older push's run; a push never cancels a running weekly or hand-started run (their own group).
-  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && 'push' || 'full' }}
+  # One group per ref and event: a newer push cancels an older push's run, but never a running weekly (schedule) or hand-started
+  # (workflow_dispatch) run, and those two never cancel each other.
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
@@ -56,14 +59,17 @@ env:
 
 jobs:
   weekly-gate:
-    # Only for the weekly run: skip everything when main still points at the commit the last weekly run tested (a quiet week costs one
-    # minute instead of a full run). A push never runs this job, so it adds nothing to a push's minutes.
+    # Only for the weekly run: skip everything when main has not moved since the commit the last weekly run saw, or moved only by docs
+    # (the same paths push ignores), so a quiet week costs one minute instead of a full run. Fails CLOSED: if GitHub cannot be asked,
+    # the week is skipped with an error annotation (a weekly run is cheap to start by hand; an unwanted one is not). A push never runs
+    # this job, so it adds nothing to a push's minutes.
     name: Weekly gate (skip if main has not moved)
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     outputs:
       skip: ${{ steps.gate.outputs.skip }}
     steps:
@@ -71,23 +77,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          # The newest earlier weekly run that was not cancelled (a skipped-everything run counts: it saw the same commit).
-          last="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event schedule --branch main -L 10 \
-            --json databaseId,headSha,conclusion \
-            --jq "[.[] | select(.databaseId != ${GITHUB_RUN_ID} and .conclusion != \"cancelled\" and .conclusion != \"\")][0].headSha // \"\"")"
-          if [ "$last" = "$GITHUB_SHA" ]; then
-            echo "main is still at $GITHUB_SHA, tested by the last weekly run: skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "main moved (last weekly run tested '${last:-none}', now $GITHUB_SHA): running the full suites."
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+          set -uo pipefail
+          skip() { echo "$1"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          # The newest earlier weekly run that was not cancelled (a skipped-everything run counts: it saw that commit).
+          if ! last="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event schedule --branch main -L 10 \
+              --json databaseId,headSha,conclusion \
+              --jq "[.[] | select(.databaseId != ${GITHUB_RUN_ID} and .conclusion != \"cancelled\" and .conclusion != \"\")][0].headSha // \"\"")"; then
+            echo "::error::Could not list the earlier weekly runs; skipping this week (fail closed). Start the full run by hand if needed."
+            skip "skipped: gh run list failed"
           fi
+          if [ -z "$last" ]; then
+            echo "No earlier weekly run: running the full suites."; echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$last" = "$GITHUB_SHA" ]; then skip "main is still at $GITHUB_SHA, seen by the last weekly run: skipping."; fi
+          # Files changed since then (the compare API lists at most 300; a full list counts as code).
+          if ! files="$(gh api "repos/$GITHUB_REPOSITORY/compare/$last...$GITHUB_SHA" --jq '.files[].filename')"; then
+            echo "::error::Could not compare $last...$GITHUB_SHA; skipping this week (fail closed). Start the full run by hand if needed."
+            skip "skipped: compare failed"
+          fi
+          total="$(printf '%s\n' "$files" | grep -c . || true)"
+          code="$(printf '%s\n' "$files" | grep -v -E '^[^/]*\.md$|^docs/|^\.github/ISSUE_TEMPLATE/' | grep -c . || true)"
+          if [ "$code" -eq 0 ] && [ "$total" -lt 300 ]; then
+            skip "main moved from $last to $GITHUB_SHA by docs only: skipping."
+          fi
+          echo "main moved from $last to $GITHUB_SHA ($code code files): running the full suites."
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
   dotnet:
     name: Build and test (.NET)
     needs: [weekly-gate]
-    if: ${{ !cancelled() && needs.weekly-gate.outputs.skip != 'true' }}
+    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -191,7 +210,7 @@ jobs:
   web:
     name: Angular build, test and client drift
     needs: [weekly-gate]
-    if: ${{ !cancelled() && needs.weekly-gate.outputs.skip != 'true' }}
+    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -263,7 +282,7 @@ jobs:
     # GITOPS_READ_KEY_CI, deploy key "procure-ai CI charts job (read-only)"; no key is needed once the GitOps repo is public).
     name: Helm charts and chart parity
     needs: [weekly-gate]
-    if: ${{ !cancelled() && needs.weekly-gate.outputs.skip != 'true' }}
+    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -366,7 +385,7 @@ jobs:
     # Long run only while private: publish.yml builds the same images after every push (a broken image fails publish).
     name: Container images (build and test, no push; weekly)
     needs: [weekly-gate]
-    if: ${{ !cancelled() && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' }}
+    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # Builds every image of deploy/scripts/build-images.ps1 to prove they build; nothing is pushed and no secret is needed
@@ -394,13 +413,16 @@ jobs:
         run: ./deploy/scripts/test-images.ps1 -Tag ci
 
   e2e:
-    name: System and end-to-end tests (weekly)
+    name: System and end-to-end tests (off until fixed)
     needs: [weekly-gate, dotnet, web]
-    # Long suites: only when FULL is true, and only after the build and the other suites passed.
-    if: >-
-      ${{ !cancelled() && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' &&
-      (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
-      needs.dotnet.result == 'success' && needs.web.result == 'success' }}
+    # E2E-OFF (plan 08 Task 14 review): switched off until the runner kill below is fixed; re-enabling it is part of go-public
+    # (plan 08 Task 17, the public 16 GB runner). Put the commented condition back to switch it on. When on: long suites only (FULL true),
+    # and only after the build and the other suites passed.
+    # The condition when on:
+    #   ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' &&
+    #   (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
+    #   needs.dotnet.result == 'success' && needs.web.result == 'success' }}
+    if: false # E2E-OFF
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -439,8 +461,8 @@ jobs:
 
       # KNOWN OPEN (plan 08 Task 14): on the private-repo runner (8 GB RAM: mongod saw 7 932 MB) the runner was killed a few minutes into
       # the system tests twice ("The runner has received a shutdown signal"), while the whole AppHost was starting; a 12 GB swap file
-      # filled the disk instead. Memory or disk exhaustion; the log below records both so the weekly run shows which. This job stays
-      # weekly/by hand while private; public repos get the 4-CPU, 16 GB runner.
+      # filled the disk instead. Memory or disk exhaustion; the log below records both once the job is switched back on (E2E-OFF
+      # above); public repos get the 4-CPU, 16 GB runner.
       - name: Log memory and disk every 30 s (printed at the end)
         run: |
           cat > "$RUNNER_TEMP/memlog.sh" <<'SCRIPT'
