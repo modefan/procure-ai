@@ -3,10 +3,10 @@ name: CI
 # Which suites run when (plan 08 ruling 14). The repo is private, so every job minute counts against the free Actions minutes of the
 # account (2 000 a month on GitHub Free; each job is rounded up to the whole minute):
 #   - every push to main: build, warnings as errors, client and generated-code drift, the fast suites (unit and architecture tests,
-#     the Angular specs, the container-less AppHost tests with the chart parity checks against the GitOps repo, the chart checks) and
+#     the Angular specs, the AppHost's chart parity tests against the charts and the GitOps repo, the chart checks) and
 #     the image builds and image tests;
 #   - nightly (schedule, skipped when main has not moved since the last nightly) and by hand (workflow_dispatch, any branch): all of
-#     that plus the long suites: the Testcontainers integration tests, the AppHost infrastructure test, the system tests and the
+#     that plus the long suites: the Testcontainers integration tests, the AppHost tests (model and infrastructure), the system tests and the
 #     Playwright end-to-end tests. A hand-started run can be narrowed with the `only` input (fewer minutes while fixing one suite).
 # Measured minutes and the arithmetic: README "Tests and CI". Once the repos are public (unlimited minutes), the long suites move to
 # every push: set FULL below to "true" for push too (plan 08 Task 17).
@@ -121,8 +121,8 @@ jobs:
       # One project at a time: the container-based suites must never run concurrently.
       # Safety nets: every project gets its own test timeout (MTP --timeout), so a hang fails that project by name
       # instead of silently using up the job timeout; the step itself is bounded below the job timeout.
-      # Long suites (containers): every *.IntegrationTests project, the projects in LONG below and the AppHost infrastructure test; they
-      # run only when FULL is true. ProcureAi.AppHost.Tests' container-less tests run in the charts job (helm and the GitOps repo are there).
+      # Long suites: every *.IntegrationTests project, the projects in LONG below (containers) and ProcureAi.AppHost.Tests (its
+      # infrastructure test starts the AppHost; its model tests take about four minutes); they run only when FULL is true.
       - name: Test
         shell: bash
         timeout-minutes: 50
@@ -148,7 +148,11 @@ jobs:
               continue
             fi
             filter=()
-            if [ "$name" = "ProcureAi.AppHost.Tests" ]; then filter=(--filter-class ProcureAi.AppHost.Tests.InfrastructureStartsTests); fi
+            # The chart parity classes run in the charts job (helm and the GitOps repo are there); everything else of the AppHost tests here.
+            if [ "$name" = "ProcureAi.AppHost.Tests" ]; then
+              filter=(--filter-not-class ProcureAi.AppHost.Tests.ChartParityTests --filter-not-class ProcureAi.AppHost.Tests.PlatformChartTests
+                --filter-not-class ProcureAi.AppHost.Tests.ChartDebeziumTests)
+            fi
             echo "::group::$name"
             start=$SECONDS
             result=passed
@@ -239,12 +243,12 @@ jobs:
           fi
 
   charts:
-    # Chart checks (plan 07 ruling 9) and the AppHost's container-less tests, including the chart parity guards (ChartParityTests,
-    # PlatformChartTests, ChartDebeziumTests; plan 07 final review M3): no containers, every push. Tool versions pinned as on the PC
+    # Chart checks (plan 07 ruling 9) and the AppHost's chart parity guards (ChartParityTests, PlatformChartTests, ChartDebeziumTests;
+    # plan 07 final review M3): no containers, every push. Tool versions pinned as on the PC
     # (plan 07 Task 2). The GitOps repo is checked out next to this one (procure-ai-gitops beside procure-ai, as on the PC), so the
     # parity tests also render the umbrella with envs/local/procure-ai.yaml; it is read with a read-only deploy key (repository secret
     # GITOPS_READ_KEY_CI, deploy key "procure-ai CI charts job (read-only)"; no key is needed once the GitOps repo is public).
-    name: Helm charts and AppHost model tests
+    name: Helm charts and chart parity
     needs: [nightly-gate]
     if: ${{ !cancelled() && needs.nightly-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
@@ -337,12 +341,13 @@ jobs:
       - name: GitOps env file is beside the repo
         run: test -f ../procure-ai-gitops/envs/local/procure-ai.yaml
 
-      # Everything but InfrastructureStartsTests (which starts the AppHost's containers: dotnet job, long suites). --fail-skips: a test that
+      # Only the chart parity classes (seconds); the AppHost's other tests are a long suite in the dotnet job. --fail-skips: a test that
       # skips because helm is missing fails here (MTP needs the value: "--fail-skips on").
-      - name: AppHost model and chart parity tests
+      - name: Chart parity tests (AppHost model against the rendered charts)
         run: >-
           dotnet test --project tests/ProcureAi.AppHost.Tests -c Release --no-build --timeout 10m --fail-skips on
-          --filter-not-class ProcureAi.AppHost.Tests.InfrastructureStartsTests
+          --filter-class ProcureAi.AppHost.Tests.ChartParityTests --filter-class ProcureAi.AppHost.Tests.PlatformChartTests
+          --filter-class ProcureAi.AppHost.Tests.ChartDebeziumTests
 
   images:
     name: Container images (build and test, no push)
