@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
 using ProcureAi.Gateway.Configuration;
 
@@ -34,11 +35,15 @@ public sealed class HubOriginMiddleware(RequestDelegate next, IOptions<HubOption
         await next(context);
     }
 
-    /// <summary>A WebSocket to <c>/hubs/**</c>: an HTTP/1.1 upgrade (<c>Upgrade: websocket</c>) or an HTTP/2 extended CONNECT.</summary>
+    /// <summary>
+    /// A WebSocket to <c>/hubs/**</c> and nothing else: an HTTP/1.1 <c>GET</c> with <c>Upgrade: websocket</c>, or an HTTP/2 extended CONNECT
+    /// whose <c>:protocol</c> is <c>websocket</c> (RFC 8441). A long-polling send (POST) never matches, whatever headers it carries.
+    /// </summary>
     public static bool IsHubWebSocket(HttpRequest request) =>
         request.Path.StartsWithSegments(HubsPath)
-        && (request.Headers.Upgrade.ToString().Contains("websocket", StringComparison.OrdinalIgnoreCase)
-            || HttpMethods.IsConnect(request.Method));
+        && ((HttpMethods.IsGet(request.Method) && request.Headers.Upgrade.ToString().Contains("websocket", StringComparison.OrdinalIgnoreCase))
+            || (request.HttpContext.Features.Get<IHttpExtendedConnectFeature>() is { IsExtendedConnect: true } connect
+                && string.Equals(connect.Protocol, "websocket", StringComparison.OrdinalIgnoreCase)));
 
     private bool IsAllowed(HttpRequest request, string origin)
     {

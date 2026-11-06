@@ -154,6 +154,43 @@ describe('UsersPage', () => {
     expect(api.setUserCostCenters).toHaveBeenLastCalledWith({ userId: 'maria', 'If-Match': '"9"', body: { codes: ['IT-200', 'MK-110'] } });
   });
 
+  it('a conflict keeps only what was changed: an untouched limit takes the latest from the server (no lost update)', async () => {
+    const { fixture, el } = await setup();
+    await openEdit(fixture);
+    // Only the cost centers are changed; the limit box stays at what the dialog opened with.
+    el.querySelector<HTMLElement>('dialog [role="option"][data-code="MK-110"]')!.click();
+    await settle(fixture);
+    api.setUserCostCenters.mockRejectedValueOnce(new HttpErrorResponse({ status: 412, error: { detail: 'old' } }));
+    // Someone else raised the limit and gave her another cost center meanwhile.
+    api.listUsers.mockResolvedValue([userDto('maria', { approvalLimit: 777, costCenterCodes: ['IT-200', 'FI-300'], version: 9 })]);
+    save(el).click();
+    await settle(fixture);
+
+    expect(el.querySelector<HTMLInputElement>('#user-limit')!.value).toBe('777');
+    save(el).click();
+    await settle(fixture);
+    // Their FI-300 stays, our MK-110 is added; their limit is not overwritten.
+    expect(api.setUserCostCenters).toHaveBeenLastCalledWith({ userId: 'maria', 'If-Match': '"9"', body: { codes: ['IT-200', 'FI-300', 'MK-110'] } });
+    expect(api.setApprovalLimit).not.toHaveBeenCalled();
+  });
+
+  it('a conflict keeps a typed limit but an untouched cost center list takes the latest', async () => {
+    const { fixture, el } = await setup();
+    await openEdit(fixture);
+    await typeLimit(fixture, '300000');
+    api.setApprovalLimit.mockRejectedValueOnce(new HttpErrorResponse({ status: 412, error: { detail: 'old' } }));
+    api.listUsers.mockResolvedValue([userDto('maria', { approvalLimit: 777, costCenterCodes: ['FI-300'], version: 9 })]);
+    save(el).click();
+    await settle(fixture);
+
+    expect(el.querySelector<HTMLInputElement>('#user-limit')!.value).toBe('300000');
+    expect(el.querySelector('dialog [role="option"][data-code="IT-200"]')!.getAttribute('aria-selected')).toBe('false');
+    save(el).click();
+    await settle(fixture);
+    expect(api.setUserCostCenters).not.toHaveBeenCalled();
+    expect(api.setApprovalLimit).toHaveBeenLastCalledWith({ userId: 'maria', 'If-Match': '"9"', body: { amount: 300000 } });
+  });
+
   it('table keeps roles on small screens: the users table stacks into cards below lg and keeps its table roles', async () => {
     const { el } = await setup();
     expectExplicitTableRoles(el.querySelector('[data-testid="users"] table'));

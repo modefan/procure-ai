@@ -26,8 +26,9 @@ export function parseRandInput(raw: string): number | null {
  * Edit one user's cost centers (Angular Aria listbox, several can be chosen) and approval limit. A native modal dialog like the
  * budget dialog: the browser traps the focus and Esc closes it (not while a save runs). Saving sends only what changed (see
  * `UsersStore.save`). The server's refusals show next to the field they belong to. A conflict (someone else saved first) keeps the
- * dialog open with what was typed: `user` is the live row of the store, so it shows the latest figures and Save goes out on the latest
- * version.
+ * dialog open with this admin's own changes on top of the latest values, like the matrix: the cost centers they ticked or unticked are
+ * applied to the latest list, a limit they changed stays, and whatever they did not touch takes the latest value (so Save never writes
+ * back an old value over someone else's change). `user` is the live row of the store, so Save goes out on the latest version.
  */
 @Component({
   selector: 'app-user-edit-dialog',
@@ -74,7 +75,7 @@ export function parseRandInput(raw: string): number | null {
 
         @if (refreshed(); as latest) {
           <p class="mt-2 text-sm text-amber-800" data-hint="refreshed" role="status">
-            {{ user().displayName }} was just changed by someone else. Now: {{ latest }}. What you entered is kept; Save applies it.
+            {{ user().displayName }} was just changed by someone else. Now: {{ latest }}. Your changes are kept on top; Save applies them.
           </p>
         }
 
@@ -125,6 +126,8 @@ export class UserEditDialog implements OnDestroy {
     return `${codes}, limit ${formatRand(user.approvalLimit)}`;
   });
   private readonly conflicted = signal(false);
+  /** What the form started from: the values when the dialog opened, then the latest after each conflict. */
+  private base: { codes: string[]; limit: number } = { codes: [], limit: 0 };
 
   protected readonly limitForm = form(this.model, (p) => {
     validate(p.limit, (ctx) => {
@@ -155,6 +158,7 @@ export class UserEditDialog implements OnDestroy {
         const user = this.user();
         this.codes.set([...user.costCenterCodes]);
         this.model.set({ limit: formatPlain(user.approvalLimit) });
+        this.base = { codes: [...user.costCenterCodes], limit: user.approvalLimit };
         if (!element.open) {
           element.showModal();
         }
@@ -189,9 +193,23 @@ export class UserEditDialog implements OnDestroy {
       if (outcome === 'saved') {
         this.close();
       } else if (outcome === 'conflict') {
+        this.rebaseOnLatest(limit);
         this.conflicted.set(true);
       }
     });
+  }
+
+  /** After a conflict: own changes on top of the latest values (see the class comment). */
+  private rebaseOnLatest(typedLimit: number): void {
+    const latest = this.store.users().find((u) => u.userId === this.user().userId) ?? this.user();
+    const mine = this.codes();
+    const added = mine.filter((code) => !this.base.codes.includes(code));
+    const removed = this.base.codes.filter((code) => !mine.includes(code));
+    this.codes.set([...latest.costCenterCodes.filter((code) => !removed.includes(code)), ...added.filter((code) => !latest.costCenterCodes.includes(code))]);
+    if (typedLimit === this.base.limit) {
+      this.model.set({ limit: formatPlain(latest.approvalLimit) });
+    }
+    this.base = { codes: [...latest.costCenterCodes], limit: latest.approvalLimit };
   }
 }
 

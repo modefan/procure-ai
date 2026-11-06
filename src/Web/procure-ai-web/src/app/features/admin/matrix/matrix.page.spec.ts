@@ -81,6 +81,8 @@ describe('MatrixPage', () => {
       expect(filler.tagName).toBe('TD');
       expect(filler.getAttribute('colspan')).toBe('5');
       expect(filler.className).toContain('bg-slate-100');
+      // An empty cell after every area label: hidden from screen readers, which would read it out as "blank".
+      expect(filler.getAttribute('aria-hidden')).toBe('true');
     }
   });
 

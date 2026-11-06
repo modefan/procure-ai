@@ -197,6 +197,47 @@ public sealed class LiveHubGatewayTests(KeycloakFixture keycloak, RedisFixture r
     }
 
     [Fact]
+    public async Task Hub_websocket_over_http2_from_another_origin_or_without_a_session_is_refused()
+    {
+        // The anti-forgery check skips hub WebSockets because the Origin check covers them: over HTTP/2 (extended CONNECT) a foreign origin
+        // must still be refused before anything reaches Notifications, and a socket without the session cookie must not get in either.
+        await using var gateway = await GatewayHost.StartAsync(keycloak, redis, kestrel: true);
+        var (browser, cookies) = gateway.NewBrowserWithCookies();
+        using (browser)
+        {
+            using var driver = new LoginDriver(keycloak);
+            await driver.LoginAsync(browser, "tom@acme.test");
+        }
+
+        var hub = new UriBuilder(gateway.Address) { Scheme = "wss", Path = "/hubs/live", Query = "id=connection-1" }.Uri;
+        var own = gateway.Address.GetLeftPart(UriPartial.Authority);
+
+        (await OpenOverHttp2Async(hub, cookies.CookieHeaderFor(gateway.Address), "https://evil.test")).ShouldBe(HttpStatusCode.Forbidden);
+        (await OpenOverHttp2Async(hub, cookies.CookieHeaderFor(gateway.Address), "null")).ShouldBe(HttpStatusCode.Forbidden);
+        (await OpenOverHttp2Async(hub, cookieHeader: null, own)).ShouldBe(HttpStatusCode.Unauthorized);
+        gateway.Stub.Seen.ShouldNotContain(s => s.Path.StartsWith("/hubs", StringComparison.Ordinal), "a refused socket never reaches the service");
+    }
+
+    [Fact]
+    public async Task Hub_long_polling_send_without_xsrf_header_is_refused_also_with_an_upgrade_header()
+    {
+        // Only a real WebSocket (GET + Upgrade, or an extended CONNECT) skips the anti-forgery check; a long-polling send (POST
+        // /hubs/live?id=...) rides on the cookie and needs the header, even if it carries an Upgrade header.
+        await using var gateway = await GatewayHost.StartAsync(keycloak, redis);
+        var browser = await SignedInAsync(gateway);
+
+        using var plain = await browser.PostAsync("/hubs/live?id=connection-1", new StringContent("{}"), Ct);
+        using var withUpgrade = new HttpRequestMessage(HttpMethod.Post, "/hubs/live?id=connection-1") { Content = new StringContent("{}") };
+        withUpgrade.Headers.TryAddWithoutValidation("Upgrade", "websocket");
+        withUpgrade.Headers.TryAddWithoutValidation("Origin", gateway.Address.GetLeftPart(UriPartial.Authority));
+        using var upgraded = await browser.SendAsync(withUpgrade, Ct);
+
+        plain.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        upgraded.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        gateway.Stub.Seen.ShouldNotContain(s => s.Path.StartsWith("/hubs", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Hub_websocket_behind_a_proxy_that_forwards_wss_is_from_the_own_origin()
     {
         // Traefik forwards a WebSocket upgrade with X-Forwarded-Proto: wss, so the request's scheme is wss while the page's origin is
@@ -219,6 +260,33 @@ public sealed class LiveHubGatewayTests(KeycloakFixture keycloak, RedisFixture r
         (await OpenAsync(hub, cookieHeader, "https://evil.test", asWebSocket)).ShouldBe(HttpStatusCode.Forbidden);
         (await OpenAsync(hub, cookieHeader, own.Replace("https://", "wss://", StringComparison.Ordinal), asWebSocket))
             .ShouldBe(HttpStatusCode.Forbidden, "a browser page never has a wss origin");
+    }
+
+    /// <summary>Opens a WebSocket over HTTP/2 (extended CONNECT) as Chrome does straight to Kestrel; returns the status of the answer.</summary>
+    private static async Task<HttpStatusCode> OpenOverHttp2Async(Uri hub, string? cookieHeader, string origin)
+    {
+        using var handler = new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true } };
+        using var invoker = new HttpMessageInvoker(handler);
+        using var socket = new ClientWebSocket();
+        socket.Options.HttpVersion = HttpVersion.Version20;
+        socket.Options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
+        socket.Options.CollectHttpResponseDetails = true;
+        if (cookieHeader is not null)
+        {
+            socket.Options.SetRequestHeader("Cookie", cookieHeader);
+        }
+
+        socket.Options.SetRequestHeader("Origin", origin);
+        try
+        {
+            await socket.ConnectAsync(hub, invoker, Ct);
+        }
+        catch (WebSocketException)
+        {
+            return socket.HttpStatusCode;
+        }
+
+        return socket.HttpStatusCode;
     }
 
     /// <summary>Opens a WebSocket with the browser's cookie and <paramref name="origin"/>; returns the status of the upgrade answer.</summary>

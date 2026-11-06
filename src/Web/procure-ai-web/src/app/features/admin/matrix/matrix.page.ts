@@ -96,10 +96,11 @@ interface Group {
             @for (group of groups(); track group.label) {
               <tbody>
                 <!-- The label sits in the sticky permission column (like the rows below it), so it stays in view on a sideways scroll in
-                     every browser; the filler carries the band's colour under the role columns. -->
+                     every browser; the filler only carries the band's colour under the role columns (hidden from screen readers, which would
+                     otherwise read a blank cell after every label). -->
                 <tr data-band>
                   <th scope="rowgroup" class="sticky left-0 z-10 border-b border-slate-100 bg-slate-100 px-4 py-2 text-xs font-semibold tracking-wide text-slate-700 uppercase">{{ group.label }}</th>
-                  <td [attr.colspan]="store.roles().length" class="border-b border-slate-100 bg-slate-100"></td>
+                  <td [attr.colspan]="store.roles().length" aria-hidden="true" class="border-b border-slate-100 bg-slate-100"></td>
                 </tr>
                 @for (permission of group.permissions; track permission) {
                   <tr class="group" [attr.data-permission]="permission">

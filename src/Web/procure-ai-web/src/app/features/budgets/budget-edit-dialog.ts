@@ -10,7 +10,8 @@ import { fiscalYearLabel } from './fiscal-year';
  * Change the amount of one cost center budget (needs `budgets.manage`). A native modal dialog like the confirm and conflict
  * dialogs: the browser traps the focus and Esc closes it (not while a save runs). The amount is checked for being a number only;
  * whether it is below what is spent plus reserved is the server's call, and its message (422) is shown inside the dialog.
- * `budget` is the live row of the store, so after a conflict the dialog shows the latest figures.
+ * `budget` is the live row of the store, so after a conflict the dialog shows the latest figures. A typed amount stays (Save then goes out
+ * on the latest version); an amount the user did not change takes the latest budget, so Save never writes an old value back.
  */
 @Component({
   selector: 'app-budget-edit-dialog',
@@ -52,8 +53,15 @@ import { fiscalYearLabel } from './fiscal-year';
         } @else {
           <p id="budget-amount-hint" class="mt-1 text-sm text-slate-600">It cannot be lower than spent plus reserved.</p>
         }
-        @if (refreshed()) {
-          <p class="mt-1 text-sm text-amber-800" data-hint="refreshed">The figures were just updated by someone else. The amount shows the latest budget.</p>
+        @if (refreshed(); as kept) {
+          <p class="mt-1 text-sm text-amber-800" data-hint="refreshed" role="status">
+            The figures were just updated by someone else.
+            @if (kept === 'typed') {
+              The budget is now {{ money(budget().amount) }}; your amount is kept, Save applies it.
+            } @else {
+              The amount shows the latest budget.
+            }
+          </p>
         }
         @if (store.saveError(); as message) {
           <p role="alert" class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{{ keepAmounts(message) }}</p>
@@ -77,8 +85,10 @@ export class BudgetEditDialog implements OnDestroy {
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly model = signal<{ amount: number }>({ amount: 0 });
   protected readonly tried = signal(false);
-  /** The figures were refreshed under the open dialog after a conflict. */
-  protected readonly refreshed = signal(false);
+  /** The figures were refreshed under the open dialog after a conflict: whether the typed amount was kept or replaced by the latest. */
+  protected readonly refreshed = signal<'typed' | 'latest' | null>(null);
+  /** The amount the form started from: the budget when the dialog opened, then the latest after each conflict. */
+  private baseAmount = 0;
 
   protected readonly amountForm = form(this.model, (p) => {
     validate(p.amount, (ctx) => {
@@ -103,13 +113,14 @@ export class BudgetEditDialog implements OnDestroy {
         this.started = true;
         this.store.clearSaveError();
         this.model.set({ amount: this.budget().amount });
+        this.baseAmount = this.budget().amount;
         if (!element.open) {
           element.showModal();
         }
       }
     });
 
-    // A save that lost to someone else (412): the store has loaded the latest budget, so show its amount and say why it moved.
+    // A save that lost to someone else (412): the store has loaded the latest budget. A typed amount stays; an untouched one takes the latest.
     let seenConflicts = this.store.conflicts();
     effect(() => {
       const conflicts = this.store.conflicts();
@@ -117,8 +128,12 @@ export class BudgetEditDialog implements OnDestroy {
         seenConflicts = conflicts;
         const amount = untracked(() => this.budget().amount);
         untracked(() => {
-          this.model.set({ amount });
-          this.refreshed.set(true);
+          const typed = this.model().amount !== this.baseAmount;
+          if (!typed) {
+            this.model.set({ amount });
+          }
+          this.baseAmount = amount;
+          this.refreshed.set(typed ? 'typed' : 'latest');
         });
       }
     });

@@ -122,7 +122,7 @@ describe('BudgetsPage', () => {
     expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('R 633');
   });
 
-  it('after a 412 the open dialog shows the latest amount and says the figures changed', async () => {
+  it('after a 412 the open dialog keeps the typed amount, shows the latest figures and saves on the new version', async () => {
     const { fixture, el } = await setup();
     (row(el, 'IT-200')!.querySelector('[data-action="edit"]') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -131,11 +131,30 @@ describe('BudgetsPage', () => {
     const input = dialog.querySelector('#budget-amount') as HTMLInputElement;
     input.value = '940000';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    api.setBudget.mockRejectedValue(new HttpErrorResponse({ status: 412 }));
+    api.setBudget.mockRejectedValueOnce(new HttpErrorResponse({ status: 412 }));
     api.listBudgets.mockResolvedValue([budgetDto('IT-200', { amount: 920000, version: 5 })]);
     (dialog.querySelector('[data-action="save-budget"] button') as HTMLButtonElement).click();
     await settle(fixture);
     expect(dialog.hasAttribute('open')).toBe(true);
+    expect((dialog.querySelector('#budget-amount') as HTMLInputElement).value).toBe('940000');
+    expect(text(dialog.querySelector('[data-hint="refreshed"]'))).toContain('R 920 000,00');
+    expect(text(dialog.querySelector('[data-hint="refreshed"]'))).toContain('kept');
+
+    (dialog.querySelector('[data-action="save-budget"] button') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(api.setBudget).toHaveBeenLastCalledWith({ costCenter: 'IT-200', fiscalYear: 'FY2027', 'If-Match': '"5"', body: { amount: 940000 } });
+  });
+
+  it('after a 412 an untouched amount takes the latest budget', async () => {
+    const { fixture, el } = await setup();
+    (row(el, 'IT-200')!.querySelector('[data-action="edit"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await settle(fixture);
+    const dialog = el.querySelector('dialog') as HTMLDialogElement;
+    api.setBudget.mockRejectedValueOnce(new HttpErrorResponse({ status: 412 }));
+    api.listBudgets.mockResolvedValue([budgetDto('IT-200', { amount: 920000, version: 5 })]);
+    (dialog.querySelector('[data-action="save-budget"] button') as HTMLButtonElement).click();
+    await settle(fixture);
     expect((dialog.querySelector('#budget-amount') as HTMLInputElement).value).toBe('920000');
     expect(text(dialog)).toContain('The figures were just updated');
   });
