@@ -11,16 +11,17 @@ public static class ListUserTenantsHandler
 {
     /// <summary>
     /// Cross-tenant on purpose (the tenant query filter does not apply): the tenant switcher needs every membership of one user. A
-    /// tenant without a name row is shown under its ID. Ordered by name.
+    /// tenant without a name row gets one from its organization (<see cref="TenantNames"/>), else is shown under its ID. Ordered by name.
     /// </summary>
-    public static async Task<IReadOnlyList<TenantDto>> Handle(ListUserTenants query, IAccessDbContext db, CancellationToken cancellationToken)
+    public static async Task<IReadOnlyList<TenantDto>> Handle(
+        ListUserTenants query, IAccessDbContext db, IIdentityDirectory identities, CancellationToken cancellationToken)
     {
         var ids = await db.TenantUsers.IgnoreQueryFilters().AsNoTracking()
             .Where(u => u.UserId == query.UserId)
             .Select(u => u.TenantId)
             .Distinct()
             .ToListAsync(cancellationToken);
-        var names = await db.Tenants.AsNoTracking().Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => t.Name, cancellationToken);
+        var names = await TenantNames.GetAsync(ids, db, identities, cancellationToken);
         return [.. ids.Select(id => new TenantDto(id, names.GetValueOrDefault(id, id))).OrderBy(t => t.Name, StringComparer.Ordinal).ThenBy(t => t.Id, StringComparer.Ordinal)];
     }
 }

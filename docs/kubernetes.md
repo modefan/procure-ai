@@ -272,12 +272,13 @@ All in the GitOps repo's `tests/` unless noted. They need the cluster running an
 | `Test-RestartKeepsData.ps1` | `k3d cluster stop/start` and deleted Postgres and MongoDB pods keep every row, document and Debezium position; a new change still reaches the data change log within 30 s |
 | End-to-end tests (this repo) | The browser suite against `https://procure.localtest.me` (below) |
 
-The end-to-end tests run against the cluster instead of an AppHost when `PROCUREAI_E2E_GATEWAY_URL` is set. Reset the demo data first
-(the scan test needs the seeded PO-1001 without an invoice, and earlier runs leave their requests behind):
+The end-to-end tests run against the cluster instead of an AppHost when `PROCUREAI_E2E_GATEWAY_URL` is set. They rerun on kept data,
+without a demo reset (plan 08 Task 7: two runs in a row pass): every test finds its own requests by a fresh title or number, the scan
+test's extra invoices for PO-1001 are accepted (as quantity mismatches), and at the end of a run Tom cancels its requests that are still
+waiting for an approval, so their budget reservations do not pile up. A reset is still the way back to the pristine demo:
 
 ```powershell
-kubectl --context k3d-procure -n procure create job "e2e-reset-$(Get-Date -Format HHmmss)" --from=cronjob/demo-reset
-# wait until it completes (about a minute), then:
+# optional: kubectl --context k3d-procure -n procure create job "e2e-reset-$(Get-Date -Format HHmmss)" --from=cronjob/demo-reset
 $env:PROCUREAI_E2E_GATEWAY_URL = 'https://procure.localtest.me'
 $env:PROCUREAI_E2E_KEYCLOAK_URL = 'https://auth.procure.localtest.me'
 dotnet run --project tests/ProcureAi.EndToEndTests -- -trait- "Target=AppHost"

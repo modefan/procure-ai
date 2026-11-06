@@ -56,6 +56,7 @@ internal static class ModelCircuitBreaker
                 var settings = context.ServiceProvider.GetRequiredService<IOptions<AiOptions>>().Value.Resilience;
                 var states = context.ServiceProvider.GetRequiredService<ICircuitBreakerStates>();
                 var time = context.ServiceProvider.GetRequiredService<TimeProvider>();
+                var circuit = new CircuitBreakerStateProvider();
                 builder.AddCircuitBreaker(new CircuitBreakerStrategyOptions
                 {
                     Name = name,
@@ -63,8 +64,11 @@ internal static class ModelCircuitBreaker
                     MinimumThroughput = settings.MinimumThroughput,
                     SamplingDuration = settings.SamplingDuration,
                     BreakDuration = settings.BreakDuration,
+                    StateProvider = circuit,
                     ShouldHandle = args => ValueTask.FromResult(
-                        args.Outcome.Exception is { } failure && Counts(failure, args.Context.CancellationToken)),
+                        args.Outcome.Exception is { } failure
+                        && (Counts(failure, args.Context.CancellationToken)
+                            || IsCancelledProbe(circuit.CircuitState, args.Context.CancellationToken))),
                     // The status screen's view of the breaker (ICircuitBreakerStates), with the time the next trial call is let through.
                     OnOpened = args =>
                     {
@@ -89,11 +93,24 @@ internal static class ModelCircuitBreaker
     public static ResiliencePipeline Pipeline(IServiceProvider services, string name) =>
         services.GetRequiredService<ResiliencePipelineProvider<string>>().GetPipeline(name);
 
-    /// <summary>Whether a failed model call counts towards opening the breaker: a passing provider failure the caller did not cause.</summary>
+    /// <summary>
+    /// Whether a failed model call counts towards opening the breaker: a passing provider failure the caller did not cause. Once the
+    /// caller has cancelled, nothing counts, whatever the provider threw: an SDK may surface the aborted request as a transport
+    /// failure (an <see cref="HttpRequestException"/> or <see cref="IOException"/>) rather than as a cancellation.
+    /// </summary>
     public static bool Counts(Exception failure, CancellationToken cancellationToken) =>
-        !(failure is OperationCanceledException && cancellationToken.IsCancellationRequested)
+        !cancellationToken.IsCancellationRequested
         && failure is not BrokenCircuitException
         && Failures.IsTransient(failure);
+
+    /// <summary>
+    /// A half-open trial call that failed because the caller cancelled it. It says nothing about the provider, but Polly closes the
+    /// breaker on every outcome it does not handle, so it is handled as a failure: the breaker opens again for one more
+    /// <see cref="AiResilienceOptions.BreakDuration"/> instead of closing on a provider that may still be down (plan 05 ruling 60).
+    /// While closed, a cancelled call still never counts (<see cref="Counts"/>).
+    /// </summary>
+    public static bool IsCancelledProbe(Polly.CircuitBreaker.CircuitState state, CancellationToken cancellationToken) =>
+        state == Polly.CircuitBreaker.CircuitState.HalfOpen && cancellationToken.IsCancellationRequested;
 
     /// <summary>Runs <paramref name="call"/> through <paramref name="pipeline"/> without handing its result to the pipeline (so never to its logs).</summary>
     public static async Task<T> RunAsync<T>(ResiliencePipeline pipeline, Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)

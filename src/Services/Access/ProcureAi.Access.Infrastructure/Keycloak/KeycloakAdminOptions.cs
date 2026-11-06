@@ -33,6 +33,13 @@ public sealed class KeycloakAdminOptions
     [Range(typeof(TimeSpan), "00:00:00", "00:10:00")]
     public TimeSpan TokenRefreshSkew { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How long a read waits for the organization name of a tenant without a <c>tenants</c> row (its first use) before it shows the ID:
+    /// the lookup's retries stop there, so Keycloak being down slows a read by at most this.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:00.100", "00:00:30")]
+    public TimeSpan OrganizationLookupTimeout { get; set; } = TimeSpan.FromSeconds(3);
+
     internal Uri BaseAddress => new(AdminBaseUrl.TrimEnd('/') + "/");
 
     internal ClientCredentialsSettings ToCredentials() => new(

@@ -248,7 +248,8 @@ flowchart LR
 4. *Answer.* The model answers from those sources only, citing them; the answer streams to the browser as server-sent
    events (`sources`, `tool_call`, `tool_result`, `delta`, `done`). Stop keeps what was written; regenerate and edit
    replace the last answer. One answer at a time per conversation (a Redis lock), 50 questions a day (SAST), 800 output
-   tokens. Every model call has a timeout and a circuit breaker (`AI:Resilience`): when the provider is down, the stream
+   tokens. Every model call goes through a circuit breaker (`AI:Resilience`); a chat call also has its own timeout
+   (`AI:Chat:Timeout`), and an embedding call only the provider SDK's network timeout per attempt. When the provider is down, the stream
    ends with "The assistant is unavailable right now." at once instead of a hung spinner.
 
 **Tools act as the user, never as the service.** `get_request_status`, `explain_approval_chain`, `get_budget` and

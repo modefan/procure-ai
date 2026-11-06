@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.Access.Application.Abstractions;
 using ProcureAi.BuildingBlocks.Application;
@@ -20,9 +21,13 @@ public sealed class KeycloakAdminException(string message) : Exception(message);
 public sealed class KeycloakAdminClient(
     HttpClient http,
     [FromKeyedServices(KeycloakAdminSetup.TokenProviderKey)] ServiceTokenProvider tokens,
-    IOptions<KeycloakAdminOptions> options) : IIdentityDirectory
+    IOptions<KeycloakAdminOptions> options,
+    ILogger<KeycloakAdminClient> logger) : IIdentityDirectory
 {
     private const int MaxOrganizationsListed = 100;
+
+    /// <summary>The most organizations a name lookup pages through (a demo realm has a handful).</summary>
+    private const int MaxOrganizationsScanned = 1_000;
 
     public string DemoTenantId => options.Value.DemoOrganization;
 
@@ -61,6 +66,45 @@ public sealed class KeycloakAdminClient(
         var organizationId = await FindOrganizationIdAsync(realm, options.Value.DemoOrganization, cancellationToken);
         await EnsureMemberAsync(realm, organizationId, user, userId, cancellationToken);
         await EnsureRoleAsync(realm, user, role, cancellationToken);
+    }
+
+    public async Task<string?> FindOrganizationNameAsync(string tenantId, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(options.Value.OrganizationLookupTimeout);
+        try
+        {
+            // Keycloak's search matches name and domain, not the alias: page through the organizations and compare the alias here.
+            var realm = Realm();
+            for (var first = 0; first < MaxOrganizationsScanned; first += MaxOrganizationsListed)
+            {
+                using var response = await SendAsync(
+                    HttpMethod.Get, $"{realm}/organizations?briefRepresentation=true&first={first}&max={MaxOrganizationsListed}", null, timeout.Token);
+                Ensure(response, "listing the organizations");
+                var page = await response.Content.ReadFromJsonAsync<JsonElement>(timeout.Token);
+                foreach (var organization in page.EnumerateArray())
+                {
+                    if (organization.TryGetProperty("alias", out var alias) && alias.GetString() == tenantId)
+                    {
+                        return organization.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String ? name.GetString() : null;
+                    }
+                }
+
+                if (page.GetArrayLength() < MaxOrganizationsListed)
+                {
+                    break;
+                }
+            }
+
+            return null;
+        }
+        catch (Exception failure) when (!cancellationToken.IsCancellationRequested && failure is not OutOfMemoryException)
+        {
+            // Keycloak down, slow or refusing: the read shows the ID this time and asks again next time. The tenant ID is no personal data.
+            logger.LogWarning("The organization name of tenant {TenantId} could not be read from Keycloak ({Failure}); it is shown under its ID.",
+                tenantId, failure.GetType().Name);
+            return null;
+        }
     }
 
     private string Realm() => $"admin/realms/{Uri.EscapeDataString(options.Value.Realm)}";

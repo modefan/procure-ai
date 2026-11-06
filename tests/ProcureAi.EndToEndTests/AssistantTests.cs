@@ -140,6 +140,8 @@ public sealed class AssistantTests(AppFixture fixture)
         fixture.RequireReady();
 
         // The seeded PO-1001 (plan 06 ruling 3): Tom's docks and stands from Fabrikam, received, waiting for Fabrikam's paper invoice.
+        // Rerunnable on kept data (plan 07 carry-over 24): each run sends another invoice under a fresh number, and an invoice for an
+        // order that already has one is still recorded (it then shows as a quantity mismatch), so nothing here needs the order uninvoiced.
         var orders = (await fixture.CallAsync(HttpMethod.Get, "/api/v1/purchasing/orders?pageSize=100", AppFixture.TomId)).Body.GetProperty("items");
         var orderNumber = "PO-1001";
         var orderId = orders.EnumerateArray().Single(o => o.GetProperty("number").GetString() == orderNumber).GetProperty("id").GetGuid();

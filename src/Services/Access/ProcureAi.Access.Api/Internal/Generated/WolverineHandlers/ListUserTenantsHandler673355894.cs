@@ -20,9 +20,11 @@ namespace Internal.Generated.WolverineHandlers
 
         public override async System.Threading.Tasks.Task HandleAsync(Wolverine.Runtime.MessageContext context, System.Threading.CancellationToken cancellation)
         {
-            var incomingMessage = new ProcureAi.BuildingBlocks.Messaging.IncomingMessage();
             await using var serviceScope = _serviceScopeFactory.CreateAsyncScope();
             Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Wolverine.Runtime.ScopedMessageContextHolder>(serviceScope.ServiceProvider).Context = context;
+            // This service has been marked as requiring service location independent of Wolverine's ability to use constructor injection of everything else
+            var identityDirectory = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ProcureAi.Access.Application.Abstractions.IIdentityDirectory>(serviceScope.ServiceProvider);
+            var incomingMessage = new ProcureAi.BuildingBlocks.Messaging.IncomingMessage();
             // This service has been marked as requiring service location independent of Wolverine's ability to use constructor injection of everything else
             var accessDbContext = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ProcureAi.Access.Application.Abstractions.IAccessDbContext>(serviceScope.ServiceProvider);
             // The actual message body
@@ -48,7 +50,7 @@ namespace Internal.Generated.WolverineHandlers
                     System.Diagnostics.Activity.Current?.SetTag("handler.type", "ProcureAi.Access.Application.Queries.ListUserTenantsHandler");
                     
                     // The actual message execution
-                    var outgoing1 = await ProcureAi.Access.Application.Queries.ListUserTenantsHandler.Handle(listUserTenants, accessDbContext, cancellation).ConfigureAwait(false);
+                    var outgoing1 = await ProcureAi.Access.Application.Queries.ListUserTenantsHandler.Handle(listUserTenants, accessDbContext, identityDirectory, cancellation).ConfigureAwait(false);
 
                     
                     // Outgoing, cascaded message

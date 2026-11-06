@@ -24,12 +24,20 @@ public sealed class SupplierOrder(string id, CreateOrderRequest request, string 
     internal void CountReceipt() => Interlocked.Increment(ref _timesReceived);
 }
 
-/// <summary>The supplier's orders, in memory. The same external reference is the same order (dedup).</summary>
-public sealed class SupplierStore
+/// <summary>
+/// The supplier's orders, in memory. The same external reference is the same order (dedup).
+/// <para>
+/// Invoice numbers carry the time the numbering started (<c>INV-yyMMddHHmmss-1001</c>, UTC): memory is lost on a restart, and
+/// Invoicing refuses a number it already holds, so a simulator started again (always more than a second later) never repeats a
+/// number it handed out before. A demo reset starts a new series the same way (plan 07 carry-over 26).
+/// </para>
+/// </summary>
+public sealed class SupplierStore(TimeProvider time)
 {
     private const int FirstOrderNumber = 1001;
 
     private readonly object _gate = new();
+    private string _invoiceSeries = SeriesAt(time);
     private readonly Dictionary<string, SupplierOrder> _byReference = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SupplierOrder> _byId = new(StringComparer.Ordinal);
     private int _orders;
@@ -73,7 +81,7 @@ public sealed class SupplierStore
 
     public bool IsCancelled(string supplierOrderId) => Find(supplierOrderId)?.Cancelled ?? false;
 
-    /// <summary>Forgets every order and starts the order and invoice numbers again (the nightly demo reset).</summary>
+    /// <summary>Forgets every order and starts the order numbers again and a new invoice series (the nightly demo reset).</summary>
     public void Reset()
     {
         lock (_gate)
@@ -82,6 +90,7 @@ public sealed class SupplierStore
             _byId.Clear();
             _orders = 0;
             _invoices = 0;
+            _invoiceSeries = SeriesAt(time);
         }
     }
 
@@ -89,7 +98,10 @@ public sealed class SupplierStore
     {
         lock (_gate)
         {
-            return $"INV-{FirstOrderNumber + _invoices++}";
+            return $"INV-{_invoiceSeries}-{FirstOrderNumber + _invoices++}";
         }
     }
+
+    private static string SeriesAt(TimeProvider time) =>
+        time.GetUtcNow().ToString("yyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
 }

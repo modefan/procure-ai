@@ -8,7 +8,7 @@ namespace ProcureAi.Simulators;
 
 /// <summary>
 /// The simulators' part of the nightly demo reset (plan 06 ruling 4), called first by ProcureAi.DemoData with the admin key: the supplier
-/// forgets its orders, the ERP its postings, both number sequences start again (SO-1001, INV-1001, ERP-5000), every webhook still waiting is
+/// forgets its orders, the ERP its postings, the order and payment numbers start again (SO-1001, ERP-5000), invoice numbers start a new series (INV-<reset time>-1001), every webhook still waiting is
 /// dropped, and chaos is back to Normal. Safe to call twice.
 /// <para>
 /// Only there when <c>DemoReset:Enabled</c> is true (<see cref="SimulatorDemoResetOptions"/>, the services' switch): otherwise the controller

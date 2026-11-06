@@ -25,4 +25,11 @@ public sealed record BusinessEvent(
     string Payload)
 {
     public const string UnknownService = "unknown";
+
+    /// <summary>
+    /// When Audit stored the event: Marten's <c>mt_last_modified</c> (the database clock at the insert; the store is insert-only, so
+    /// it never changes), filled in on every read. Unlike <see cref="OccurredAt"/> a publisher cannot choose it, so it is the order
+    /// the events were recorded in (plan 07 carry-over 28). Not set when the event is created.
+    /// </summary>
+    public DateTimeOffset RecordedAt { get; set; }
 }

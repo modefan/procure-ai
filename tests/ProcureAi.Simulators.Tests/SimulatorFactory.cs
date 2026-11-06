@@ -54,8 +54,10 @@ public sealed class SimulatorFactory : WebApplicationFactory<Program>
 
     private readonly Dictionary<string, string?> _settings;
 
-    public SimulatorFactory(Dictionary<string, string?>? overrides = null)
+    /// <param name="start">The fake clock's start (a later one stands for a simulator started again later).</param>
+    public SimulatorFactory(Dictionary<string, string?>? overrides = null, DateTimeOffset? start = null)
     {
+        Time = new FakeTimeProvider(start ?? DefaultStart);
         _settings = new Dictionary<string, string?>
         {
             ["Simulators:ApiKey"] = SimulatorKey,
@@ -76,7 +78,9 @@ public sealed class SimulatorFactory : WebApplicationFactory<Program>
         }
     }
 
-    public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 27, 10, 0, 0, TimeSpan.Zero));
+    public static readonly DateTimeOffset DefaultStart = new(2026, 10, 27, 10, 0, 0, TimeSpan.Zero);
+
+    public FakeTimeProvider Time { get; }
 
     public FakeWebhookReceiver Receiver { get; } = new();
 

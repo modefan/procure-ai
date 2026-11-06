@@ -18,6 +18,6 @@ public interface IAuditStore
     Task<IReadOnlyList<BusinessEvent>> LatestAsync(
         string tenantId, int skip, int limit, IReadOnlyCollection<string> excludedTypes, CancellationToken cancellationToken);
 
-    /// <summary>The <c>RequestSubmitted</c> events of the given requests of one tenant (they carry the request numbers).</summary>
+    /// <summary>The <c>RequestSubmitted</c> events of the given requests of one tenant (they carry the request numbers), first recorded first.</summary>
     Task<IReadOnlyList<BusinessEvent>> SubmissionsAsync(string tenantId, IReadOnlyCollection<Guid> subjectIds, CancellationToken cancellationToken);
 }

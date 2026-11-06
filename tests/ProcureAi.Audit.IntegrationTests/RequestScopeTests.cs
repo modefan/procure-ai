@@ -180,6 +180,34 @@ public sealed class RequestScopeTests(AuditApp app)
     }
 
     [Fact]
+    public async Task Forged_second_request_submitted_does_not_change_scope()
+    {
+        // Plan 07 carry-over 28: a second RequestSubmitted for Tom's request (someone with broker write access) claims it is Alice's,
+        // on her cost center, and that it happened before Tom's. Only the first one recorded counts.
+        var (tenant, id) = await TomsRequestAsync();
+        await app.PublishAsync(
+            new RequestSubmitted(id, tenant, "PR-7", "Tom's laptop", "alice", "CC-100", 30_000m, DateTimeOffset.UtcNow.AddHours(-3), "SUP-1", []),
+            Exchanges.Requests, tenant, "alice");
+        await app.WaitForStoredAsync(tenant, s => s.Count == 3);
+
+        var stored = await app.Services.GetRequiredService<ProcureAi.Audit.Application.Abstractions.IAuditStore>().SubmissionsAsync(tenant, [id], Ct);
+        stored.Count.ShouldBe(2);
+        stored[0].UserId.ShouldBe(Tom, "first recorded first, by the insert time Marten keeps (RecordedAt), not by OccurredAt");
+        stored[0].RecordedAt.ShouldBeLessThan(stored[1].RecordedAt);
+
+        foreach (var url in new[] { History(id), DataChanges(id) })
+        {
+            using var alice = await GetAsync(url, tenant, "alice");
+            alice.StatusCode.ShouldBe(HttpStatusCode.NotFound, $"{url}: the forgery does not make it Alice's");
+            using var mia = await GetAsync(url, tenant, "mia");
+            mia.StatusCode.ShouldBe(HttpStatusCode.OK, $"{url}: still IT-200's");
+        }
+
+        (await FeedAsync(tenant, "alice")).ShouldNotContain(a => a.RequestId == id);
+        (await FeedAsync(tenant, "mia")).ShouldContain(a => a.RequestId == id);
+    }
+
+    [Fact]
     public async Task Unknown_owner_fails_closed()
     {
         // Audit has an approval event of the request but neither its RequestSubmitted nor a captured row: nobody can tell whose it is.

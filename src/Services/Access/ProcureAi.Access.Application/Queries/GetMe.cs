@@ -10,8 +10,8 @@ public sealed record GetMe(string UserId, IReadOnlyList<string> Roles, string Te
 
 public static class GetMeHandler
 {
-    /// <summary>Uses the same rules as the internal effective-access lookup, then adds names (tenant query filters apply).</summary>
-    public static async Task<MeDto> Handle(GetMe query, IAccessDbContext db, CancellationToken cancellationToken)
+    /// <summary>Uses the same rules as the internal effective-access lookup, then adds names (tenant query filters apply; the tenant's name from <see cref="TenantNames"/>).</summary>
+    public static async Task<MeDto> Handle(GetMe query, IAccessDbContext db, IIdentityDirectory identities, CancellationToken cancellationToken)
     {
         var matrix = await db.PermissionMatrices.AsNoTracking().Include(m => m.Grants).SingleOrDefaultAsync(cancellationToken);
         var user = await db.TenantUsers.AsNoTracking().SingleOrDefaultAsync(u => u.UserId == query.UserId, cancellationToken);
@@ -24,9 +24,8 @@ public static class GetMeHandler
             .Select(c => new CostCenterDto(c.Code, c.Name, c.DepartmentCode))
             .ToList();
         decimal? limit = access.ApprovalLimit.Amount > 0 ? access.ApprovalLimit.Amount : null;
-        var tenantName = await db.Tenants.AsNoTracking().Where(t => t.Id == query.TenantId).Select(t => t.Name).SingleOrDefaultAsync(cancellationToken);
+        var tenantName = query.TenantId.Length == 0 ? "" : await TenantNames.GetAsync(query.TenantId, db, identities, cancellationToken);
         return new MeDto(
-            query.UserId, user?.DisplayName ?? query.UserId, [.. query.Roles.Order(StringComparer.Ordinal)], acting, limit,
-            tenantName ?? query.TenantId);
+            query.UserId, user?.DisplayName ?? query.UserId, [.. query.Roles.Order(StringComparer.Ordinal)], acting, limit, tenantName);
     }
 }

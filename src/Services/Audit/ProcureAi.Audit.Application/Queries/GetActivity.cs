@@ -120,12 +120,10 @@ public static class GetActivityHandler
         CancellationToken cancellationToken)
     {
         var missing = events.Where(e => e.SubjectId is { } id && !submissions.ContainsKey(id)).Select(e => e.SubjectId!.Value).Distinct().ToList();
-        foreach (var stored in await store.SubmissionsAsync(tenant, missing, cancellationToken))
+        // The first recorded submission per request (RequestReadScope.FirstSubmissions); a request is looked up in one batch only.
+        foreach (var (id, first) in RequestReadScope.FirstSubmissions(await store.SubmissionsAsync(tenant, missing, cancellationToken)))
         {
-            if (stored.SubjectId is { } id)
-            {
-                submissions.TryAdd(id, stored);
-            }
+            submissions.TryAdd(id, first);
         }
     }
 

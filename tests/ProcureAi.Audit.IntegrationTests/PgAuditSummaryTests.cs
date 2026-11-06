@@ -106,6 +106,11 @@ public sealed class PgAuditSummaryTests(AuditApp app)
     [InlineData("SESSION,1,1,DDL,CREATE TABLE,TABLE,public.y,create table y (id int),<not logged>", "public.y", "(id int)")]
     [InlineData("SESSION,1,1,FUNCTION,DO,,,DO $$ BEGIN PERFORM 5000; END $$,<not logged>", "", "5000")]
     [InlineData("SESSION,1,1,DDL,CREATE TABLE,,,/* note */ CREATE TABLE z (id int),<not logged>", "", "note")]
+    // The statement fallback is for the classes pgaudit.log holds today (ddl,role) only: should READ, WRITE or MISC ever be logged,
+    // the word after the command is a column, a setting or a keyword, not an object (plan 07 carry-over, Task 0a minor).
+    [InlineData("SESSION,1,1,READ,SELECT,,,SELECT password_hash FROM users,<not logged>", "", "password_hash")]
+    [InlineData("SESSION,1,1,WRITE,UPDATE,,,UPDATE accounts SET balance = 1,<not logged>", "", "accounts")]
+    [InlineData("SESSION,1,1,MISC,SET,,,SET app.secret_token TO 'x',<not logged>", "", "secret_token")]
     public void Status_item_names_only_the_object(string message, string expected, string leak)
     {
         var fields = PgAuditMessage.Fields("AUDIT: " + message);

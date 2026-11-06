@@ -79,8 +79,11 @@ public static class DependencyInjection
                 options.DatabaseSchemaName = DocumentSchema;
                 options.AutoCreateSchemaObjects = autoCreate;
 
-                // The history of a request is read by tenant and request: one index on both.
-                options.Schema.For<BusinessEvent>().Index(Columns<BusinessEvent>(e => e.TenantId, e => e.SubjectId!));
+                // The history of a request is read by tenant and request: one index on both. RecordedAt is the insert time
+                // (mt_last_modified, an existing column: no schema change), the order a publisher cannot forge.
+                options.Schema.For<BusinessEvent>()
+                    .Metadata(metadata => metadata.LastModified.MapTo(e => e.RecordedAt))
+                    .Index(Columns<BusinessEvent>(e => e.TenantId, e => e.SubjectId!));
 
                 // A pending change is decided by its match or by the grace timeout, never both: versions (optimistic concurrency).
                 options.Schema.For<DataChange>()

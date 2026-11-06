@@ -30,6 +30,7 @@ public sealed class SimulatorResetTests
         (await ReadAsync(await supplier.PostAsJsonAsync("erp/v1/payments", payment))).GetProperty("documentNumber").GetString().ShouldBe("ERP-5000");
         (await admin.PutAsJsonAsync("api/v1/simulators/chaos", Down)).StatusCode.ShouldBe(HttpStatusCode.OK);
 
+        var resetAt = factory.Time.GetUtcNow();
         (await admin.PostAsync("api/v1/simulators/reset", null)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
         var chaos = await ReadAsync(await admin.GetAsync("api/v1/simulators/chaos"));
@@ -46,7 +47,8 @@ public sealed class SimulatorResetTests
         await SettleAsync();
         factory.Receiver.Received.Select(w => w.Json.TryGetProperty("externalReference", out var r) ? r.GetString() : null)
             .ShouldAllBe(r => r == "acme/PO-1001-again");
-        factory.Receiver.Received.Single(w => w.Type == "invoice.issued").Json.GetProperty("invoiceNumber").GetString().ShouldBe("INV-1001");
+        factory.Receiver.Received.Single(w => w.Type == "invoice.issued").Json.GetProperty("invoiceNumber").GetString()
+            .ShouldBe($"INV-{resetAt:yyMMddHHmmss}-1001", "a new series that starts at the reset");
         (await ReadAsync(await supplier.PostAsJsonAsync("erp/v1/payments", payment))).GetProperty("documentNumber").GetString().ShouldBe("ERP-5000");
 
         // Twice is safe.
@@ -102,6 +104,40 @@ public sealed class SimulatorResetTests
         (await admin.GetAsync("api/v1/simulators/reset")).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
 
         (await ReadAsync(await admin.GetAsync("api/v1/simulators/supplier/orders?buyerReference=demo%2FPO-0001"))).GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Simulator_numbers_do_not_repeat_after_restart()
+    {
+        // Invoicing refuses an invoice number it already holds, and the simulator keeps its numbers in memory only: a restart (pod
+        // rescheduled, image update) must not hand out a number of an invoice issued before it (plan 07 carry-over 26).
+        var noAutoInvoice = new Dictionary<string, string?> { ["Simulators:Supplier:AutoInvoice"] = "false" };
+        var before = new List<string>();
+        await using (var first = new SimulatorFactory(noAutoInvoice))
+        {
+            using var supplier = first.SupplierClient();
+            using var admin = first.AdminClient();
+            before.Add(await InvoiceAsync(admin, await PlaceAsync(supplier, "acme/PO-1001")));
+            before.Add(await InvoiceAsync(admin, await PlaceAsync(supplier, "acme/PO-1002")));
+        }
+
+        before.Distinct().Count().ShouldBe(2);
+
+        // Started again a minute later, with empty memory.
+        await using var again = new SimulatorFactory(noAutoInvoice, DefaultStart.AddMinutes(1));
+        using var supplierAgain = again.SupplierClient();
+        using var adminAgain = again.AdminClient();
+        var after = await InvoiceAsync(adminAgain, await PlaceAsync(supplierAgain, "acme/PO-1003"));
+
+        before.ShouldNotContain(after);
+        after.ShouldStartWith("INV-");
+    }
+
+    private static async Task<string> InvoiceAsync(HttpClient admin, string supplierOrderId)
+    {
+        var response = await admin.PostAsJsonAsync($"api/v1/simulators/supplier/orders/{supplierOrderId}/invoice", new { });
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        return (await ReadAsync(response)).GetProperty("invoiceNumber").GetString()!;
     }
 
     private static Dictionary<string, string?> Enabled => new() { ["DemoReset:Enabled"] = "true" };

@@ -4,7 +4,7 @@
 # chart mounts at /usr/share/nginx/html/config.json. Nothing environment-specific is baked into the image.
 FROM node:26.13.0-alpine AS build
 WORKDIR /src
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npx ng build --configuration production

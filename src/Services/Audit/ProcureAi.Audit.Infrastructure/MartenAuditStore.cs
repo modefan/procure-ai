@@ -68,6 +68,7 @@ public sealed class MartenAuditStore(IDocumentStore store) : IAuditStore
         await using var session = store.QuerySession();
         return await session.Query<BusinessEvent>()
             .Where(e => e.TenantId == tenantId && e.Type == "RequestSubmitted" && ids.Contains(e.SubjectId))
+            .OrderBy(e => e.RecordedAt).ThenBy(e => e.Id)
             .ToListAsync(cancellationToken);
     }
 }

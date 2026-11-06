@@ -13,7 +13,7 @@ public sealed record RequestOwner(string RequesterId, string CostCenterCode);
 /// The Requests read rule (plan 07 Task 0c ruling, Task 5c) applied to Audit's per-request reads and the activity feed: the admin key
 /// and a service acting for nobody (<see cref="CallerScope.All"/>) and a tenant-admin user (<c>wholeTenant</c>, decided by the Api)
 /// read every request of the tenant; anyone else only those they raised or of one of their cost centers (<see cref="CallerScope.Allows"/>).
-/// The owner comes from what Audit stores: the request's <c>RequestSubmitted</c> (a submitted request's cost center no longer changes),
+/// The owner comes from what Audit stores: the request's first recorded <c>RequestSubmitted</c> (a submitted request's cost center no longer changes),
 /// else, for a draft, the newest captured row of the requests table. When neither is there the request is out of scope: the read
 /// fails closed (404), it never falls back to the tenant.
 /// </summary>
@@ -32,13 +32,34 @@ public static class RequestReadScope
             return;
         }
 
-        var submitted = await store.SubmissionsAsync(tenant, [requestId], cancellationToken);
-        var owner = submitted.Select(FromSubmission).FirstOrDefault(o => o is not null)
+        // Only the first recorded submission counts; when it cannot be read, a later one is not used in its place.
+        var submitted = FirstSubmissions(await store.SubmissionsAsync(tenant, [requestId], cancellationToken)).GetValueOrDefault(requestId);
+        var owner = (submitted is null ? null : FromSubmission(submitted))
             ?? FromRow(await changes.LatestRowOfSubjectAsync(tenant, options.Database, options.Table, requestId, cancellationToken));
         if (owner is null || !callerScope.Allows(owner.RequesterId, owner.CostCenterCode))
         {
             throw new NotFoundException(notFound);
         }
+    }
+
+    /// <summary>
+    /// The <c>RequestSubmitted</c> per request that decides its owner and number: the first one Audit recorded
+    /// (<see cref="BusinessEvent.RecordedAt"/>, then the ID), whatever order they come in. A later one (forged by someone with broker
+    /// write access, or a replay with other content) never moves a request into another caller's scope, and its own
+    /// <c>OccurredAt</c> cannot put it first (plan 07 carry-over 28).
+    /// </summary>
+    public static Dictionary<Guid, BusinessEvent> FirstSubmissions(IEnumerable<BusinessEvent> submissions)
+    {
+        var first = new Dictionary<Guid, BusinessEvent>();
+        foreach (var submitted in submissions.OrderBy(e => e.RecordedAt).ThenBy(e => e.Id))
+        {
+            if (submitted.SubjectId is { } id)
+            {
+                first.TryAdd(id, submitted);
+            }
+        }
+
+        return first;
     }
 
     /// <summary>The requester and cost center a <c>RequestSubmitted</c> event names; null when it cannot be read.</summary>

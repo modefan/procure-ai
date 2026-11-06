@@ -317,6 +317,7 @@ public sealed class AppFixture : IAsyncLifetime
         }, null, System.Net.HttpStatusCode.Created);
         var id = created.RootElement.GetProperty("id").GetGuid();
         var number = created.RootElement.GetProperty("number").GetString()!;
+        _submitted.Add(id);
         (await SendAsync($"/api/v1/requests/{id}/submit", null, tag, System.Net.HttpStatusCode.Accepted)).Body.Dispose();
         created.Dispose();
         return (id, number);
@@ -534,8 +535,41 @@ public sealed class AppFixture : IAsyncLifetime
         await AppHost.ResourceNotifications.WaitForResourceHealthyAsync(resource, cts.Token);
     }
 
+    /// <summary>The requests <see cref="SubmitRequestAsync"/> raised in this run.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentBag<Guid> _submitted = [];
+
+    /// <summary>
+    /// Against a deployment the data stays (plan 07 carry-over 24: the suite reruns on kept data, no demo reset needed): Tom cancels the
+    /// requests of this run that are still waiting for an approval, so their IT-200 budget reservations do not pile up run after run
+    /// (an approved one became an order; its spend is part of the demo). Best effort: a failure here never fails the run.
+    /// </summary>
+    private async Task CancelWaitingRequestsAsync()
+    {
+        foreach (var id in _submitted)
+        {
+            try
+            {
+                var (request, etag) = await CallAsync(HttpMethod.Get, $"/api/v1/requests/{id}", TomId);
+                if (request.TryGetProperty("status", out var status) && status.ValueKind == System.Text.Json.JsonValueKind.String
+                    && status.GetString() == "Submitted" && etag is not null)
+                {
+                    await CallAsync(HttpMethod.Post, $"/api/v1/requests/{id}/cancel", TomId, new { reason = "End-to-end run cleanup" }, etag);
+                }
+            }
+            catch (Exception failure)
+            {
+                Console.WriteLine($"Cleanup: request {id} was not cancelled ({failure.GetType().Name}: {failure.Message})");
+            }
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
+        if (IsExternal && !string.IsNullOrEmpty(_adminApiKey))
+        {
+            await CancelWaitingRequestsAsync();
+        }
+
         if (Browser is not null)
         {
             await Browser.CloseAsync();

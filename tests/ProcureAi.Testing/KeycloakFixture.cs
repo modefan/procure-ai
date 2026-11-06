@@ -161,13 +161,13 @@ public sealed class KeycloakFixture : IAsyncLifetime
         return response.Headers.Location!.Segments[^1];
     }
 
-    /// <summary>Creates an organization with this alias (and the same name); returns its ID.</summary>
-    public async Task<string> CreateOrganizationAsync(string alias)
+    /// <summary>Creates an organization with this alias (named <paramref name="name"/>, or the alias); returns its ID.</summary>
+    public async Task<string> CreateOrganizationAsync(string alias, string? name = null)
     {
         using var http = await AdminHttpAsync();
         using var response = await http.PostAsJsonAsync(
             $"/admin/realms/{Realm}/organizations",
-            new { name = alias, alias, enabled = true, domains = new[] { new { name = alias + ".test", verified = false } } });
+            new { name = name ?? alias, alias, enabled = true, domains = new[] { new { name = alias + ".test", verified = false } } });
         EnsureSuccess(response, $"Creating organization {alias}", await response.Content.ReadAsStringAsync());
         return response.Headers.Location!.Segments[^1];
     }

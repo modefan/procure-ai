@@ -10,14 +10,14 @@ public sealed record GetUserName(string UserId);
 public static class GetUserNameHandler
 {
     /// <summary>The display name and email address of a user of the caller tenant (the tenant query filter applies); 404 for anyone else.</summary>
-    public static async Task<UserNameDto> Handle(GetUserName query, IAccessDbContext db, CancellationToken cancellationToken)
+    public static async Task<UserNameDto> Handle(GetUserName query, IAccessDbContext db, IIdentityDirectory identities, CancellationToken cancellationToken)
     {
         var user = await db.TenantUsers.AsNoTracking()
             .Where(u => u.UserId == query.UserId)
             .Select(u => new { u.UserId, u.DisplayName, u.Email, u.TenantId })
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException($"User {query.UserId} was not found.");
-        var tenantName = await db.Tenants.AsNoTracking().Where(t => t.Id == user.TenantId).Select(t => t.Name).SingleOrDefaultAsync(cancellationToken);
+        var tenantName = await TenantNames.GetAsync(user.TenantId, db, identities, cancellationToken);
         return new UserNameDto(user.UserId, user.DisplayName, user.Email, tenantName);
     }
 }

@@ -53,6 +53,22 @@ jobs:
 
       - uses: ./.github/actions/ci-secrets
 
+      # The same check as tests/ProcureAi.ArchitectureTests/NodeVersionTests, here so it runs while the tests are off: one Node patch in
+      # .nvmrc (setup-node) and every FROM node: of the web image, and npm enforces package.json engines (plan 07 carry-over 31).
+      - name: Node version drift (.nvmrc = web Dockerfile)
+        shell: bash
+        run: |
+          nvmrc="$(tr -d '[:space:]' < .nvmrc)"
+          tags="$(sed -n -E 's/^FROM[[:space:]]+node:([0-9.]+).*/\1/p' src/Web/procure-ai-web/Dockerfile)"
+          if [ -z "$tags" ]; then echo "::error::no FROM node: in src/Web/procure-ai-web/Dockerfile"; exit 1; fi
+          for tag in $tags; do
+            if [ "$tag" != "$nvmrc" ]; then
+              echo "::error::src/Web/procure-ai-web/Dockerfile uses node:$tag but .nvmrc says $nvmrc"; exit 1
+            fi
+          done
+          grep -qx 'engine-strict=true' src/Web/procure-ai-web/.npmrc || { echo "::error::src/Web/procure-ai-web/.npmrc must set engine-strict=true"; exit 1; }
+          echo "Node $nvmrc in .nvmrc and the web Dockerfile"
+
       - name: Build
         run: dotnet build ProcureAi.slnx -c Release -warnaserror -m:4
 

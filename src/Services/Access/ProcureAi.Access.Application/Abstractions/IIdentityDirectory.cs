@@ -21,6 +21,13 @@ public interface IIdentityDirectory
     /// not exist.
     /// </summary>
     Task EnsureDemoMemberAsync(string userId, string role, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The display name of the organization whose alias is <paramref name="tenantId"/>; null when there is none, or when the identity
+    /// provider cannot be asked right now (it fails or is slow: the caller then shows the ID). Never throws for that; only the caller's
+    /// own cancellation ends it with an <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<string?> FindOrganizationNameAsync(string tenantId, CancellationToken cancellationToken);
 }
 
 /// <summary>

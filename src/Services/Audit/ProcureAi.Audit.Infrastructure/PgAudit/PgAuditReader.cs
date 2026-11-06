@@ -157,11 +157,20 @@ public static class PgAuditMessage
 
     private static readonly string[] Qualifiers = ["IF NOT EXISTS", "IF EXISTS", "ONLY", "CONCURRENTLY"];
 
+    /// <summary>The pgaudit classes whose object is read from the statement when pgaudit gives none (see <see cref="ObjectOf"/>).</summary>
+    public static readonly IReadOnlySet<string> StatementFallbackClasses = new HashSet<string>(StringComparer.Ordinal) { "DDL", "ROLE" };
+
     /// <summary>
     /// The object a statement names: pgaudit's object name when it gives one, otherwise the identifier right after the command at the
     /// start of the statement (<c>CREATE TABLE IF NOT EXISTS public.x (…)</c> → <c>public.x</c>); session logging leaves the object fields
     /// empty for most DDL. Only that one token, never the rest of the statement, and nothing with a string literal in it. Empty when
     /// there is none.
+    /// <para>
+    /// The statement fallback is only for the classes <see cref="StatementFallbackClasses"/> (<c>DDL</c>, <c>ROLE</c>): the classes
+    /// <c>pgaudit.log=ddl,role</c> logs today, whose commands are always followed by the object's name. For any other class (should
+    /// <c>pgaudit.log</c> ever add read, write, function or misc) the word after the command is a column, a setting or a keyword
+    /// (<c>SELECT password_hash</c>, <c>SET app.token</c>), so only pgaudit's own object name is shown, or nothing.
+    /// </para>
     /// </summary>
     public static string ObjectOf(IReadOnlyList<string> fields)
     {
@@ -170,7 +179,7 @@ public static class PgAuditMessage
             return fields[ObjectName].Length <= MaxObjectName ? fields[ObjectName] : "";
         }
 
-        if (fields.Count <= Statement || fields[Command].Length == 0)
+        if (fields.Count <= Statement || fields[Command].Length == 0 || !StatementFallbackClasses.Contains(fields[Class]))
         {
             return "";
         }
