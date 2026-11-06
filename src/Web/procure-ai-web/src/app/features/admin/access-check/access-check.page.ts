@@ -54,7 +54,7 @@ const ACTIONS: CheckAction[] = ['view', 'approve'];
               selectionMode="explicit"
               [(value)]="picked"
               aria-label="Users"
-              class="absolute inset-x-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-lg border border-slate-300 bg-white p-1 text-sm shadow-lg"
+              class="scroll-hint absolute inset-x-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-lg border border-slate-300 bg-white p-1 text-sm shadow-lg"
             >
               @for (user of matches(); track user.userId) {
                 <div ngOption [value]="user.userId" [label]="user.displayName" class="user-option">

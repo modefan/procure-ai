@@ -87,20 +87,35 @@ describe('MatrixStore', () => {
     expect(api.setRolePermissions).not.toHaveBeenCalled();
   });
 
-  it('concurrent_save_shows_conflict_and_reloads', async () => {
+  it('concurrent_save_shows_conflict_and_reloads: conflict dialog keeps typed values on top of the latest matrix', async () => {
     await store().load();
     store().toggle('requester', 'requests.approve');
-    api.setRolePermissions.mockRejectedValue(problem(412, 'The version is old.'));
-    api.getMatrix.mockResolvedValue(matrixDto({ version: 9 }));
+    store().toggle('admin', 'admin.policies');
+    api.setRolePermissions.mockRejectedValueOnce(problem(412, 'The version is old.'));
+    // Someone else gave the requester budgets.read meanwhile.
+    const latest = matrixDto({
+      version: 9,
+      roles: matrixDto().roles.map((r) => (r.role === 'requester' ? { ...r, permissions: [...r.permissions, 'budgets.read'] } : r)),
+    });
+    api.getMatrix.mockResolvedValue(latest);
 
     expect(await store().save()).toBe(false);
 
     expect(conflict.show).toHaveBeenCalledOnce();
     expect(conflict.show.mock.calls[0][0]).toContain('Someone else');
+    expect(conflict.show.mock.calls[0][0]).toContain('kept');
     expect(store().matrix()?.version).toBe(9);
-    // The reloaded matrix replaces the edits.
-    expect(store().dirty()).toBe(false);
+    // The latest matrix with this admin's own ticks on top: theirs (budgets.read) and ours (requests.approve, admin.policies removed).
+    expect(store().dirty()).toBe(true);
+    expect([...store().draft()['requester']]).toEqual(expect.arrayContaining(['budgets.read', 'requests.approve']));
+    expect(store().draft()['admin'].has('admin.policies')).toBe(false);
+    expect(store().changedRoles()).toEqual(['requester', 'admin']);
     expect(store().actionError()).toBeNull();
+
+    // Save again goes out on the latest version.
+    api.setRolePermissions.mockImplementation(applying(latest));
+    expect(await store().save()).toBe(true);
+    expect(api.setRolePermissions.mock.calls.at(-2)![0]['If-Match']).toBe('"9"');
   });
 
   it('lockout_422_shows_message', async () => {

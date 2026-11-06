@@ -246,6 +246,22 @@
   }
 }
 
+/*
+ * A scrolling list (listbox) that has more below or above shows a soft shadow at that edge, so it is clear that it scrolls (the scroll
+ * bar is hidden on touch screens and in macOS by default). Pure CSS: the white covers scroll with the content (local) and hide the
+ * shadows (scroll) once an end is reached. Use it on an element with a white background and overflow-y: auto.
+ */
+@layer components {
+  .scroll-hint {
+    background:
+      linear-gradient(white 30%, rgb(255 255 255 / 0)) center top / 100% 2.5rem no-repeat local,
+      linear-gradient(rgb(255 255 255 / 0), white 70%) center bottom / 100% 2.5rem no-repeat local,
+      radial-gradient(farthest-side at 50% 0, rgb(15 23 42 / 0.18), rgb(15 23 42 / 0)) center top / 100% 0.75rem no-repeat scroll,
+      radial-gradient(farthest-side at 50% 100%, rgb(15 23 42 / 0.18), rgb(15 23 42 / 0)) center bottom / 100% 0.75rem no-repeat scroll;
+    background-color: white;
+  }
+}
+
 /* Options of the user combobox on the access check screen (Angular Aria combobox + listbox). */
 @layer components {
   .user-option {

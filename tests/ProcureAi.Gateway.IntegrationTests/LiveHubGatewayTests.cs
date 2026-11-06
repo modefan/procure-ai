@@ -154,14 +154,85 @@ public sealed class LiveHubGatewayTests(KeycloakFixture keycloak, RedisFixture r
         (await OpenAsync(hub, cookieHeader, "https://app.test")).ShouldBe(HttpStatusCode.SwitchingProtocols);
     }
 
+    [Fact]
+    public async Task Hub_websocket_over_http2_connects_through_gateway_with_session()
+    {
+        // Chrome opens a WebSocket over its existing HTTP/2 connection to the gateway (RFC 8441 extended CONNECT; Kestrel offers it) when
+        // nothing in between speaks HTTP/1.1, as under the AppHost. The CONNECT carries the cookie and the Origin but no anti-forgery
+        // header, like the HTTP/1.1 GET upgrade; refusing it made SignalR fall back to long polling (plan 07 carry-over 22).
+        await using var gateway = await GatewayHost.StartAsync(keycloak, redis, kestrel: true);
+        var (browser, cookies) = gateway.NewBrowserWithCookies();
+        using (browser)
+        {
+            using var driver = new LoginDriver(keycloak);
+            await driver.LoginAsync(browser, "tom@acme.test");
+        }
+
+        var hub = new UriBuilder(gateway.Address) { Scheme = "wss", Path = "/hubs/live", Query = "id=connection-1" }.Uri;
+        using var handler = new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true } };
+        using var invoker = new HttpMessageInvoker(handler);
+        using var socket = new ClientWebSocket();
+        socket.Options.HttpVersion = HttpVersion.Version20;
+        socket.Options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
+        socket.Options.CollectHttpResponseDetails = true;
+        socket.Options.SetRequestHeader("Cookie", cookies.CookieHeaderFor(gateway.Address));
+        socket.Options.SetRequestHeader("Origin", gateway.Address.GetLeftPart(UriPartial.Authority));
+
+        try
+        {
+            await socket.ConnectAsync(hub, invoker, Ct);
+        }
+        catch (WebSocketException error)
+        {
+            throw new ShouldAssertException($"The HTTP/2 WebSocket was refused with {(int)socket.HttpStatusCode}.", error);
+        }
+
+        socket.HttpStatusCode.ShouldBe(HttpStatusCode.OK, "an HTTP/2 WebSocket is accepted with 200, not 101");
+        var buffer = new byte[256];
+        var received = await socket.ReceiveAsync(buffer, Ct);
+        Encoding.UTF8.GetString(buffer, 0, received.Count).ShouldBe("connected:/hubs/live");
+        var upgrade = gateway.Stub.Seen.Last(s => s.Path == "/hubs/live");
+        Bearer(upgrade).GetClaim("tenant").Value.ShouldBe("acme");
+        upgrade.Header("Cookie").ShouldBeNull("the browser's cookies never reach a service");
+    }
+
+    [Fact]
+    public async Task Hub_websocket_behind_a_proxy_that_forwards_wss_is_from_the_own_origin()
+    {
+        // Traefik forwards a WebSocket upgrade with X-Forwarded-Proto: wss, so the request's scheme is wss while the page's origin is
+        // https://<host>. The page is the gateway's own origin all the same, without listing it in Hubs:AllowedOrigins.
+        await using var gateway = await GatewayHost.StartAsync(
+            keycloak, redis, new() { ["ForwardedHeaders:KnownProxies:0"] = "127.0.0.1" }, kestrel: true);
+        var (browser, cookies) = gateway.NewBrowserWithCookies();
+        using (browser)
+        {
+            using var driver = new LoginDriver(keycloak);
+            await driver.LoginAsync(browser, "tom@acme.test");
+        }
+
+        var cookieHeader = cookies.CookieHeaderFor(gateway.Address);
+        var hub = new UriBuilder(gateway.Address) { Scheme = "wss", Path = "/hubs/live", Query = "id=connection-1" }.Uri;
+        var own = gateway.Address.GetLeftPart(UriPartial.Authority);
+        var asWebSocket = new Dictionary<string, string> { ["X-Forwarded-Proto"] = "wss" };
+
+        (await OpenAsync(hub, cookieHeader, own, asWebSocket)).ShouldBe(HttpStatusCode.SwitchingProtocols);
+        (await OpenAsync(hub, cookieHeader, "https://evil.test", asWebSocket)).ShouldBe(HttpStatusCode.Forbidden);
+        (await OpenAsync(hub, cookieHeader, own.Replace("https://", "wss://", StringComparison.Ordinal), asWebSocket))
+            .ShouldBe(HttpStatusCode.Forbidden, "a browser page never has a wss origin");
+    }
+
     /// <summary>Opens a WebSocket with the browser's cookie and <paramref name="origin"/>; returns the status of the upgrade answer.</summary>
-    private static async Task<HttpStatusCode> OpenAsync(Uri hub, string cookieHeader, string origin)
+    private static async Task<HttpStatusCode> OpenAsync(Uri hub, string cookieHeader, string origin, Dictionary<string, string>? headers = null)
     {
         using var socket = new ClientWebSocket();
         socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
         socket.Options.CollectHttpResponseDetails = true;
         socket.Options.SetRequestHeader("Cookie", cookieHeader);
         socket.Options.SetRequestHeader("Origin", origin);
+        foreach (var (name, value) in headers ?? [])
+        {
+            socket.Options.SetRequestHeader(name, value);
+        }
         try
         {
             await socket.ConnectAsync(hub, Ct);

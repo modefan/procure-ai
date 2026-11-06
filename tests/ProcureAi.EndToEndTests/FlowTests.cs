@@ -112,19 +112,15 @@ public sealed class FlowTests(AppFixture fixture)
 
     /// <summary>
     /// Plan 07 Review Focus 5 (and the Task 5 carry-over): the live connection is a real WebSocket through the gateway (on the cluster also
-    /// through Traefik), not SignalR's silent fallback to Server-Sent Events or long polling, and pushes arrive over it.
+    /// through Traefik), not SignalR's silent fallback to long polling, and pushes arrive over it.
     /// </summary>
     [Fact]
     public async Task Live_connection_is_a_websocket_through_the_gateway()
     {
+        // Under the AppHost the browser talks HTTP/2 straight to the gateway and opens the socket as an extended CONNECT (RFC 8441); behind
+        // Traefik it is an HTTP/1.1 upgrade. Both must stay WebSockets (plan 07 carry-over 22: the CONNECT was refused by the anti-forgery
+        // check and SignalR fell back to long polling).
         fixture.RequireReady();
-        if (!fixture.IsExternal)
-        {
-            // Found 2026-11-05 (plan 07 Task 8): under the AppHost the browser's hub connection falls back to long polling (GET/POST
-            // /hubs/live?id=...), while behind Traefik on the cluster it is a WebSocket. Cause not yet known (the browser talks HTTP/2 to the
-            // gateway directly there, HTTP/1.1 through Traefik on the cluster); a plan 08 carry-over. Live updates still work over polling.
-            Assert.Skip("Under the AppHost SignalR falls back to long polling (known, plan 08 carry-over); this check runs against a deployment.");
-        }
         await using var context = await fixture.NewContextAsync();
         var page = await context.NewPageAsync();
 

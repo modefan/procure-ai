@@ -40,7 +40,7 @@ interface Group {
 /**
  * Screen 14: which role has which permission (needs `admin.authorization`). Rows are grouped by area, columns are the roles; a
  * change is a draft until Save changes, which saves role by role (see `MatrixStore`). The permission column stays in place when
- * the matrix scrolls sideways on a phone.
+ * the matrix scrolls sideways on a phone, and so do the area labels.
  */
 @Component({
   selector: 'app-matrix-page',
@@ -95,8 +95,11 @@ interface Group {
             </thead>
             @for (group of groups(); track group.label) {
               <tbody>
-                <tr>
-                  <th scope="colgroup" [attr.colspan]="store.roles().length + 1" class="sticky left-0 border-b border-slate-100 bg-slate-100 px-4 py-2 text-xs font-semibold tracking-wide text-slate-700 uppercase"><span class="sticky left-4 inline-block">{{ group.label }}</span></th>
+                <!-- The label sits in the sticky permission column (like the rows below it), so it stays in view on a sideways scroll in
+                     every browser; the filler carries the band's colour under the role columns. -->
+                <tr data-band>
+                  <th scope="rowgroup" class="sticky left-0 z-10 border-b border-slate-100 bg-slate-100 px-4 py-2 text-xs font-semibold tracking-wide text-slate-700 uppercase">{{ group.label }}</th>
+                  <td [attr.colspan]="store.roles().length" class="border-b border-slate-100 bg-slate-100"></td>
                 </tr>
                 @for (permission of group.permissions; track permission) {
                   <tr class="group" [attr.data-permission]="permission">

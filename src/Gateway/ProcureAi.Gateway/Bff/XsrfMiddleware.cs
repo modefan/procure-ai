@@ -35,6 +35,8 @@ public sealed class XsrfMiddleware(RequestDelegate next)
         !(HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)
           || HttpMethods.IsOptions(request.Method) || HttpMethods.IsTrace(request.Method))
         && !BffSchemes.UsesPassThrough(request)
+        // An HTTP/2 WebSocket to a hub is a CONNECT and cannot carry headers; HubOriginMiddleware checks its Origin instead.
+        && !HubOriginMiddleware.IsHubWebSocket(request)
         // sendBeacon cannot set headers; the endpoint changes nothing for the user.
         && !ClientLogEndpoints.IsClientLogPath(request.Path);
 }

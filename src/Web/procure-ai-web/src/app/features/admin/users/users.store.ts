@@ -117,7 +117,7 @@ export const UsersStore = signalStore(
             return 'error';
           }
           if (isConflict(error)) {
-            await conflict.show(`Someone else changed ${user.displayName}. Showing the latest version.`);
+            await conflict.show(`Someone else changed ${user.displayName}. Showing the latest version; what you entered is kept.`);
             await fetchAll().catch(() => undefined);
             return 'conflict';
           }

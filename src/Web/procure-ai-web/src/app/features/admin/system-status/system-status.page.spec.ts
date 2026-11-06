@@ -3,6 +3,7 @@ import { provideRouter } from '@angular/router';
 import { SystemStatusService } from '../../../api/notifications/services/system-status.service';
 import { SupplierChaosService } from '../../../api/purchasing/services/supplier-chaos.service';
 import { permissionGuard } from '../../../core/auth/permission.guard';
+import { expectExplicitTableRoles } from '../../../core/ui/stacked-table.testing';
 import { APP_ROUTES } from '../../app.routes';
 import { serviceStatus, statusDto } from './system-status.testing';
 import { SystemStatusPage } from './system-status.page';
@@ -46,6 +47,11 @@ describe('SystemStatusPage', () => {
     const row = text(el.querySelector('tr[data-service="Purchasing"]'));
     expect(row).toContain('Degraded');
     expect(row).toContain('Supplier API: OPEN (retry in 20 s)');
+  });
+
+  it('table keeps roles on small screens: the services table stacks into cards below lg and keeps its table roles', async () => {
+    const { el } = await setup(statusDto({ services: [serviceStatus('Purchasing'), serviceStatus('Invoicing')] }));
+    expectExplicitTableRoles(el.querySelector('[data-testid="services"] table'));
   });
 
   it('down_service_shows_down_badge', async () => {

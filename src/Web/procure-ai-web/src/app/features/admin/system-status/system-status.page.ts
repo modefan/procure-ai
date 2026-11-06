@@ -77,28 +77,29 @@ const ALERT_LABELS: Record<string, string> = {
         </div>
       } @else if (store.status()) {
         <div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="services">
-          <table class="w-full text-left text-sm lg:min-w-[44rem] max-lg:block">
+          <!-- Below lg the table stacks into cards (display: block), which drops its table semantics; the explicit roles keep them. -->
+          <table role="table" class="w-full text-left text-sm lg:min-w-[44rem] max-lg:block">
             <caption class="sr-only">Services with their health, instances and circuit breakers</caption>
-            <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide text-slate-600 uppercase max-lg:sr-only">
-              <tr>
-                <th scope="col" class="px-4 py-3">Service</th>
-                <th scope="col" class="px-4 py-3">Health</th>
-                <th scope="col" class="px-4 py-3 text-right">Instances</th>
-                <th scope="col" class="px-4 py-3">Circuit breakers</th>
+            <thead role="rowgroup" class="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide text-slate-600 uppercase max-lg:sr-only">
+              <tr role="row">
+                <th scope="col" role="columnheader" class="px-4 py-3">Service</th>
+                <th scope="col" role="columnheader" class="px-4 py-3">Health</th>
+                <th scope="col" role="columnheader" class="px-4 py-3 text-right">Instances</th>
+                <th scope="col" role="columnheader" class="px-4 py-3">Circuit breakers</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100 max-lg:block">
+            <tbody role="rowgroup" class="divide-y divide-slate-100 max-lg:block">
               @for (service of store.services(); track service.name) {
-                <tr [attr.data-service]="service.name" class="max-lg:block max-lg:space-y-1.5 max-lg:px-4 max-lg:py-3">
-                  <td class="px-4 py-3 font-medium text-slate-900 max-lg:flex max-lg:items-center max-lg:justify-between max-lg:gap-3 max-lg:p-0">
+                <tr role="row" [attr.data-service]="service.name" class="max-lg:block max-lg:space-y-1.5 max-lg:px-4 max-lg:py-3">
+                  <td role="cell" class="px-4 py-3 font-medium text-slate-900 max-lg:flex max-lg:items-center max-lg:justify-between max-lg:gap-3 max-lg:p-0">
                     {{ service.name }}
                     <span class="lg:hidden" [class]="badge(service.health)">{{ service.health }}</span>
                   </td>
-                  <td class="px-4 py-3 max-lg:hidden">
+                  <td role="cell" class="px-4 py-3 max-lg:hidden">
                     <span data-testid="health" [class]="badge(service.health)">{{ service.health }}</span>
                   </td>
-                  <td class="cell-label px-4 py-3 text-right tabular-nums text-slate-900 max-lg:block max-lg:p-0 max-lg:text-left" data-label="Instances">{{ service.instances }}</td>
-                  <td class="px-4 py-3 max-lg:block max-lg:p-0">
+                  <td role="cell" class="cell-label px-4 py-3 text-right tabular-nums text-slate-900 max-lg:block max-lg:p-0 max-lg:text-left" data-label="Instances">{{ service.instances }}</td>
+                  <td role="cell" class="px-4 py-3 max-lg:block max-lg:p-0">
                     @for (breaker of service.breakers; track breaker.name) {
                       <div [class]="breakerClass(breaker)">{{ breakerText(breaker) }}</div>
                     } @empty {
@@ -107,8 +108,8 @@ const ALERT_LABELS: Record<string, string> = {
                   </td>
                 </tr>
               } @empty {
-                <tr>
-                  <td colspan="4" class="px-4 py-6 text-center text-slate-600">No services reported.</td>
+                <tr role="row">
+                  <td role="cell" colspan="4" class="px-4 py-6 text-center text-slate-600">No services reported.</td>
                 </tr>
               }
             </tbody>

@@ -47,7 +47,7 @@ describe('MatrixPage', () => {
     const { el } = await setup();
     const headers = [...el.querySelectorAll('thead th')].map((th) => text(th));
     expect(headers).toEqual(['Permission', 'Requester', 'Manager', 'Department head', 'Finance', 'Admin']);
-    expect([...el.querySelectorAll('tbody th[scope="colgroup"]')].map((th) => text(th))).toEqual([
+    expect([...el.querySelectorAll('tbody th[scope="rowgroup"]')].map((th) => text(th))).toEqual([
       'Requests',
       'Orders',
       'Invoices',
@@ -61,6 +61,27 @@ describe('MatrixPage', () => {
     expect(text(approve)).toContain('Approve or reject');
     expect(text(el)).toContain('Permissions are defined in code');
     expect(text(el)).toContain('Audited. Services pick up changes within seconds.');
+  });
+
+  it('group label bands stay readable on a sideways scroll: the label sits in the sticky permission column, a filler spans the roles', async () => {
+    const { el } = await setup();
+    const bands = [...el.querySelectorAll('tbody tr[data-band]')];
+    expect(bands.length).toBe(6);
+    for (const band of bands) {
+      const [label, filler, ...rest] = [...band.children] as HTMLElement[];
+      expect(rest).toEqual([]);
+      // The label cell is a row-group header in the first column, sticky like the permission cells below it (same classes).
+      expect(label.tagName).toBe('TH');
+      expect(label.getAttribute('scope')).toBe('rowgroup');
+      expect(label.classList).toContain('sticky');
+      expect(label.classList).toContain('left-0');
+      expect(label.classList).toContain('z-10');
+      expect(label.hasAttribute('colspan')).toBe(false);
+      // The band's colour carries on under the role columns.
+      expect(filler.tagName).toBe('TD');
+      expect(filler.getAttribute('colspan')).toBe('5');
+      expect(filler.className).toContain('bg-slate-100');
+    }
   });
 
   it('checkboxes reflect the loaded matrix and are labelled with role and permission', async () => {

@@ -25,7 +25,9 @@ export function parseRandInput(raw: string): number | null {
 /**
  * Edit one user's cost centers (Angular Aria listbox, several can be chosen) and approval limit. A native modal dialog like the
  * budget dialog: the browser traps the focus and Esc closes it (not while a save runs). Saving sends only what changed (see
- * `UsersStore.save`). The server's refusals show next to the field they belong to; a conflict closes the dialog (the list is re-read).
+ * `UsersStore.save`). The server's refusals show next to the field they belong to. A conflict (someone else saved first) keeps the
+ * dialog open with what was typed: `user` is the live row of the store, so it shows the latest figures and Save goes out on the latest
+ * version.
  */
 @Component({
   selector: 'app-user-edit-dialog',
@@ -52,7 +54,7 @@ export function parseRandInput(raw: string): number | null {
           aria-labelledby="user-codes-label"
           [attr.aria-invalid]="store.codesError() ? 'true' : null"
           [attr.aria-describedby]="store.codesError() ? 'user-codes-error' : 'user-codes-hint'"
-          class="max-h-52 overflow-y-auto rounded-lg border border-slate-300 bg-white p-1 text-sm shadow-sm focus-within:outline-2 focus-within:outline-indigo-700 aria-[invalid=true]:border-red-600"
+          class="scroll-hint max-h-52 overflow-y-auto rounded-lg border border-slate-300 bg-white p-1 text-sm shadow-sm focus-within:outline-2 focus-within:outline-indigo-700 aria-[invalid=true]:border-red-600"
         >
           @for (center of costCenters(); track center.code) {
             <li ngOption [value]="center.code" [label]="center.code + ' ' + center.name" [attr.data-code]="center.code" class="cost-option">
@@ -65,7 +67,15 @@ export function parseRandInput(raw: string): number | null {
         @if (store.codesError(); as message) {
           <p id="user-codes-error" role="alert" class="field-error">{{ message }}</p>
         } @else {
-          <p id="user-codes-hint" class="mt-1 text-sm text-slate-600">Press Space or click to tick a cost center. {{ codes().length }} chosen.</p>
+          <p id="user-codes-hint" class="mt-1 text-sm text-slate-600">
+            Press Space or click to tick a cost center. {{ codes().length }} of {{ costCenters().length }} cost centers chosen.
+          </p>
+        }
+
+        @if (refreshed(); as latest) {
+          <p class="mt-2 text-sm text-amber-800" data-hint="refreshed" role="status">
+            {{ user().displayName }} was just changed by someone else. Now: {{ latest }}. What you entered is kept; Save applies it.
+          </p>
         }
 
         <label for="user-limit" class="field-label mt-4">Approval limit (Rand)</label>
@@ -105,6 +115,16 @@ export class UserEditDialog implements OnDestroy {
   private readonly model = signal<{ limit: string }>({ limit: '' });
   private readonly tried = signal(false);
   protected readonly max = formatRand(MAX_LIMIT);
+  /** After a conflict: the latest saved values, in words; the typed ones stay in the form. */
+  protected readonly refreshed = computed(() => {
+    if (!this.conflicted()) {
+      return null;
+    }
+    const user = this.user();
+    const codes = user.costCenterCodes.length > 0 ? user.costCenterCodes.join(', ') : 'no cost centers';
+    return `${codes}, limit ${formatRand(user.approvalLimit)}`;
+  });
+  private readonly conflicted = signal(false);
 
   protected readonly limitForm = form(this.model, (p) => {
     validate(p.limit, (ctx) => {
@@ -166,8 +186,10 @@ export class UserEditDialog implements OnDestroy {
         return;
       }
       const outcome = await this.store.save(this.user(), this.codes(), limit);
-      if (outcome !== 'error') {
+      if (outcome === 'saved') {
         this.close();
+      } else if (outcome === 'conflict') {
+        this.conflicted.set(true);
       }
     });
   }

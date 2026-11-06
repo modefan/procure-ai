@@ -5,6 +5,7 @@ import { AccessService } from '../../../api/access/services/access.service';
 import { AuthStore } from '../../../core/auth/auth.store';
 import { ConflictDialog } from '../../../core/ui/conflict-dialog';
 import { APP_ROUTES } from '../../app.routes';
+import { expectExplicitTableRoles } from '../../../core/ui/stacked-table.testing';
 import { costCenterAdminDto, userDto } from '../admin.testing';
 import { UsersPage } from './users.page';
 
@@ -128,16 +129,42 @@ describe('UsersPage', () => {
     expect(el.querySelector('dialog')).not.toBeNull();
   });
 
-  it('conflict_reloads_user: the dialog closes and the list shows the latest', async () => {
+  it('conflict dialog keeps typed values: the edit stays open with what was typed, shows the latest and saves it on the new version', async () => {
     const { fixture, el } = await setup();
     await openEdit(fixture);
+    el.querySelector<HTMLElement>('dialog [role="option"][data-code="MK-110"]')!.click();
     await typeLimit(fixture, '1000');
-    api.setApprovalLimit.mockRejectedValue(new HttpErrorResponse({ status: 412, error: { detail: 'old' } }));
+    api.setUserCostCenters.mockRejectedValueOnce(new HttpErrorResponse({ status: 412, error: { detail: 'old' } }));
     api.listUsers.mockResolvedValue([userDto('maria', { approvalLimit: 777, version: 9 })]);
     save(el).click();
     await settle(fixture);
-    expect(el.querySelector('dialog')).toBeNull();
+
+    // The list behind shows the latest; the dialog is still open with the typed limit and the ticked cost center.
     expect(text(row(el, 'maria'))).toContain('R 777,00');
+    expect(el.querySelector('dialog')).not.toBeNull();
+    expect(el.querySelector<HTMLInputElement>('#user-limit')!.value).toBe('1000');
+    expect(el.querySelector('dialog [role="option"][data-code="MK-110"]')!.getAttribute('aria-selected')).toBe('true');
+    const hint = text(el.querySelector('[data-hint="refreshed"]'));
+    expect(hint).toContain('changed by someone else');
+    expect(hint).toContain('R 777,00');
+
+    // Save again goes out with the latest version.
+    save(el).click();
+    await settle(fixture);
+    expect(api.setUserCostCenters).toHaveBeenLastCalledWith({ userId: 'maria', 'If-Match': '"9"', body: { codes: ['IT-200', 'MK-110'] } });
+  });
+
+  it('table keeps roles on small screens: the users table stacks into cards below lg and keeps its table roles', async () => {
+    const { el } = await setup();
+    expectExplicitTableRoles(el.querySelector('[data-testid="users"] table'));
+  });
+
+  it('the cost center list shows a scroll hint and says how many there are', async () => {
+    const { fixture, el } = await setup();
+    await openEdit(fixture);
+    const list = el.querySelector('dialog [role="listbox"]')!;
+    expect(list.classList).toContain('scroll-hint');
+    expect(text(el.querySelector('#user-codes-hint'))).toContain('2 cost centers');
   });
 
   it('unknown_cost_center_422_shows_field_error: next to the cost center list, dialog stays open', async () => {

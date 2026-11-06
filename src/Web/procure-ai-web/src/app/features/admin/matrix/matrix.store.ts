@@ -31,6 +31,33 @@ type Draft = Record<string, ReadonlySet<string>>;
 
 const draftOf = (matrix: MatrixDto): Draft => Object.fromEntries(matrix.roles.map((r) => [r.role, new Set(r.permissions)]));
 
+/** What was ticked and unticked in `draft` compared with `base`, per role. */
+type Toggles = Record<string, { added: string[]; removed: string[] }>;
+
+const togglesOf = (base: MatrixDto, draft: Draft, roles: string[]): Toggles => {
+  const saved = draftOf(base);
+  return Object.fromEntries(
+    roles.map((role) => {
+      const before = saved[role] ?? new Set<string>();
+      const after = draft[role] ?? new Set<string>();
+      return [role, { added: [...after].filter((p) => !before.has(p)), removed: [...before].filter((p) => !after.has(p)) }];
+    }),
+  );
+};
+
+/** The ticks put back on top of a newer matrix. */
+const applyToggles = (latest: MatrixDto, toggles: Toggles): Draft => {
+  const rows = draftOf(latest);
+  return Object.fromEntries(
+    Object.entries(toggles).map(([role, { added, removed }]) => {
+      const next = new Set(rows[role] ?? []);
+      added.forEach((p) => next.add(p));
+      removed.forEach((p) => next.delete(p));
+      return [role, next];
+    }),
+  );
+};
+
 const sameSet = (a: ReadonlySet<string> | undefined, b: ReadonlySet<string>): boolean => !!a && a.size === b.size && [...b].every((x) => a.has(x));
 
 interface MatrixState {
@@ -50,8 +77,9 @@ interface MatrixState {
 /**
  * The role-permission matrix (screen 14, `admin.authorization`), edited as a draft and saved role by role (plan 06 ruling 8): one
  * PUT per changed role in the matrix's role order, each with the version of the answer before. If one fails, the roles saved so far
- * stay saved and are named, and the matrix is read again. A 412/409 means somebody else saved first: the conflict dialog opens
- * and the edits are replaced by the latest matrix. A refusal that is not a conflict (422: the admin role must keep
+ * stay saved and are named, and the matrix is read again. A 412/409 means somebody else saved first: the conflict dialog opens,
+ * the latest matrix is shown and this admin's own ticks of the unsaved roles are put back on top of it (what they changed, not their
+ * whole old rows, so the other admin's changes stay), ready to check and save again. A refusal that is not a conflict (422: the admin role must keep
  * `admin.authorization`) keeps the unsaved edits so they can be corrected.
  * A push `access-matrix` re-reads the matrix; with unsaved edits it only offers "Reload" when the server's version really is newer
  * (our own save echoes back as a push too).
@@ -90,11 +118,13 @@ export const MatrixStore = signalStore(
     let shown: number | null = null;
     let pushedWhileSaving = false;
 
-    const show = (matrix: MatrixDto, keep: Draft = {}) =>
-      patchState(store, { matrix, draft: { ...draftOf(matrix), ...keep }, changedElsewhere: false });
+    /** `keep`: edits to show on top of the matrix, or how to compute them from it. */
+    type Keep = Draft | ((matrix: MatrixDto) => Draft);
+    const show = (matrix: MatrixDto, keep: Keep = {}) =>
+      patchState(store, { matrix, draft: { ...draftOf(matrix), ...(typeof keep === 'function' ? keep(matrix) : keep) }, changedElsewhere: false });
 
     /** Reads the matrix. Unsaved edits are kept unless `replace`; then a newer version only raises `changedElsewhere`. */
-    const fetchMatrix = async (replace: boolean, keep: Draft = {}): Promise<void> => {
+    const fetchMatrix = async (replace: boolean, keep: Keep = {}): Promise<void> => {
       const call = ++latest;
       const epoch = store.cacheEpoch();
       if (shown !== epoch && store.matrix() === null) {
@@ -205,8 +235,12 @@ export const MatrixStore = signalStore(
           }
           const before = saved.length > 0 ? `Saved before that: ${names(saved)}. ` : '';
           if (isConflict(error)) {
-            await conflict.show(`Someone else changed the authorization matrix. ${before}Showing the latest version.`);
-            await fetchMatrix(true).catch(() => undefined);
+            const unsaved = roles.filter((r) => !saved.includes(r));
+            const toggles = togglesOf(start, edits, unsaved);
+            await conflict.show(
+              `Someone else changed the authorization matrix. ${before}Showing the latest version; your unsaved ticks are kept on top of it.`,
+            );
+            await fetchMatrix(true, (latest) => applyToggles(latest, toggles)).catch(() => undefined);
           } else {
             log.warn('Saving the authorization matrix failed', error);
             const problem = problemOf(error);

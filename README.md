@@ -420,6 +420,11 @@ Or sign in through Keycloak as usual; the demo password is the `keycloak-demo-pa
 | Globex manager (Ben) | ben@globex.test | Globex | manager |
 | (Keycloak login only) | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
 
+**Thandi through the normal Keycloak login:** she belongs to two organizations, so after the password Keycloak shows its own
+**organization picker** (Acme Corp or Globex). Pick one; that is the company the session starts in, and **Switch company** in her
+user menu changes it later. The **Finance (Thandi)** button skips the picker (it starts in Acme). Every other demo user is in one
+organization and never sees the picker.
+
 How the buttons work: the gateway (`POST /bff/demo-login` with `{ "user": "tom" }`, XSRF header required) signs the user in with
 the OAuth password grant on a **separate** Keycloak client, `procure-demo-login` (confidential, direct access grants only, no
 browser flow), and then creates exactly the session the normal code-flow login creates: tokens in the Redis ticket store, the
