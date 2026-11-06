@@ -38,6 +38,21 @@ tests:
       - equal:
           path: spec.backoffLimit
           value: 0
+      # ... but an evicted or preempted pod (DisruptionTarget) is not counted: the Job retries it (plan 08 Task 6 fix round 1, review I1).
+      - equal:
+          path: spec.podFailurePolicy.rules[0]
+          value:
+            action: Ignore
+            onPodConditions:
+              - type: DisruptionTarget
+      - equal:
+          path: spec.podFailurePolicy.rules[1]
+          value:
+            action: FailJob
+            onExitCodes: { containerName: migrate, operator: NotIn, values: [0] }
+      - equal:
+          path: spec.template.spec.restartPolicy
+          value: Never
       # The same image and environment as the app, plus --migrate.
       - equal:
           path: spec.template.spec.containers[0].image

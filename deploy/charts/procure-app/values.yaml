@@ -72,7 +72,8 @@ migration:
   # No pod retry (plan 08 Task 6, ruling 9): Argo CD retries the whole sync 3 times (procure-ai-gitops apps/values.yaml), each rerunning
   # every migration; 6 pod retries (10 s to 5 min apart) made one failing attempt last over 10 minutes, so the root turned Degraded only
   # after most of an hour. On a fresh cluster the platform syncs first (Postgres, MongoDB and the db-roles Job are ready before any
-  # migration runs), so a failure here is the migration's own.
+  # migration runs), so a failure here is the migration's own. An evicted or preempted pod does not count (the Job's podFailurePolicy,
+  # templates/migrate-job.yaml): the Job replaces it.
   backoffLimit: 0
   # The whole Job (every attempt) must finish within this; then it fails and the sync stops with it.
   activeDeadlineSeconds: 900

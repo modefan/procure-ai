@@ -21,6 +21,20 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: {{ .Values.migration.backoffLimit }}
+  # backoffLimit 0 is for the migration's own errors (plan 08 ruling 9), not for a pod the cluster took away: an eviction (node memory
+  # pressure, API eviction) or a preemption marks the pod DisruptionTarget, which is not counted, so the Job starts a new pod instead of
+  # failing the sync (and spending one of Argo CD's 3 retries). activeDeadlineSeconds still bounds the whole Job. A non-zero exit of the
+  # migration (including a cgroup OOM kill, 137: a migration that does not fit its limit is a sizing bug to see at once) fails the Job.
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: migrate
+          operator: NotIn
+          values: [0]
   # A missing Postgres or a hung migration fails the hook visibly (and with it the sync) instead of blocking it forever.
   activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
   template:
