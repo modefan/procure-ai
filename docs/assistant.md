@@ -12,7 +12,7 @@ It also reads supplier invoices from PDF. All AI calls go through Microsoft.Exte
 > **Which model answers today: a built-in demo model.** The plan was GitHub Models for development (free), but GitHub
 > retired it on 2026-07-30. A real provider (Azure AI Foundry or any OpenAI-compatible endpoint) needs a cloud account,
 > which is the owner's call and has not been made yet. Until then the AppHost runs the **Fake provider**: deterministic,
-> no key, no account, no cost. It is labelled **"Demo model"** in the app. It runs the whole pipeline for real (ingestion,
+> no key, no account, no cost. It is labeled **"Demo model"** in the app. It runs the whole pipeline for real (ingestion,
 > embeddings, hybrid search, tools, guards, streaming, telemetry), but its "answers" are extracts: the first sentence (or
 > the table or list) of the top sources, plus a summary of any tool result. Its embeddings are a hashed bag of words, so
 > retrieval is lexical. Switching to a real model is configuration only (below); the code does not change.
