@@ -461,8 +461,10 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
         cookie.ShouldContain("samesite=strict");
         cookie.ShouldContain("path=/");
         cookie.ShouldNotContain("domain=");
-        // Only a session key is in the cookie: the tokens stay in Redis.
-        cookie.ShouldNotContain("eyj");
+        // Only a session key is in the cookie: the tokens stay in Redis. A JWT is header.payload.signature with a base64url JSON header
+        // ("eyJ..."); a bare "eyj" can turn up by chance in the protected (random) cookie value, so look for the whole JWT shape.
+        var raw = response.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("__Host-procure=", StringComparison.Ordinal));
+        System.Text.RegularExpressions.Regex.IsMatch(raw, @"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.").ShouldBeFalse("no token in the cookie");
     }
 
     [Fact]
