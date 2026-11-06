@@ -183,7 +183,7 @@ tests:
           content:
             name: tmp
             emptyDir:
-              sizeLimit: 256Mi
+              sizeLimit: 512Mi
       - contains:
           path: spec.template.spec.containers[0].env
           content:

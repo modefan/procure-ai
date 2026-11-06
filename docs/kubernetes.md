@@ -350,6 +350,6 @@ API server.
   so they keep serving and restart normally. Its replication slot keeps the changes (up to `postgres.maxSlotWalKeepSize`), and it catches
   up when it is back. The outage shows on the system status page and as a `platform` Application that is not Healthy. Under the AppHost the
   APIs still wait for their Debezium (`WaitFor`), so a local run starts in a known order.
-- **The Aspire dashboard restarts.** Its telemetry lives in a SQLite database in `/tmp` (lost with the pod). `/tmp` is a 256Mi emptyDir
-  and the caps (`dashboard.telemetryLimits` in the chart) bound the database to well below that; an `Evicted` event naming the `tmp`
+- **The Aspire dashboard restarts.** Its telemetry lives in a SQLite database in `/tmp` (lost with the pod). `/tmp` is a 512Mi emptyDir
+  and the caps (`dashboard.telemetryLimits` in the chart) should level the database off near 200 MiB (measured growth: values.yaml); an `Evicted` event naming the `tmp`
   emptyDir means the caps no longer fit the volume (`kubectl -n observability get events`).

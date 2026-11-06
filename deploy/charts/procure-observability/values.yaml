@@ -33,13 +33,15 @@ dashboard:
   # only, checked on 13.6.2), the `tmp` emptyDir below. Logs and traces are capped in total, metric points per
   # dimension (about 1 200 dimensions here). Measured on k3d (plan 08 Task 6): 5 000 logs ~4 MB, 5 000 traces ~50 MB, about 300 metric
   # points a minute; the plan 07 cap of 20 000 points per dimension was in effect no cap, and the database outgrew the 64Mi /tmp in 10-20
-  # minutes (the pod was evicted). 200 points per dimension (hours of history at the apps' 60 s export) bound it to roughly 75 MB.
+  # minutes (the pod was evicted). 200 points per dimension (hours of history at the apps' 60 s export) bound it (measured below).
   telemetryLimits:
     maxLogCount: 5000
     maxTraceCount: 5000
     maxMetricsCount: 200
-  # /tmp's emptyDir (on the node's disk, not memory): the database, about twice the measured bound of the caps above.
-  tmpSizeLimit: 256Mi
+  # /tmp's emptyDir (on the node's disk, not memory). Measured with these caps on 2026-11-06 (plan 08 Task 6 resume): 16 MiB 3 minutes after
+  # the start, then a steady ~0.95 MiB a minute (41 MiB after 31 minutes, no eviction). Metric points stop growing once each dimension holds
+  # 200 (~200 minutes at the 60 s export), so the database should level off near 200 MiB; 512Mi leaves room for that estimate being low.
+  tmpSizeLimit: 512Mi
   # The .NET GC heap cap (as the apps' DOTNET_GCHeapHardLimit): 288 MiB of the 384 MiB limit.
   heapHardLimit: "0x12000000"
   resources:
