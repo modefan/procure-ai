@@ -420,10 +420,11 @@ Or sign in through Keycloak as usual; the demo password is the `keycloak-demo-pa
 | Globex manager (Ben) | ben@globex.test | Globex | manager |
 | (Keycloak login only) | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
 
-**Thandi through the normal Keycloak login:** she belongs to two organizations, so after the password Keycloak shows its own
-**organization picker** (Acme Corp or Globex). Pick one; that is the company the session starts in, and **Switch company** in her
-user menu changes it later. The **Finance (Thandi)** button skips the picker (it starts in Acme). Every other demo user is in one
-organization and never sees the picker.
+**Thandi through the normal Keycloak login:** the sign-in asks for the email first. Thandi belongs to two organizations, so
+Keycloak then shows its own **organization picker** ("Select an organization to proceed": Globex or Acme Corp) and only after that
+the password. The organization picked is the company the session starts in; **Switch company** in her user menu changes it later.
+The **Finance (Thandi)** button skips the picker (it starts in Acme). Every other demo user is in one organization and goes from the
+email straight to the password.
 
 How the buttons work: the gateway (`POST /bff/demo-login` with `{ "user": "tom" }`, XSRF header required) signs the user in with
 the OAuth password grant on a **separate** Keycloak client, `procure-demo-login` (confidential, direct access grants only, no
