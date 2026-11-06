@@ -487,13 +487,13 @@ whole AppHost and drives a request through approval, purchasing, invoicing and a
 gateway. The assistant's retrieval is measured on every run (hit@6 on 34 questions); its model-judged evaluation
 (`tests/ProcureAi.Assistant.Evaluation`, groundedness and relevance) needs a real provider and is run by hand. GitHub Actions builds with warnings as errors and fails
 the build if any of the services' OpenAPI documents (found by convention, so a new service is covered
-automatically) or the generated Angular clients differ from what is committed. While the repo is private, every
-Actions minute counts against the free 2 000 a month, so CI splits the suites (`.github/workflows/ci.yml`): every push runs the
-build, the drift checks, the unit and architecture tests, the Vitest specs, the chart checks with the AppHost's chart parity tests
-(the GitOps repo checked out beside it) and the image builds and image tests, about 21 billed minutes (plus 8 for publishing). The
-long suites (Testcontainers integration tests, the AppHost tests, the system tests and Playwright) run nightly when `main` has
-moved and on demand (`workflow_dispatch`, optionally narrowed to some projects), about 45 minutes for the .NET suites alone; they
-move to every push once the repo is public. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
+automatically) or the generated Angular clients differ from what is committed. **While the repo is private**, every Actions
+minute counts against the free 2 000 a month, so CI splits the suites (`.github/workflows/ci.yml`): every push that changes more than
+docs runs the build, the drift checks, the unit and architecture tests, the Vitest specs and the chart checks with the AppHost's chart
+parity tests (the GitOps repo checked out beside it), about 15 billed minutes plus about 8 for publishing (images and deploy). The long suites (image
+builds and image tests, Testcontainers integration tests, the AppHost tests, the system tests and Playwright) run weekly when `main` has
+moved and on demand (`workflow_dispatch`, optionally narrowed to some projects); the .NET suites alone take about 45 minutes. **When
+the repo goes public** (unlimited minutes) the long suites move back to every push. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
 
 ## Design decisions
 
