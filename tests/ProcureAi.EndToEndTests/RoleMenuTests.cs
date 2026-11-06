@@ -44,6 +44,17 @@ public sealed class RoleMenuTests(AppFixture fixture)
             .ToArray();
         shown.ShouldBe(links, $"{role}'s menu");
 
+        // On a desktop the header is one row: the user menu sits beside the links, not wrapped below them (the Department head's
+        // longer role once pushed it onto a second row at 1440 px).
+        foreach (var width in new[] { 1440, 1280 })
+        {
+            await page.SetViewportSizeAsync(width, 800);
+            var navBox = (await nav.BoundingBoxAsync())!;
+            var userBox = (await page.GetByTestId("user-menu").BoundingBoxAsync())!;
+            userBox.Y.ShouldBeLessThan(navBox.Y + navBox.Height, $"{role}'s header is one row at {width} px");
+        }
+        await page.SetViewportSizeAsync(1280, 800);
+
         var admin = page.GetByTestId("admin-menu");
         if (adminLinks.Length == 0)
         {

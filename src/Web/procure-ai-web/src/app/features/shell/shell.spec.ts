@@ -272,6 +272,12 @@ describe('Shell header', () => {
     TestBed.resetTestingModule();
   });
 
+  it('user_menu_shows_a_hyphenated_role_as_words', async () => {
+    signIn(['requests.read', 'requests.approve'], ['department-head']);
+    user.update((u) => ({ ...u!, tenantName: 'Acme Corp' }));
+    expect(text((await render()).querySelector('[data-testid=user-menu]'))).toContain('Department head · Acme Corp');
+  });
+
   it('user_menu_falls_back_to_the_tenant_id_when_the_name_is_unknown', async () => {
     signIn(['requests.read'], ['manager']);
     user.update((u) => ({ ...u!, tenantName: null }));

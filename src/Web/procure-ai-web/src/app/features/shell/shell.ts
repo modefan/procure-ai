@@ -13,6 +13,7 @@ import { DevPanelStore } from '../../core/dev-panel/dev-panel.store';
 import { BellMenu } from './bell-menu';
 import { LiveIndicator } from './live-indicator';
 import { OnlineUsers } from './online-users';
+import { roleLabel } from '../../core/auth/role-label';
 
 interface NavLink {
   path: string;
@@ -52,8 +53,8 @@ const ADMIN_LINKS: NavLink[] = [
     </a>
 
     <header class="border-b border-slate-200 bg-white">
-      <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
-        <div class="flex items-center gap-2">
+      <div data-testid="header-row" class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 lg:flex-nowrap">
+        <div class="flex shrink-0 items-center gap-2">
           @if (auth.isLoggedIn()) {
             <button
               type="button"
@@ -72,7 +73,7 @@ const ADMIN_LINKS: NavLink[] = [
           </a>
         </div>
 
-        <nav #nav aria-label="Main" [class.nav-fade-end]="fadeEnd()" (scroll)="updateFade()" class="order-3 -mx-4 flex w-[calc(100%+2rem)] items-center gap-1 overflow-x-auto px-4 py-1 lg:order-none lg:mx-0 lg:w-auto lg:flex-wrap lg:overflow-visible lg:px-0" [class]="auth.isLoggedIn() ? 'max-md:hidden' : ''">
+        <nav #nav aria-label="Main" [class.nav-fade-end]="fadeEnd()" (scroll)="updateFade()" class="order-3 -mx-4 flex w-[calc(100%+2rem)] items-center gap-1 overflow-x-auto px-4 py-1 lg:order-none lg:mx-0 lg:w-auto lg:min-w-0 lg:px-0" [class]="auth.isLoggedIn() ? 'max-md:hidden' : ''">
           @if (!auth.isLoggedIn()) {
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" class="nav-link">Welcome</a>
           }
@@ -95,7 +96,7 @@ const ADMIN_LINKS: NavLink[] = [
           }
         </nav>
 
-        <div class="ml-auto flex items-center gap-2">
+        <div class="ml-auto flex shrink-0 items-center gap-2">
           @if (auth.isLoggedIn()) {
             @if (adminLinks().length > 0) {
               <div class="relative max-md:hidden" data-admin-menu>
@@ -124,7 +125,7 @@ const ADMIN_LINKS: NavLink[] = [
             <app-live-indicator />
             <app-bell-menu />
             <div class="relative">
-              <button ngMenuTrigger #trigger="ngMenuTrigger" [menu]="userMenu" type="button" data-testid="user-menu" class="btn-ghost max-w-40 !px-2 !py-1 sm:max-w-52 sm:!px-4">
+              <button ngMenuTrigger #trigger="ngMenuTrigger" [menu]="userMenu" type="button" data-testid="user-menu" class="btn-ghost max-w-40 !px-2 !py-1 sm:max-w-52 sm:!px-4 lg:max-w-44">
                 <span class="min-w-0 text-left leading-tight">
                   <span class="block truncate">{{ auth.user()?.name ?? 'Account' }}</span>
                   <span class="block truncate text-xs font-normal text-slate-500">{{ roleAndTenant() }}</span>
@@ -295,7 +296,7 @@ export class Shell {
 
   protected readonly roleAndTenant = computed(() => {
     const user = this.auth.user();
-    const role = user?.roles[0] ? capitalise(user.roles[0]) : '';
+    const role = user?.roles[0] ? roleLabel(user.roles[0]) : '';
     const tenant = user?.tenantName?.trim() || (user?.tenantId ? capitalise(user.tenantId) : '');
     return [role, tenant].filter(Boolean).join(' · ');
   });

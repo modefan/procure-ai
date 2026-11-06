@@ -2,6 +2,7 @@ import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { MatrixDto } from '../../../api/access/models/matrix-dto';
 import { AccessService } from '../../../api/access/services/access.service';
+import { roleLabel } from '../../../core/auth/role-label';
 import { isConflict, problemOf } from '../../../core/http/problem-fields';
 import { LiveConnection } from '../../../core/live/live-connection';
 import { Logger } from '../../../core/logging/logger';
@@ -14,18 +15,9 @@ const SAVE_FAILED = 'The changes could not be saved. Please try again.';
 
 /** The roles in the order of the screen; a role the server adds later is placed after them. */
 const ROLE_ORDER = ['requester', 'manager', 'department-head', 'finance', 'admin'];
-const ROLE_LABELS: Record<string, string> = {
-  requester: 'Requester',
-  manager: 'Manager',
-  'department-head': 'Department head',
-  finance: 'Finance',
-  admin: 'Admin',
-};
 
-/** The screen name of a role (`department-head` becomes "Department head"). */
-export function roleLabel(role: string): string {
-  return ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1).replace(/-/g, ' ');
-}
+/** Re-exported for the matrix and users screens. */
+export { roleLabel };
 
 type Draft = Record<string, ReadonlySet<string>>;
 
