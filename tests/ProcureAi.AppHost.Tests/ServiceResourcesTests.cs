@@ -503,19 +503,28 @@ public sealed class ServiceResourcesTests
     {
         await using var scope = await ModelScope.BuildAsync(
         [
-            "AI:Provider=OpenAI", "AI:Endpoint=https://example.openai.azure.com/openai/v1/", "AI:ApiKey=test-only-key",
-            "AI:Chat:Model=gpt-4.1-mini", "AI:Embedding:Model=text-embedding-3-small", "AI:Guard:Model=gpt-4.1-nano", "AI:Fake:StreamDelayMs=120",
+            "AI:Provider=AzureFoundry", "AI:Endpoint=https://example.openai.azure.com/openai/v1/", "AI:ApiKey=test-only-key",
+            "AI:Chat:Model=chat", "AI:Embedding:Model=embeddings", "AI:Guard:Model=guard", "AI:Fake:StreamDelayMs=120",
+            "AI:Chat:ReasoningEffort=None", "AI:Chat:MinOutputTokens=256", "AI:Chat:SupportsTemperature=false", "AI:DailyTokenCapPerTenant=150000",
+            "AI:Prices:InputPerMillionUsd=0.25", "AI:Prices:OutputPerMillionUsd=2", "AI:Prices:EmbeddingPerMillionUsd=0.022",
         ]);
         var api = scope.Model.Resources.OfType<ProjectResource>().Single(r => r.Name == "assistant-api");
 
         var env = await EnvironmentOfAsync(api);
 
-        env.ShouldContainKeyAndValue("AI__Provider", "OpenAI");
+        env.ShouldContainKeyAndValue("AI__Provider", "AzureFoundry");
         env.ShouldContainKeyAndValue("AI__Endpoint", "https://example.openai.azure.com/openai/v1/");
-        env.ShouldContainKeyAndValue("AI__Chat__Model", "gpt-4.1-mini");
-        env.ShouldContainKeyAndValue("AI__Embedding__Model", "text-embedding-3-small");
-        env.ShouldContainKeyAndValue("AI__Guard__Model", "gpt-4.1-nano");
+        env.ShouldContainKeyAndValue("AI__Chat__Model", "chat");
+        env.ShouldContainKeyAndValue("AI__Embedding__Model", "embeddings");
+        env.ShouldContainKeyAndValue("AI__Guard__Model", "guard");
         env.ShouldContainKeyAndValue("AI__Fake__StreamDelayMs", "120");
+        env.ShouldContainKeyAndValue("AI__Chat__ReasoningEffort", "None");
+        env.ShouldContainKeyAndValue("AI__Chat__SupportsTemperature", "false");
+        env.ShouldContainKeyAndValue("AI__Chat__MinOutputTokens", "256");
+        env.ShouldContainKeyAndValue("AI__DailyTokenCapPerTenant", "150000");
+        env.ShouldContainKeyAndValue("AI__Prices__InputPerMillionUsd", "0.25");
+        env.ShouldContainKeyAndValue("AI__Prices__OutputPerMillionUsd", "2");
+        env.ShouldContainKeyAndValue("AI__Prices__EmbeddingPerMillionUsd", "0.022");
         var key = env["AI__ApiKey"].ShouldBeOfType<ParameterResource>();
         key.Secret.ShouldBeTrue("the key is shown masked in the dashboard");
         // Only the Assistant gets the key.

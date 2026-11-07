@@ -59,7 +59,7 @@ public sealed class AssistantInfraFixture() : ServiceInfraFixture(Database, "pol
 public sealed class AssistantApiFactory(
     AssistantInfraFixture infra, StubAccessServer access, IEnumerable<KeyValuePair<string, string?>> services, List<Activity> exportedActivities,
     EmbeddingProbe embeddings, ChatScript script, ChatFaults faults, (string Database, string Chat)? databases = null,
-    IReadOnlyDictionary<string, string?>? settings = null)
+    IReadOnlyDictionary<string, string?>? settings = null, Action<IServiceCollection>? configureServices = null)
     : ServiceApiFactory<Program>(
         AssistantInfraFixture.Database, databases?.Database ?? infra.DbConnectionString, infra.RabbitConnectionString, infra.RedisConnectionString)
 {
@@ -76,11 +76,6 @@ public sealed class AssistantApiFactory(
         }
 
         builder.UseSetting($"ConnectionStrings:{AssistantInfraFixture.ChatDatabase}", databases?.Chat ?? infra.ChatConnectionString);
-        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
-        {
-            builder.UseSetting(key, value);
-        }
-
         builder.UseSetting("AI:Fake:StreamDelayMs", "0");
         // A provider that stops answering fails the call after 2 s without an update (the scripted "hangs" question).
         builder.UseSetting("AI:Chat:Timeout", "00:00:02");
@@ -95,6 +90,12 @@ public sealed class AssistantApiFactory(
         // A tool call that hangs is given up after 2 s (the stub Budgets can hang; its client's own timeouts are longer).
         builder.UseSetting("Assistant:Tools:Timeout", "00:00:02");
 
+        // A test's own settings last, so they win over the defaults above.
+        foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
+        {
+            builder.UseSetting(key, value);
+        }
+
         builder.ConfigureTestServices(services =>
         {
             // A second exporter on the service's own tracer provider: what reaches it is what the OTLP exporter gets, so a source
@@ -107,6 +108,7 @@ public sealed class AssistantApiFactory(
             // Store and lock faults for the tenants a test lists (ChatFaults).
             services.Decorate<IConversationStore>((inner, _) => new FaultyConversationStore(inner, faults));
             services.Decorate<IAnswerLock>((inner, _) => new FaultyAnswerLock(inner, faults));
+            configureServices?.Invoke(services);
         });
     }
 }
@@ -161,9 +163,14 @@ public sealed class AssistantApp : IAsyncLifetime
     private IEnumerable<KeyValuePair<string, string?>> StubSettings =>
         Requests.Settings.Concat(Approvals.Settings).Concat(Budgets.Settings).Concat(Suppliers.Settings);
 
-    /// <summary>Another instance of the API on databases of its own (the caller disposes it), with settings of the test's own.</summary>
-    public AssistantApiFactory CreateInstance((string Database, string Chat) databases, IReadOnlyDictionary<string, string?> settings) =>
-        new(Infra, Access, StubSettings, [], Embeddings, Script, Faults, databases, settings);
+    /// <summary>
+    /// Another instance of the API on databases of its own (the caller disposes it), with settings and services of the test's own, and the
+    /// spans it exports in <paramref name="activities"/>.
+    /// </summary>
+    public AssistantApiFactory CreateInstance(
+        (string Database, string Chat) databases, IReadOnlyDictionary<string, string?> settings, Action<IServiceCollection>? configureServices = null,
+        List<Activity>? activities = null) =>
+        new(Infra, Access, StubSettings, activities ?? [], Embeddings, Script, Faults, databases, settings, configureServices);
 
     public async ValueTask InitializeAsync()
     {

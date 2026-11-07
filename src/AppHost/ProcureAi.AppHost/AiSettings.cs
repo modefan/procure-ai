@@ -4,7 +4,8 @@ namespace ProcureAi.AppHost;
 
 /// <summary>
 /// The Assistant's model provider settings, from the AppHost's configuration (user secrets: <c>AI:Provider</c>, <c>AI:Endpoint</c>,
-/// <c>AI:ApiKey</c>, <c>AI:Chat:Model</c>, <c>AI:Embedding:Model</c>, <c>AI:Guard:Model</c>, and <c>AI:Fake:StreamDelayMs</c>, the Fake model's
+/// <c>AI:ApiKey</c>, <c>AI:Chat:Model</c>, <c>AI:Chat:ReasoningEffort</c>, <c>AI:Chat:MinOutputTokens</c>, <c>AI:Chat:SupportsTemperature</c>, <c>AI:Embedding:Model</c>,
+/// <c>AI:Guard:Model</c>, <c>AI:DailyTokenCapPerTenant</c>, <c>AI:Prices:*</c>, and <c>AI:Fake:StreamDelayMs</c>, the Fake model's
 /// pause between words, which the end-to-end tests raise to stop an answer halfway). All optional: a setting that is not
 /// configured is not passed, and the API keeps its own default (the Fake provider: no key, no account). No parameter is required, so the
 /// AppHost starts without any AI account.
@@ -12,7 +13,11 @@ namespace ProcureAi.AppHost;
 public static class AiSettings
 {
     /// <summary>The settings passed as <c>AI__...</c> when configured (the key separately, as a secret parameter).</summary>
-    public static readonly string[] PlainKeys = ["Provider", "Endpoint", "Chat:Model", "Embedding:Model", "Guard:Model", "Fake:StreamDelayMs"];
+    public static readonly string[] PlainKeys =
+    [
+        "Provider", "Endpoint", "Chat:Model", "Chat:ReasoningEffort", "Chat:MinOutputTokens", "Chat:SupportsTemperature", "Embedding:Model", "Guard:Model",
+        "DailyTokenCapPerTenant", "Prices:InputPerMillionUsd", "Prices:OutputPerMillionUsd", "Prices:EmbeddingPerMillionUsd", "Fake:StreamDelayMs",
+    ];
 
     public const string ApiKeyParameter = "ai-api-key";
 

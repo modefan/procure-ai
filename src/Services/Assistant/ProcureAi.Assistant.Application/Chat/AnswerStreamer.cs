@@ -22,7 +22,7 @@ namespace ProcureAi.Assistant.Application.Chat;
 /// <summary>
 /// Answers a question in a conversation of the caller as a stream of <see cref="SseEvent"/>s (plan 05 Task 5a, rulings 6 to 10).
 /// <see cref="StartAsync"/> does everything that can still be a plain HTTP answer: the conversation (404, also for another user's or
-/// tenant's), the mode (422), the per-conversation lock (409), the daily quota (429, counted here), then the question is stored. The stream
+/// tenant's), the mode (422), the tenant's daily token cap (429), the per-conversation lock (409), the daily quota (429, counted here), then the question is stored. The stream
 /// then rewrites a follow-up with the history (<see cref="QueryRewriter"/>), searches (<see cref="IHybridSearch"/>, top
 /// <c>Assistant:Retrieval:TopK</c>) and sends <c>sources</c>, streams the <c>answer</c> client's text as <c>delta</c>s with the six read-only
 /// tools offered (past purchases are searched, and <c>find_similar_purchases</c> offered, only when the caller has <c>requests.read</c>) (<see cref="AssistantTools"/>, Task 5b: each call is a <c>tool_call</c> and a <c>tool_result</c> event and a saved
@@ -40,6 +40,7 @@ public sealed class AnswerStreamer(
     IConversationStore store,
     IAnswerLock locks,
     IQuestionQuota quota,
+    ITenantTokenBudget tokenBudget,
     IHybridSearch search,
     QueryRewriter rewriter,
     AssistantToolsFactory toolsFactory,
@@ -73,6 +74,11 @@ public sealed class AnswerStreamer(
 
     public static string QuotaTitle(int limit) => $"You've used all {limit} questions for today.";
 
+    /// <summary>The 429 of a tenant whose daily token cap is reached (<c>AI:DailyTokenCapPerTenant</c>).</summary>
+    public const string TokenCapTitle = "The assistant has reached today's limit for your organisation.";
+
+    public const string TokenCapDetail = "It answers again after midnight. The policy documents stay available in the meantime.";
+
     public async Task<AnswerStart> StartAsync(AskQuestion command, CancellationToken cancellationToken)
     {
         var tenant = caller.TenantId ?? throw new ForbiddenException("Asking needs a tenant.");
@@ -80,6 +86,15 @@ public sealed class AnswerStreamer(
         if (await RefusalAsync(command, owner, cancellationToken) is { } early)
         {
             return early;
+        }
+
+        // The tenant's daily token cap (a cost guard): checked before anything is counted, so a refused question costs no quota.
+        var budget = await tokenBudget.GetAsync(tenant, cancellationToken);
+        if (budget.Spent)
+        {
+            metrics.Question("over_token_cap");
+            var untilMidnight = budget.ResetsAt - time.GetUtcNow();
+            return new AnswerStart.Refused(429, TokenCapTitle, TokenCapDetail, untilMidnight > TimeSpan.Zero ? untilMidnight : TimeSpan.Zero);
         }
 
         // Past purchases are request data: searched, and their tool offered, only with requests.read in the runtime matrix.
@@ -211,6 +226,7 @@ public sealed class AnswerStreamer(
                 metrics.ChatUsage(
                     rewrite.Model ?? ai.Value.EffectiveChatModel, conversation.TenantId, rewrite.Usage.Input, rewrite.Usage.Output,
                     ai.Value.EffectivePrices);
+                await AddTokensAsync(conversation.TenantId, rewrite.Usage);
             }
 
             var types = purchasesAllowed ? SearchRequest.AllTypes : SearchRequest.PolicyOnly;
@@ -353,6 +369,7 @@ public sealed class AnswerStreamer(
 
         metrics.Question(outcome);
         metrics.ChatUsage(answer.Model, conversation.TenantId, answer.Usage.Input, answer.Usage.Output, ai.Value.EffectivePrices);
+        await AddTokensAsync(conversation.TenantId, answer.Usage);
         logger.LogInformation(
             "Answer {Outcome} in conversation {ConversationId} for user {UserId} of tenant {TenantId}: model {Model}, {InputTokens} input and"
             + " {OutputTokens} output tokens, {DurationMs} ms, guard flags {GuardFlags}",
@@ -382,6 +399,19 @@ public sealed class AnswerStreamer(
 
         await InvalidateAsync(conversation.Id);
         return saved;
+    }
+
+    /// <summary>Adds a model call's tokens to the tenant's daily total; a Redis failure is logged, never the answer's failure.</summary>
+    private async Task AddTokensAsync(string tenantId, TokenUsage usage)
+    {
+        try
+        {
+            await tokenBudget.AddAsync(tenantId, usage.Input + usage.Output, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "The daily token total of tenant {TenantId} could not be updated", tenantId);
+        }
     }
 
     private async Task InvalidateAsync(Guid conversationId)

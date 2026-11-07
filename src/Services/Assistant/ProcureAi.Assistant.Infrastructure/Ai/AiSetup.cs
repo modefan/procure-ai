@@ -113,8 +113,28 @@ public static class AiSetup
 
     private static AiOptions Ai(IServiceProvider services) => services.GetRequiredService<IOptions<AiOptions>>().Value;
 
+    /// <summary>
+    /// The model's defaults for every call of a pipeline: the output limit (<c>AI:Chat:MaxOutputTokens</c>) and the reasoning effort
+    /// (<c>AI:Chat:ReasoningEffort</c>) unless the caller set them, a limit of at least <c>AI:Chat:MinOutputTokens</c>, and no temperature or
+    /// top-p for a model that only takes its default (<c>AI:Chat:SupportsTemperature</c> false, a reasoning model).
+    /// </summary>
+    internal static void ApplyModelDefaults(ChatOptions options, ChatModelOptions chat)
+    {
+        options.MaxOutputTokens = Math.Max(options.MaxOutputTokens ?? chat.MaxOutputTokens, chat.MinOutputTokens);
+        if (chat.ReasoningEffort is { } effort)
+        {
+            options.Reasoning ??= new ReasoningOptions { Effort = effort };
+        }
+
+        if (!chat.SupportsTemperature)
+        {
+            options.Temperature = null;
+            options.TopP = null;
+        }
+    }
+
     private static IChatClient WithDefaultLimits(IChatClient inner, AiOptions ai) =>
-        new ConfigureOptionsChatClient(inner, options => options.MaxOutputTokens ??= ai.Chat.MaxOutputTokens);
+        new ConfigureOptionsChatClient(inner, options => ApplyModelDefaults(options, ai.Chat));
 
     /// <summary>
     /// The circuit breaker of one pipeline (<c>AI:Resilience</c>, <see cref="ModelCircuitBreaker"/>), just above the timeout, so a
@@ -177,8 +197,9 @@ internal sealed class ProviderClients(IChatClient chat, IEmbeddingGenerator<stri
             case AiProvider.Fake:
                 return new ProviderClients(new FakeChatClient(ai.Fake.StreamDelayMs), new FakeEmbeddingGenerator());
 
-            case AiProvider.OpenAI:
-                // Any OpenAI-compatible endpoint: Azure Foundry's /openai/v1 or OpenAI. The key never leaves this object.
+            case AiProvider.OpenAI or AiProvider.AzureFoundry:
+                // Any OpenAI-compatible endpoint: Azure Foundry's /openai/v1/ (deployment names as the models) or OpenAI. The key never
+                // leaves this object. The provider's error bodies (which may echo the prompt) never leave the innermost stage (ProviderErrors).
                 var client = new OpenAIClient(
                     new ApiKeyCredential(ai.ApiKey!),
                     new OpenAIClientOptions
@@ -188,11 +209,11 @@ internal sealed class ProviderClients(IChatClient chat, IEmbeddingGenerator<stri
                         // Few SDK retries (AI:Resilience:ProviderMaxRetries), so the circuit breaker above sees a provider that is down quickly.
                         RetryPolicy = new ClientRetryPolicy(ai.Resilience.ProviderMaxRetries),
                     });
-                var chat = client.GetChatClient(ai.Chat.Model).AsIChatClient();
+                var chat = new ProviderErrorChatClient(client.GetChatClient(ai.Chat.Model).AsIChatClient());
                 return new ProviderClients(
                     chat,
-                    client.GetEmbeddingClient(ai.Embedding.Model).AsIEmbeddingGenerator(ai.Embedding.Dimensions),
-                    ai.EffectiveGuardModel == ai.Chat.Model ? chat : client.GetChatClient(ai.EffectiveGuardModel).AsIChatClient());
+                    new ProviderErrorEmbeddingGenerator(client.GetEmbeddingClient(ai.Embedding.Model).AsIEmbeddingGenerator(ai.Embedding.Dimensions)),
+                    ai.EffectiveGuardModel == ai.Chat.Model ? chat : new ProviderErrorChatClient(client.GetChatClient(ai.EffectiveGuardModel).AsIChatClient()));
 
             default:
                 throw new InvalidOperationException($"'{AiOptions.SectionName}:{nameof(AiOptions.Provider)}' is not set to a known provider.");

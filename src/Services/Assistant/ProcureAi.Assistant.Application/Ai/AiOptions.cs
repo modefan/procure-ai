@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using ProcureAi.Assistant.Domain;
 
@@ -12,6 +13,12 @@ public enum AiProvider
 
     /// <summary>Any OpenAI-compatible endpoint: Azure Foundry's <c>/openai/v1</c> or OpenAI itself.</summary>
     OpenAI,
+
+    /// <summary>
+    /// Azure AI Foundry through its OpenAI-compatible <c>/openai/v1/</c> endpoint (no <c>api-version</c>), with the deployment names as the
+    /// model names. The same client as <see cref="OpenAI"/>; a name of its own so the configuration says what runs.
+    /// </summary>
+    AzureFoundry,
 }
 
 /// <summary>
@@ -30,10 +37,10 @@ public sealed class AiOptions : IValidatableObject
     [Required]
     public AiProvider? Provider { get; set; }
 
-    /// <summary>The OpenAI-compatible base URL, e.g. <c>https://&lt;resource&gt;.openai.azure.com/openai/v1/</c>. Required for <see cref="AiProvider.OpenAI"/>.</summary>
+    /// <summary>The OpenAI-compatible base URL, e.g. <c>https://&lt;resource&gt;.openai.azure.com/openai/v1/</c>. Required for an OpenAI-compatible provider.</summary>
     public string? Endpoint { get; set; }
 
-    /// <summary>Required for <see cref="AiProvider.OpenAI"/>. Never logged.</summary>
+    /// <summary>Required for an OpenAI-compatible provider. Never logged.</summary>
     public string? ApiKey { get; set; }
 
     [Required, ValidateObjectMembers]
@@ -57,7 +64,17 @@ public sealed class AiOptions : IValidatableObject
     [Required, ValidateObjectMembers]
     public AiResilienceOptions Resilience { get; set; } = new();
 
+    /// <summary>
+    /// The most tokens (input plus output of answers and their query rewrites) one tenant may use per calendar day of
+    /// <c>Assistant:Quota:TimeZone</c>; once reached, further questions get a friendly 429 until midnight. A cost guard for the live demo.
+    /// </summary>
+    [Range(1, 1_000_000_000)]
+    public long DailyTokenCapPerTenant { get; set; } = 200_000;
+
     public bool IsFake => Provider == AiProvider.Fake;
+
+    /// <summary>Whether the provider is an OpenAI-compatible endpoint (<see cref="AiProvider.OpenAI"/> or <see cref="AiProvider.AzureFoundry"/>).</summary>
+    public bool IsOpenAICompatible => Provider is AiProvider.OpenAI or AiProvider.AzureFoundry;
 
     /// <summary>The chat model that really answers: the configured one, or <see cref="FakeChatModel"/> under the Fake provider.</summary>
     public string EffectiveChatModel => IsFake ? FakeChatModel : Chat.Model;
@@ -73,7 +90,7 @@ public sealed class AiOptions : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (Provider != AiProvider.OpenAI)
+        if (!IsOpenAICompatible)
         {
             yield break;
         }
@@ -82,20 +99,20 @@ public sealed class AiOptions : IValidatableObject
             || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
         {
             yield return new ValidationResult(
-                $"'{SectionName}:{nameof(Endpoint)}' must be an absolute http(s) URL for the {AiProvider.OpenAI} provider.", [nameof(Endpoint)]);
+                $"'{SectionName}:{nameof(Endpoint)}' must be an absolute http(s) URL for the {Provider} provider.", [nameof(Endpoint)]);
         }
 
         if (string.IsNullOrWhiteSpace(ApiKey))
         {
             yield return new ValidationResult(
-                $"'{SectionName}:{nameof(ApiKey)}' is required for the {AiProvider.OpenAI} provider (user secrets or AI__ApiKey).", [nameof(ApiKey)]);
+                $"'{SectionName}:{nameof(ApiKey)}' is required for the {Provider} provider (user secrets or AI__ApiKey).", [nameof(ApiKey)]);
         }
     }
 }
 
 public sealed class ChatModelOptions
 {
-    /// <summary>The chat model (or the Foundry deployment name), e.g. <c>gpt-4.1-mini</c>.</summary>
+    /// <summary>The chat model (or the Foundry deployment name), e.g. <c>chat</c>.</summary>
     [Required, MinLength(1)]
     public string Model { get; set; } = "";
 
@@ -103,9 +120,30 @@ public sealed class ChatModelOptions
     [Range(1, 16_384)]
     public int MaxOutputTokens { get; set; } = 800;
 
+    /// <summary>
+    /// The least output limit any call gets: a smaller limit a call sets (the classifier's 10, the reranker's 100) is raised to this. 1
+    /// changes nothing. A reasoning model counts its thinking against the limit and returns no text at all when a tiny limit is used up
+    /// first (gpt-5-mini with 10: empty, <c>finish_reason: length</c>), so set a few hundred for one; only the tokens produced are billed.
+    /// </summary>
+    [Range(1, 16_384)]
+    public int MinOutputTokens { get; set; } = 1;
+
     /// <summary>How long one call to the provider may take.</summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// The reasoning effort sent with every chat call (answer, utility and guard) that does not set its own; empty sends none (the model's
+    /// default). A reasoning model counts its thinking against the output limit, so the short classifier and rewrite calls need a low effort
+    /// (<c>None</c>) to leave room for the answer itself.
+    /// </summary>
+    public ReasoningEffort? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// Whether the model accepts a sampling temperature. False for reasoning models (they accept only the default and answer 400 to
+    /// <c>temperature: 0</c>): the calls' <c>Temperature</c> and <c>TopP</c> are then left out.
+    /// </summary>
+    public bool SupportsTemperature { get; set; } = true;
 }
 
 public sealed class EmbeddingModelOptions : IValidatableObject

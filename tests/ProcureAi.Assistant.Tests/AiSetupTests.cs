@@ -70,6 +70,82 @@ public sealed class AiSetupTests
         both.GetRequiredKeyedService<IChatClient>(AiClients.Answer).GetService<FakeChatClient>().ShouldBeNull("a real provider, not the fake");
     }
 
+    [Fact]
+    public void AzureFoundry_provider_is_the_openai_compatible_client_and_requires_endpoint_and_key()
+    {
+        using var neither = Build(("AI:Provider", "AzureFoundry"));
+        using var both = Build(
+            ("AI:Provider", "AzureFoundry"), ("AI:Endpoint", "https://example.openai.azure.com/openai/v1/"), ("AI:ApiKey", "test-key"),
+            ("AI:Chat:Model", "chat"), ("AI:Embedding:Model", "embeddings"));
+
+        var missing = Should.Throw<OptionsValidationException>(() => Start(neither));
+        missing.Message.ShouldContain("AI:Endpoint");
+        missing.Message.ShouldContain("AI:ApiKey");
+        Should.NotThrow(() => Start(both));
+        both.GetRequiredService<IOptions<AiOptions>>().Value.EffectiveChatModel.ShouldBe("chat", "the deployment name is the model name");
+        both.GetRequiredKeyedService<IChatClient>(AiClients.Answer).GetService<FakeChatClient>().ShouldBeNull("a real provider, not the fake");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    public void Daily_token_cap_below_one_fails_start(string cap)
+    {
+        using var provider = Build(("AI:DailyTokenCapPerTenant", cap));
+
+        Should.Throw<OptionsValidationException>(() => Start(provider)).Message.ShouldContain("DailyTokenCapPerTenant");
+    }
+
+    [Fact]
+    public async Task Reasoning_effort_and_no_temperature_come_from_configuration_for_every_pipeline()
+    {
+        var seen = new List<ChatOptions?>();
+        var settings = new Dictionary<string, string?>(Shipped)
+        {
+            ["AI:Chat:ReasoningEffort"] = "None",
+            ["AI:Chat:SupportsTemperature"] = "false",
+            ["AI:Chat:MinOutputTokens"] = "256",
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAssistantAi(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        services.AddSingleton(new ProviderClients(new OptionsRecorder(seen), new FakeEmbeddingGenerator()));
+        await using var provider = services.BuildServiceProvider();
+
+        foreach (var key in new[] { AiClients.Utility, AiClients.Guard })
+        {
+            await provider.GetRequiredKeyedService<IChatClient>(key).GetResponseAsync(
+                [new(ChatRole.User, "hello")], new ChatOptions { MaxOutputTokens = 10, Temperature = 0, TopP = 0.5f }, Ct);
+        }
+
+        await provider.GetRequiredKeyedService<IChatClient>(AiClients.Utility).GetResponseAsync(
+            [new(ChatRole.User, "hello")], new ChatOptions { Reasoning = new ReasoningOptions { Effort = ReasoningEffort.High } }, Ct);
+
+        seen.Count.ShouldBe(3);
+        // A reasoning model counts its thinking against the limit: a call's small limit is raised to AI:Chat:MinOutputTokens.
+        seen.Take(2).ShouldAllBe(o => o!.Temperature == null && o.TopP == null && o.Reasoning!.Effort == ReasoningEffort.None && o.MaxOutputTokens == 256);
+        seen[2]!.Reasoning!.Effort.ShouldBe(ReasoningEffort.High, "a caller's own effort wins");
+        seen[2]!.MaxOutputTokens.ShouldBe(800);
+    }
+
+    [Fact]
+    public async Task Without_reasoning_settings_the_callers_temperature_reaches_the_provider_and_no_effort_is_sent()
+    {
+        var seen = new List<ChatOptions?>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAssistantAi(new ConfigurationBuilder().AddInMemoryCollection(Shipped).Build());
+        services.AddSingleton(new ProviderClients(new OptionsRecorder(seen), new FakeEmbeddingGenerator()));
+        await using var provider = services.BuildServiceProvider();
+
+        await provider.GetRequiredKeyedService<IChatClient>(AiClients.Utility).GetResponseAsync(
+            [new(ChatRole.User, "hello")], new ChatOptions { Temperature = 0 }, Ct);
+
+        seen.Single()!.Temperature.ShouldBe(0f);
+        seen.Single()!.Reasoning.ShouldBeNull();
+        seen.Single()!.MaxOutputTokens.ShouldBe(800);
+    }
+
     [Theory]
     [InlineData("3072")]
     [InlineData("768")]
@@ -351,6 +427,16 @@ public sealed class AiSetupTests
             Interlocked.Increment(ref Calls);
             cancellationToken.ThrowIfCancellationRequested();
             throw new HttpRequestException("down", null, System.Net.HttpStatusCode.TooManyRequests);
+        }
+    }
+
+    private sealed class OptionsRecorder(List<ChatOptions?> seen) : DelegatingChatClient(new FakeChatClient())
+    {
+        public override Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            seen.Add(options?.Clone());
+            return base.GetResponseAsync(messages, options, cancellationToken);
         }
     }
 

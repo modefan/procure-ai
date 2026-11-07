@@ -10,7 +10,7 @@ public static class ChatSetup
 {
     /// <summary>
     /// Conversations and answers (plan 05 Task 5a): the tenant-scoped <c>conversations</c> collection of the chat database and its index
-    /// migration, the store, the Redis answer lock and question quota (on the shared <c>IConnectionMultiplexer</c>), the caller's runtime permissions
+    /// migration, the store, the Redis answer lock, question quota and daily token cap (on the shared <c>IConnectionMultiplexer</c>), the caller's runtime permissions
     /// (<see cref="ICallerPermissions"/>: past purchases need <c>requests.read</c>), and the Application's
     /// <see cref="AnswerStreamer"/>, <see cref="QueryRewriter"/> and <see cref="ConversationService"/>.
     /// </summary>
@@ -21,6 +21,7 @@ public static class ChatSetup
         services.AddScoped<IConversationStore, MongoConversationStore>();
         services.AddSingleton<IAnswerLock, RedisAnswerLock>();
         services.AddSingleton<IQuestionQuota, RedisQuestionQuota>();
+        services.AddSingleton<ITenantTokenBudget, RedisTenantTokenBudget>();
         services.AddScoped<QueryRewriter>();
         services.AddScoped<ICallerPermissions, CallerPermissions>();
         services.AddScoped<AnswerStreamer>();

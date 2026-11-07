@@ -1,0 +1,129 @@
+using System.ClientModel;
+using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.AI;
+
+namespace ProcureAi.Assistant.Infrastructure.Ai;
+
+/// <summary>
+/// Keeps the provider's error text inside the provider stage. The OpenAI SDK puts the whole error body into the
+/// <see cref="ClientResultException"/> message, and providers echo parts of the request there (the prompt, a parameter, sometimes a
+/// key-like value). That message would reach every log line, span status and retry event that prints the exception. So an error answer
+/// is thrown on as a new <see cref="ClientResultException"/> with the same response (its <see cref="ClientResultException.Status"/>, so
+/// <see cref="AiFailures"/> and the circuit breaker see the same failure) and a message of our own: the HTTP status and the error code,
+/// when the code is a plain identifier (<c>rate_limit_exceeded</c>, <c>content_filter</c>). The original is not kept as the inner
+/// exception, since logs print inner exceptions too.
+/// </summary>
+internal static partial class ProviderErrors
+{
+    /// <summary>The exception to throw instead of <paramref name="exception"/>: the same status and response, without the provider's text.</summary>
+    public static ClientResultException Scrub(ClientResultException exception)
+    {
+        var response = exception.GetRawResponse();
+        var status = exception.Status;
+        var code = response is null ? null : CodeOf(response.Content);
+        var message = code is null
+            ? string.Create(CultureInfo.InvariantCulture, $"The model provider answered HTTP {status}.")
+            : string.Create(CultureInfo.InvariantCulture, $"The model provider answered HTTP {status} ({code}).");
+        return new ClientResultException(message, response);
+    }
+
+    /// <summary>The error code of an OpenAI-style error body (<c>error.code</c>, else <c>error.type</c>) when it is a plain identifier.</summary>
+    internal static string? CodeOf(BinaryData? body)
+    {
+        if (body is null || body.ToMemory().IsEmpty)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var json = JsonDocument.Parse(body.ToMemory());
+            if (json.RootElement.ValueKind != JsonValueKind.Object || !json.RootElement.TryGetProperty("error", out var error)
+                || error.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            foreach (var name in new[] { "code", "type" })
+            {
+                if (error.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                    && value.GetString() is { } text && PlainCode().IsMatch(text))
+                {
+                    return text;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
+    }
+
+    /// <summary>A code we may log: lower-case letters, digits and underscores, at most 40 (never free text, never a key).</summary>
+    [GeneratedRegex("^[a-z][a-z0-9_]{0,39}$", RegexOptions.CultureInvariant)]
+    private static partial Regex PlainCode();
+}
+
+/// <summary>The innermost stage over the provider's chat client: <see cref="ProviderErrors"/>.</summary>
+internal sealed class ProviderErrorChatClient(IChatClient inner) : DelegatingChatClient(inner)
+{
+    public override async Task<ChatResponse> GetResponseAsync(
+        IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await base.GetResponseAsync(messages, options, cancellationToken);
+        }
+        catch (ClientResultException exception)
+        {
+            throw ProviderErrors.Scrub(exception);
+        }
+    }
+
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await using var updates = base.GetStreamingResponseAsync(messages, options, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        while (true)
+        {
+            bool more;
+            try
+            {
+                more = await updates.MoveNextAsync();
+            }
+            catch (ClientResultException exception)
+            {
+                throw ProviderErrors.Scrub(exception);
+            }
+
+            if (!more)
+            {
+                yield break;
+            }
+
+            yield return updates.Current;
+        }
+    }
+}
+
+/// <summary>The innermost stage over the provider's embedding generator: <see cref="ProviderErrors"/>.</summary>
+internal sealed class ProviderErrorEmbeddingGenerator(IEmbeddingGenerator<string, Embedding<float>> inner)
+    : DelegatingEmbeddingGenerator<string, Embedding<float>>(inner)
+{
+    public override async Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+        IEnumerable<string> values, EmbeddingGenerationOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await base.GenerateAsync(values, options, cancellationToken);
+        }
+        catch (ClientResultException exception)
+        {
+            throw ProviderErrors.Scrub(exception);
+        }
+    }
+}
