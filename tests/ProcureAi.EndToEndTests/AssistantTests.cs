@@ -30,7 +30,10 @@ public sealed class AssistantTests(AppFixture fixture)
         await page.GetByTestId("send").ClickAsync();
     }
 
+    // The Fake model's scripted answer (its badge, the tool step, the thresholds table): a deployment with a real model (the hosted demo,
+    // plan 08 Task 12) answers in its own words, so its run leaves this test out with -trait- "Model=Fake".
     [Fact]
+    [Trait("Model", "Fake")]
     public async Task Tom_asks_and_sees_streamed_answer_with_sources_and_tool_step()
     {
         fixture.RequireReady();
