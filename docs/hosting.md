@@ -14,9 +14,10 @@ SSH tunnel.
 | VM | **Contabo Cloud VPS 8**: 8 vCPU x86, 24 GB, 300 GB SSD, region EU (data center "European Union 2"), Ubuntu 26.04 LTS. Instance `203735351`, IPv4 `45.13.235.178`, IPv6 `2a02:c207:2373:5351::1` | The full stack needs about 9 GiB plus Argo CD. x86 runs the published images as they are. Ubuntu 24.04 is the fallback if k3s ever misbehaves on 26.04 (`image_id` in `infra/hosted/variables.tf`). |
 | Kubernetes | **k3s** v1.35.10+k3s1 (single node, the local cluster's minor), with Traefik and ServiceLB as shipped, flannel **host-gw** and IPv4 only | Same distribution as the local k3d cluster. host-gw needs no tunnel on one node and opens no socket; VXLAN would listen on UDP 8472, an unauthenticated way into the pod network. |
 | Network | Two firewalls. Contabo's firewall allows inbound **only TCP 22, 80, 443** (IPv4 and IPv6), then Contabo's own "block all traffic" rule. On the VM, the nftables table `inet procure_host` (cloud-init, service `procure-host-firewall`) lets in only replies, 22, 80, 443 and the ICMPv6 that IPv6 needs on `eth0`, and forwards only 80/443 to pods (never a NodePort). No ping: the VM does not answer it, which does not mean it is down. | The Kubernetes API, the kubelet and kube-proxy's health port listen only on the node address `10.0.1.2`. That address is on a dummy interface, because Contabo's private networks are a paid add-on. |
-| GitOps | Argo CD on the VM, root Application on `envs/hosted/` | Same app of apps as local. |
-| Models | Azure Foundry (Task 9) | |
-| DNS | Cloudflare (`daleabels.com`): an **A** record each for `procure`, `auth` and `dashboard`, DNS only (not proxied), TTL 300 s. **No AAAA**: k3s is IPv4 only (ServiceLB publishes host ports for IPv4 only), so IPv6 visitors and Let's Encrypt would reach an address where 80/443 do not answer. IPv6-only visitors cannot reach the demo; dual-stack is a Task 12 question. | Kept by the same Terraform root (official `cloudflare/cloudflare` provider, account-owned token with DNS Write on this zone only). The apex and other records are not touched. |
+| GitOps | Argo CD on the VM, root Application on `envs/hosted/` (platform, observability, procure-ai). The publish workflow bumps `envs/hosted/release.yaml` together with `envs/local/release.yaml`, so the public demo follows main | Same app of apps and charts as local; only the values in `envs/hosted/` differ. |
+| Edge | Traefik as k3s ships it, configured by a HelmChartConfig: http answers with a permanent redirect to https, and its Service keeps the visitor's address (`externalTrafficPolicy: Local`). One Let's Encrypt certificate (cert-manager, HTTP-01) for `procure`, `auth` and `dashboard.daleabels.com` is Traefik's default certificate | The charts stay as they are: every Ingress without its own secret gets the default certificate, as the local CA's does locally. One certificate is one ACME order and one renewal. |
+| Models | Azure Foundry (Task 9): deployments `chat` (gpt-5-mini) and `embeddings` (text-embedding-3-small, 1536 dimensions), key in Secret `procure-ai-provider` | Configuration only (`envs/hosted/procure-ai.yaml`); local and CI keep the Fake provider. |
+| DNS | Cloudflare (`daleabels.com`): an **A** record each for `procure`, `auth` and `dashboard`, DNS only (not proxied), TTL 300 s. **No AAAA**: k3s is IPv4 only (ServiceLB publishes host ports for IPv4 only), so IPv6 visitors and Let's Encrypt would reach an address where 80/443 do not answer. IPv6-only visitors cannot reach the demo. Task 12 decided to stay IPv4-only (below). | Kept by the same Terraform root (official `cloudflare/cloudflare` provider, account-owned token with DNS Write on this zone only). The apex and other records are not touched. |
 
 **Why Contabo and not Hetzner.** Plan 08 chose Hetzner (cx43, EUR 15.99 a month). But every affordable 16 GB type (cx43, cx53, cax31,
 cpx41) was sold out in all EU locations for the whole day of 2026-11-07. The next types in stock cost EUR 69 or more. The Terraform for
@@ -48,6 +49,15 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
 - **Graceful shutdown.** The kubelet shuts pods down gracefully when the VM shuts down: `shutdownGracePeriod` 60 s, 20 s of it for
   critical pods. logind waits 75 s. Its drop-in must sort after unattended-upgrades' own 30 s file, or the kubelet's shutdown manager does
   not start.
+- **AppArmor and k3s's runc (Task 12).** Ubuntu 26.04 keeps `kernel.apparmor_restrict_unprivileged_unconfined` and
+  `..._userns` at 1, which turns an unprivileged, unconfined process's profile change into a stack. k3s's bundled runc has no profile,
+  so every non-root container ran as `cri-containerd.apparmor.d//&unconfined` and could not signal its own processes: Postgres and
+  MongoDB failed their first-start init ("pg_ctl: could not send stop signal: Permission denied") and left half-initialised volumes.
+  Ubuntu gives its own `/usr/sbin/runc` the profile `runc` (unconfined flag, `userns`); `/etc/apparmor.d/procure-k3s-runc` (cloud-init)
+  is that profile with k3s's runc path added, and Ubuntu's file is disabled (`/etc/apparmor.d/disable/runc`) so one definition loads.
+  Both kernel restrictions stay on, containers keep containerd's profile, and containerd's profile accepts signals from `runc`, so
+  stopping containers works. Test-HostBaseline checks the sysctls, the profile, that no process carries a stacked label and that the
+  kernel log has no container signal denials. Lifting the sysctl instead was rejected in review (a host-wide security control).
 - **Memory reservations** (24 GB VM): kube 1.5 GiB, system 512 MiB, eviction below 1 GiB free.
 - **Secrets.** Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
 - **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
@@ -97,12 +107,93 @@ After a reinstall, check once by hand the things the baseline cannot see from ou
 The Argo CD UI has no public address. Open the tunnel, then run
 `kubectl --kubeconfig %USERPROFILE%\.procure-ai\hosted\kubeconfig --context procure-hosted -n argocd port-forward svc/argocd-server 8080:80`.
 
+## The public environment (plan 08 Task 12)
+
+After the VM is up (above), four more steps make it the public demo. All are safe to run again:
+
+```powershell
+cd procure-ai-gitops
+./bootstrap/hosted/install-cert-manager.ps1 -Issuer staging      # first time: prove the ACME flow on Let's Encrypt's staging CA
+./bootstrap/hosted/install-cert-manager.ps1 -Issuer production   # then the real certificate (the default; later runs change nothing)
+./bootstrap/new-local-ca.ps1 -Environment hosted                 # the VM's own internal CA for MongoDB's TLS (no browser sees it)
+./bootstrap/new-secrets.ps1 -Environment hosted                  # incl. procure-ai-provider (Azure Foundry key from AZURE_FOUNDRY_API_KEY)
+# Argo CD (install-argocd.ps1 -Environment hosted, above) then brings up envs/hosted on its own.
+./tests/Test-PublicSurface.ps1                                   # what the internet sees (below)
+./tests/Test-Smoke.ps1 -Environment hosted
+```
+
+`install-cert-manager.ps1` does the edge:
+
+- **Traefik** (HelmChartConfig `kube-system/traefik`): `http://` answers 301 to `https://` with path and query kept, for every host.
+  Let's Encrypt's HTTP-01 check follows that redirect to port 443, where cert-manager's solver Ingress answers. The Service has
+  `externalTrafficPolicy: Local`, so ServiceLB forwards without SNAT and Traefik sees the visitor's address. Traefik trusts no incoming
+  `X-Forwarded-*` (nothing sits in front of the VM), puts the visitor's address into `X-Forwarded-For`, and the gateway trusts that
+  header from the pod network only, where only Traefik may connect (plan 08 ruling 5). The gateway's rate limits and logs see the real
+  client address.
+- **CoreDNS:** inside the cluster `auth.daleabels.com` resolves to Traefik, so pods fetch Keycloak's discovery and keys through the same
+  host name and certificate as the browser (the hosted twin of the local rewrite).
+- **cert-manager** 1.21.3 from the official OCI chart (`oci://quay.io/jetstack/charts/cert-manager`), CRDs installed and kept by the
+  chart. Two ClusterIssuers, `letsencrypt-staging` and `letsencrypt-production` (ACME HTTP-01 on Ingress class `traefik`). The ACME
+  account e-mail comes from the user env var `PROCURE_ACME_EMAIL`, not from a repo.
+- **The certificate:** Certificate `ingress-tls/procure-public` (ECDSA P-256, a new key on each renewal) for the three hosts, Secret
+  `procure-public-tls`, and the TLSStore `ingress-tls/default` that makes it Traefik's default. It lives in its own namespace because
+  `procure` denies all ingress traffic by default, which would block cert-manager's solver pod. Let's Encrypt certificates last 90 days;
+  cert-manager renews 30 days before the end.
+
+What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/realms/procure/` and `/resources/` (no admin console, admin
+API, master realm or welcome page; `publicRealms` in the platform chart); no Mailpit ingress; Argo CD without admin user and ingress;
+the demo switches on (seed, nightly reset at 02:00 Africa/Johannesburg, one-click demo login, the "behind the scenes" panel); the
+Assistant on Azure Foundry (`AI__Provider=AzureFoundry`, deployments `chat` and `embeddings`, no reasoning, no temperature, at least 256
+output tokens per call, the app's default daily token cap per tenant); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
+Postgres 20 GiB, MongoDB 5 GiB, RabbitMQ 2 GiB volumes.
+
+**IPv4 only (decided in Task 12).** The DNS names have A records only. Dual-stack would need a k3s reinstall with IPv6 cluster and
+service CIDRs (a k3s cluster's address families cannot be changed in place), IPv6 on ServiceLB and Traefik, a second set of firewall
+rules, and AAAA records, for a demo that reviewers open from office and home networks that all reach IPv4. Cost of the choice: an
+IPv6-only visitor cannot open the demo. `Test-PublicSurface.ps1` fails if an AAAA record appears, because it would point at an address
+where 80/443 do not answer.
+
+### Checks against the public demo (from Dale's PC)
+
+| Script (procure-ai-gitops) | What it proves |
+|---|---|
+| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's `/admin`, master realm, welcome page and `/metrics` answer 404 and the procure realm's discovery 200; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404 |
+| `tests/Test-Smoke.ps1 -Environment hosted` | The local smoke checks against the public hosts (gateway, Keycloak, demo login, seeded data with the hosted admin key `DEMO_ADMIN_API_KEY_HOSTED`, dashboard sign-in by role, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For`, pgaudit roles, realm drift) |
+| `tests/Test-FreshCluster.ps1 -Environment hosted -WatchOnly` | Every Application Synced and Healthy, every pod Ready and stable, then the smoke checks (the hosted cluster is never deleted by a test) |
+| `tests/Test-RestartKeepsData.ps1 -Environment hosted -Reboot` | Review Focus 4: a VM reboot; the cluster converges on its own within 15 minutes, Postgres shut down cleanly (no crash recovery in its log), every row, document and replication slot survives, every Debezium resumes, a new change reaches the data change log |
+| `tests/Test-WalSlotsAdvance.ps1 -Environment hosted -IdleMinutes 360 -WatchWholeWindow` | Review Focus 1: after a WAL burst in an uncaptured database, every slot catches up, then stays below 64 MB of lag for the whole six idle hours |
+| End-to-end tests, external target | The browser suite against `https://procure.daleabels.com` (procure-ai `docs/kubernetes.md`; for the hosted demo also `PROCUREAI_E2E_USER_SECRETS_ID=procure-ai-hosted`, `DEMO_ADMIN_API_KEY` = the hosted key, `KUBECONFIG` = the hosted kubeconfig and `PROCUREAI_E2E_KUBE_CONTEXT=procure-hosted`, and `-trait- "Model=Fake"` too: the one test of the Fake model's scripted answer cannot pass against the real model) |
+
+### Size on the VM (measured 2026-11-07, `kubectl top`)
+
+| When | Node (kubectl top node) | All pods | `free -m` |
+|---|---|---|---|
+| Argo CD only (Task 11) | 2046 MiB, 104m CPU | - | 1790 MiB used of 24026 |
+| Whole demo, about 15 min after the first sync, idle | 7475 MiB (35 %), 1738m CPU (21 %, still settling) | 5774 MiB | 7674 MiB used, 16352 available |
+| After the full E2E flow (28 browser tests, real model) | 7982 MiB (38 %), 1123m CPU (14 %) | 6220 MiB | - |
+
+The largest pods: Keycloak about 660 MiB, Postgres about 260-300 MiB, each of the eight Debezium Servers about 250 MiB, MongoDB about
+250 MiB, the Argo CD application controller about 260 MiB; cert-manager about 70 MiB in all. First sync of the whole demo from an empty
+cluster: 11 min 09 s (node peak 7.18 GiB), Test-FreshCluster -WatchOnly. Disk: 13 GB used of 290 GB. Plenty of room on the 24 GB VM: no
+size in `envs/hosted` needs raising.
+
+**A reboot (Review Focus 4, `Test-RestartKeepsData.ps1 -Environment hosted -Reboot`, 2026-11-07):** SSH back after about 80 s, the whole
+demo Synced/Healthy/Ready and the smoke checks passing about 5 minutes after the reboot command (limit 15). Postgres shut down cleanly
+with the node ("database system was shut down at ..." on the next start, no crash recovery), every row, document and replication slot
+kept, every Debezium Ready without a restart, and a new request reached the data change log 3 s after it was made. The certificate is a
+Secret and survives as is.
+
+A VM reboot leaves the pods the kubelet's graceful shutdown ended as `Failed` objects ("terminated in response to imminent node
+shutdown"); their Deployments and StatefulSets replace them. They hold no resources. Remove them with
+`kubectl delete pods -A --field-selector=status.phase=Failed` when they clutter the list.
+
 ## What it costs, and how to stop it
 
 | Item | Per month |
 |---|---|
 | Contabo Cloud VPS 8 (order 15654477, monthly term) | **EUR 14.00** (0 % VAT on the invoice), which is Contabo's list price for Cloud VPS 8 |
 | Contabo firewall, SSH key secret, IPv4 and IPv6 included with the VPS, Cloudflare DNS records | free |
+| Let's Encrypt certificate, cert-manager | free |
 
 The Contabo API lists one add-on on the instance, ID 1501 ×1, from the order itself. Contabo's public product list does not name the
 ID. It costs nothing extra: the invoice (EUR 14.00) equals the list price of Cloud VPS 8 with no setup fee, so it is one of the order's

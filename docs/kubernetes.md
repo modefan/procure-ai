@@ -79,7 +79,7 @@ their own or are not meant for the internet; the defaults keep today's local beh
 | Switch (default) | Where | When off / on |
 |---|---|---|
 | `mailpit.ingress.enabled` (`true`) | procure-platform | No Mailpit Ingress, and Traefik may not reach the pod. Open the UI with `kubectl -n procure port-forward svc/mailpit 8025` |
-| `keycloak.ingress.publicPathsOnly` (`false`) | procure-platform | The Keycloak Ingress routes only `/realms/` and `/resources/` (Keycloak's public paths): no admin console, no admin REST API, no welcome page. Admin work with `kcadm.sh` in the pod ("Troubleshooting") |
+| `keycloak.ingress.publicPathsOnly` (`false`) | procure-platform | The Keycloak Ingress routes only `/realms/<realm>/` for the realms in `keycloak.ingress.publicRealms` (`[procure]`) and `/resources/` (Keycloak's public paths): no admin console, no admin REST API, no welcome page and no master realm (its login and token endpoints would take admin passwords from the internet). Admin work with `kcadm.sh` in the pod ("Troubleshooting"). On in `envs/hosted` |
 | `argocd.adminEnabled` (`true`) | GitOps `apps/values.yaml`, set in `envs/<env>/apps.yaml` | Argo CD's `admin` user is disabled (no password login; use `argocd --core` or kubectl) |
 | `argocd.ingressEnabled` (`true`) | same | No Argo CD Ingress; `kubectl -n argocd port-forward svc/argocd-server 8080:80` |
 
