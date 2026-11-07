@@ -171,8 +171,15 @@ spec:
       http:
         paths:
           {{- /* publicPathsOnly (plan 08 ruling 4): Keycloak's documented public paths only, so no admin console, admin REST API
-          (/admin), welcome page or /js on the public host. Access calls the admin API on the Service (procure-ai values). */}}
-          {{- range (ternary (list "/realms/" "/resources/") (list "/") .Values.keycloak.ingress.publicPathsOnly) }}
+          (/admin), welcome page or /js on the public host. Access calls the admin API on the Service (procure-ai values). Only the
+          realms in publicRealms (plan 08 Task 12): the master realm's login and token endpoints stay inside the cluster too. */}}
+          {{- $public := list }}
+          {{- if .Values.keycloak.ingress.publicPathsOnly }}
+          {{- if not .Values.keycloak.ingress.publicRealms }}{{ fail "keycloak.ingress.publicRealms must name at least one realm when publicPathsOnly is on" }}{{ end }}
+          {{- range .Values.keycloak.ingress.publicRealms }}{{ $public = append $public (printf "/realms/%s/" .) }}{{ end }}
+          {{- $public = append $public "/resources/" }}
+          {{- end }}
+          {{- range (ternary $public (list "/") .Values.keycloak.ingress.publicPathsOnly) }}
           - path: {{ . }}
             pathType: Prefix
             backend:

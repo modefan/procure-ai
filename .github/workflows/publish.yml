@@ -1,8 +1,9 @@
 name: publish
 
 # After CI passed for a push to main: build the images, push them to GitHub Container Registry, then deploy the commit by setting
-# appRevision (and the platform image tags) in the GitOps repo (modefan/procure-ai-gitops envs/local/release.yaml). Argo CD sees the bump
-# within a few minutes and syncs: migrations first, then the new pods (plan 07 Task 6, rulings 1, 4 and 6).
+# appRevision (and the platform image tags) in the GitOps repo (modefan/procure-ai-gitops envs/local/release.yaml and, since plan 08
+# Task 12, envs/hosted/release.yaml: the public demo follows main too). Argo CD sees the bump within a few minutes and syncs: migrations
+# first, then the new pods (plan 07 Task 6, rulings 1, 4 and 6).
 #   App images (the .NET apps, web, demo-data): tag = the commit's full SHA.
 #   Platform images (postgres, keycloak, debezium, built from infra/<name>): tag = the git tree hash of infra/<name>, built and pushed only
 #   when GHCR does not have that tag yet, so a deploy that changes only app code does not restart Postgres, Keycloak or Debezium.
@@ -118,10 +119,11 @@ jobs:
         working-directory: gitops
         env:
           PLATFORM_TAGS: ${{ needs.images.outputs.platform-tags }}
-          GITOPS_ENV: local
+          # Every environment that follows main: the local k3d cluster and the public hosted VM (plan 08 Task 12). Each file is bumped on
+          # its own (an environment pinned to a newer revision by hand is never moved back); one commit for all.
+          GITOPS_ENVS: local hosted
         run: |
           set -euo pipefail
-          file="envs/${GITOPS_ENV}/release.yaml"
           short="${REVISION:0:7}"
           for name in postgres keycloak debezium; do
             tag="$(jq -r --arg n "$name" '.[$n] // empty' <<< "$PLATFORM_TAGS")"
@@ -130,27 +132,40 @@ jobs:
           git config user.name "procure-ai publish"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for attempt in 1 2 3; do
-            current="$(yq -r '.appRevision // ""' "$file")"
-            if [ "$current" = "$REVISION" ]; then
-              echo "appRevision is already $REVISION."
+            bumped=()
+            summary=()
+            for env in $GITOPS_ENVS; do
+              file="envs/${env}/release.yaml"
+              [ -f "$file" ] || { echo "::error::$file does not exist"; exit 1; }
+              current="$(yq -r '.appRevision // ""' "$file")"
+              if [ "$current" = "$REVISION" ]; then
+                echo "${env}: appRevision is already $REVISION."
+                continue
+              fi
+              # Never move backwards: skip when this commit is an ancestor of the deployed one (a newer run already deployed).
+              if [ -n "$current" ] && git -C ../app merge-base --is-ancestor "$REVISION" "$current" 2>/dev/null; then
+                echo "::notice::${env}: deployed revision $current is newer than $REVISION; left as it is."
+                continue
+              fi
+              # Quoted strings: a SHA made of digits only would otherwise be read as a number.
+              REVISION="$REVISION" PLATFORM_TAGS="$PLATFORM_TAGS" yq -i '
+                .appRevision = strenv(REVISION) | .appRevision style="double" |
+                .platformImageTags = (strenv(PLATFORM_TAGS) | from_json) | .platformImageTags style="" | (.platformImageTags[] | key) style="" | .platformImageTags[] style="double"' "$file"
+              [ "$(yq -r '.appRevision' "$file")" = "$REVISION" ]
+              bumped+=("$env")
+              summary+=("${env}: appRevision ${current:-<none>} -> ${REVISION}")
+            done
+            if [ "${#bumped[@]}" -eq 0 ]; then
+              echo "Nothing to deploy: every environment is at $REVISION or newer."
               exit 0
             fi
-            # Never move backwards: skip when this commit is an ancestor of the deployed one (a newer run already deployed).
-            if [ -n "$current" ] && git -C ../app merge-base --is-ancestor "$REVISION" "$current" 2>/dev/null; then
-              echo "::notice::Deployed revision $current is newer than $REVISION; nothing to do."
-              exit 0
-            fi
-            # Quoted strings: a SHA made of digits only would otherwise be read as a number.
-            REVISION="$REVISION" PLATFORM_TAGS="$PLATFORM_TAGS" yq -i '
-              .appRevision = strenv(REVISION) | .appRevision style="double" |
-              .platformImageTags = (strenv(PLATFORM_TAGS) | from_json) | .platformImageTags style="" | (.platformImageTags[] | key) style="" | .platformImageTags[] style="double"' "$file"
-            [ "$(yq -r '.appRevision' "$file")" = "$REVISION" ]
-            git commit -q -am "Deploy procure-ai ${short}" \
+            git commit -q -am "Deploy procure-ai ${short} to ${bumped[*]}" \
               -m "procure-ai ${REVISION}; platform images ${PLATFORM_TAGS} (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
             if git push -q origin HEAD:main; then
               {
-                echo "### Deployed procure-ai ${short} to ${GITOPS_ENV}"
-                echo "appRevision ${current:-<none>} -> ${REVISION}; platform image tags ${PLATFORM_TAGS}"
+                echo "### Deployed procure-ai ${short} to ${bumped[*]}"
+                printf '%s\n' "${summary[@]}"
+                echo "platform image tags ${PLATFORM_TAGS}"
               } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi

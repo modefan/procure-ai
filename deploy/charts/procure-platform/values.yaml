@@ -85,9 +85,12 @@ keycloak:
   # Keycloak trusts X-Forwarded-* only from these (Traefik's pods; k3s pod CIDR). Only Traefik and Access may connect (networkPolicies).
   proxyTrustedAddresses: 10.42.0.0/16
   ingress:
-    # true: the ingress routes only Keycloak's public paths /realms/ and /resources/ (plan 08 ruling 4: a public host). The admin console
-    # and REST API are then reached inside the cluster only (Access on the Service; kcadm in the pod). false (local): every path.
+    # true: the ingress routes only Keycloak's public paths /realms/<realm>/ for the realms below and /resources/ (plan 08 ruling 4: a
+    # public host). The admin console, the admin REST API and the master realm (the admin's login and token endpoints) are then reached
+    # inside the cluster only (Access on the Service; kcadm in the pod). false (local): every path.
     publicPathsOnly: false
+    # The realms the public host serves when publicPathsOnly is on (the app's realm; never master).
+    publicRealms: [procure]
 
 # The keycloak-config Job (templates/keycloak-config-job.yaml, plan 08 ruling 7): keycloak-config-cli applies the realm file to the running
 # Keycloak on every sync. Not under the AppHost (start-dev imports the realm at every start of its fresh container).

@@ -104,8 +104,9 @@ tests:
                     name: http
 
   # Plan 08 ruling 4: on a public host only Keycloak's documented public paths are routed (no /admin, no welcome page, no /js);
-  # the admin console and REST API stay inside the cluster (Access calls them on the Service, kcadm in the pod).
-  - it: keycloak ingress serves only realms and resources when publicPathsOnly
+  # the admin console and REST API stay inside the cluster (Access calls them on the Service, kcadm in the pod). Plan 08 Task 12: only
+  # the app's realm, so the master realm's login and token endpoints (admin passwords) are not reachable from outside either.
+  - it: keycloak ingress serves only the procure realm and resources when publicPathsOnly
     set:
       keycloak.ingress.publicPathsOnly: true
     documentSelector:
@@ -118,7 +119,7 @@ tests:
       - equal:
           path: spec.rules[0].http.paths
           value:
-            - path: /realms/
+            - path: /realms/procure/
               pathType: Prefix
               backend:
                 service:
@@ -132,3 +133,26 @@ tests:
                   name: keycloak
                   port:
                     name: http
+
+  - it: keycloak ingress routes each public realm when there are several
+    set:
+      keycloak.ingress.publicPathsOnly: true
+      keycloak.ingress.publicRealms: [procure, other]
+    documentSelector:
+      path: kind
+      value: Ingress
+    asserts:
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 3
+      - equal: { path: "spec.rules[0].http.paths[0].path", value: /realms/procure/ }
+      - equal: { path: "spec.rules[0].http.paths[1].path", value: /realms/other/ }
+      - equal: { path: "spec.rules[0].http.paths[2].path", value: /resources/ }
+
+  - it: keycloak ingress refuses publicPathsOnly without a realm (it would route nothing but resources)
+    set:
+      keycloak.ingress.publicPathsOnly: true
+      keycloak.ingress.publicRealms: []
+    asserts:
+      - failedTemplate:
+          errorPattern: keycloak.ingress.publicRealms must name at least one realm

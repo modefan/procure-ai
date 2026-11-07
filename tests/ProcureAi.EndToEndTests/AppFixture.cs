@@ -49,6 +49,13 @@ public sealed class AppFixture : IAsyncLifetime
     /// <summary>The AppHost's UserSecretsId (src/AppHost/ProcureAi.AppHost): where the demo password lives.</summary>
     private const string AppHostUserSecretsId = "procure-ai-apphost";
 
+    /// <summary>
+    /// External target only: the user-secrets store holding that deployment's demo password (default the AppHost's; the hosted demo's is
+    /// <c>procure-ai-hosted</c>, the GitOps repo's bootstrap/new-secrets.ps1 -Environment hosted). Its admin key comes from DEMO_ADMIN_API_KEY
+    /// in the test process's environment.
+    /// </summary>
+    public const string UserSecretsIdVariable = "PROCUREAI_E2E_USER_SECRETS_ID";
+
     public const string TenantId = "acme";
     public const string DemoUser = "tom@acme.test";
 
@@ -149,8 +156,9 @@ public sealed class AppFixture : IAsyncLifetime
         GatewayUrl = new Uri(gatewayUrl.TrimEnd('/') + "/");
         var keycloak = Environment.GetEnvironmentVariable(KeycloakUrlVariable);
         KeycloakUrl = new Uri(string.IsNullOrWhiteSpace(keycloak) ? $"{GatewayUrl.Scheme}://auth.{GatewayUrl.Authority}" : keycloak);
+        var secretsId = Environment.GetEnvironmentVariable(UserSecretsIdVariable) is { Length: > 0 } id ? id : AppHostUserSecretsId;
         _demoPassword = new ConfigurationBuilder()
-            .AddUserSecrets(AppHostUserSecretsId)
+            .AddUserSecrets(secretsId)
             .Build()["Parameters:keycloak-demo-password"];
 
         if (string.IsNullOrEmpty(_adminApiKey) || string.IsNullOrEmpty(_demoPassword))
