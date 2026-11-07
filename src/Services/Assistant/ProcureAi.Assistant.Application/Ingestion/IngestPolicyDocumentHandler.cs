@@ -76,6 +76,8 @@ public sealed class PolicyIngestion(
             return;
         }
 
+        // Every model call of the job counts against the document's tenant's daily token total.
+        using var usage = AiUsageScope.For(job.TenantId);
         try
         {
             await IngestAsync(job, cancellationToken);

@@ -29,6 +29,9 @@ public sealed class ModelPromptShield(IChatClient classifier, ILogger<ModelPromp
     public const int DocumentWindow = 6_000;
 
     private const int DocumentOverlap = 200;
+
+    /// <summary>Not a label: what <see cref="ClassifyAsync"/> returns when the provider's content filter refused the classifier call.</summary>
+    private const string ProviderFiltered = "#provider_filter";
     private const int MaxOutputTokens = 10;
 
     private static readonly string QuestionInstructions = string.Join('\n',
@@ -59,6 +62,7 @@ public sealed class ModelPromptShield(IChatClient classifier, ILogger<ModelPromp
         var label = await ClassifyAsync(QuestionInstructions, text, cancellationToken);
         return label switch
         {
+            ProviderFiltered => PromptShieldResult.Block(GuardReasons.ProviderFilter),
             Safe => PromptShieldResult.Allowed,
             InjectionLabel => PromptShieldResult.Block(GuardReasons.Injection),
             OffTopicLabel => PromptShieldResult.Block(GuardReasons.OffTopic),
@@ -75,6 +79,8 @@ public sealed class ModelPromptShield(IChatClient classifier, ILogger<ModelPromp
             {
                 case InjectionLabel:
                     return PromptShieldResult.Block(GuardReasons.Injection);
+                case ProviderFiltered:
+                    return PromptShieldResult.Block(GuardReasons.ProviderFilter);
                 case Safe or OffTopicLabel:
                     continue;
                 default:
@@ -92,8 +98,19 @@ public sealed class ModelPromptShield(IChatClient classifier, ILogger<ModelPromp
             .Append("\n</message>")
             .ToString();
         var options = new ChatOptions { MaxOutputTokens = MaxOutputTokens, Temperature = 0 };
-        var response = await classifier.GetResponseAsync(
-            [new ChatMessage(ChatRole.System, instructions), new ChatMessage(ChatRole.User, prompt)], options, cancellationToken);
+        ChatResponse response;
+        try
+        {
+            response = await classifier.GetResponseAsync(
+                [new ChatMessage(ChatRole.System, instructions), new ChatMessage(ChatRole.User, prompt)], options, cancellationToken);
+        }
+        catch (GuardBlockedException blocked) when (blocked.Reason == GuardReasons.ProviderFilter)
+        {
+            // The provider's own content filter refused the classifier prompt (it carries the text): the text is blocked, like an INJECTION.
+            logger.LogWarning("The model provider's content filter refused the guard classifier's prompt; the text is blocked");
+            return ProviderFiltered;
+        }
+
         var label = Label(response.Text);
         if (label is null)
         {

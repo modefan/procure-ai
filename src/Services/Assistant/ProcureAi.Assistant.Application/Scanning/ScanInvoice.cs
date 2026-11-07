@@ -79,6 +79,13 @@ public sealed class InvoiceScanner(
 
             (read, model) = await ReadAsync(text, tenant, settings, cancellationToken);
         }
+        catch (GuardBlockedException blocked)
+        {
+            // The provider's content filter refused the invoice text (our document guard had passed it).
+            metrics.GuardBlock("document", blocked.Reason);
+            logger.LogWarning("An invoice scan was refused by the model provider's content filter ({Reason})", blocked.Reason);
+            throw new DomainException(UnreadableTitle);
+        }
         catch (Exception exception) when (
             exception is not DomainException && !cancellationToken.IsCancellationRequested && failures.IsTransient(exception))
         {

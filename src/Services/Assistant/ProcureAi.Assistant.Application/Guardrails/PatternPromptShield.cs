@@ -440,7 +440,8 @@ public sealed partial class PatternPromptShield(GuardOptions options) : IPromptS
     /// "Now", "this conversation", "earlier", "previous", "prior", "the system", "the assistant", "prompt", "the developer", "your" and
     /// "you" are never an outside party ("ignore all instructions of the system" is blocked); the party must end the phrase ("the
     /// procurement assistant", "the manager prompt", "the supplier system" are blocked), also in the possessive ("the supplier's assistant",
-    /// "the supplier’s bot", plan 05 ruling 31); the singular "instruction" counts too; and
+    /// "the supplier’s bot", plan 05 ruling 31) and with up to two words before the role ("the supplier's helpful assistant", "the
+    /// supplier smart assistant", "the vendor's own AI"); the singular "instruction" counts too; and
     /// "from now on … ignore all instructions" is blocked in any case.
     /// </summary>
     [GeneratedRegex(
@@ -452,7 +453,7 @@ public sealed partial class PatternPromptShield(GuardOptions options) : IPromptS
         + @"|partners?|buyers?|approvers?|auditors?|lawyers?|bosses|boss|directors?|documents?|e-?mails?|letters?|contracts?"
         + @"|invoices?|quotes?|quotations?|attachments?|websites?|portals?|third[- ]part(?:y|ies)|salespeople|salesperson|sales reps?"
         + @"|staff|finance|procurement|legal|department|team|callers?|phone calls?)\b"
-        + @"(?!(?:['’]s?)?[\s-]+(?:assistant|prompts?|instructions?|system|bot|ai|model|agent|chat)\b))"
+        + @"(?!(?:['’]s?)?(?:[\s-]+[\w'’-]+){0,2}?[\s-]+(?:assistant|prompts?|instructions?|system|bot|ai|model|agent|chat)\b))"
         + @"|\bfrom now on\b[^.\n]{0,40}?\b(?:ignore|disregard|forget)\s+(?:all|any|every)\s+(?:the\s+)?(?:previous\s+|prior\s+)?instructions?\b",
         RegexOptions.IgnoreCase, Timeout)]
     private static partial Regex IgnoreAllInQuestion();

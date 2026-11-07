@@ -36,6 +36,33 @@ public sealed class ModelPromptShieldTests
         (await shield.CheckQuestionAsync("Who approves laptops?", Ct)).ShouldBe(PromptShieldResult.Block(GuardReasons.ClassifierUnclear));
     }
 
+    [Fact]
+    public async Task Provider_content_filter_on_the_classifier_call_blocks_the_question_and_flags_the_document()
+    {
+        // Azure's own filter can refuse the classifier prompt itself (it carries the attack): that is a block, not a failure.
+        var shield = new ModelPromptShield(new FilteringChatClient(), NullLogger<ModelPromptShield>.Instance);
+
+        (await shield.CheckQuestionAsync("an attack", Ct)).ShouldBe(PromptShieldResult.Block(GuardReasons.ProviderFilter));
+        (await shield.CheckDocumentAsync("## 1 Notes an attack", Ct)).ShouldBe(PromptShieldResult.Block(GuardReasons.ProviderFilter));
+    }
+
+    private sealed class FilteringChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new GuardBlockedException(GuardBlockedException.InputStage, GuardReasons.ProviderFilter);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class ReplyingChatClient(string reply) : IChatClient
     {
         public Task<ChatResponse> GetResponseAsync(

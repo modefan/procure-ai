@@ -16,6 +16,26 @@ public sealed record StubModelError(int Status, string Body, IReadOnlyDictionary
     /// <summary>An OpenAI-style error body.</summary>
     public static string ErrorBody(string message, string code) =>
         JsonSerializer.Serialize(new { error = new { message, type = "invalid_request_error", code } });
+
+    /// <summary>Azure OpenAI's prompt content filter answer (as Azure sent it on 2026-11-07), with the prompt echoed into the message.</summary>
+    public static StubModelError ContentFilter(string echo) => new(
+        400,
+        JsonSerializer.Serialize(new
+        {
+            error = new
+            {
+                message = "The response was filtered due to the prompt triggering Azure OpenAI's content management policy. " + echo,
+                type = (string?)null,
+                param = "prompt",
+                code = "content_filter",
+                status = 400,
+                innererror = new
+                {
+                    code = "ResponsibleAIPolicyViolation",
+                    content_filter_result = new { jailbreak = new { detected = true, filtered = true } },
+                },
+            },
+        }));
 }
 
 /// <summary>
@@ -35,6 +55,8 @@ public sealed class StubModelServer : IAsyncDisposable
     private readonly ConcurrentQueue<StubModelError> _answerErrors = new();
     private Func<string, StubModelError>? _failAll;
     private int _answerRequests;
+    private int _chatRequests;
+    private int _embeddingRequests;
 
     private StubModelServer(WebApplication app) => _app = app;
 
@@ -43,6 +65,17 @@ public sealed class StubModelServer : IAsyncDisposable
 
     /// <summary>How many answer calls reached the server (retries included).</summary>
     public int AnswerRequests => Volatile.Read(ref _answerRequests);
+
+    /// <summary>How many chat calls of any task (answer, classify, scan, context ...) reached the server; each reports
+    /// <see cref="PromptTokens"/> + <see cref="CompletionTokens"/>.</summary>
+    public int ChatRequests => Volatile.Read(ref _chatRequests);
+
+    /// <summary>How many embedding calls reached the server; each reports one token per input.</summary>
+    public int EmbeddingRequests => Volatile.Read(ref _embeddingRequests);
+
+    /// <summary>A scan's reply: a valid invoice for the scan task's structured output.</summary>
+    public const string ScanJson =
+        """{"supplierName":"Stub Supplier (Pty) Ltd","supplierVatNumber":"4123456789","invoiceNumber":"INV-1","invoiceDate":"2026-10-20","orderNumber":null,"lines":[{"description":"Desk","quantity":1,"unitPriceExclVat":100,"lineTotalExclVat":100}],"vat":15,"totalExclVat":100,"totalInclVat":115}""";
 
     public void EnqueueAnswerError(StubModelError error) => _answerErrors.Enqueue(error);
 
@@ -57,7 +90,7 @@ public sealed class StubModelServer : IAsyncDisposable
         ["AI:ApiKey"] = "stub-model-key",
         ["AI:Chat:Model"] = "chat",
         ["AI:Embedding:Model"] = "embeddings",
-        // Only the answer calls reach the scripted part: no classifier and no chunk context calls.
+        // No classifier and no chunk context calls unless a test asks for them (each answers too: SAFE, "ok").
         ["Assistant:Guard:Classifier"] = "None",
         ["Assistant:Ingestion:ContextualRetrieval"] = "false",
     };
@@ -75,6 +108,7 @@ public sealed class StubModelServer : IAsyncDisposable
             var body = await new StreamReader(http.Request.Body, Encoding.UTF8).ReadToEndAsync(http.RequestAborted);
             using var json = JsonDocument.Parse(body);
             var streamed = json.RootElement.TryGetProperty("stream", out var stream) && stream.ValueKind == JsonValueKind.True;
+            Interlocked.Increment(ref stub._chatRequests);
             var answer = body.Contains(AiTasks.Line(AiTasks.Answer), StringComparison.Ordinal);
             if (answer)
             {
@@ -87,7 +121,10 @@ public sealed class StubModelServer : IAsyncDisposable
                 }
             }
 
-            var text = answer ? AnswerText : "ok";
+            var text = answer ? AnswerText
+                : body.Contains(AiTasks.Line(AiTasks.Classify), StringComparison.Ordinal) ? "SAFE"
+                : body.Contains(AiTasks.Line(AiTasks.Scan), StringComparison.Ordinal) ? ScanJson
+                : "ok";
             if (streamed)
             {
                 await WriteStreamAsync(http, text);
@@ -108,6 +145,7 @@ public sealed class StubModelServer : IAsyncDisposable
 
         app.MapPost("/openai/v1/embeddings", async (HttpContext http) =>
         {
+            Interlocked.Increment(ref stub._embeddingRequests);
             using var json = await JsonDocument.ParseAsync(http.Request.Body, cancellationToken: http.RequestAborted);
             var inputs = json.RootElement.GetProperty("input");
             var count = inputs.ValueKind == JsonValueKind.Array ? inputs.GetArrayLength() : 1;

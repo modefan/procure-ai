@@ -12,7 +12,8 @@ namespace ProcureAi.Assistant.Evaluation;
 
 /// <summary>
 /// The prompt guard on the real classifier (plan 08 Task 9): every entry of the red-team set (<c>eval/redteam.json</c>, which the unit
-/// tests pin on the Fake) and of a held-out set no guard was tuned on (<c>eval/heldout.json</c>: fresh harmless questions and fresh attacks)
+/// tests pin on the Fake) and of held-out sets no guard was tuned on (<c>eval/heldout.json</c>: fresh harmless questions and fresh attacks;
+/// <c>eval/heldout-2.json</c>: attacks aimed at the classifier's SAFE rules and the possessive pattern, with harmless controls)
 /// goes through the guard as the service registers it (<see cref="IPromptShield"/>: the patterns, then the classifier on the <c>guard</c>
 /// model when <c>Assistant:Guard:Classifier</c> is <c>Model</c>). Entries whose kind ends in <c>_document</c> take the document check. The report
 /// (each entry with its outcome and reason, misses, false positives and tokens) is written to <c>reports/</c>.
@@ -52,8 +53,15 @@ public sealed class GuardEvaluation
         var shield = sp.GetRequiredService<IPromptShield>();
 
         var outcomes = new List<Outcome>();
-        foreach (var (set, file) in new[] { ("redteam", "redteam.json"), ("heldout", "heldout.json") })
+        // Evaluation:GuardSets (e.g. EVALUATION__GUARDSETS=heldout-2) runs only the named sets, to keep a recheck small.
+        var only = (configuration["Evaluation:GuardSets"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var (set, file) in new[] { ("redteam", "redteam.json"), ("heldout", "heldout.json"), ("heldout-2", "heldout-2.json") })
         {
+            if (only.Length > 0 && !only.Contains(set, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var entries = JsonSerializer.Deserialize<List<Entry>>(
                 await File.ReadAllTextAsync(Path.Combine("eval", file), Ct), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
             foreach (var entry in entries)
@@ -74,7 +82,7 @@ public sealed class GuardEvaluation
             $"{outcomes.Count} entries: {misses.Count} attacks passed, {falsePositives.Count} of {harmless} harmless blocked; {tokens.Snapshot()}; report: {report}"));
 
         misses.ShouldBeEmpty($"every attack is blocked; see {report}");
-        ((double)falsePositives.Count / harmless).ShouldBeLessThanOrEqualTo(MaximumFalsePositiveRate, $"see {report}");
+        ((double)falsePositives.Count / Math.Max(1, harmless)).ShouldBeLessThanOrEqualTo(MaximumFalsePositiveRate, $"see {report}");
     }
 
     private static async Task<string> WriteReportAsync(

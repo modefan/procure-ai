@@ -10,8 +10,11 @@ public sealed record TokenBudget(long Used, long Cap, DateTimeOffset ResetsAt)
 
 /// <summary>
 /// The tokens per tenant per calendar day of <c>Assistant:Quota:TimeZone</c> (<c>AI:DailyTokenCapPerTenant</c>), across every instance: the
-/// input and output tokens of each answer and its query rewrite are added when they are known. A question is refused once the day's
-/// total has reached the cap; the answer that crosses it is finished, so the cap may be passed by at most one answer.
+/// input and output tokens of every model call made for the tenant (answers, query rewrites, the guard classifier, invoice scans, chunk
+/// context and embeddings during ingestion) are added by each pipeline's counting stage once the call has reported them. Questions,
+/// uploads, replacements and scans are refused once the day's total has reached the cap. The check comes before the work and the count
+/// after it, so every call already in flight for the tenant (all its users, on every instance) finishes and is counted: the cap can be
+/// passed by that much. Only the per-user rate limits, the per-conversation lock and the per-call output limits bound the overshoot.
 /// </summary>
 public interface ITenantTokenBudget
 {

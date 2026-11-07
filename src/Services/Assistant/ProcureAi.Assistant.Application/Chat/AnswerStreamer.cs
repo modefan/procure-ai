@@ -88,7 +88,8 @@ public sealed class AnswerStreamer(
             return early;
         }
 
-        // The tenant's daily token cap (a cost guard): checked before anything is counted, so a refused question costs no quota.
+        // The tenant's daily token cap (a cost guard): checked before anything is counted, so a refused question costs no quota. The
+        // tokens themselves are counted by every model pipeline (its counting stage), for the tenant of the request (AiUsageScope).
         var budget = await tokenBudget.GetAsync(tenant, cancellationToken);
         if (budget.Spent)
         {
@@ -226,7 +227,6 @@ public sealed class AnswerStreamer(
                 metrics.ChatUsage(
                     rewrite.Model ?? ai.Value.EffectiveChatModel, conversation.TenantId, rewrite.Usage.Input, rewrite.Usage.Output,
                     ai.Value.EffectivePrices);
-                await AddTokensAsync(conversation.TenantId, rewrite.Usage);
             }
 
             var types = purchasesAllowed ? SearchRequest.AllTypes : SearchRequest.PolicyOnly;
@@ -323,6 +323,14 @@ public sealed class AnswerStreamer(
                 error = null;
                 break;
             case GuardBlockedException blocked:
+                if (blocked.Reason == GuardReasons.ProviderFilter)
+                {
+                    // Our guards passed it, the provider's content filter did not: worth a look, but not a failure of ours.
+                    metrics.GuardBlock(blocked.Stage, blocked.Reason);
+                    logger.LogWarning(
+                        "The model provider's content filter refused a question in conversation {ConversationId}", conversation.Id);
+                }
+
                 answer.Status = MessageStatus.Blocked;
                 answer.GuardFlags.Add($"{blocked.Stage}:{blocked.Reason}");
                 if (blocked.Stage == GuardBlockedException.InputStage)
@@ -369,7 +377,6 @@ public sealed class AnswerStreamer(
 
         metrics.Question(outcome);
         metrics.ChatUsage(answer.Model, conversation.TenantId, answer.Usage.Input, answer.Usage.Output, ai.Value.EffectivePrices);
-        await AddTokensAsync(conversation.TenantId, answer.Usage);
         logger.LogInformation(
             "Answer {Outcome} in conversation {ConversationId} for user {UserId} of tenant {TenantId}: model {Model}, {InputTokens} input and"
             + " {OutputTokens} output tokens, {DurationMs} ms, guard flags {GuardFlags}",
@@ -399,19 +406,6 @@ public sealed class AnswerStreamer(
 
         await InvalidateAsync(conversation.Id);
         return saved;
-    }
-
-    /// <summary>Adds a model call's tokens to the tenant's daily total; a Redis failure is logged, never the answer's failure.</summary>
-    private async Task AddTokensAsync(string tenantId, TokenUsage usage)
-    {
-        try
-        {
-            await tokenBudget.AddAsync(tenantId, usage.Input + usage.Output, CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(exception, "The daily token total of tenant {TenantId} could not be updated", tenantId);
-        }
     }
 
     private async Task InvalidateAsync(Guid conversationId)

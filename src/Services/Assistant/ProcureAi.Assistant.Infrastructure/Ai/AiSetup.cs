@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using OpenAI;
 using ProcureAi.Assistant.Application;
 using ProcureAi.Assistant.Application.Ai;
+using ProcureAi.Assistant.Application.Chat;
 using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Telemetry;
 using ProcureAi.Assistant.Infrastructure.Ai.Fake;
@@ -29,7 +30,7 @@ public static class AiSetup
     /// <item><c>answer</c>: the guardrails (<see cref="ChatClientBuilderExtensions.UseGuardrails"/>: <see cref="GuardrailChatClient"/> through
     /// <see cref="IAnswerGuardrail"/>) → default limits (<c>AI:Chat:MaxOutputTokens</c>) →
     /// function invocation (at most <c>Assistant:Tools:MaxCallsPerQuestion</c> tool calls, then an answer without tools) → OpenTelemetry (<see cref="AiClients.TelemetrySource"/>;
-    /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → logging (one content-free line per call; the
+    /// prompt and answer text only with <c>AI:Telemetry:LogContent</c>) → token counting (the tenant's daily total) → logging (one content-free line per call; the
     /// message log only with LogContent) → circuit breaker (<c>AI:Resilience</c>, <see cref="ModelCircuitBreaker"/>) → provider timeout (<c>AI:Chat:Timeout</c>,
     /// <see cref="ProviderTimeoutChatClient"/>) → provider;</item>
     /// <item><c>utility</c>: default limits → OpenTelemetry → logging → circuit breaker → provider timeout → provider;</item>
@@ -64,6 +65,7 @@ public static class AiSetup
                 MaximumIterationsPerRequest = sp.GetRequiredService<IOptions<AssistantOptions>>().Value.Tools.MaxCallsPerQuestion,
             })
             .Use(Traced)
+            .Use(Counted)
             .Use(Logged)
             .Use(Breaker(ModelCircuitBreaker.Answer))
             .Use(Timed);
@@ -71,6 +73,7 @@ public static class AiSetup
         services.AddKeyedChatClient(AiClients.Utility, sp => sp.GetRequiredService<ProviderClients>().Chat)
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use(Traced)
+            .Use(Counted)
             .Use(Logged)
             .Use(Breaker(ModelCircuitBreaker.Utility))
             .Use(Timed);
@@ -78,6 +81,7 @@ public static class AiSetup
         services.AddKeyedChatClient(AiClients.Guard, sp => sp.GetRequiredService<ProviderClients>().Guard)
             .Use((inner, sp) => WithDefaultLimits(inner, Ai(sp)))
             .Use(Traced)
+            .Use(Counted)
             .Use(Logged)
             .Use(Breaker(ModelCircuitBreaker.Guard))
             .Use(Timed);
@@ -87,6 +91,7 @@ public static class AiSetup
         services.AddEmbeddingGenerator(sp => sp.GetRequiredService<ProviderClients>().Embeddings)
             .Use((inner, sp) => new OpenTelemetryEmbeddingGenerator<string, Embedding<float>>(
                 inner, sp.GetService<ILoggerFactory>()?.CreateLogger(typeof(OpenTelemetryEmbeddingGenerator<string, Embedding<float>>)), AiClients.TelemetrySource))
+            .Use(CountedEmbeddings)
             .Use(LoggedEmbeddings)
             .Use((inner, sp) => new CircuitBreakerEmbeddingGenerator(inner, ModelCircuitBreaker.Pipeline(sp, ModelCircuitBreaker.Embeddings)));
 
@@ -145,6 +150,17 @@ public static class AiSetup
 
     /// <summary>The innermost stage: a provider that stops answering fails after <c>AI:Chat:Timeout</c> (<see cref="ProviderTimeoutChatClient"/>).</summary>
     private static IChatClient Timed(IChatClient inner, IServiceProvider services) => new ProviderTimeoutChatClient(inner, Ai(services).Chat.Timeout);
+
+    /// <summary>
+    /// The counting stage (<see cref="TokenCountingChatClient"/>): every call's tokens go to the daily total of the flow's tenant
+    /// (<see cref="AiUsageScope"/>, <c>AI:DailyTokenCapPerTenant</c>). Left out where no budget is registered (the evaluation project).
+    /// </summary>
+    private static IChatClient Counted(IChatClient inner, IServiceProvider services) =>
+        services.GetService<ITenantTokenBudget>() is { } budget ? new TokenCountingChatClient(inner, budget, CallLogger(services)) : inner;
+
+    private static IEmbeddingGenerator<string, Embedding<float>> CountedEmbeddings(
+        IEmbeddingGenerator<string, Embedding<float>> inner, IServiceProvider services) =>
+        services.GetService<ITenantTokenBudget>() is { } budget ? new TokenCountingEmbeddingGenerator(inner, budget, CallLogger(services)) : inner;
 
     private static IChatClient Traced(IChatClient inner, IServiceProvider services) =>
         new OpenTelemetryChatClient(inner, LoggerFor<OpenTelemetryChatClient>(services), AiClients.TelemetrySource)

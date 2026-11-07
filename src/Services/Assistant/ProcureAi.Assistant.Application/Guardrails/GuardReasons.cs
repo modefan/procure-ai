@@ -17,6 +17,9 @@ public static class GuardReasons
     public const string OffTopic = "off_topic";
     public const string ClassifierUnclear = "classifier_unclear";
 
+    /// <summary>The model provider's own content filter refused the prompt (Azure's <c>content_filter</c>), after our guards passed it.</summary>
+    public const string ProviderFilter = "provider_filter";
+
     /// <summary>A guard pattern ran out of time on the text (fail closed).</summary>
     public const string TooComplex = "too_complex";
 
@@ -47,6 +50,7 @@ public static class GuardReasons
         SecretRequest => "The text asks for keys, passwords or other secrets.",
         OffTopic => "The question is not about procurement.",
         ClassifierUnclear => "The guard could not classify the text.",
+        ProviderFilter => "The AI provider's content filter refused the text.",
         Ungrounded => "The answer did not cite its sources.",
         _ => reason,
     };

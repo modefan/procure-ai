@@ -18,6 +18,9 @@ public static class AssistantApi
         ServiceHost.Build(args, ServiceName, builder =>
         {
             builder.Services.AddAssistantInfrastructure(builder.Configuration);
+            // Every request's model calls count against the caller's tenant (the daily token cap).
+            builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(
+                mvc => mvc.Filters.Add<ProcureAi.Assistant.Api.Controllers.AiUsageTenantFilter>(int.MinValue));
             builder.Host.UseWolverine(options => options.ConfigureAssistant(builder.Configuration, ServiceName));
         })
         // The nightly demo reset (plan 06 ruling 4): only where DemoReset:Enabled is true, else 404.

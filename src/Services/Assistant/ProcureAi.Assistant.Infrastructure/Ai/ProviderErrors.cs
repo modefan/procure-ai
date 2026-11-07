@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using ProcureAi.Assistant.Application.Guardrails;
 
 namespace ProcureAi.Assistant.Infrastructure.Ai;
 
@@ -13,14 +14,27 @@ namespace ProcureAi.Assistant.Infrastructure.Ai;
 /// key-like value). That message would reach every log line, span status and retry event that prints the exception. So an error answer
 /// is thrown on as a new <see cref="ClientResultException"/> with the same response (its <see cref="ClientResultException.Status"/>, so
 /// <see cref="AiFailures"/> and the circuit breaker see the same failure) and a message of our own: the HTTP status and the error code,
-/// when the code is a plain identifier (<c>rate_limit_exceeded</c>, <c>content_filter</c>). The original is not kept as the inner
-/// exception, since logs print inner exceptions too.
+/// when the code is a plain identifier (<c>rate_limit_exceeded</c>, <c>unsupported_value</c>). The original is not kept as the inner
+/// exception, since logs print inner exceptions too. A content filter refusal becomes a <see cref="GuardBlockedException"/>.
 /// </summary>
 internal static partial class ProviderErrors
 {
-    /// <summary>The exception to throw instead of <paramref name="exception"/>: the same status and response, without the provider's text.</summary>
-    public static ClientResultException Scrub(ClientResultException exception)
+    /// <summary>The provider's content filter code (Azure OpenAI: a 400 with <c>error.code</c> <c>content_filter</c>).</summary>
+    public const string ContentFilterCode = "content_filter";
+
+    /// <summary>
+    /// The exception to throw instead of <paramref name="exception"/>: a 400 from the provider's content filter is a guard block
+    /// (<see cref="GuardReasons.ProviderFilter"/>, input stage: the friendly 422, never a failure); anything else the same status and
+    /// response, without the provider's text.
+    /// </summary>
+    public static Exception Scrub(ClientResultException exception)
     {
+        if (exception.Status == 400 && exception.GetRawResponse() is { } filtered && CodeOf(filtered.Content) == ContentFilterCode)
+        {
+            return new GuardBlockedException(GuardBlockedException.InputStage, GuardReasons.ProviderFilter);
+        }
+
+
         var response = exception.GetRawResponse();
         var status = exception.Status;
         var code = response is null ? null : CodeOf(response.Content);

@@ -36,6 +36,8 @@ public sealed class InvoiceScansController(InvoiceScanner scanner, IOptions<Assi
     [Idempotent]
     [RequirePermission(Permissions.InvoicesCreate)]
     [UploadSizeLimit]
+    [TokenCapGate]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests)]
     [Consumes("multipart/form-data")]
     [ProducesResponseType<InvoiceScanDto>(StatusCodes.Status200OK, "application/json")]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]

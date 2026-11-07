@@ -140,6 +140,110 @@ public sealed class ProviderFailureTests(AssistantApp app)
         await AskOkAsync(instance.Client, other, await CreateAsync(instance.Client, other), Question);
     }
 
+    [Fact]
+    public async Task Every_model_path_counts_against_the_tenants_daily_total()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        // The classifier and the chunk context on, so a question, a scan and an ingestion each make more than one kind of model call.
+        await using var instance = await StartAsync(model, new()
+        {
+            ["Assistant:Guard:Classifier"] = "Model",
+            ["Assistant:Ingestion:ContextualRetrieval"] = "true",
+        });
+        var tenant = AssistantApp.NewTenant();
+        var budget = instance.Services.GetRequiredService<ITenantTokenBudget>();
+        async Task<long> UsedAsync() => (await budget.GetAsync(tenant, Ct)).Used;
+        const int PerChatCall = StubModelServer.PromptTokens + StubModelServer.CompletionTokens;
+
+        // A question: the classifier, the answer and the query embedding.
+        var token = User(tenant);
+        await AskOkAsync(instance.Client, token, await CreateAsync(instance.Client, token), Question);
+        var afterQuestion = await UsedAsync();
+        afterQuestion.ShouldBeGreaterThanOrEqualTo(2 * PerChatCall + 1, "classifier + answer + query embedding");
+
+        // An invoice scan: the document classifier and the scan itself.
+        using (var scan = await ScanAsync(instance.Client, AssistantApp.Token(tenant, "finance", "fiona"), Ct))
+        {
+            scan.StatusCode.ShouldBe(HttpStatusCode.OK, await scan.Content.ReadAsStringAsync(Ct));
+        }
+
+        var afterScan = await UsedAsync();
+        (afterScan - afterQuestion).ShouldBeGreaterThanOrEqualTo(2 * PerChatCall, "document classifier + scan");
+
+        // An ingestion (in the background, for the document's tenant): the document classifier, one context call per chunk, the embeddings.
+        var admin = PolicyDocumentsApi.Admin(tenant);
+        var document = await PolicyDocumentsApi.UploadOkAsync(instance.Client, admin, "policy.md", PolicyDocumentsApi.Markdown("counted", 2));
+        await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, admin, document.Id, "Ready");
+        (await UsedAsync() - afterScan).ShouldBeGreaterThanOrEqualTo(3 * PerChatCall + 2, "document classifier + two chunk contexts + embeddings");
+    }
+
+    [Fact]
+    public async Task Capped_tenant_cannot_upload_replace_or_scan()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new());
+        var tenant = AssistantApp.NewTenant();
+        var admin = PolicyDocumentsApi.Admin(tenant);
+        var document = await PolicyDocumentsApi.UploadOkAsync(instance.Client, admin, "policy.md", PolicyDocumentsApi.Markdown("capped", 1));
+        await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, admin, document.Id, "Ready");
+        var current = await PolicyDocumentsApi.GetOkAsync(instance.Client, admin, document.Id);
+
+        // The tenant has used its day (on another instance, say).
+        await instance.Services.GetRequiredService<ITenantTokenBudget>().AddAsync(tenant, 1_000_000_000, Ct);
+        var calls = model.ChatRequests + model.EmbeddingRequests;
+
+        using var upload = await PolicyDocumentsApi.UploadAsync(instance.Client, admin, "other.md", PolicyDocumentsApi.Markdown("other", 1));
+        using var replace = await PolicyDocumentsApi.ReplaceAsync(
+            instance.Client, admin, document.Id, current.RowVersion, "policy.md", PolicyDocumentsApi.Markdown("replaced", 1));
+        using var scan = await ScanAsync(instance.Client, AssistantApp.Token(tenant, "finance", "fiona"), Ct);
+
+        foreach (var response in new[] { upload, replace, scan })
+        {
+            var body = await response.Content.ReadAsStringAsync(Ct);
+            response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, body);
+            body.ShouldContain(AnswerStreamer.TokenCapTitle);
+            response.Headers.RetryAfter.ShouldNotBeNull();
+        }
+
+        (model.ChatRequests + model.EmbeddingRequests).ShouldBe(calls, "nothing reached the model");
+        (await PolicyDocumentsApi.GetOkAsync(instance.Client, admin, document.Id)).Version.ShouldBe(1, "the replacement was not taken");
+    }
+
+    [Fact]
+    public async Task Azure_content_filter_is_a_guard_block_not_a_failure()
+    {
+        var marker = $"zzfilter{Guid.NewGuid():N}"[..20];
+        var logs = new CapturingSink();
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new(), services => services.AddSingleton<ILogEventSink>(logs));
+        var token = User(AssistantApp.NewTenant());
+        model.FailAnswers(request => StubModelError.ContentFilter($"Prompt: {request}"));
+
+        var result = await AskAsync(instance.Client, token, await CreateAsync(instance.Client, token), $"{Question} {marker}");
+
+        result.Status.ShouldBe(HttpStatusCode.OK);
+        var error = result.Of("error").Single().Data;
+        error.GetProperty("status").GetInt32().ShouldBe(422);
+        error.GetProperty("title").GetString().ShouldBe(AnswerStreamer.GuardTitle);
+        model.AnswerRequests.ShouldBe(1, "a refusal is not retried");
+        var events = logs.Events;
+        events.ShouldContain(e => e.Level == LogEventLevel.Warning && e.RenderMessage().Contains("content filter"));
+        events.ShouldNotContain(e => e.Level >= LogEventLevel.Error, "a content filter refusal is not an error of ours");
+        events.Select(Render).ShouldNotContain(line => line.Contains(marker) || line.Contains("content management policy"));
+    }
+
+    private static async Task<HttpResponseMessage> ScanAsync(HttpClient client, string token, CancellationToken cancellationToken)
+    {
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(await File.ReadAllBytesAsync("Files/invoice-correct.pdf", cancellationToken));
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        form.Add(file, "file", "invoice.pdf");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/assistant/invoice-scans") { Content = form };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        return await client.SendAsync(request, cancellationToken);
+    }
+
     private async Task<Instance> StartAsync(
         StubModelServer model, Dictionary<string, string?> settings, Action<IServiceCollection>? services = null, List<Activity>? spans = null)
     {

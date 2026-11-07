@@ -86,10 +86,11 @@ order it names is chosen when the user can see it), and nothing is saved until t
 that answer them. Retrieval is tested on every run: hit@6 (an expected section among the six sources) is **1.00** on the
 seeded policy with the Fake provider (the test requires 0.8). Groundedness and relevance are judged by a model with
 Microsoft.Extensions.AI.Evaluation.Quality in the evaluation project, and the guard is measured on the real classifier with the
-red-team set plus a held-out set (`eval/heldout.json`) that no guard was tuned on. Both spend tokens, so they are outside the CI
-loop and skip under the Fake. First real run (2026-11-07, gpt-5-mini, reasoning effort none): groundedness **5.00**, relevance
-**4.24** (of 5; both must reach 4.0); guard: all 105 attacks blocked, 3 of 80 harmless questions blocked (all 12 held-out
-harmless questions passed). The judge is the answering model itself (only one chat deployment so far).
+red-team set plus held-out sets (`eval/heldout.json`, `eval/heldout-2.json`) that no guard was tuned on. Both spend tokens, so they
+are outside the CI loop and skip under the Fake. First real run (2026-11-07, gpt-5-mini, reasoning effort none): **self-judged**
+groundedness 5.00 and relevance 4.24 (of 5; both must reach 4.0). The judge is the answering model itself (only one chat
+deployment so far), so these scores are an optimistic check, not an independent one. Guard: all 105 attacks blocked, 3 of 80
+harmless questions blocked; the held-out sets: 15 of 15 harmless passed, 17 of 17 attacks blocked.
 
 **Switching to a real model.** Set the AppHost user secrets (all optional; without them the Fake provider runs):
 
@@ -109,8 +110,21 @@ dotnet user-secrets set "AI:Chat:MinOutputTokens" "256" --project $apphost
 A reasoning model counts its thinking against the output limit: with the classifier's limit of 10 tokens gpt-5-mini returned
 no text at all, so every question failed closed. `MinOutputTokens` raises every call's limit to at least that; only the tokens
 produced are billed. The provider's error bodies (which can echo the prompt) are cut to the HTTP status and a plain error code
-before anything logs them. Each tenant may use `AI:DailyTokenCapPerTenant` tokens a day (default 200 000); after that the
-assistant answers "The assistant has reached today's limit for your organisation." until midnight (SAST).
+before anything logs them. When Azure's own content filter refuses a prompt (400 `content_filter`), the question is blocked like one
+our guard caught (422 "I can't help with that", reason `provider_filter`, a Warning in the log), not a failure.
+
+**Daily token cap.** Each tenant may use `AI:DailyTokenCapPerTenant` tokens a day (default 200 000, SAST calendar day). Every
+model call made for the tenant counts: answers, query rewrites, the guard classifier, invoice scans, and the chunk context and
+embeddings of an ingestion (counted for the document's tenant). Once the total reaches the cap, questions, policy uploads,
+replacements and invoice scans are refused with 429 "The assistant has reached today's limit for your organisation." and
+`Retry-After` until midnight. The check happens before the work and the count after it, so every call already in flight for the
+tenant (all its users, on every instance) still finishes and counts: the cap can be passed by that much. Only the per-user rate
+limits, the per-conversation lock and the per-call output limits bound the overshoot.
+
+**To recheck when the model or deployment changes.** `AI:Chat:ReasoningEffort` `None` is sent as `reasoning_effort: "none"`. Azure's
+gpt-5-mini 2025-08-07 accepts it (0 reasoning tokens, checked 2026-11-07), but OpenAI documents `minimal` as gpt-5-mini's lowest
+effort. If a deployment rejects it, every call fails with a 400 (shown as "could not answer", and the breaker does not open); then
+remove the setting or pick `Low`.
 
 Every chunk stores the model that embedded it, and embeddings are only reused for the same model. After the switch, replace
 each policy document once (Replace on the policy documents screen) so it is embedded by the new model; the dimensions stay
