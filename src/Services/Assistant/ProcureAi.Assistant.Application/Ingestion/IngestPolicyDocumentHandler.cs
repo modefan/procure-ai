@@ -352,10 +352,6 @@ public sealed class PolicyIngestion(
     }
 
     /// <summary>
-    /// Runs a call to a model (the guard, the context writer, the embeddings); a failure of it that may pass becomes an
-    /// <see cref="AiProviderUnavailableException"/>. Only these calls are classified, so a database timeout is never reported as the model.
-    /// </summary>
-    /// <summary>
     /// Throws <see cref="BudgetReachedException"/> when the document's tenant reached its daily token cap. When Redis cannot be read the
     /// job goes on (logged): the counting stage undercounts in that case too, and a Redis outage should not fail every document.
     /// </summary>
@@ -381,6 +377,10 @@ public sealed class PolicyIngestion(
     /// <summary>The tenant's daily token cap is reached: the version ends <c>Failed</c> with <see cref="BudgetReachedReason"/>, never retried.</summary>
     private sealed class BudgetReachedException() : Exception("The tenant's daily AI token limit is reached.");
 
+    /// <summary>
+    /// Runs a call to a model (the guard, the context writer, the embeddings); a failure of it that may pass becomes an
+    /// <see cref="AiProviderUnavailableException"/>. Only these calls are classified, so a database timeout is never reported as the model.
+    /// </summary>
     private async Task<T> ModelCallAsync<T>(Func<Task<T>> call, CancellationToken cancellationToken)
     {
         try
