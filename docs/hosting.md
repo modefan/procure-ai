@@ -1,93 +1,107 @@
 # Hosting the live demo
 
-The live demo runs on one virtual machine at Hetzner Cloud with k3s, deployed by Argo CD from
-[procure-ai-gitops](https://github.com/modefan/procure-ai-gitops), the same GitOps flow as the local cluster
-([kubernetes.md](kubernetes.md)). The whole hosted setup is code: one Terraform root in `procure-ai-gitops/infra/hetzner/` creates the
-VM, its firewall, private network and SSH key **and** the Cloudflare DNS records; cloud-init installs k3s on the first boot; the bootstrap
-scripts in `procure-ai-gitops/bootstrap/hosted/` run from Dale's PC through an SSH tunnel.
+The live demo runs on one virtual machine, a Contabo Cloud VPS with k3s. Argo CD deploys it from
+[procure-ai-gitops](https://github.com/modefan/procure-ai-gitops), with the same GitOps flow as the local cluster
+([kubernetes.md](kubernetes.md)). The whole hosted setup is code. One Terraform root in `procure-ai-gitops/infra/hosted/` builds the VM:
+it adopts the paid instance and reinstalls it with Ubuntu, the SSH key and cloud-init, which installs k3s. The same root also sets up the
+VM's firewall and the Cloudflare DNS records. The bootstrap scripts in `procure-ai-gitops/bootstrap/hosted/` run from Dale's PC through an
+SSH tunnel.
 
 ## What runs where
 
 | Piece | Choice | Why |
 |---|---|---|
-| VM | Hetzner Cloud **cx43** (8 shared vCPU x86, 16 GB, 160 GB disk) or, when cx43 is out of stock, **cx53** (16 shared vCPU, 32 GB, 320 GB); in Falkenstein (`fsn1`), Nuremberg (`nbg1`) or Helsinki (`hel1`); Ubuntu 26.04 LTS (24.04 is the fallback if k3s misbehaves on it) | The full stack needs about 9 GiB plus Argo CD; x86 runs the published images as they are. `host.json` and Test-HostBaseline show which type runs. |
-| Kubernetes | **k3s** v1.35.10+k3s1 (single node; the local cluster's minor), Traefik and ServiceLB as shipped | Same distribution as the local k3d cluster. |
-| Network | Hetzner firewall: inbound **only TCP 22, 80, 443** (IPv4 and IPv6); a private network `10.0.1.0/24` | The Kubernetes API, the kubelet and kube-proxy's health port listen only on the private address `10.0.1.2`. No ICMP: the VM does not answer ping, which is not an outage (path-MTU messages for its own connections still pass, the firewall is stateful). |
+| VM | **Contabo Cloud VPS 8**: 8 vCPU x86, 24 GB, 300 GB SSD, region EU (data center "European Union 2"), Ubuntu 26.04 LTS. Instance `203735351`, IPv4 `45.13.235.178`, IPv6 `2a02:c207:2373:5351::1` | The full stack needs about 9 GiB plus Argo CD. x86 runs the published images as they are. Ubuntu 24.04 is the fallback if k3s ever misbehaves on 26.04 (`image_id` in `infra/hosted/variables.tf`). |
+| Kubernetes | **k3s** v1.35.10+k3s1 (single node, the local cluster's minor), with Traefik and ServiceLB as shipped | Same distribution as the local k3d cluster. |
+| Network | Contabo firewall: inbound **only TCP 22, 80, 443** (IPv4 and IPv6), then Contabo's own "block all traffic" rule. No ICMP: the VM does not answer ping, which does not mean it is down. | The Kubernetes API, the kubelet and kube-proxy's health port listen only on the node address `10.0.1.2`. That address is on a dummy interface, because Contabo's private networks are a paid add-on. |
 | GitOps | Argo CD on the VM, root Application on `envs/hosted/` | Same app of apps as local. |
 | Models | Azure Foundry (Task 9) | |
-| DNS | Cloudflare (`daleabels.com`): A and AAAA for `procure`, `auth` and `dashboard`, DNS only (not proxied), TTL 300 s | Kept by the same Terraform root (official `cloudflare/cloudflare` provider, account-owned token with DNS Write on this zone only); the apex and other records are not touched. |
+| DNS | Cloudflare (`daleabels.com`): A and AAAA for `procure`, `auth` and `dashboard`, DNS only (not proxied), TTL 300 s | Kept by the same Terraform root (official `cloudflare/cloudflare` provider, account-owned token with DNS Write on this zone only). The apex and other records are not touched. |
+
+**Why Contabo and not Hetzner.** Plan 08 chose Hetzner (cx43, EUR 15.99 a month). But every affordable 16 GB type (cx43, cx53, cax31,
+cpx41) was sold out in all EU locations for the whole day of 2026-11-07. The next types in stock cost EUR 69 or more. The Terraform for
+Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
 
 ## Security baseline (checked by `bootstrap/hosted/Test-HostBaseline.ps1`)
 
-- SSH: one non-root sudo user `procure`, key only (ed25519, private half only on Dale's PC). No root login, no password or
-  keyboard-interactive login, only that user, no agent/X11 forwarding; only local port forwarding (the API tunnel). fail2ban bans
+- **SSH.** There is one non-root sudo user, `procure`, who logs in with an ed25519 key only. The private half of the key is only on Dale's
+  PC. There is no root login and no password or keyboard-interactive login, and only that user may log in. Agent and X11 forwarding are
+  off; only local port forwarding is allowed (the API tunnel). fail2ban (journal of `ssh.service`, including `sshd-session`) bans
   addresses that keep failing.
-- Unattended security upgrades are on; the VM does **not** reboot by itself (a reboot restarts the whole demo, so it is a deliberate step).
-  Test-HostBaseline warns when an update waits for a reboot; then reboot at a quiet time (`ssh ... sudo reboot`; pods get 60 s to stop),
-  at the latest when a kernel fix is security-relevant. k3s starts again only once the private address is up.
-- The Kubernetes API (6443) is not reachable from the internet: it listens on the private address only, and the firewall drops it anyway.
-  kubectl and helm reach it through `bootstrap/hosted/open-tunnel.ps1` (ssh `-L 127.0.0.1:16443:10.0.1.2:6443`).
-- The kubelet shuts pods down gracefully when the VM shuts down: `shutdownGracePeriod` 60 s, 20 s of it for critical pods (logind waits
-  75 s). Memory reservations as on the local cluster (kube 1 GiB, system 256 MiB, eviction below 1 GiB free).
-- Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
-- No Terraform state, kubeconfig, SSH key or Secret is in any repo: they live in `%USERPROFILE%\.procure-ai\hosted\` on Dale's PC
-  (current user only) and are listed by name in DEMO PASSWORDS.txt. The hosted Secrets come from their own user-secrets store
-  `procure-ai-hosted` (`new-secrets.ps1 -Environment hosted`), so the public demo shares no secret with the local setup; the registry
-  pull Secret uses a read-only GHCR token, not the GitHub CLI token.
+- **Contabo's own cloud-config.** On every boot it sets `PermitRootLogin yes` in `sshd_config` and sets the root password. Our
+  `sshd_config.d/00-procure-hardening.conf` is read first and wins. The root password works only on Contabo's VNC console, which the
+  Contabo API cannot switch off; Dale can switch it off in the panel. Its `pkill -HUP sshd` fails on Ubuntu 26.04, so `cloud-init status`
+  says "error" on every boot. The bootstrap accepts that one known error and nothing else.
+- **Updates.** Unattended security upgrades are on. The VM does **not** reboot by itself: a reboot restarts the whole demo, so it is a
+  deliberate step. Test-HostBaseline warns when an update waits for a reboot. Then reboot at a quiet time (`ssh ... sudo systemctl
+  reboot`). The kubelet gives pods 60 s to stop (checked: the pods ended "terminated in response to imminent node shutdown"), and k3s
+  comes back on its own within about 30 s.
+- **The Kubernetes API (6443)** is not reachable from the internet: it listens on the node address only, and the firewall drops it
+  anyway. kubectl and helm reach it through `bootstrap/hosted/open-tunnel.ps1` (ssh `-L 127.0.0.1:16443:10.0.1.2:6443`).
+- **Graceful shutdown.** The kubelet shuts pods down gracefully when the VM shuts down: `shutdownGracePeriod` 60 s, 20 s of it for
+  critical pods. logind waits 75 s. Its drop-in must sort after unattended-upgrades' own 30 s file, or the kubelet's shutdown manager does
+  not start.
+- **Memory reservations** (24 GB VM): kube 1.5 GiB, system 512 MiB, eviction below 1 GiB free.
+- **Secrets.** Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
+- **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
+  `%USERPROFILE%\.procure-ai\hosted\` on Dale's PC (current user only) and are listed by name in DEMO PASSWORDS.txt. The hosted Secrets
+  come from their own user-secrets store `procure-ai-hosted` (`new-secrets.ps1 -Environment hosted`), so the public demo shares no secret
+  with the local setup. The registry pull Secret uses a read-only GHCR token, not the GitHub CLI token.
 
 ## Bringing it up (from Dale's PC)
 
-Needs `terraform`, `kubectl`, `helm`, Windows OpenSSH, `gh` and the .NET SDK, plus the user env vars `HCLOUD_TOKEN` (Hetzner, project
-`procure-ai`), `CLOUDFLARE_API_TOKEN` (DNS token for daleabels.com) and `GHCR_READ_TOKEN`.
+Needs `terraform`, `kubectl`, `helm`, Windows OpenSSH, `gh` and the .NET SDK, plus these user env vars: `CONTABO_CLIENT_ID`,
+`CONTABO_CLIENT_SECRET`, `CONTABO_USER` and `CONTABO_PASSWORD` (Contabo API), `CLOUDFLARE_API_TOKEN` (DNS token for daleabels.com) and
+`GHCR_READ_TOKEN`.
 
 ```powershell
 cd procure-ai-gitops
-./bootstrap/hosted/new-hosted-cluster.ps1 -PlanOnly   # plan + money guard: SSH key, network, firewall, one approved server, 6 DNS records
-./bootstrap/hosted/new-hosted-cluster.ps1             # apply (asks, shows the price), cloud-init, kubeconfig, tunnel, namespaces
-#   -ServerType cx53 -Location nbg1                   # another approved type/location (cx43|cx53, fsn1|nbg1|hel1)
-#   -WaitForStock                                     # poll until cx43 (then cx53) is in stock in fsn1/nbg1/hel1, then apply with that
+./bootstrap/hosted/new-hosted-cluster.ps1 -PlanOnly   # plan + money guard: SSH key secret, the adopted VPS, firewall, 6 DNS records
+./bootstrap/hosted/new-hosted-cluster.ps1 -Reinstall  # first time only: adopts and REINSTALLS the VPS, cloud-init, kubeconfig, tunnel, namespaces
+./bootstrap/hosted/new-hosted-cluster.ps1             # any later time: applies firewall/DNS changes, re-checks SSH, cloud-init, the cluster
 ./bootstrap/new-secrets.ps1 -Environment hosted       # Secrets from the procure-ai-hosted user secrets (generated on the first run)
 ./bootstrap/install-argocd.ps1 -Environment hosted    # Argo CD (no admin user, no ingress) and the root Application
 ./bootstrap/hosted/Test-HostBaseline.ps1              # the checks above, from the PC
 ./bootstrap/hosted/open-tunnel.ps1 -Close             # close the tunnel when done
 ```
 
-Every script is safe to run again. `new-hosted-cluster.ps1` refuses a plan that would create anything else (backups, extra IPs,
-volumes, other DNS records), use a type or location Dale has not approved, cost more than the approved price per the Hetzner API, or
-replace the server (all its data) unless `-AllowReplace` is given. Changes to `cloud-init.yaml` do not touch a running
-server (Terraform ignores them); make the change on the VM over SSH too (`ssh -i %USERPROFILE%\.procure-ai\hosted\procure-hosted_ed25519
-procure@<ip>`, using the `known_hosts` file there).
+Every script is safe to run again. `new-hosted-cluster.ps1` refuses a plan that would:
 
-After a new server, check once by hand what the baseline cannot see from outside (the kubelet listens only on the private address):
-`kubectl logs` and `kubectl exec` into a kube-system pod and `kubectl top node` work through the tunnel; a failed SSH login raises
-`Total failed` in `sudo fail2ban-client status sshd`; `sudo k3s check-config` passes on Ubuntu 26.04; one deliberate reboot brings k3s
-back (it waits for the private address); a second `new-hosted-cluster.ps1 -PlanOnly` shows no changes (no provider drift).
+- order an instance (a create without `existing_instance_id = 203735351`);
+- delete the instance (for the Contabo provider, delete means *cancel*; `prevent_destroy` blocks it as well);
+- add any other paid Contabo resource or add-on, or other DNS records;
+- reinstall the VM without `-Reinstall`.
 
-The Argo CD UI has no public address: open the tunnel, then
+Changes to `cloud-init.yaml` do not touch a running VM, because Terraform ignores them. Make the change on the VM over SSH too
+(`ssh -i %USERPROFILE%\.procure-ai\hosted\procure-hosted_ed25519 procure@45.13.235.178`, with the `known_hosts` file there), or reinstall
+on purpose with `-Reinstall`.
+
+After a reinstall, check once by hand the things the baseline cannot see from outside:
+
+- `kubectl logs` and `kubectl exec` into a kube-system pod, and `kubectl top node`, through the tunnel;
+- a failed SSH login raises `Total failed` in `sudo fail2ban-client status sshd`;
+- `sudo k3s check-config` passes;
+- one deliberate reboot brings k3s back;
+- a second `-PlanOnly` shows no changes.
+
+The Argo CD UI has no public address. Open the tunnel, then run
 `kubectl --kubeconfig %USERPROFILE%\.procure-ai\hosted\kubeconfig --context procure-hosted -n argocd port-forward svc/argocd-server 8080:80`.
 
-## What it costs, and how to pause it
+## What it costs, and how to stop it
 
-| Item | Per month (checked through the Hetzner API, 2026-11-07) |
+| Item | Per month |
 |---|---|
-| cx43 (fsn1, nbg1 or hel1) | EUR 15.99 net, EUR 18.39 with 15 % VAT |
-| or cx53, only when cx43 is out of stock | EUR 29.49 net, EUR 33.91 with VAT |
-| Primary IPv4 | EUR 0.50 net, EUR 0.58 with VAT |
-| Firewall, private network, SSH key, IPv6, 20 TB traffic, Cloudflare DNS records | free |
-| **Total** | **about EUR 19 per month with cx43, about EUR 34.50 with cx53** (billed by the hour) |
+| Contabo Cloud VPS 8 (order 15654477, monthly term, no add-ons bought) | **EUR 14.00** (0 % VAT on the invoice) |
+| Contabo firewall, SSH key secret, IPv4 and IPv6 included with the VPS, Cloudflare DNS records | free |
 
-Hetzner bills a server for every hour it **exists**, also while it is switched off. To pause the cost, delete it:
+Contabo bills the VPS **until the end of its term**: a monthly contract from 2026-11-07, renewed every month. Stopping, deleting the
+DNS records, or reinstalling the VM does **not** stop the billing. Only a cancellation does, and that is Dale's call:
 
-```powershell
-cd procure-ai-gitops
-./bootstrap/hosted/new-hosted-cluster.ps1 -Destroy
-```
-
-It always uses the hosted state in `%USERPROFILE%\.procure-ai\hosted\` (never a `terraform.tfstate` in the checkout), destroys the
-server, its IPv4, the six DNS records and the free firewall, network and SSH key, and then checks through the Hetzner and Cloudflare
-APIs that no procure-ai server and none of the records is left. Do not run a bare `terraform destroy` in `infra/hetzner`: in a fresh clone
-it would read an empty state, destroy nothing and leave the server billing.
-
-Everything on the VM is lost (the demo data is reseeded every night anyway). `new-hosted-cluster.ps1` and the steps above bring it back
-in about 15 minutes; the new server gets new addresses and Terraform points the DNS records at them in the same apply. No backups, snapshots, volumes or load
-balancers are used (each would bill extra).
+- **Cancel:** in the Contabo customer panel (my.contabo.com, the VPS, "Cancel"), at least **4 weeks** before the end of the current
+  monthly term (Contabo's terms). As a consumer, Dale also has a 14-day right of withdrawal from 2026-11-07.
+- Terraform never cancels. `terraform destroy` fails on `prevent_destroy`, and `./bootstrap/hosted/new-hosted-cluster.ps1 -Destroy` only
+  removes the free parts: the DNS records, the firewall and the SSH key secret. It then forgets the instance in the state. Afterwards it
+  checks through both APIs that the records and the firewall are gone and that the instance is still there and **not** cancelled. Use it to
+  take the demo off its names, not to save money.
+- No backups, snapshots, extra IPs, object storage or private networks are used (each would bill extra). The demo data is reseeded every
+  night, so a reinstall loses nothing that matters.
