@@ -73,8 +73,6 @@ public sealed class PurchaseIndexer(
     /// <param name="attempt">The delivery attempt, 1 for the first (Wolverine's <c>Envelope.Attempts</c>).</param>
     public async Task CompletedAsync(IAssistantDbContext db, RequestCompleted message, int attempt, CancellationToken cancellationToken)
     {
-        // The purchase's embedding counts against the request's tenant's daily token total.
-        using var usage = AiUsageScope.For(message.TenantId);
         var existing = await FindAsync(db, message.RequestId, cancellationToken);
         if (existing is null || !existing.HasSubmitData)
         {
@@ -106,6 +104,9 @@ public sealed class PurchaseIndexer(
         {
             return;
         }
+
+        // The purchase's embedding counts against its tenant's daily token total, whichever event (submit, approve, complete) completes it.
+        using var usage = AiUsageScope.For(purchase.TenantId);
 
         var names = new List<string>();
         foreach (var userId in purchase.ApproverIdList)

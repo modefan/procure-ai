@@ -132,6 +132,9 @@ public sealed class PastPurchasesTests(AssistantApp app)
         var chunk = await WaitForChunkAsync(submitted.RequestId, c => c.Text.Contains("approved by"));
         chunk.Text.ShouldBe(ExpectedText(title));
         (await ChunkCountAsync(submitted.RequestId)).ShouldBe(1L);
+        // Indexed on the submit event, not the completion: its embedding still counts against the tenant's daily tokens.
+        (await app.Services.GetRequiredService<ProcureAi.Assistant.Application.Chat.ITenantTokenBudget>().GetAsync(tenant, Ct)).Used
+            .ShouldBeGreaterThan(0);
     }
 
     [Fact]

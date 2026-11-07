@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProcureAi.Assistant.Application.Abstractions;
 using ProcureAi.Assistant.Application.Ai;
+using ProcureAi.Assistant.Application.Chat;
 using ProcureAi.Assistant.Application.Documents;
 using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Telemetry;
@@ -55,6 +56,7 @@ public sealed class PolicyIngestion(
     IEmbeddingGenerator<string, Embedding<float>> embeddings,
     IAiFailures failures,
     IDatabaseFailures databaseFailures,
+    ITenantTokenBudget budget,
     ICacheInvalidator cache,
     AssistantMetrics metrics,
     IOptions<AiOptions> ai,
@@ -76,11 +78,28 @@ public sealed class PolicyIngestion(
             return;
         }
 
-        // Every model call of the job counts against the document's tenant's daily token total.
+        // Every model call of the job counts against the document's tenant's daily token total, and a tenant that reached its cap
+        // gets no more: checked here (a queued job and every retry pass this point) and before each batch of chunks.
         using var usage = AiUsageScope.For(job.TenantId);
         try
         {
+            await StopIfBudgetSpentAsync(job, cancellationToken);
             await IngestAsync(job, cancellationToken);
+        }
+        catch (BudgetReachedException)
+        {
+            logger.LogWarning(
+                "Policy document {DocumentId} version {Version} stopped: tenant {TenantId} reached its daily AI token limit",
+                job.DocumentId, job.Version, job.TenantId);
+            await EndAsync(job, PolicyDocumentStatus.Failed, BudgetReachedReason, cancellationToken);
+        }
+        catch (GuardBlockedException blocked) when (blocked.Reason == GuardReasons.ProviderFilter)
+        {
+            // The provider's content filter refused a chunk context or embedding call (our document guard had passed it).
+            metrics.GuardBlock("document", blocked.Reason);
+            logger.LogWarning(
+                "Policy document {DocumentId} version {Version} was refused by the model provider's content filter", job.DocumentId, job.Version);
+            await EndAsync(job, PolicyDocumentStatus.Flagged, GuardReasons.Describe(blocked.Reason), cancellationToken);
         }
         catch (TextExtractionException exception)
         {
@@ -118,6 +137,9 @@ public sealed class PolicyIngestion(
             await EndAsync(job, PolicyDocumentStatus.Failed, UnexpectedFailure, cancellationToken);
         }
     }
+
+    /// <summary>The reason shown for a version stopped by the tenant's daily token cap (<c>AI:DailyTokenCapPerTenant</c>).</summary>
+    public const string BudgetReachedReason = "Your organisation reached today's AI limit; upload the file again tomorrow.";
 
     /// <summary>The reason shown for a version whose ingestion failed for an unexpected reason (details are in the log only).</summary>
     public const string UnexpectedFailure = "Ingestion failed unexpectedly.";
@@ -209,6 +231,7 @@ public sealed class PolicyIngestion(
         var step = job.ProgressStep;
         foreach (var batch in todo.Chunk(options.Value.Ingestion.BatchSize))
         {
+            await StopIfBudgetSpentAsync(job, cancellationToken);
             var chunks = await EmbedAsync(job, batch, stored, reusable, model, cancellationToken);
             done += batch.Length;
             var percent = done * 100 / children.Count;
@@ -332,6 +355,32 @@ public sealed class PolicyIngestion(
     /// Runs a call to a model (the guard, the context writer, the embeddings); a failure of it that may pass becomes an
     /// <see cref="AiProviderUnavailableException"/>. Only these calls are classified, so a database timeout is never reported as the model.
     /// </summary>
+    /// <summary>
+    /// Throws <see cref="BudgetReachedException"/> when the document's tenant reached its daily token cap. When Redis cannot be read the
+    /// job goes on (logged): the counting stage undercounts in that case too, and a Redis outage should not fail every document.
+    /// </summary>
+    private async Task StopIfBudgetSpentAsync(Job job, CancellationToken cancellationToken)
+    {
+        TokenBudget today;
+        try
+        {
+            today = await budget.GetAsync(job.TenantId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(exception, "The daily token total of tenant {TenantId} could not be read; ingestion goes on", job.TenantId);
+            return;
+        }
+
+        if (today.Spent)
+        {
+            throw new BudgetReachedException();
+        }
+    }
+
+    /// <summary>The tenant's daily token cap is reached: the version ends <c>Failed</c> with <see cref="BudgetReachedReason"/>, never retried.</summary>
+    private sealed class BudgetReachedException() : Exception("The tenant's daily AI token limit is reached.");
+
     private async Task<T> ModelCallAsync<T>(Func<Task<T>> call, CancellationToken cancellationToken)
     {
         try

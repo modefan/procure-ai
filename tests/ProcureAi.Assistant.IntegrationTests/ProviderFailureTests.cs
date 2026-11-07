@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using ProcureAi.Assistant.Application.Chat;
+using ProcureAi.Assistant.Application.Ingestion;
+using ProcureAi.Assistant.Infrastructure.Persistence;
 using Serilog.Core;
 using Serilog.Events;
 using Shouldly;
@@ -230,6 +232,65 @@ public sealed class ProviderFailureTests(AssistantApp app)
         events.ShouldContain(e => e.Level == LogEventLevel.Warning && e.RenderMessage().Contains("content filter"));
         events.ShouldNotContain(e => e.Level >= LogEventLevel.Error, "a content filter refusal is not an error of ours");
         events.Select(Render).ShouldNotContain(line => line.Contains(marker) || line.Contains("content management policy"));
+    }
+
+    [Fact]
+    public async Task Capped_tenants_queued_ingestion_makes_no_model_calls()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        // The seeded tenants have used their day before this instance starts, and its seed ingestion is already queued.
+        await CapSeededTenantsAsync(1);
+        await using var instance = await StartAsync(model, new()
+        {
+            ["AI:DailyTokenCapPerTenant"] = "1",
+            ["Assistant:Ingestion:ContextualRetrieval"] = "true",
+        });
+
+        foreach (var (tenant, documentId) in DemoSeeder.Documents)
+        {
+            var failed = await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, PolicyDocumentsApi.Admin(tenant), documentId, "Failed");
+            failed.FailureReason.ShouldBe(PolicyIngestion.BudgetReachedReason);
+        }
+
+        model.ChatRequests.ShouldBe(0, "no guard, context or scan call for a capped tenant");
+        model.EmbeddingRequests.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Ingestion_stops_between_batches_once_the_cap_is_reached()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        // Cap 150: the first batch of 4 chunks (4 context calls of 60 tokens, 4 embedding tokens) passes it, so the second never starts.
+        // The seeded tenants are capped already, so the stub sees this tenant's calls only.
+        await CapSeededTenantsAsync(150);
+        await using var instance = await StartAsync(model, new()
+        {
+            ["AI:DailyTokenCapPerTenant"] = "150",
+            ["Assistant:Ingestion:ContextualRetrieval"] = "true",
+        });
+        var tenant = AssistantApp.NewTenant();
+        var admin = PolicyDocumentsApi.Admin(tenant);
+
+        var document = await PolicyDocumentsApi.UploadOkAsync(instance.Client, admin, "policy.md", PolicyDocumentsApi.Markdown("partway", 12));
+        var failed = await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, admin, document.Id, "Failed");
+
+        failed.FailureReason.ShouldBe(PolicyIngestion.BudgetReachedReason);
+        model.ChatRequests.ShouldBe(4, "the first batch's chunk contexts only (Assistant:Ingestion:BatchSize 4)");
+        model.EmbeddingRequests.ShouldBe(1);
+    }
+
+    /// <summary>Puts the demo seed's tenants at <paramref name="tokens"/> today (on the shared Redis, whose cap of 200 000 they stay under).</summary>
+    private async Task CapSeededTenantsAsync(long tokens)
+    {
+        var budget = app.Services.GetRequiredService<ITenantTokenBudget>();
+        foreach (var tenant in DemoSeeder.Documents.Select(d => d.TenantId).Distinct())
+        {
+            var used = (await budget.GetAsync(tenant, Ct)).Used;
+            if (used < tokens)
+            {
+                await budget.AddAsync(tenant, tokens - used, Ct);
+            }
+        }
     }
 
     private static async Task<HttpResponseMessage> ScanAsync(HttpClient client, string token, CancellationToken cancellationToken)
