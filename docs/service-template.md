@@ -113,11 +113,16 @@ documents (plan 05 ruling 4: the Assistant's chat history and invoice scans). Po
 
 ### The Assistant: AI providers and pipelines
 
-- `AI` section (`AiOptions`, validated at startup): `Provider` (`Fake` | `OpenAI`), `Endpoint` and `ApiKey` (both required for `OpenAI`, the
-  key from user secrets or `AI__ApiKey`), `Chat { Model, MaxOutputTokens 800, Timeout 60 s }`, `Embedding { Model, Dimensions }` (must be
+- `AI` section (`AiOptions`, validated at startup): `Provider` (`Fake` | `OpenAI` | `AzureFoundry`), `Endpoint` and `ApiKey` (both required
+  for `OpenAI` and `AzureFoundry`, the key from user secrets or `AI__ApiKey`), `DailyTokenCapPerTenant` (200 000; a tenant past it gets a
+  friendly 429 until midnight), `Chat { Model, MaxOutputTokens 800, MinOutputTokens 1, ReasoningEffort?, SupportsTemperature true,
+  Timeout 60 s }` (a reasoning model such as gpt-5-mini needs `ReasoningEffort None`, `SupportsTemperature false` and
+  `MinOutputTokens 256`), `Embedding { Model, Dimensions }` (must be
   1536, the column), `Guard { Model? }`, `Telemetry { LogContent }` (true only in Development), `Prices` (USD per million tokens, for the
   cost metric), `Fake { StreamDelayMs 15 }`. `Fake` is the default in appsettings: no key, no account. `OpenAI` covers any OpenAI-compatible
-  endpoint (Azure Foundry's `/openai/v1`, OpenAI).
+  endpoint (Azure Foundry's `/openai/v1`, OpenAI); `AzureFoundry` is the same client, named for what runs (deployment names as models).
+  The provider's error bodies never leave the innermost stage (`ProviderErrors`): logs and spans see only the HTTP status and a plain
+  error code.
 - `AiSetup.AddAssistantAi` (Assistant.Infrastructure, the only project that may name a provider SDK:
   `Only_assistant_infrastructure_references_provider_sdks`) registers keyed `IChatClient`s `answer` (an `IAnswerGuardrail` when one is
   registered, then default limits, function invocation (at most `Assistant:Tools:MaxCallsPerQuestion` rounds), OpenTelemetry, logging,

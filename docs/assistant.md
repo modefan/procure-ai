@@ -9,13 +9,13 @@ fact comes from, and can look things up (a request's status, who must approve an
 It also reads supplier invoices from PDF. All AI calls go through Microsoft.Extensions.AI (`IChatClient`,
 `IEmbeddingGenerator`); no provider SDK type is used outside one setup class, and an architecture test keeps it that way.
 
-> **Which model answers today: a built-in demo model.** The plan was GitHub Models for development (free), but GitHub
-> retired it on 2026-07-30. A real provider (Azure AI Foundry or any OpenAI-compatible endpoint) needs a cloud account,
-> which is the owner's call and has not been made yet. Until then the AppHost runs the **Fake provider**: deterministic,
-> no key, no account, no cost. It is labeled **"Demo model"** in the app. It runs the whole pipeline for real (ingestion,
-> embeddings, hybrid search, tools, guards, streaming, telemetry), but its "answers" are extracts: the first sentence (or
-> the table or list) of the top sources, plus a summary of any tool result. Its embeddings are a hashed bag of words, so
-> retrieval is lexical. Switching to a real model is configuration only (below); the code does not change.
+> **Which model answers.** The real provider is **Azure AI Foundry** (`AI:Provider` `AzureFoundry`, its OpenAI-compatible
+> `/openai/v1/` endpoint): chat on a `gpt-5-mini` deployment, embeddings on `text-embedding-3-small` (1 536 dimensions natively).
+> Without AI settings the AppHost runs the **Fake provider**: deterministic, no key, no account, no cost, labeled **"Demo model"**
+> in the app. It runs the whole pipeline for real (ingestion, embeddings, hybrid search, tools, guards, streaming, telemetry),
+> but its "answers" are extracts: the first sentence (or the table or list) of the top sources, plus a summary of any tool
+> result. Its embeddings are a hashed bag of words, so retrieval is lexical. Tests and CI always use it. Switching between them
+> is configuration only (below); the code does not change.
 
 ```mermaid
 flowchart LR
@@ -85,19 +85,32 @@ order it names is chosen when the user can see it), and nothing is saved until t
 **Evaluation.** `tests/ProcureAi.Assistant.Evaluation/eval/questions.json` holds 34 questions with the policy sections
 that answer them. Retrieval is tested on every run: hit@6 (an expected section among the six sources) is **1.00** on the
 seeded policy with the Fake provider (the test requires 0.8). Groundedness and relevance are judged by a model with
-Microsoft.Extensions.AI.Evaluation.Quality in the evaluation project; it spends tokens, so it is outside the CI loop and
-skips until a real provider is configured. It has not been run yet, for that reason.
+Microsoft.Extensions.AI.Evaluation.Quality in the evaluation project, and the guard is measured on the real classifier with the
+red-team set plus a held-out set (`eval/heldout.json`) that no guard was tuned on. Both spend tokens, so they are outside the CI
+loop and skip under the Fake. First real run (2026-11-07, gpt-5-mini, reasoning effort none): groundedness **5.00**, relevance
+**4.24** (of 5; both must reach 4.0); guard: all 105 attacks blocked, 3 of 80 harmless questions blocked (all 12 held-out
+harmless questions passed). The judge is the answering model itself (only one chat deployment so far).
 
 **Switching to a real model.** Set the AppHost user secrets (all optional; without them the Fake provider runs):
 
 ```powershell
 $apphost = "src/AppHost/ProcureAi.AppHost"
-dotnet user-secrets set "AI:Provider" "OpenAI" --project $apphost
-dotnet user-secrets set "AI:Endpoint" "https://<resource>.openai.azure.com/openai/v1/" --project $apphost   # or any OpenAI-compatible endpoint
+dotnet user-secrets set "AI:Provider" "AzureFoundry" --project $apphost   # or OpenAI: any OpenAI-compatible endpoint
+dotnet user-secrets set "AI:Endpoint" "https://<resource>.openai.azure.com/openai/v1/" --project $apphost   # no api-version
 dotnet user-secrets set "AI:ApiKey" "<key>" --project $apphost
-dotnet user-secrets set "AI:Chat:Model" "gpt-4.1-mini" --project $apphost
-dotnet user-secrets set "AI:Embedding:Model" "text-embedding-3-small" --project $apphost   # 1 536 dimensions
+dotnet user-secrets set "AI:Chat:Model" "chat" --project $apphost             # the deployment name
+dotnet user-secrets set "AI:Embedding:Model" "embeddings" --project $apphost  # 1 536 dimensions
+# gpt-5-mini is a reasoning model: no temperature, no reasoning for these short tasks, and room for its output
+dotnet user-secrets set "AI:Chat:ReasoningEffort" "None" --project $apphost
+dotnet user-secrets set "AI:Chat:SupportsTemperature" "false" --project $apphost
+dotnet user-secrets set "AI:Chat:MinOutputTokens" "256" --project $apphost
 ```
+
+A reasoning model counts its thinking against the output limit: with the classifier's limit of 10 tokens gpt-5-mini returned
+no text at all, so every question failed closed. `MinOutputTokens` raises every call's limit to at least that; only the tokens
+produced are billed. The provider's error bodies (which can echo the prompt) are cut to the HTTP status and a plain error code
+before anything logs them. Each tenant may use `AI:DailyTokenCapPerTenant` tokens a day (default 200 000); after that the
+assistant answers "The assistant has reached today's limit for your organisation." until midnight (SAST).
 
 Every chunk stores the model that embedded it, and embeddings are only reused for the same model. After the switch, replace
 each policy document once (Replace on the policy documents screen) so it is embedded by the new model; the dimensions stay

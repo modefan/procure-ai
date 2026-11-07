@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The model-judged evaluation of the Assistant (plan 05 Task 10): groundedness and relevance of real answers to eval/questions.json.
+    The model-judged evaluation of the Assistant (plan 05 Task 10): groundedness and relevance of real answers to eval/questions.json,
+    and the guard on the real classifier (plan 08 Task 9): the red-team set and a held-out set (eval/heldout.json).
     Its name does not end in "Tests" on purpose, so the CI test loop never runs it, and every test skips unless AI__Provider names a real
     provider (it spends tokens). The retrieval half (hit@6 on the same questions) runs in ProcureAi.Assistant.IntegrationTests, on the
     Fake provider too. Reports go to reports/ (gitignored).
@@ -31,6 +32,9 @@
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="eval/questions.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The guard evaluation: the red-team set the unit tests pin on the Fake, and a held-out set no guard was tuned on. -->
+    <Content Include="eval/heldout.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../ProcureAi.Assistant.Tests/Guardrails/redteam.json" Link="eval/redteam.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The Assistant's shipped settings (models, limits), overridden by the environment (AI__Provider, AI__Endpoint, AI__ApiKey ...). -->
     <Content Include="../../src/Services/Assistant/ProcureAi.Assistant.Api/appsettings.json" Link="assistant.appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

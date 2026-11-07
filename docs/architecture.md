@@ -15,7 +15,7 @@ flowchart LR
     Asst -->|"tools, as the user"| Svc
     Asst -->|"chunks, pgvector"| PG
     Asst -->|"conversations, scans"| Mongo
-    Asst <-->|"IChatClient, IEmbeddingGenerator"| Model["Model provider (Fake now, OpenAI-compatible later)"]
+    Asst <-->|"IChatClient, IEmbeddingGenerator"| Model["Model provider (Azure AI Foundry, or the Fake)"]
     GW <-->|"WebSocket /hubs"| Notif["Notifications (SignalR, no database)"]
     Notif -->|"presence, bell items, dedupe keys"| Redis
     MQ -->|"events"| Notif

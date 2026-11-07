@@ -60,6 +60,7 @@ public sealed class AnswerQualityEvaluation
             Assert.Skip("The evaluation needs a real model (it spends tokens): set AI__Provider, AI__Endpoint, AI__ApiKey. Skipped under the Fake provider.");
         }
 
+        using var tokens = new TokenMeter();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddAssistantAi(configuration);
@@ -94,16 +95,16 @@ public sealed class AnswerQualityEvaluation
 
         var averageGroundedness = results.Average(r => r.Groundedness ?? 0);
         var averageRelevance = results.Average(r => r.Relevance ?? 0);
-        var report = await WriteReportAsync(ai, results, averageGroundedness, averageRelevance);
+        var report = await WriteReportAsync(ai, results, averageGroundedness, averageRelevance, tokens.Snapshot());
         TestContext.Current.TestOutputHelper?.WriteLine(string.Create(
-            CultureInfo.InvariantCulture, $"groundedness {averageGroundedness:0.00}, relevance {averageRelevance:0.00}; report: {report}"));
+            CultureInfo.InvariantCulture, $"groundedness {averageGroundedness:0.00}, relevance {averageRelevance:0.00}; {tokens.Snapshot()}; report: {report}"));
 
         averageGroundedness.ShouldBeGreaterThanOrEqualTo(MinimumAverageGroundedness, $"see {report}");
         averageRelevance.ShouldBeGreaterThanOrEqualTo(MinimumAverageRelevance, $"see {report}");
     }
 
     /// <summary>The Assistant's shipped settings, overridden by this project's user secrets and the environment.</summary>
-    private static IConfiguration Configuration() =>
+    internal static IConfiguration Configuration() =>
         new ConfigurationBuilder()
             .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "assistant.appsettings.json"), optional: false)
             .AddUserSecrets<AnswerQualityEvaluation>(optional: true)
@@ -137,7 +138,8 @@ public sealed class AnswerQualityEvaluation
         ];
     }
 
-    private static async Task<string> WriteReportAsync(AiOptions ai, IReadOnlyList<Scored> results, double groundedness, double relevance)
+    private static async Task<string> WriteReportAsync(
+        AiOptions ai, IReadOnlyList<Scored> results, double groundedness, double relevance, TokenTotals tokens)
     {
         var directory = Path.Combine(ProjectDirectory(), "reports");
         Directory.CreateDirectory(directory);
@@ -150,6 +152,7 @@ public sealed class AnswerQualityEvaluation
             questions = results.Count,
             averageGroundedness = Math.Round(groundedness, 2),
             averageRelevance = Math.Round(relevance, 2),
+            tokens,
             results,
         };
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(report, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }), Encoding.UTF8, Ct);
@@ -157,7 +160,7 @@ public sealed class AnswerQualityEvaluation
     }
 
     /// <summary>This project's folder (the report is kept there, not in bin/), found from the output folder upwards.</summary>
-    private static string ProjectDirectory()
+    internal static string ProjectDirectory()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
