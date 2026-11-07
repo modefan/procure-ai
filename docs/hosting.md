@@ -58,6 +58,11 @@ replace the server (all its data) unless `-AllowReplace` is given. Changes to `c
 server (Terraform ignores them); make the change on the VM over SSH too (`ssh -i %USERPROFILE%\.procure-ai\hosted\procure-hosted_ed25519
 procure@<ip>`, using the `known_hosts` file there).
 
+After a new server, check once by hand what the baseline cannot see from outside (the kubelet listens only on the private address):
+`kubectl logs` and `kubectl exec` into a kube-system pod and `kubectl top node` work through the tunnel; a failed SSH login raises
+`Total failed` in `sudo fail2ban-client status sshd`; `sudo k3s check-config` passes on Ubuntu 26.04; one deliberate reboot brings k3s
+back (it waits for the private address); a second `new-hosted-cluster.ps1 -PlanOnly` shows no changes (no provider drift).
+
 The Argo CD UI has no public address: open the tunnel, then
 `kubectl --kubeconfig %USERPROFILE%\.procure-ai\hosted\kubeconfig --context procure-hosted -n argocd port-forward svc/argocd-server 8080:80`.
 
