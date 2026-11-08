@@ -126,6 +126,23 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     }
 
     [Fact]
+    public async Task Logging_out_still_works_while_off()
+    {
+        var tom = await SignedInAsync();
+        var xsrf = await XsrfAsync(tom);
+        await SwitchOffAsync("Off.");
+        await ExpectDisabledAsync(await tom.GetAsync("/bff/user", Ct), "Off.");
+
+        // Leaving is always possible (SystemAvailability:AllowedPaths): the server-side session ends now, not when it expires.
+        using var logout = await tom.SendAsync(Request(HttpMethod.Post, "/bff/logout", ("X-XSRF-TOKEN", xsrf)), Ct);
+
+        logout.StatusCode.ShouldBe(HttpStatusCode.NoContent, await logout.Content.ReadAsStringAsync(Ct));
+        _gateway.Access.SystemEnabled = true;
+        await Task.Delay(TimeSpan.FromSeconds(1.5), Ct);
+        (await tom.GetAsync("/bff/user", Ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task Switching_back_on_lets_calls_through_within_the_cache_duration()
     {
         await SwitchOffAsync("Off.");
@@ -267,6 +284,15 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
         var browser = _gateway.NewBrowser();
         _disposables.Add(browser);
         return browser;
+    }
+
+    /// <summary>The session's anti-forgery token (from the <c>XSRF-TOKEN</c> cookie <c>/bff/user</c> sets).</summary>
+    private static async Task<string> XsrfAsync(HttpClient browser)
+    {
+        using var response = await browser.GetAsync("/bff/user", Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var cookie = response.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("XSRF-TOKEN=", StringComparison.Ordinal));
+        return Uri.UnescapeDataString(cookie["XSRF-TOKEN=".Length..].Split(';')[0]);
     }
 
     private async Task<HttpClient> SignedInAsync()

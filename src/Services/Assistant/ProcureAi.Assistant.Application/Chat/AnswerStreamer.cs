@@ -246,6 +246,20 @@ public sealed class AnswerStreamer(
         answer.Sources = [.. hits!.Select((hit, i) => new SourceRef($"S{i + 1}", hit.ChunkId, hit.Type, hit.Title, hit.SectionPath, hit.Reference))];
         yield return SseEvent.OfSources(answer.Sources);
 
+        // The cap again, right before the expensive calls (the guard classifier and the answer): the rewrite and the query embedding,
+        // or other questions of the tenant meanwhile, may have reached it since the check at the start. Like that check, a refusal here
+        // costs no quota: the question counted at the start is given back.
+        if (await TokenCapReachedAsync(conversation.TenantId, cancellationToken))
+        {
+            metrics.Question("over_token_cap");
+            await quota.ReturnAsync(conversation.TenantId, conversation.UserId, CancellationToken.None);
+            answer.Status = MessageStatus.Failed;
+            await SaveAsync(answer, conversation);
+            await held.DisposeAsync();
+            yield return SseEvent.OfError(429, TokenCapTitle, TokenCapDetail);
+            yield break;
+        }
+
         // 2. The answer, streamed, with the tools of this question (they act as the caller and number new sources on from these).
         var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
         var tools = toolsFactory.Create(answer.Sources, purchasesAllowed);
@@ -327,8 +341,17 @@ public sealed class AnswerStreamer(
                 {
                     // Our guards passed it, the provider's content filter did not: worth a look, but not a failure of ours.
                     metrics.GuardBlock(blocked.Stage, blocked.Reason);
-                    logger.LogWarning(
-                        "The model provider's content filter refused a question in conversation {ConversationId}", conversation.Id);
+                    if (blocked.Stage == GuardBlockedException.InputStage)
+                    {
+                        logger.LogWarning(
+                            "The model provider's content filter refused a question in conversation {ConversationId}", conversation.Id);
+                    }
+                    else
+                    {
+                        // Azure ends a filtered completion with finish_reason content_filter (ProviderErrorChatClient).
+                        logger.LogWarning(
+                            "The model provider's content filter refused an answer in conversation {ConversationId}", conversation.Id);
+                    }
                 }
 
                 answer.Status = MessageStatus.Blocked;
@@ -354,6 +377,20 @@ public sealed class AnswerStreamer(
 
         await SaveAsync(answer, conversation);
         return error;
+    }
+
+    /// <summary>Whether the tenant's daily token cap is reached; false when it cannot be read (the cap is a cost guard, not a gate).</summary>
+    private async Task<bool> TokenCapReachedAsync(string tenant, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (await tokenBudget.GetAsync(tenant, cancellationToken)).Spent;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning(exception, "The daily token total of tenant {TenantId} could not be read before the answer", tenant);
+            return false;
+        }
     }
 
     /// <summary>A provider failure that may pass (unreachable, 429/5xx, a timeout).</summary>

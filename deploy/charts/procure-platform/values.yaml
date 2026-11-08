@@ -160,7 +160,7 @@ debezium:
   # Each replicates as its database's own role <service>_cdc (<service> = the database name without "db"; password: Secret
   # procure-db-roles, key <service>-cdc-password), which the db-roles Job creates.
   postgres:
-    - { database: accessdb, tables: [permission_matrices, permission_grants, departments, cost_centers, tenant_users, audit_entries] }
+    - { database: accessdb, tables: [permission_matrices, permission_grants, departments, cost_centers, tenant_users, system_settings, audit_entries] }
     - { database: budgetsdb, tables: [budgets, budget_reservations, budget_spends, audit_entries] }
     - { database: approvalsdb, tables: [approval_steps, audit_entries] }
     - { database: requestsdb, tables: [purchase_requests, request_lines, audit_entries] }

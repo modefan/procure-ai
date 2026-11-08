@@ -243,6 +243,13 @@ export const AssistantStore = signalStore(
           if (event.data.status === 422) {
             const reason = [event.data.title, event.data.detail].filter((t) => !!t).map((t) => t!.replace(/[.\s]*$/, '.')).join(' ');
             finish(conversationId, 'Blocked', { note: reason || null });
+          } else if (event.data.status === 429) {
+            // The organisation's daily limit, reached after the question started: the same notice as a 429 before the stream.
+            finish(conversationId, 'Failed');
+            patchState(store, (s) => ({
+              notice: { kind: 'quota' as const, title: event.data.title ?? "You've used all your questions for today.", detail: event.data.detail ?? null, retry: false },
+              quota: s.quota ? { ...s.quota, used: Math.max(s.quota.used, s.quota.limit) } : s.quota,
+            }));
           } else {
             log.warn('The answer stream sent an error', { status: event.data.status });
             finish(conversationId, 'Failed');

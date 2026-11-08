@@ -50,7 +50,7 @@ public sealed class SystemAvailabilityOptions : ServiceClientResilienceOptions, 
 
     /// <summary>
     /// Paths below <see cref="BlockedPaths"/> that stay open while the demo is off: the switch itself (the web app reads it, the admin key
-    /// sets it; appsettings: <c>/api/v1/system/availability</c>). Health, Swagger UI and the web app's files are outside the blocked paths anyway.
+    /// sets it; appsettings: <c>/api/v1/system/availability</c>) and logging out (<c>/bff/logout</c>, <c>/bff/logout-all</c>). Health, Swagger UI and the web app's files are outside the blocked paths anyway.
     /// </summary>
     public string[] AllowedPaths { get; set; } = [];
 

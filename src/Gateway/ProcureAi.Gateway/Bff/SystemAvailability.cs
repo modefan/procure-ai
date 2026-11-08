@@ -120,7 +120,7 @@ public sealed class SystemAvailabilityReader(
 /// While the demo is switched off, every browser call to <see cref="SystemAvailabilityOptions.BlockedPaths"/> (the API, the BFF and the hubs)
 /// is answered with 503 ProblemDetails of type <see cref="ProblemType"/> and <c>Retry-After</c>, before authentication and before anything is
 /// proxied, so nothing a visitor does reaches a service; the web app shows its maintenance page on that type. Passes: the
-/// <see cref="SystemAvailabilityOptions.AllowedPaths"/> (the switch itself), everything outside the blocked paths (health, Swagger UI, the
+/// <see cref="SystemAvailabilityOptions.AllowedPaths"/> (the switch itself, and logging out, so a user can always end their session), everything outside the blocked paths (health, Swagger UI, the
 /// web app's files and <c>config.json</c>), and calls with the valid admin API key (a forged <c>X-Api-Key</c> does not pass). Separate from
 /// the nightly reset's <see cref="MaintenanceMiddleware"/>, which only holds back writes for a few minutes.
 /// </summary>

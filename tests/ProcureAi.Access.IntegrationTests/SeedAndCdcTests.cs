@@ -122,6 +122,47 @@ public sealed class SeedAndCdcTests(AccessInfraFixture infra)
         return await command.ExecuteScalarAsync(Ct) is string text ? text : null;
     }
 
+    [Fact]
+    public async Task Cdc_captures_the_demo_switch_with_audit_row()
+    {
+        await infra.EnsureDebeziumAsync();
+        await using var factory = new AccessApiFactory(infra);
+        using var client = factory.CreateClient();
+        await using var cdc = await CdcListener.StartAsync(infra.RabbitConnectionString);
+        var marker = $"Paused for test {Guid.NewGuid():N}";
+
+        async Task SwitchAsync(object body)
+        {
+            using var put = new HttpRequestMessage(HttpMethod.Put, "/api/v1/system/availability") { Content = JsonContent.Create(body) };
+            put.Headers.Add("X-Api-Key", TestAuth.ApiKey);
+            using var response = await client.SendAsync(put, Ct);
+            response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
+        }
+
+        try
+        {
+            await SwitchAsync(new { enabled = false, message = marker });
+
+            var message = await cdc.WaitForAsync(
+                m => m.RoutingKey == "accessdb.public.system_settings" && m.Operation is "c" or "u"
+                     && m.After.GetProperty("message").GetString() == marker,
+                CdcTimeout);
+            message.After.GetProperty("enabled").GetBoolean().ShouldBeFalse();
+            message.After.GetProperty("changed_by").GetString().ShouldBe("claude-admin");
+            await using var db = new Infrastructure.AccessDbContext(
+                new DbContextOptionsBuilder<Infrastructure.AccessDbContext>().UseNpgsql(infra.DbConnectionString).Options);
+            var audit = await db.Set<AuditEntry>()
+                .Where(e => e.Table == "system_settings" && e.TransactionId == message.TransactionId)
+                .SingleAsync(Ct);
+            audit.ActorId.ShouldBe("claude-admin", "the CDC change is matched to the interceptor row, so it shows who switched");
+        }
+        finally
+        {
+            // The shared database's switch goes back on for the other tests.
+            await SwitchAsync(new { enabled = true });
+        }
+    }
+
     private static async Task<Dictionary<string, long>> CountsAsync(string connectionString)
     {
         await using var connection = new NpgsqlConnection(connectionString);

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Chat;
 using ProcureAi.Assistant.Application.Ingestion;
 using ProcureAi.Assistant.Infrastructure.Persistence;
@@ -143,6 +145,31 @@ public sealed class ProviderFailureTests(AssistantApp app)
     }
 
     [Fact]
+    public async Task The_cap_is_checked_again_before_the_answer_call()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new() { ["AI:DailyTokenCapPerTenant"] = "1000" });
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
+        var conversation = await CreateAsync(instance.Client, token);
+        // One token below the cap: the question passes the check at its start, and its query embedding (1 token) reaches the cap.
+        await instance.Services.GetRequiredService<ITenantTokenBudget>().AddAsync(tenant, 999, Ct);
+
+        var result = await AskAsync(instance.Client, token, conversation, Question);
+
+        result.Status.ShouldBe(HttpStatusCode.OK, "the stream had started: the refusal is its error event");
+        var error = result.Of("error").Single().Data;
+        error.GetProperty("status").GetInt32().ShouldBe(429);
+        error.GetProperty("title").GetString().ShouldBe(AnswerStreamer.TokenCapTitle);
+        model.EmbeddingRequests.ShouldBe(1);
+        model.ChatRequests.ShouldBe(0, "neither the guard classifier nor the answer was called");
+        var saved = await WaitForLastMessageAsync(instance.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");
+        saved.GetProperty("status").GetString().ShouldBe("Failed");
+        (await GetOkAsync(instance.Client, ChatApi.Quota, token)).GetProperty("used").GetInt32()
+            .ShouldBe(0, "like the check at the start, a refusal at the cap costs no quota");
+    }
+
+    [Fact]
     public async Task Every_model_path_counts_against_the_tenants_daily_total()
     {
         await using var model = await StubModelServer.StartAsync();
@@ -217,8 +244,11 @@ public sealed class ProviderFailureTests(AssistantApp app)
         var marker = $"zzfilter{Guid.NewGuid():N}"[..20];
         var logs = new CapturingSink();
         await using var model = await StubModelServer.StartAsync();
-        await using var instance = await StartAsync(model, new(), services => services.AddSingleton<ILogEventSink>(logs));
-        var token = User(AssistantApp.NewTenant());
+        // A large output limit, so a charge of the prompt alone is told apart from the whole reservation.
+        await using var instance = await StartAsync(
+            model, new() { ["AI:Chat:MaxOutputTokens"] = "10000" }, services => services.AddSingleton<ILogEventSink>(logs));
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
         model.FailAnswers(request => StubModelError.ContentFilter($"Prompt: {request}"));
 
         var result = await AskAsync(instance.Client, token, await CreateAsync(instance.Client, token), $"{Question} {marker}");
@@ -232,6 +262,100 @@ public sealed class ProviderFailureTests(AssistantApp app)
         events.ShouldContain(e => e.Level == LogEventLevel.Warning && e.RenderMessage().Contains("content filter"));
         events.ShouldNotContain(e => e.Level >= LogEventLevel.Error, "a content filter refusal is not an error of ours");
         events.Select(Render).ShouldNotContain(line => line.Contains(marker) || line.Contains("content management policy"));
+        // Azure bills a prompt-filtered call for the prompt's evaluation: the prompt part of the reservation stays, the output part not.
+        var used = (await instance.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(tenant, Ct)).Used;
+        used.ShouldBeGreaterThan(100, "the answer prompt (sources, tools, question) is charged");
+        used.ShouldBeLessThan(10_000, "nothing was generated, so the output limit is not charged");
+    }
+
+    [Fact]
+    public async Task Answer_the_client_left_mid_stream_still_counts_against_the_cap()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new());
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
+        var conversation = await CreateAsync(instance.Client, token);
+        var budget = instance.Services.GetRequiredService<ITenantTokenBudget>();
+        var outputLimit = instance.Services.GetRequiredService<IOptions<AiOptions>>().Value.Chat.MaxOutputTokens;
+        // The answer streams its first text, then stalls: the usage (in the stream's last chunk) never comes.
+        model.AnswerMode(StubAnswerMode.Stall);
+
+        using (var request = AskRequest(token, conversation, Question))
+        using (var abort = CancellationTokenSource.CreateLinkedTokenSource(Ct))
+        {
+            using var response = await instance.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, abort.Token);
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+            await model.AnswerStalled.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            // The provider has billed the prompt and is producing the answer: the visitor closes the tab.
+            await abort.CancelAsync();
+        }
+
+        // The stopped answer is saved once its model call has ended (and the counting stage has run).
+        var stopped = await WaitForLastMessageAsync(instance.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");
+        stopped.GetProperty("status").GetString().ShouldBe("Stopped");
+        model.AnswerRequests.ShouldBe(1);
+
+        // The reservation made before the answer call (prompt estimate + output limit) stays: the provider may have billed all of it.
+        (await budget.GetAsync(tenant, Ct)).Used.ShouldBeGreaterThanOrEqualTo(outputLimit, "the cancelled answer is charged");
+    }
+
+    [Fact]
+    public async Task Answer_refused_by_the_provider_or_the_breaker_gives_its_reservation_back()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new()
+        {
+            ["AI:Resilience:ProviderMaxRetries"] = "0",
+            ["AI:Resilience:MinimumThroughput"] = "2",
+            ["AI:Resilience:FailureRatio"] = "0.5",
+            ["AI:Resilience:BreakDuration"] = "00:05:00",
+        });
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
+        var outputLimit = instance.Services.GetRequiredService<IOptions<AiOptions>>().Value.Chat.MaxOutputTokens;
+        model.FailAnswers(_ => RateLimited());
+
+        // Two 429s (the provider generated nothing), then the open breaker refuses the third answer before the provider is asked.
+        for (var i = 0; i < 3; i++)
+        {
+            var failed = await AskAsync(instance.Client, token, await CreateAsync(instance.Client, token), Question);
+            failed.Of("error").Single().Data.GetProperty("status").GetInt32().ShouldBe(503);
+        }
+
+        model.AnswerRequests.ShouldBe(2, "the third was refused by the open breaker");
+        // Only the three query embeddings (one token each) count: none of the answer reservations was kept.
+        (await instance.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(tenant, Ct)).Used
+            .ShouldBeLessThan(outputLimit, "refused calls reached no model and are not charged");
+    }
+
+    [Fact]
+    public async Task Answer_cut_by_the_providers_output_filter_is_a_blocked_answer()
+    {
+        var logs = new CapturingSink();
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new(), services => services.AddSingleton<ILogEventSink>(logs));
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
+        var conversation = await CreateAsync(instance.Client, token);
+        // Azure filters a completion by ending the stream with finish_reason content_filter (no error), then sends the usage.
+        model.AnswerMode(StubAnswerMode.Filter);
+
+        var result = await AskAsync(instance.Client, token, conversation, Question);
+
+        result.Status.ShouldBe(HttpStatusCode.OK);
+        var error = result.Of("error").Single().Data;
+        error.GetProperty("status").GetInt32().ShouldBe(422);
+        error.GetProperty("title").GetString().ShouldBe(AnswerStreamer.GuardTitle);
+        result.Of("done").ShouldBeEmpty();
+        model.AnswerRequests.ShouldBe(1, "a refusal is not retried");
+        var saved = await WaitForLastMessageAsync(instance.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");
+        saved.GetProperty("status").GetString().ShouldBe("Blocked");
+        logs.Events.ShouldContain(e => e.Level == LogEventLevel.Warning && e.RenderMessage().Contains("content filter refused an answer"));
+        logs.Events.ShouldNotContain(e => e.Level >= LogEventLevel.Error, "a content filter refusal is not an error of ours");
+        // The stream was read to its end, so its usage still counts.
+        (await instance.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(tenant, Ct)).Used
+            .ShouldBeGreaterThanOrEqualTo(StubModelServer.PromptTokens + StubModelServer.CompletionTokens);
     }
 
     [Fact]
@@ -319,6 +443,13 @@ public sealed class ProviderFailureTests(AssistantApp app)
     /// <summary>Puts the demo seed's tenants at <paramref name="tokens"/> today (on the shared Redis, whose cap of 200 000 they stay under).</summary>
     private async Task CapSeededTenantsAsync(long tokens)
     {
+        // The shared app ingests its own copy of the seed when it starts, counted against the same tenants on the same Redis: wait until it
+        // is done, or its counts land after the totals below were read (the test then failed when it ran first).
+        foreach (var (seededTenant, documentId) in DemoSeeder.Documents)
+        {
+            await PolicyDocumentsApi.WaitForStatusAsync(app.Client, PolicyDocumentsApi.Admin(seededTenant), documentId, "Ready");
+        }
+
         var budget = app.Services.GetRequiredService<ITenantTokenBudget>();
         foreach (var tenant in DemoSeeder.Documents.Select(d => d.TenantId).Distinct())
         {

@@ -152,15 +152,22 @@ public static class AiSetup
     private static IChatClient Timed(IChatClient inner, IServiceProvider services) => new ProviderTimeoutChatClient(inner, Ai(services).Chat.Timeout);
 
     /// <summary>
-    /// The counting stage (<see cref="TokenCountingChatClient"/>): every call's tokens go to the daily total of the flow's tenant
-    /// (<see cref="AiUsageScope"/>, <c>AI:DailyTokenCapPerTenant</c>). Left out where no budget is registered (the evaluation project).
+    /// The counting stage (<see cref="TokenCountingChatClient"/>): every call reserves an estimate on the daily total of the flow's tenant
+    /// (<see cref="AiUsageScope"/>, <c>AI:DailyTokenCapPerTenant</c>) and settles it with the usage the provider reports. Left out where no budget is registered (the evaluation project).
     /// </summary>
     private static IChatClient Counted(IChatClient inner, IServiceProvider services) =>
-        services.GetService<ITenantTokenBudget>() is { } budget ? new TokenCountingChatClient(inner, budget, CallLogger(services)) : inner;
+        services.GetService<ITenantTokenBudget>() is { } budget
+            ? new TokenCountingChatClient(inner, budget, Estimator(services), CallLogger(services))
+            : inner;
 
     private static IEmbeddingGenerator<string, Embedding<float>> CountedEmbeddings(
         IEmbeddingGenerator<string, Embedding<float>> inner, IServiceProvider services) =>
-        services.GetService<ITenantTokenBudget>() is { } budget ? new TokenCountingEmbeddingGenerator(inner, budget, CallLogger(services)) : inner;
+        services.GetService<ITenantTokenBudget>() is { } budget
+            ? new TokenCountingEmbeddingGenerator(inner, budget, Estimator(services), CallLogger(services))
+            : inner;
+
+    /// <summary>The estimate a counting stage reserves before each call (<c>AI:CharsPerTokenEstimate</c>).</summary>
+    private static TokenEstimator Estimator(IServiceProvider services) => new(Ai(services).CharsPerTokenEstimate);
 
     private static IChatClient Traced(IChatClient inner, IServiceProvider services) =>
         new OpenTelemetryChatClient(inner, LoggerFor<OpenTelemetryChatClient>(services), AiClients.TelemetrySource)

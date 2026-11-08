@@ -70,10 +70,11 @@ To save hosting costs the whole demo can be switched off without stopping anythi
 and while it is off the gateway answers every browser call to `/api/**`, `/bff/**` and the hubs with 503 ProblemDetails of type
 `https://procure-ai/problems/system-disabled` (with `Retry-After`), before sign-in and before anything reaches a service. The web app asks
 the switch before it starts and shows only its maintenance page ("This demo is switched off", the stored message or a default text, and a
-"Request access" link when `maintenance.contactUrl` is set in config.json). The switch itself, health, Swagger UI, the web app's files and
-calls with the admin API key keep working. The gateway reads the switch every `SystemAvailability:CacheDuration` (5 s); if Access cannot be
+"Request access" link when `maintenance.contactUrl` is set in config.json). The switch itself, logging out (`/bff/logout`, `/bff/logout-all`), health,
+Swagger UI, the web app's files and calls with the admin API key keep working. The gateway reads the switch every `SystemAvailability:CacheDuration` (5 s); if Access cannot be
 reached it keeps the last answer, and if it never had one it lets calls through. The nightly reset never changes the switch; every change is
-in the data change audit (`system_settings`, by `claude-admin`).
+in the data change audit (`system_settings`, by `claude-admin`), and Debezium captures the table too, so a switch made outside the app
+(manual SQL) shows up as an unmatched change.
 
 Only the admin API key may switch it (`PUT`, any user token is 403); anyone may read it (`GET /api/v1/system/availability`):
 
@@ -96,7 +97,10 @@ Live connections (SignalR) that were open when the demo was switched off are not
 connection keeps carrying presence heartbeats until the browser's next HTTP call or reconnect gets the 503, which takes it to the
 maintenance page and stops the connection. The gateway reads the switch with its service-account token, so Access counts the read in the internal service
 accounts' rate-limit partition (the shared `procure-internal` client, also used by the other services' calls to Access), which no visitor can
-reach: a flood of anonymous reads through the gateway cannot starve it. When it cannot get a token, it reads anonymously. The web app waits at most
+reach: a flood of anonymous reads through the gateway cannot starve it. When it cannot get a token, it reads anonymously. The web app's own
+anonymous reads of the switch all reach Access from the gateway's address, so they share one anonymous rate-limit partition there: a
+visitor flooding them (within the gateway's per-address limit) can make other visitors' reads fail, and the web app then starts as if the
+demo were on (fail open). Accepted: the 1 s read cache absorbs most of such a flood and the gateway's own enforcement is unaffected. The web app waits at most
 `maintenance.checkTimeoutMs` (config.json, 4 s) for the switch at start-up, then starts as if it were on.
 
 This is separate from the nightly reset's short maintenance window (writes only, a Redis flag with a TTL).

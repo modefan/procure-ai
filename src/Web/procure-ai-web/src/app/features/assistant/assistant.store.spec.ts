@@ -172,6 +172,27 @@ describe('AssistantStore', () => {
     expect(store.messages().map((m) => m.role)).toEqual(['User']);
   });
 
+  it('a 429 error event (the daily limit reached mid-question) shows the limit notice, not unavailable', async () => {
+    const store = setup();
+    await asking(store);
+    streams.last.emit({ type: 'sources', data: [] });
+    streams.last.emit({
+      type: 'error',
+      data: { status: 429, title: "The assistant has reached today's limit for your organisation.", detail: 'It answers again after midnight.' },
+    });
+    streams.last.end();
+    await flush();
+
+    expect(store.streaming()).toBeNull();
+    expect(store.messages()[1]).toMatchObject({ role: 'Assistant', status: 'Failed' });
+    expect(store.notice()).toEqual({
+      kind: 'quota',
+      title: "The assistant has reached today's limit for your organisation.",
+      detail: 'It answers again after midnight.',
+      retry: false,
+    });
+  });
+
   it('a stream that breaks off (network) is unavailable too, never a spinner', async () => {
     const store = setup();
     await asking(store);

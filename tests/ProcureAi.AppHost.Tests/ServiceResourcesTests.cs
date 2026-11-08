@@ -147,7 +147,7 @@ public sealed class ServiceResourcesTests
         debeziumEnv.ShouldContainKeyAndValue("DEBEZIUM_SOURCE_DATABASE_DBNAME", "accessdb");
         debeziumEnv.ShouldContainKeyAndValue(
             "DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST",
-            "public.permission_matrices,public.permission_grants,public.departments,public.cost_centers,public.tenant_users,public.audit_entries");
+            "public.permission_matrices,public.permission_grants,public.departments,public.cost_centers,public.tenant_users,public.system_settings,public.audit_entries");
         api.Annotations.OfType<WaitAnnotation>()
             .ShouldContain(w => w.Resource == migrate && w.WaitType == WaitType.WaitForCompletion);
         api.Annotations.OfType<WaitAnnotation>().ShouldContain(w => w.Resource == debezium && w.WaitType == WaitType.WaitUntilHealthy);
