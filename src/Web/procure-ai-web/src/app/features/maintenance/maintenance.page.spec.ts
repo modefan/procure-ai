@@ -2,16 +2,16 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
 import { AppConfigService } from '../../core/config/app-config';
-import { SystemAvailability } from '../../core/system/system-availability';
+import { AvailabilityAnswer, SystemAvailability } from '../../core/system/system-availability';
 import { DEFAULT_MAINTENANCE_TEXT, MaintenancePage } from './maintenance.page';
 
 describe('MaintenancePage', () => {
   const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  let check: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
+  let read: ReturnType<typeof vi.fn<() => Promise<AvailabilityAnswer>>>;
   let load: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    check = vi.fn<() => Promise<boolean>>();
+    read = vi.fn<() => Promise<AvailabilityAnswer>>();
     load = vi.fn().mockResolvedValue(undefined);
     TestBed.configureTestingModule({
       providers: [provideRouter([]), { provide: AuthStore, useValue: { load } }],
@@ -21,10 +21,10 @@ describe('MaintenancePage', () => {
   const render = async (message: string | null, contact?: { contactUrl: string; contactLabel: string }) => {
     const availability = TestBed.inject(SystemAvailability);
     availability.markDisabled(message);
-    vi.spyOn(availability, 'check').mockImplementation(check);
+    vi.spyOn(availability, 'read').mockImplementation(read);
     if (contact) {
       const config = TestBed.inject(AppConfigService);
-      config.config.update((c) => ({ ...c, maintenance: contact }));
+      config.config.update((c) => ({ ...c, maintenance: { ...c.maintenance, ...contact } }));
     }
     const fixture = TestBed.createComponent(MaintenancePage);
     fixture.detectChanges();
@@ -59,7 +59,7 @@ describe('MaintenancePage', () => {
   });
 
   it('try again while still off says so and stays', async () => {
-    check.mockResolvedValue(false);
+    read.mockResolvedValue({ enabled: false, message: null });
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     const { fixture, el } = await render(null);
 
@@ -72,15 +72,38 @@ describe('MaintenancePage', () => {
     expect(load).not.toHaveBeenCalled();
   });
 
-  it('try again once it is on checks the session and opens the welcome page', async () => {
-    check.mockResolvedValue(true);
+  it('try again once it is on checks the session and opens the welcome page, and only then shows the app again', async () => {
+    read.mockResolvedValue({ enabled: true, message: null });
+    const availability = TestBed.inject(SystemAvailability);
+    const seen: { step: string; disabled: boolean }[] = [];
+    load.mockImplementation(async () => void seen.push({ step: 'load', disabled: availability.disabled() }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockImplementation(async () => {
+      seen.push({ step: 'navigate', disabled: availability.disabled() });
+      return true;
+    });
+    const { fixture, el } = await render(null);
+
+    el.querySelector('button')!.click();
+    await fixture.whenStable();
+
+    expect(navigate).toHaveBeenCalledWith('/');
+    expect(seen).toEqual([
+      { step: 'load', disabled: true },
+      { step: 'navigate', disabled: true },
+    ]);
+    expect(availability.disabled()).toBe(false);
+  });
+
+  it('try again once it is on still opens the welcome page when the session check fails', async () => {
+    read.mockResolvedValue({ enabled: true, message: null });
+    load.mockRejectedValue(new Error('gateway down'));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     const { fixture, el } = await render(null);
 
     el.querySelector('button')!.click();
     await fixture.whenStable();
 
-    expect(load).toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith('/');
+    expect(TestBed.inject(SystemAvailability).disabled()).toBe(false);
   });
 });

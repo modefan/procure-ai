@@ -10,7 +10,7 @@ import { Logger } from '../logging/logger';
 import { CORRELATION_HEADER } from './correlation.interceptor';
 import { isOwnRequest } from './own-requests';
 import { SKIP_FORBIDDEN_REDIRECT } from './skip-forbidden';
-import { disabledDetail, isSystemDisabled, MAINTENANCE_PATH, SystemAvailability } from '../system/system-availability';
+import { disabledMessage, isSystemDisabled, MAINTENANCE_PATH, SystemAvailability } from '../system/system-availability';
 
 // Kept in its own file so the auth store can use it without importing this interceptor (which imports the store).
 export { SKIP_FORBIDDEN_REDIRECT } from './skip-forbidden';
@@ -35,7 +35,7 @@ export const errorsInterceptor: HttpInterceptorFn = (request, next) => {
   return next(request).pipe(
     catchError((error: unknown) => {
       if (ownRequest && isSystemDisabled(error)) {
-        availability.markDisabled(disabledDetail(error));
+        availability.markDisabled(disabledMessage(error));
         void router.navigateByUrl(MAINTENANCE_PATH);
         return throwError(() => error);
       }

@@ -17,8 +17,9 @@ import { SystemAvailability } from './core/system/system-availability';
       <app-shell />
       <app-session-expired-dialog />
       <app-conflict-dialog />
-      <app-confirm-dialog />
     }
+    <!-- Outside the switch: a question being asked (e.g. "Leave without saving?") must never lose its dialog half-way. -->
+    <app-confirm-dialog />
   `,
 })
 export class App {

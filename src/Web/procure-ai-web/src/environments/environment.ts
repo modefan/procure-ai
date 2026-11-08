@@ -32,5 +32,5 @@ export const environment: AppConfig = {
   // Off by default; local and demo set it in config.json (the server needs DevPanel:Enabled too).
   devPanel: { enabled: false },
   // The maintenance page's "request access" link. Empty: no link (deployments set their own in config.json).
-  maintenance: { contactUrl: '', contactLabel: '' },
+  maintenance: { contactUrl: '', contactLabel: '', checkTimeoutMs: 4000 },
 };

@@ -92,7 +92,10 @@ describe('http interceptors', () => {
     const call = firstValueFrom(http.get('/api/v1/requests')).catch((e: unknown) => e);
     backend
       .expectOne('/api/v1/requests')
-      .flush({ type: SYSTEM_DISABLED_TYPE, status: 503, detail: 'Back on Monday.' }, { status: 503, statusText: 'Service Unavailable' });
+      .flush(
+        { type: SYSTEM_DISABLED_TYPE, status: 503, detail: 'Back on Monday.', message: 'Back on Monday.' },
+        { status: 503, statusText: 'Service Unavailable' },
+      );
 
     expect(await call).toBeInstanceOf(HttpErrorResponse);
     expect(navigate).toHaveBeenCalledWith('/maintenance');
@@ -100,6 +103,22 @@ describe('http interceptors', () => {
     expect(availability.disabled()).toBe(true);
     expect(availability.message()).toBe('Back on Monday.');
     expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('503 system-disabled without a stored message keeps the page default (not the gateway detail)', async () => {
+    vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const call = firstValueFrom(http.get('/api/v1/requests')).catch((e: unknown) => e);
+    backend
+      .expectOne('/api/v1/requests')
+      .flush(
+        { type: SYSTEM_DISABLED_TYPE, status: 503, detail: 'The gateway default text.', message: null },
+        { status: 503, statusText: 'Service Unavailable' },
+      );
+    await call;
+
+    const availability = TestBed.inject(SystemAvailability);
+    expect(availability.disabled()).toBe(true);
+    expect(availability.message()).toBeNull();
   });
 
   it('any other 503 does not go to the maintenance page', async () => {

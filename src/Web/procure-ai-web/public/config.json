@@ -28,6 +28,7 @@
   },
   "maintenance": {
     "contactUrl": "",
-    "contactLabel": ""
+    "contactLabel": "",
+    "checkTimeoutMs": 4000
   }
 }

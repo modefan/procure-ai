@@ -41,11 +41,17 @@ describe('merge (live and cache settings)', () => {
   });
 
   it('maintenance contact: a safe link and its label from config.json, anything else is no link', () => {
-    expect(merge(environment, {}).maintenance).toEqual({ contactUrl: '', contactLabel: '' });
+    expect(merge(environment, {}).maintenance).toEqual({ contactUrl: '', contactLabel: '', checkTimeoutMs: 4000 });
     expect(merge(environment, { maintenance: { contactUrl: 'https://example.org/ask', contactLabel: ' Ask for access ' } }).maintenance)
-      .toEqual({ contactUrl: 'https://example.org/ask', contactLabel: 'Ask for access' });
+      .toEqual({ contactUrl: 'https://example.org/ask', contactLabel: 'Ask for access', checkTimeoutMs: 4000 });
     expect(merge(environment, { maintenance: { contactUrl: 'mailto:demo@example.org' } }).maintenance.contactUrl).toBe('mailto:demo@example.org');
     expect(merge(environment, { maintenance: { contactUrl: 'javascript:alert(1)' } }).maintenance.contactUrl).toBe('');
     expect(merge(environment, { maintenance: { contactUrl: '/relative' } }).maintenance.contactUrl).toBe('');
+  });
+
+  it('maintenance check timeout: a positive number from config.json, otherwise the default', () => {
+    expect(merge(environment, { maintenance: { checkTimeoutMs: 2500 } }).maintenance.checkTimeoutMs).toBe(2500);
+    expect(merge(environment, { maintenance: { checkTimeoutMs: 0 } }).maintenance.checkTimeoutMs).toBe(4000);
+    expect(merge(environment, { maintenance: { checkTimeoutMs: '9' } }).maintenance.checkTimeoutMs).toBe(4000);
   });
 });

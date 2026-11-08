@@ -1,7 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { isSystemDisabled, MAINTENANCE_PATH, startUp, SYSTEM_DISABLED_TYPE, SystemAvailability } from './system-availability';
+import { AppConfigService } from '../config/app-config';
+import {
+  disabledMessage,
+  isSystemDisabled,
+  MAINTENANCE_PATH,
+  startUp,
+  SYSTEM_DISABLED_TYPE,
+  SystemAvailability,
+} from './system-availability';
 
 describe('SystemAvailability', () => {
   let http: HttpTestingController;
@@ -42,6 +50,39 @@ describe('SystemAvailability', () => {
     expect(availability.disabled()).toBe(false);
   });
 
+  it('a 503 system-disabled answer counts as off, with its stored message', async () => {
+    expect(await answer({ type: SYSTEM_DISABLED_TYPE, detail: 'gateway default', message: null }, 503)).toBe(false);
+    expect(availability.disabled()).toBe(true);
+    expect(availability.message()).toBeNull();
+  });
+
+  it('read() answers without changing what the app shows; apply() shows it', async () => {
+    const read = availability.read();
+    (await vi.waitFor(() => http.expectOne(url))).flush({ enabled: false, message: 'Off.' });
+
+    const result = await read;
+    expect(result).toEqual({ enabled: false, message: 'Off.' });
+    expect(availability.disabled()).toBe(false);
+
+    availability.apply(result);
+    expect(availability.disabled()).toBe(true);
+    expect(availability.message()).toBe('Off.');
+  });
+
+  it('a read slower than maintenance.checkTimeoutMs counts as on (the start is not held up)', async () => {
+    TestBed.inject(AppConfigService).config.update((c) => ({ ...c, maintenance: { ...c.maintenance, checkTimeoutMs: 30 } }));
+    const started = Date.now();
+
+    const checked = availability.check();
+    const pending = await vi.waitFor(() => http.expectOne(url));
+
+    expect(await checked).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(availability.disabled()).toBe(false);
+    pending.flush({ enabled: false, message: 'Too late.' });
+    expect(availability.disabled()).toBe(false);
+  });
+
   it('switched back on clears an earlier off', async () => {
     availability.markDisabled('Off.');
     expect(await answer({ enabled: true, message: null })).toBe(true);
@@ -59,6 +100,12 @@ describe('isSystemDisabled', () => {
     expect(isSystemDisabled(error(503, null))).toBe(false);
     expect(isSystemDisabled(error(500, { type: SYSTEM_DISABLED_TYPE }))).toBe(false);
     expect(isSystemDisabled(new Error('x'))).toBe(false);
+  });
+
+  it('disabledMessage reads the stored message (the message extension), never the gateway detail', () => {
+    expect(disabledMessage(error(503, { type: SYSTEM_DISABLED_TYPE, detail: 'x', message: ' Back soon. ' }))).toBe('Back soon.');
+    expect(disabledMessage(error(503, { type: SYSTEM_DISABLED_TYPE, detail: 'gateway default', message: null }))).toBeNull();
+    expect(disabledMessage(error(503, { type: SYSTEM_DISABLED_TYPE, detail: 'gateway default' }))).toBeNull();
   });
 });
 

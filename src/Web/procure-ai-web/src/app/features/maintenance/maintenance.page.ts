@@ -65,13 +65,21 @@ export class MaintenancePage {
     this.checking.set(true);
     this.stillOff.set(false);
     try {
-      if (await this.availability.check()) {
-        // Back on: find out who is signed in (skipped while off), then the welcome page, which leads on from there.
-        await this.auth.load();
-        await this.router.navigateByUrl('/');
-      } else {
+      const answer = await this.availability.read();
+      if (!answer.enabled) {
+        this.availability.apply(answer);
         this.stillOff.set(true);
+        return;
       }
+      // Back on. First find out who is signed in (skipped while off) and open the welcome page, and only then show the app again, so the
+      // shell never renders around this page. A failed session check is no reason to stay here: the welcome page offers the sign-in.
+      try {
+        await this.auth.load();
+      } catch {
+        // Nobody counts as signed in; the welcome page leads to the sign-in.
+      }
+      await this.router.navigateByUrl('/');
+      this.availability.apply(answer);
     } finally {
       this.checking.set(false);
     }

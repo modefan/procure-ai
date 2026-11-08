@@ -1,5 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { inject, Injector, Service, signal } from '@angular/core';
+import { AppConfigService } from '../config/app-config';
 
 /** The `type` of the gateway's 503 while the demo is switched off. */
 export const SYSTEM_DISABLED_TYPE = 'https://procure-ai/problems/system-disabled';
@@ -18,11 +19,23 @@ export function isSystemDisabled(error: unknown): error is HttpErrorResponse {
   );
 }
 
-/** The `detail` of that answer (the stored message or the gateway's default text); null when there is none. */
-export function disabledDetail(error: HttpErrorResponse): string | null {
-  const detail = (error.error as { detail?: unknown }).detail;
-  return typeof detail === 'string' && detail.trim() !== '' ? detail : null;
+/**
+ * The stored message of that answer (its `message` extension; null when none was stored), so the page shows the same texts whether the app
+ * read the switch itself or a call was refused. Not `detail`: without a message the gateway puts its own default text there.
+ */
+export function disabledMessage(error: HttpErrorResponse): string | null {
+  const message = (error.error as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim() !== '' ? message.trim() : null;
 }
+
+/** What the switch says: on or off, and the stored message while off (null: the page's default text). */
+export interface AvailabilityAnswer {
+  enabled: boolean;
+  message: string | null;
+}
+
+/** The answer when the switch cannot be read: on (fail open, as in the gateway). */
+const ON: AvailabilityAnswer = { enabled: true, message: null };
 
 /**
  * Is the demo switched on? Access holds the switch (`GET /api/v1/system/availability`, anonymous); the gateway refuses the browser's other
@@ -31,6 +44,7 @@ export function disabledDetail(error: HttpErrorResponse): string | null {
 @Service()
 export class SystemAvailability {
   private readonly injector = inject(Injector);
+  private readonly config = inject(AppConfigService);
   /**
    * The generated client, loaded as a chunk of its own: imported statically it would pull the generated client's shared code into the
    * initial bundle. The import starts when the service is created (the app initializer, before config.json is in), so it costs no extra wait.
@@ -44,29 +58,49 @@ export class SystemAvailability {
   readonly message = signal<string | null>(null);
 
   /**
-   * Asks Access. True when the demo is on. A failed read (gateway or Access unreachable) counts as on, as in the gateway: an unreadable
-   * switch never locks anyone out, and the app's own error handling shows what is really wrong.
+   * Asks Access, without changing what the app shows (see {@link apply}). A failed read (gateway or Access unreachable) or one slower than
+   * `maintenance.checkTimeoutMs` counts as on, as in the gateway: an unreadable switch never locks anyone out (nor holds the app's start), and
+   * the app's own error handling shows what is really wrong. A late answer is ignored here; a late "off" refusal still reaches the
+   * interceptor, which shows the maintenance page then.
    */
-  async check(): Promise<boolean> {
+  async read(): Promise<AvailabilityAnswer> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<AvailabilityAnswer>((resolve) => {
+      timer = setTimeout(() => resolve(ON), this.config.config().maintenance.checkTimeoutMs);
+    });
     try {
-      const { SystemService } = await this.client;
-      const answer = await this.injector.get(SystemService).getSystemAvailability();
-      this.disabled.set(!answer.enabled);
-      this.message.set(answer.enabled ? null : (answer.message?.trim() || null));
-    } catch (error) {
-      if (isSystemDisabled(error)) {
-        this.markDisabled(disabledDetail(error));
-      } else {
-        this.disabled.set(false);
-      }
+      return await Promise.race([this.ask(), timedOut]);
+    } finally {
+      clearTimeout(timer);
     }
-    return !this.disabled();
+  }
+
+  /** Shows what an answer says: the maintenance page while off, the app while on. */
+  apply(answer: AvailabilityAnswer): void {
+    this.message.set(answer.enabled ? null : answer.message);
+    this.disabled.set(!answer.enabled);
+  }
+
+  /** Reads the switch and shows what it says. True when the demo is on. */
+  async check(): Promise<boolean> {
+    const answer = await this.read();
+    this.apply(answer);
+    return answer.enabled;
   }
 
   /** A call was refused because the demo is off (the gateway's 503): show the maintenance page from now on. */
   markDisabled(message: string | null): void {
-    this.message.set(message);
-    this.disabled.set(true);
+    this.apply({ enabled: false, message });
+  }
+
+  private async ask(): Promise<AvailabilityAnswer> {
+    try {
+      const { SystemService } = await this.client;
+      const answer = await this.injector.get(SystemService).getSystemAvailability();
+      return answer.enabled ? ON : { enabled: false, message: answer.message?.trim() || null };
+    } catch (error) {
+      return isSystemDisabled(error) ? { enabled: false, message: disabledMessage(error) } : ON;
+    }
   }
 }
 

@@ -57,6 +57,11 @@ export interface MaintenanceConfig {
   contactUrl: string;
   /** The text of that link; empty = "Request access". */
   contactLabel: string;
+  /**
+   * How long the start-up (and "Try again") read of the switch may take, in ms. After that the demo counts as on (fail open, as in the
+   * gateway): a hung Access must not hold the app's start for the gateway's whole proxy timeout.
+   */
+  checkTimeoutMs: number;
 }
 
 export interface AppConfig {
@@ -139,6 +144,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
     maintenance: {
       contactUrl: contactUrl(maintenance['contactUrl'], defaults.maintenance.contactUrl),
       contactLabel: typeof maintenance['contactLabel'] === 'string' ? maintenance['contactLabel'].trim() : defaults.maintenance.contactLabel,
+      checkTimeoutMs: positive(maintenance['checkTimeoutMs'], defaults.maintenance.checkTimeoutMs),
     },
   };
 }
