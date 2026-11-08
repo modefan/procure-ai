@@ -51,8 +51,9 @@ public sealed class AppFixture : IAsyncLifetime
 
     /// <summary>
     /// External target only: the user-secrets store holding that deployment's demo password (default the AppHost's; the hosted demo's is
-    /// <c>procure-ai-hosted</c>, the GitOps repo's bootstrap/new-secrets.ps1 -Environment hosted). Its admin key comes from DEMO_ADMIN_API_KEY
-    /// in the test process's environment.
+    /// <c>procure-ai-hosted</c>, the GitOps repo's bootstrap/new-secrets.ps1 -Environment hosted). With a store named here, the admin key comes
+    /// from that store too (<c>Parameters:admin-api-key</c>), never from DEMO_ADMIN_API_KEY: the local key is never sent to another
+    /// deployment because a variable was not overridden (plan 08 Task 12 review).
     /// </summary>
     public const string UserSecretsIdVariable = "PROCUREAI_E2E_USER_SECRETS_ID";
 
@@ -156,15 +157,24 @@ public sealed class AppFixture : IAsyncLifetime
         GatewayUrl = new Uri(gatewayUrl.TrimEnd('/') + "/");
         var keycloak = Environment.GetEnvironmentVariable(KeycloakUrlVariable);
         KeycloakUrl = new Uri(string.IsNullOrWhiteSpace(keycloak) ? $"{GatewayUrl.Scheme}://auth.{GatewayUrl.Authority}" : keycloak);
-        var secretsId = Environment.GetEnvironmentVariable(UserSecretsIdVariable) is { Length: > 0 } id ? id : AppHostUserSecretsId;
-        _demoPassword = new ConfigurationBuilder()
-            .AddUserSecrets(secretsId)
-            .Build()["Parameters:keycloak-demo-password"];
+        var targetStore = Environment.GetEnvironmentVariable(UserSecretsIdVariable) is { Length: > 0 } id ? id : null;
+        var secrets = new ConfigurationBuilder()
+            .AddUserSecrets(targetStore ?? AppHostUserSecretsId)
+            .Build();
+        _demoPassword = secrets["Parameters:keycloak-demo-password"];
+        if (targetStore is not null)
+        {
+            // The target's own key (the deployment's Secrets are made from this store), whatever DEMO_ADMIN_API_KEY holds.
+            _adminApiKey = secrets["Parameters:admin-api-key"];
+        }
 
         if (string.IsNullOrEmpty(_adminApiKey) || string.IsNullOrEmpty(_demoPassword))
         {
-            _skipReason = "End-to-end tests need the user environment variable DEMO_ADMIN_API_KEY and the AppHost user secret "
-                          + "Parameters:keycloak-demo-password (see DEMO PASSWORDS.txt). Not set, so the tests are skipped.";
+            _skipReason = targetStore is null
+                ? "End-to-end tests need the user environment variable DEMO_ADMIN_API_KEY and the AppHost user secret "
+                  + "Parameters:keycloak-demo-password (see DEMO PASSWORDS.txt). Not set, so the tests are skipped."
+                : $"End-to-end tests against this deployment need Parameters:admin-api-key and Parameters:keycloak-demo-password in the "
+                  + $"user-secrets store {targetStore} ({UserSecretsIdVariable}). Not set, so the tests are skipped.";
             return;
         }
 
