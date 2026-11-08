@@ -233,7 +233,16 @@ Who can sign in, and with what rights:
 | `claude` | API token only (no UI login): `Authorization: Bearer $env:ARGOCD_AUTH_TOKEN_HOSTED` on Argo CD's REST API; a new token from `./bootstrap/new-argocd-token.ps1 -Environment hosted` | `role:admin` |
 
 Without the tunnel nothing of this is reachable. Claude also keeps `kubectl` (and `argocd --core`, which uses the kubeconfig) through the
-tunnel, so no Argo CD admin function depends on Keycloak. The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC),
+tunnel, so no Argo CD admin function depends on Keycloak. The Keycloak sign-in is for the UI only: `argocd login --sso` would need the
+CLI's callback `http://localhost:8085/auth/callback`, which the client deliberately does not allow (Claude uses its API token). Inside the
+cluster argocd-server accepts no connection at all (a NetworkPolicy in `envs/hosted/argocd.yaml`: no pod can try the admin password; the
+port-forward does not go through the pod network).
+
+**Trust boundary.** The `procure` realm is also Argo CD's admin directory: whoever can add a user to `argocd-admins` becomes Argo CD admin
+and so cluster admin. Besides the Keycloak bootstrap admin, Access's service account `procure-access-admin` (roles `manage-users` and
+`manage-realm`, for the demo's organizations) can do that, so a compromise of the Access service or its client secret reaches the cluster,
+not only the realm; the tunnel still stands in front of Argo CD. Accepted for the demo (one directory, like AD at work); a separate,
+non-public `ops` realm for Argo CD would remove it. The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC),
 `envs/hosted/argocd.yaml` (url, OIDC issuer) and `envs/hosted/apps.yaml` (admin login on, no ingress). Keycloak's side (client
 `argocd`, group `argocd-admins`, the `groups` claim) is in `infra/keycloak/procure-realm.json`; its redirect URIs follow the platform
 chart's `keycloak.argocdUrl` (`http://127.0.0.1:8080` on hosted, so the port-forward must use port 8080 for the Keycloak sign-in).
@@ -247,13 +256,18 @@ or stores it:
 
 ```powershell
 cd procure-ai-gitops
-./bootstrap/add-argocd-admin.ps1 -UserName dale -Email you@example.com -FirstName Dale -LastName Abels   # asks for the password twice
-./bootstrap/hosted/open-argocd.ps1                                                                      # then "Log in via Keycloak"
+./bootstrap/add-argocd-admin.ps1 -UserName you@example.com -FirstName Dale -LastName Abels   # asks for the password twice
+./bootstrap/hosted/open-argocd.ps1                                                           # then "Log in via Keycloak"
 ```
 
-- The realm uses the e-mail as the user name when one is given, so you sign in with the e-mail address.
+- The realm uses the e-mail address as the user name, so `-UserName` is your address and you sign in with it.
 - The user is created enabled, e-mail verified and in no organization (so it is not a tenant user of the demo), and added to the group
   `argocd-admins`. Argo CD's *User Info* then shows that group.
+- The script refuses demo users, before changing anything: an address in a demo domain (`*.test`), a service account, one of the realm
+  file's fixed user IDs, a member of any organization, and an address that finds a different user by e-mail than by user name (no
+  e-mail fallback). `tests/Test-AddArgocdAdmin.ps1` in the GitOps repo proves each refusal against the live Keycloak.
+- Signing in to the procure app with this user does not make it a demo user: the gateway joins tenantless users to the Demo company only
+  when `Registration:Enabled` is on (off, like self-registration, `docs/demo.md`). It would see no company and no data.
 - Run it again with `-ResetPassword` for a new password, or `-Remove` to take the admin role away (the user stays).
 - Nothing in Git lists your user, so the keycloak-config Job (it re-applies the realm file on every sync) leaves it and its group
   membership alone.

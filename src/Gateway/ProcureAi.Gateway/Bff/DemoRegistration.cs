@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Options;
+using ProcureAi.Gateway.Configuration;
 
 namespace ProcureAi.Gateway.Bff;
 
@@ -8,13 +10,21 @@ namespace ProcureAi.Gateway.Bff;
 /// Moves a signed-in user who belongs to no tenant (just self-registered) into the demo company: asks Access to register
 /// them, then refreshes the session's tokens at the identity provider so the new <c>tenant</c> and roles claims appear.
 /// Never throws: any failure leaves the session as it was, and the caller answers as for a user without a tenant.
+/// Only when <c>Registration:Enabled</c> is on; otherwise a user without a tenant stays without one.
 /// </summary>
 public sealed class DemoRegistration(
-    IRegistrationClient registrations, TokenRefresher refresher, TimeProvider time, ILogger<DemoRegistration> logger)
+    IRegistrationClient registrations, TokenRefresher refresher, TimeProvider time, IOptions<RegistrationOptions> options,
+    ILogger<DemoRegistration> logger)
 {
     /// <returns>True when the session now carries the new tokens (and <c>http.User</c> the new claims).</returns>
     public async Task<bool> TryJoinAsync(HttpContext http)
     {
+        if (!options.Value.Enabled)
+        {
+            // Self-registration is off: a tenantless user (e.g. an admin's own Keycloak user) is not made a demo user.
+            return false;
+        }
+
         var cancellationToken = http.RequestAborted;
         try
         {

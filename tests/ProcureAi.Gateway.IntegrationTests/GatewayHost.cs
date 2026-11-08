@@ -83,6 +83,9 @@ public sealed class GatewayHost : IAsyncDisposable
             // Every host its own maintenance flag (tests share one Redis): a flag one test sets never blocks another's writes.
             ["DemoReset:MaintenanceKey"] = keyPrefix + "maintenance",
             ["RateLimiting:PermitLimit"] = "100000",
+            // The test realm allows self-registration (KeycloakFixture), so the gateway joins new users to the demo company here; the
+            // shipped default is off (RegistrationOptions.Enabled).
+            ["Registration:Enabled"] = "true",
             // Tests sign in and switch many times from the one test client address; DemoEntryRateLimitTests use the real limit.
             ["RateLimiting:DemoEntry:PermitLimit"] = "100000",
             ["RateLimiting:DemoEntry:GlobalPermitLimit"] = "100000",

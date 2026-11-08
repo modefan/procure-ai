@@ -87,7 +87,28 @@ tests:
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)filter/background-db:\s*\n\s*error_mode: ignore\s*\n\s*traces:\s*\n\s*span:\s*\n\s*- IsRootSpan\(\) and \(attributes\["db\.system\.name"\] != nil or attributes\["db\.system"\]\s+!= nil\)\s*\n'
+          pattern: '(?s)filter/background-db:\s*\n\s*error_mode: ignore\s*\n\s*traces:\s*\n\s*span:\s*\n\s*- IsRootSpan\(\) and \(span\.attributes\["db\.system\.name"\] != nil or span\.attributes\["db\.system"\]\s+!= nil\)\s*\n'
+
+  # Review 12c M1: every OTTL path has its context prefix (the unprefixed form is the legacy one; the collector rewrites it with a
+  # notice). Test-CollectorRedaction.ps1 also fails on that notice in the real collector's log.
+  - it: collector OTTL paths carry their context prefix
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)transform/redact:.*set\(log\.severity_text, "INFO"\) where IsString\(log\.body\) and IsMatch\(log\.body\.string,'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)transform/redact:.*set\(log\.severity_number, SEVERITY_NUMBER_INFO\) where IsString\(log\.body\)'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)transform/redact:.*replace_pattern\(log\.body\.string, .*where IsString\(log\.body\)'
+      # No unprefixed path in any processor: a bare body/severity_*/attributes not preceded by a context name and a dot. (The
+      # top-level keys are rendered in order; the processors' lines are the indented ones after `processors:`. The filelog operators'
+      # `attributes[...]` under receivers are stanza fields, not OTTL.)
+      - notMatchRegex:
+          path: data.relay
+          pattern: '\nprocessors:(\n  [^\n]*)*\n  [^\n]*[^.\w"](body|severity_text|severity_number|attributes)(\.|\[|,|\))'
 
   - it: collector reads pod logs read-only through group 0, not as root
     template: charts/opentelemetry-collector/templates/daemonset.yaml

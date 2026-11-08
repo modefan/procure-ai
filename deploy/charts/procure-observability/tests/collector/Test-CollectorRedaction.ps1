@@ -5,7 +5,9 @@
 # It tests the chart's real configuration: the collector config is rendered with `helm template`, and only three things differ from
 # the deployed one (written to an override file): the filelog reads the samples from their start, the k8sattributes processor is left
 # out (it needs the Kubernetes API) and a file exporter replaces the dashboard exporter. The receiver operators and the transform
-# processors are exactly as rendered.
+# processors are exactly as rendered. The traces pipeline runs its rendered processors too (without k8sattributes), so every OTTL
+# statement of the config is parsed, and the collector's log must hold no deprecation notice (e.g. "paths were modified to include their
+# context prefix", which the collector logs for OTTL paths in the legacy form without a context prefix; review 12c M1).
 #
 # Needs: Docker, helm (with the chart's dependency built: `helm dependency build deploy/charts/procure-observability`).
 # Usage: pwsh deploy/charts/procure-observability/tests/collector/Test-CollectorRedaction.ps1
@@ -52,6 +54,12 @@ try {
     $processors = $m.Groups[1].Value -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' } |
         ForEach-Object { $_ -replace '^- ', '' } | Where-Object { $_ -notmatch '^k8s_?attributes' }
     Assert-That ($processors -contains 'transform/redact') 'the logs pipeline runs transform/redact'
+    # The traces pipeline's processors as rendered, without k8sattributes (filter/background-db, transform/client-address).
+    $t = [regex]::Match($relay, '(?s)\n    traces:\s*\n\s*exporters:.*?\n\s*processors:\s*\n((?:\s*- \S+\n)+)')
+    if (-not $t.Success) { throw 'traces pipeline not found in the rendered config' }
+    $traceProcessors = $t.Groups[1].Value -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' } |
+        ForEach-Object { $_ -replace '^- ', '' } | Where-Object { $_ -notmatch '^k8s_?attributes' }
+    Assert-That ($traceProcessors -contains 'filter/background-db') 'the traces pipeline runs filter/background-db'
 
     # The receiver's name as the chart renders it (file_log or filelog).
     $receiver = [regex]::Match($relay, '(?m)^  (file_?log):').Groups[1].Value
@@ -72,10 +80,11 @@ service:
       receivers: [$receiver]
       processors: [$($processors -join ', ')]
       exporters: [file]
-    # Only the logs pipeline is under test; these two would start k8sattributes, which needs the Kubernetes API.
+    # The logs pipeline is under test; traces runs its processors only so that their OTTL is parsed (k8sattributes left out, it needs
+    # the Kubernetes API); metrics runs none.
     traces:
       receivers: [otlp]
-      processors: []
+      processors: [$($traceProcessors -join ', ')]
       exporters: [file]
     metrics:
       receivers: [otlp]
@@ -170,6 +179,12 @@ service:
     Assert-That (($audit | Where-Object { $_.Severity -eq 'INFO' }).Count -eq $audit.Count) 'pgaudit records have severity INFO'
     $others = @($records | Where-Object { $_.Body -notmatch 'AUDIT: SESSION' -and $_.Severity -eq 'INFO' })
     Assert-That ($others.Count -eq 0) 'other lines keep their (unset) severity'
+
+    # 7. Nothing in the config uses a deprecated form: the collector's own log has no deprecation notice.
+    $collectorLog = @(docker logs $name 2>&1 | ForEach-Object { "$_" })
+    $deprecated = @($collectorLog | Where-Object { $_ -match '(?i)deprecat|paths were modified|context prefix' })
+    if ($deprecated) { $deprecated | Select-Object -First 5 | ForEach-Object { Write-Host "  collector: $_" } }
+    Assert-That ($collectorLog.Count -gt 0 -and $deprecated.Count -eq 0) "the collector log has no deprecation notice ($($collectorLog.Count) lines read)"
 }
 finally {
     docker rm -f $name 2>&1 | Out-Null

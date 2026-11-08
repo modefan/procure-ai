@@ -753,6 +753,30 @@ public sealed class GatewayTests(KeycloakFixture keycloak, RedisFixture redis) :
     }
 
     [Fact]
+    public async Task Tenantless_user_is_not_joined_to_the_demo_company_when_registration_is_off()
+    {
+        // The shipped default (appsettings.json: Registration:Enabled false), as on the public demo: the only tenantless users there are
+        // admin users (the owner's own Keycloak user for Argo CD, plan 08 Task 12c review M4), who must stay out of the demo company.
+        await _gateway.DisposeAsync();
+        _gateway = await GatewayHost.StartAsync(keycloak, redis, new() { ["Registration:Enabled"] = null });
+        var browser = await RegisteredBrowserAsync();
+
+        var user = await browser.GetFromJsonAsync<JsonElement>("/bff/user", Ct);
+
+        user.GetProperty("tenantId").ValueKind.ShouldBe(JsonValueKind.Null);
+        user.GetProperty("permissions").GetArrayLength().ShouldBe(0);
+        _gateway.Access.Registrations.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Registration_enabled_that_is_not_a_boolean_fails_at_startup()
+    {
+        // Bound strictly at startup (ValidateOnStart): a typo must not silently turn the switch off or on.
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => GatewayHost.StartAsync(keycloak, redis, new() { ["Registration:Enabled"] = "yes please" }));
+    }
+
+    [Fact]
     public async Task User_with_a_tenant_is_never_registered()
     {
         var browser = await SignedInAsync();

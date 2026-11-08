@@ -15,7 +15,13 @@ Or sign in through Keycloak as usual; the demo password is the `keycloak-demo-pa
 | Finance (Thandi) | thandi@acme.test | Acme and Globex | finance in both (**Switch company** in her user menu) |
 | Admin | admin@acme.test | Acme | admin |
 | Globex manager (Ben) | ben@globex.test | Globex | manager |
-| (Keycloak login only) | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users) |
+| (Keycloak login only) | approver@demo.test | Demo | manager (approves requests on the sandbox cost center DEMO-100 of self-registered users, when self-registration is on) |
+
+**Self-registration is off on the public demo** (plan 08 Task 12c): the realm does not allow it (`registrationAllowed: false` in
+`infra/keycloak/procure-realm.json`), the web app shows no "Register" (runtime config `registration.enabled`, default false) and the
+gateway joins nobody to the Demo company (`Registration:Enabled`, default false). Reviewers use the demo users above. When all three are
+switched on together, a new user registers through Keycloak's form, joins the Demo company as a requester on DEMO-100 at the first page
+load, and approver@demo.test approves their requests.
 
 **Thandi through the normal Keycloak login:** the sign-in asks for the email first. Thandi belongs to two organizations, so
 Keycloak then shows its own **organization picker** ("Select an organization to proceed": Globex or Acme Corp) and only after that
@@ -53,8 +59,8 @@ step that failed. It takes about two minutes on a fresh start (the simulated sup
 Reviewers can change anything, so the demo starts fresh every night at 02:00 (Africa/Johannesburg): `ProcureAi.DemoData reset` first checks
 that every service and the simulators have the reset switched on (else it stops before touching anything), then resets the
 simulators, then every service in parallel through its internal `POST .../internal/demo/reset` (admin key or service account only, and
-404 unless `DemoReset:Enabled`), then Audit last, and seeds again. The users who registered themselves into the Demo company stay;
-Keycloak is not touched. Each service deletes with its normal write paths, so the audit trail shows the reset as the app's own changes,
+404 unless `DemoReset:Enabled`), then Audit last, and seeds again. Keycloak is not touched (when self-registration is on, the users
+who registered themselves into the Demo company stay). Each service deletes with its normal write paths, so the audit trail shows the reset as the app's own changes,
 never as "changed outside the app". `ProcureAi.DemoData schedule` runs it every night; locally, the dashboard command **Reset demo data**
 on the `demo-data` resource runs it once. There is no reset button in the app.
 

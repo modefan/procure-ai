@@ -193,17 +193,19 @@ opentelemetry-collector:
       # Applies to the apps' OTLP logs too (their string bodies only; they already carry no personal data). The pgaudit statements
       # (Postgres console: `LOG:  AUDIT: SESSION,...`) get severity INFO: the Postgres console has no level the container parser reads,
       # and the dashboard would show them as unspecified. Tested against the real image: tests/collector/Test-CollectorRedaction.ps1.
+      # Every OTTL path carries its context prefix (log., span.): the unprefixed form is the legacy one, which the collector rewrites
+      # with a notice (review 12c M1); the test fails on that notice.
       transform/redact:
         error_mode: ignore
         log_statements:
           - context: log
             statements:
-              - 'set(severity_text, "INFO") where IsString(body) and IsMatch(body.string, "\\sLOG:\\s+AUDIT: ")'
-              - 'set(severity_number, SEVERITY_NUMBER_INFO) where IsString(body) and IsMatch(body.string, "\\sLOG:\\s+AUDIT: ")'
-              - 'replace_pattern(body.string, "(?i)\\b(username|email|ipAddress|login_hint)=(?:\"[^\"]*\"|[^\",\\s&]*)", "$1=\"***\"") where IsString(body)'
-              - 'replace_pattern(body.string, "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "***") where IsString(body)'
-              - 'replace_pattern(body.string, "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b", "***") where IsString(body)'
-              - 'replace_pattern(body.string, "(^|[^0-9A-Za-z:.])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?|::[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})", "$1***") where IsString(body)'
+              - 'set(log.severity_text, "INFO") where IsString(log.body) and IsMatch(log.body.string, "\\sLOG:\\s+AUDIT: ")'
+              - 'set(log.severity_number, SEVERITY_NUMBER_INFO) where IsString(log.body) and IsMatch(log.body.string, "\\sLOG:\\s+AUDIT: ")'
+              - 'replace_pattern(log.body.string, "(?i)\\b(username|email|ipAddress|login_hint)=(?:\"[^\"]*\"|[^\",\\s&]*)", "$1=\"***\"") where IsString(log.body)'
+              - 'replace_pattern(log.body.string, "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "***") where IsString(log.body)'
+              - 'replace_pattern(log.body.string, "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b", "***") where IsString(log.body)'
+              - 'replace_pattern(log.body.string, "(^|[^0-9A-Za-z:.])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?|::[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})", "$1***") where IsString(log.body)'
       # The visitor's address as an attribute (plan 08 Task 12c; CLAUDE.md "Observability": no personal data). Since Traefik keeps the
       # client address (hostPorts, plan 08 Task 12), a span or log attribute holding it would carry a visitor's public IP. None of our
       # instrumentation records one today (checked on the hosted dashboard's database, Task 12c report); this keeps it so if a library
@@ -231,7 +233,7 @@ opentelemetry-collector:
         error_mode: ignore
         traces:
           span:
-            - IsRootSpan() and (attributes["db.system.name"] != nil or attributes["db.system"] != nil)
+            - IsRootSpan() and (span.attributes["db.system.name"] != nil or span.attributes["db.system"] != nil)
       batch: {}
     exporters:
       otlp:
