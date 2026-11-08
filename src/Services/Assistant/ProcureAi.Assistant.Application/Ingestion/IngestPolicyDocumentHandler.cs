@@ -9,6 +9,7 @@ using ProcureAi.Assistant.Application.Documents;
 using ProcureAi.Assistant.Application.Guardrails;
 using ProcureAi.Assistant.Application.Telemetry;
 using ProcureAi.Assistant.Domain;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Application.Caching;
 using ProcureAi.Contracts.Assistant;
 using Wolverine;
@@ -67,7 +68,9 @@ public sealed class PolicyIngestion(
     /// <summary>How often a commit that lost a race on the document row (a replace or remove meanwhile) is tried again.</summary>
     private const int CommitAttempts = 3;
 
-    private sealed record Job(Guid DocumentId, int Version, string TenantId, string Title, string ContentType, byte[] Content, int ProgressStep);
+    /// <param name="Seeded">The demo seed's own document (uploaded by <see cref="SystemCaller"/>): counted, but never stopped by the cap.</param>
+    private sealed record Job(
+        Guid DocumentId, int Version, string TenantId, string Title, string ContentType, byte[] Content, int ProgressStep, bool Seeded);
 
     /// <param name="attempt">The delivery attempt, 1 for the first (Wolverine's <see cref="Envelope.Attempts"/>).</param>
     public async Task RunAsync(IngestPolicyDocument message, int attempt, CancellationToken cancellationToken)
@@ -79,7 +82,9 @@ public sealed class PolicyIngestion(
         }
 
         // Every model call of the job counts against the document's tenant's daily token total, and a tenant that reached its cap
-        // gets no more: checked here (a queued job and every retry pass this point) and before each batch of chunks.
+        // gets no more: checked here (a queued job and every retry pass this point) and before each batch of chunks. The demo seed's
+        // own document is the exception (counted, never stopped): the nightly reset deletes the policy and seeds it again, and a tenant
+        // capped between midnight and the reset would otherwise have no policy for the whole day. It is one fixed document a night.
         using var usage = AiUsageScope.For(job.TenantId);
         try
         {
@@ -170,7 +175,9 @@ public sealed class PolicyIngestion(
                 await PublishStatusAsync(unit, document, message.Version);
             }
 
-            job = new Job(document.Id, message.Version, document.TenantId, document.Title, file.ContentType, file.Content, document.Progress / 10 * 10);
+            job = new Job(
+                document.Id, message.Version, document.TenantId, document.Title, file.ContentType, file.Content, document.Progress / 10 * 10,
+                document.UploadedBy == SystemCaller.Id);
         }, cancellationToken);
         return job;
     }
@@ -352,11 +359,17 @@ public sealed class PolicyIngestion(
     }
 
     /// <summary>
-    /// Throws <see cref="BudgetReachedException"/> when the document's tenant reached its daily token cap. When Redis cannot be read the
-    /// job goes on (logged): the counting stage undercounts in that case too, and a Redis outage should not fail every document.
+    /// Throws <see cref="BudgetReachedException"/> when the document's tenant reached its daily token cap (never for the demo seed's own
+    /// document, <see cref="Job.Seeded"/>). When Redis cannot be read the job goes on (logged): the counting stage undercounts in that
+    /// case too, and a Redis outage should not fail every document.
     /// </summary>
     private async Task StopIfBudgetSpentAsync(Job job, CancellationToken cancellationToken)
     {
+        if (job.Seeded)
+        {
+            return;
+        }
+
         TokenBudget today;
         try
         {

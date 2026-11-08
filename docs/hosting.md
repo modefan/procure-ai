@@ -160,7 +160,7 @@ What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/rea
 API, master realm or welcome page; `publicRealms` in the platform chart); no Mailpit ingress; Argo CD without ingress (Keycloak sign-in; the admin login only as break-glass, through the tunnel);
 the demo switches on (seed, nightly reset at 02:00 Africa/Johannesburg, one-click demo login, the "behind the scenes" panel); the
 Assistant on Azure Foundry (`AI__Provider=AzureFoundry`, deployments `chat` and `embeddings`, no reasoning, no temperature, at least 256
-output tokens per call, the app's default daily token cap per tenant); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
+output tokens per call, a daily token cap of 150 000 per organisation, sized below); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
 Postgres 20 GiB, MongoDB 5 GiB, RabbitMQ 2 GiB volumes.
 
 **Rollouts on hosted keep the chart's default surge** (a new pod next to the old one, then the switch), unlike local's maxSurge 0. The
@@ -300,13 +300,51 @@ cd procure-ai-gitops
 
 ## What it costs, and how to stop it
 
-| Item | Per month |
-|---|---|
-| Contabo Cloud VPS 8 (order 15654477, monthly term) | **EUR 14.00** (0 % VAT on the invoice), which is Contabo's list price for Cloud VPS 8 |
-| Contabo firewall, SSH key secret, IPv4 and IPv6 included with the VPS, Cloudflare DNS records | free |
-| Let's Encrypt certificate, cert-manager | free |
+Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 1 = R 16.54, EUR 1 = USD 1.1165 = R 18.46.
 
-The Contabo API lists one add-on on the instance, ID 1501 ×1, from the order itself. Contabo's public product list does not name the
+| Item | Per month | USD | ZAR |
+|---|---|---|---|
+| Contabo Cloud VPS 8 (order 15654477, monthly term) | EUR 14.00 (0 % VAT on the invoice), Contabo's list price | 15.63 | 258.50 |
+| Domain `daleabels.com` (Cloudflare Registrar, USD 11.17 a year, auto-renew, expires 2027-11-07) | one twelfth | 0.93 | 15.40 |
+| Azure Foundry, **expected** (about 1.3 M tokens: the nightly re-seed of Acme and Globex, ~16 000 tokens a night, and ~10 questions a day) | gpt-5-mini $0.25 in / $2.00 out per 1 M, embeddings $0.022 per 1 M | 0.40-0.80 | 7-13 |
+| Azure Foundry, **worst case under the caps** (every organisation at its daily cap every day, below) | 14 M tokens at $0.60 per 1 M | 8.40 | 139 |
+| GitHub (repos, Actions inside the free 2 000 private minutes; free once public), GHCR images | free | 0 | 0 |
+| Cloudflare DNS, Let's Encrypt certificate, cert-manager | free | 0 | 0 |
+| Contabo firewall, SSH key secret, IPv4 and IPv6 (included with the VPS) | free | 0 | 0 |
+| **Total, expected** | | **about 17.00-17.40** | **about 281-287** |
+| **Total, worst case** | | **about 25.00** | **about 413** |
+
+**The AI cost is capped by the app, not by Azure.** Each organisation may use `AI:DailyTokenCapPerTenant` tokens a day, **150 000 on the
+live demo** (`envs/hosted/procure-ai.yaml` in the GitOps repo, with the arithmetic). Measured on the live demo (2026-11-08): a policy
+question costs 1 700-1 900 tokens (guard classifier and answer), one with a tool call about 3 300, a question the guard blocks about 300;
+the nightly re-seed of one organisation (policy ingestion and past purchases) about 8 000. So the cap allows about 40-80 questions a day per
+organisation. There are three organisations (Acme, Globex, Demo); self-registration is off, and when on it adds users to Demo, never new
+organisations. Worst case: 3 x 150 000 x 30 days plus the two seeds, which are counted but never stopped (procure-ai `docs/assistant.md`,
+"Daily token cap"), is about 14 M tokens. Priced as if 20 % were output (measured: about 5 %), that is $0.60 per 1 M and **$8.40 a month**,
+under the Azure budget alert. Questions already running when the cap is reached still finish; the `chat` deployment's limit of 50 000
+tokens and 50 requests a minute bounds that overshoot. Per user the Assistant also allows 50 questions a day, and the demo login 30 sign-ins
+a minute per visitor address (300 a minute in all).
+
+**Azure guards.** The budget `procure-ai-10usd` on the subscription: USD 10 a month, e-mails to the Azure account's address at 50 % and
+100 % of the actual cost and at 100 % of the forecast. Cost Management cannot send a test e-mail: only a real threshold proves the
+e-mail. The deployments: `chat` (gpt-5-mini, GlobalStandard, capacity 50: 50 000
+tokens and 50 requests a minute, read from Azure's `x-ratelimit-limit-*` answer headers on 2026-11-08) and `embeddings`
+(text-embedding-3-small, DataZoneStandard, 100 000 tokens a minute). The Azure account is a **Free Trial** (USD 200 credit, spending limit
+on) that ends about **2026-12-07**. Until then the credit pays and nothing is billed to the card. After that, Azure stops the deployments
+unless the account is upgraded to pay-as-you-go, which is Dale's call. Without the upgrade, switch the live demo to the Fake model first
+(below), so the Assistant gives scripted answers instead of errors.
+
+### Pausing the costs
+
+| To stop | Do this | Saves | Undo |
+|---|---|---|---|
+| Visitors using the demo, incl. its AI | The demo switch off (`PUT /api/v1/system/availability`, `docs/demo.md` "Switching the demo off"): every visitor sees the maintenance page | Every visitor's AI cost; the nightly re-seed still runs (about 16 000 tokens, under USD 0.01 a night) | The switch on |
+| All Azure AI cost, demo still usable | In the GitOps repo `envs/hosted/procure-ai.yaml`, `AI__Provider: Fake` (and remove the `AI__Endpoint` and `AI__ApiKey` lines), push: Argo CD rolls the Assistant to the keyless Fake model (scripted answers, no tokens). The stored vectors came from the other model and match poorly, so after switching (either way) the nightly re-seed embeds the policy again; replace it on the policy documents screen to have it at once | All of Azure | The old values back, push |
+| Azure entirely | Delete the two deployments (`az cognitiveservices account deployment delete ... -n chat` and `-n embeddings`); first switch to Fake as above. A deployment costs nothing while unused (pay per token), so this only matters when the account is closed | Nothing extra while unused | Recreate them as in plan 08 Task 9 (`chat` gpt-5-mini 2025-08-07 GlobalStandard 50, `embeddings` text-embedding-3-small DataZoneStandard 100) |
+| The VPS | Cancel it in the Contabo panel (below) | EUR 14 a month | A new order, then `new-hosted-cluster.ps1` and the steps above |
+| The domain | Turn auto-renew off in the Cloudflare dashboard (it then lapses on 2027-11-07) | USD 11.17 a year | Auto-renew on |
+
+The VPS line in more detail: the Contabo API lists one add-on on the instance, ID 1501 ×1, from the order itself. Contabo's public product list does not name the
 ID. It costs nothing extra: the invoice (EUR 14.00) equals the list price of Cloud VPS 8 with no setup fee, so it is one of the order's
 included choices (region, storage type or the no-setup option). Terraform never adds or removes add-ons (`ignore_changes`). Dale can
 confirm its name in the panel under the order.

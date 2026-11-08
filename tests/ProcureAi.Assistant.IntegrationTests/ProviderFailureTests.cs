@@ -235,25 +235,33 @@ public sealed class ProviderFailureTests(AssistantApp app)
     }
 
     [Fact]
-    public async Task Capped_tenants_queued_ingestion_makes_no_model_calls()
+    public async Task Capped_tenants_queued_upload_makes_no_model_calls_but_the_demo_seed_still_ingests()
     {
         await using var model = await StubModelServer.StartAsync();
-        // The seeded tenants have used their day before this instance starts, and its seed ingestion is already queued.
+        // Both seeded tenants have used their day before this instance starts, and the seed's ingestion is already queued. Globex's
+        // document is made a user's upload, so it stands for any queued upload of a capped tenant; Acme's stays the demo seed's own.
+        var (seeded, uploaded) = (DemoSeeder.Documents[0], DemoSeeder.Documents[1]);
         await CapSeededTenantsAsync(1);
-        await using var instance = await StartAsync(model, new()
-        {
-            ["AI:DailyTokenCapPerTenant"] = "1",
-            ["Assistant:Ingestion:ContextualRetrieval"] = "true",
-        });
+        var usedBefore = (await app.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(seeded.TenantId, Ct)).Used;
+        await using var instance = await StartAsync(
+            model,
+            new()
+            {
+                ["AI:DailyTokenCapPerTenant"] = "1",
+                ["Assistant:Ingestion:ContextualRetrieval"] = "true",
+            },
+            beforeStart: database => MarkUploadedByAUserAsync(database, uploaded.DocumentId));
 
-        foreach (var (tenant, documentId) in DemoSeeder.Documents)
-        {
-            var failed = await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, PolicyDocumentsApi.Admin(tenant), documentId, "Failed");
-            failed.FailureReason.ShouldBe(PolicyIngestion.BudgetReachedReason);
-        }
+        var failed = await PolicyDocumentsApi.WaitForStatusAsync(
+            instance.Client, PolicyDocumentsApi.Admin(uploaded.TenantId), uploaded.DocumentId, "Failed");
+        failed.FailureReason.ShouldBe(PolicyIngestion.BudgetReachedReason);
 
-        model.ChatRequests.ShouldBe(0, "no guard, context or scan call for a capped tenant");
-        model.EmbeddingRequests.ShouldBe(0);
+        // The nightly reset deletes the policy and seeds it again: a tenant someone capped between midnight and the reset must not lose
+        // its policy for the whole day. The seed is one fixed document, so letting it through bounds what it can spend.
+        await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, PolicyDocumentsApi.Admin(seeded.TenantId), seeded.DocumentId, "Ready");
+        var usedAfter = (await app.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(seeded.TenantId, Ct)).Used;
+        usedAfter.ShouldBeGreaterThan(usedBefore, "the seed's ingestion still counts for its tenant");
+        model.EmbeddingRequests.ShouldBeGreaterThan(0, "the seed's chunks were embedded");
     }
 
     [Fact]
@@ -261,13 +269,28 @@ public sealed class ProviderFailureTests(AssistantApp app)
     {
         await using var model = await StubModelServer.StartAsync();
         // Cap 150: the first batch of 4 chunks (4 context calls of 60 tokens, 4 embedding tokens) passes it, so the second never starts.
-        // The seeded tenants are capped already, so the stub sees this tenant's calls only.
+        // The seeded tenants are capped already and their queued documents made users' uploads (the demo seed itself is not stopped by
+        // the cap), so the stub sees this tenant's calls only.
         await CapSeededTenantsAsync(150);
-        await using var instance = await StartAsync(model, new()
+        await using var instance = await StartAsync(
+            model,
+            new()
+            {
+                ["AI:DailyTokenCapPerTenant"] = "150",
+                ["Assistant:Ingestion:ContextualRetrieval"] = "true",
+            },
+            beforeStart: async database =>
+            {
+                foreach (var (_, documentId) in DemoSeeder.Documents)
+                {
+                    await MarkUploadedByAUserAsync(database, documentId);
+                }
+            });
+        foreach (var (seededTenant, documentId) in DemoSeeder.Documents)
         {
-            ["AI:DailyTokenCapPerTenant"] = "150",
-            ["Assistant:Ingestion:ContextualRetrieval"] = "true",
-        });
+            await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, PolicyDocumentsApi.Admin(seededTenant), documentId, "Failed");
+        }
+
         var tenant = AssistantApp.NewTenant();
         var admin = PolicyDocumentsApi.Admin(tenant);
 
@@ -278,6 +301,13 @@ public sealed class ProviderFailureTests(AssistantApp app)
         model.ChatRequests.ShouldBe(4, "the first batch's chunk contexts only (Assistant:Ingestion:BatchSize 4)");
         model.EmbeddingRequests.ShouldBe(1);
     }
+
+    /// <summary>Makes a seeded document look like a user's upload (before the instance that ingests it starts).</summary>
+    private static async Task MarkUploadedByAUserAsync(string database, Guid documentId) =>
+        (await DemoResetProbe.CountAsync(
+            database,
+            $"with changed as (update policy_documents set uploaded_by = 'a-tenant-admin' where id = '{documentId}' returning 1) select count(*) from changed"))
+        .ShouldBe(1);
 
     /// <summary>Puts the demo seed's tenants at <paramref name="tokens"/> today (on the shared Redis, whose cap of 200 000 they stay under).</summary>
     private async Task CapSeededTenantsAsync(long tokens)
@@ -306,9 +336,15 @@ public sealed class ProviderFailureTests(AssistantApp app)
     }
 
     private async Task<Instance> StartAsync(
-        StubModelServer model, Dictionary<string, string?> settings, Action<IServiceCollection>? services = null, List<Activity>? spans = null)
+        StubModelServer model, Dictionary<string, string?> settings, Action<IServiceCollection>? services = null, List<Activity>? spans = null,
+        Func<string, Task>? beforeStart = null)
     {
         var databases = await app.Infra.CreateSeededDatabasesAsync($"model_{Guid.NewGuid():N}"[..20]);
+        if (beforeStart is not null)
+        {
+            await beforeStart(databases.Database);
+        }
+
         foreach (var (key, value) in model.Settings)
         {
             settings.TryAdd(key, value);

@@ -15,7 +15,7 @@ namespace ProcureAi.Assistant.Infrastructure.Chat;
 internal sealed class RedisTenantTokenBudget(
     IConnectionMultiplexer redis, IOptions<AssistantOptions> options, IOptions<AiOptions> ai, TimeProvider time) : ITenantTokenBudget
 {
-    /// <summary>Every counter (all tenants and days): the demo reset deletes them.</summary>
+    /// <summary>Every counter (all tenants and days). The demo reset keeps them on purpose: the cap is a cost guard.</summary>
     public const string KeyPattern = "assistant:tokens:*";
 
     private static readonly TimeSpan KeyLifetime = TimeSpan.FromDays(2);
