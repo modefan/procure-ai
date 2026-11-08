@@ -39,4 +39,13 @@ describe('merge (live and cache settings)', () => {
     expect(merge(environment, { devPanel: { enabled: 'yes' } }).devPanel).toEqual(environment.devPanel);
     expect(merge(environment, {}).devPanel).toEqual(environment.devPanel);
   });
+
+  it('maintenance contact: a safe link and its label from config.json, anything else is no link', () => {
+    expect(merge(environment, {}).maintenance).toEqual({ contactUrl: '', contactLabel: '' });
+    expect(merge(environment, { maintenance: { contactUrl: 'https://example.org/ask', contactLabel: ' Ask for access ' } }).maintenance)
+      .toEqual({ contactUrl: 'https://example.org/ask', contactLabel: 'Ask for access' });
+    expect(merge(environment, { maintenance: { contactUrl: 'mailto:demo@example.org' } }).maintenance.contactUrl).toBe('mailto:demo@example.org');
+    expect(merge(environment, { maintenance: { contactUrl: 'javascript:alert(1)' } }).maintenance.contactUrl).toBe('');
+    expect(merge(environment, { maintenance: { contactUrl: '/relative' } }).maintenance.contactUrl).toBe('');
+  });
 });

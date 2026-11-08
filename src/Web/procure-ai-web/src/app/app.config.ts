@@ -1,3 +1,4 @@
+import { Location } from '@angular/common';
 import { ApplicationConfig, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideHttpClient, withInterceptors, withXsrfConfiguration } from '@angular/common/http';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
@@ -11,6 +12,8 @@ import { errorsInterceptor } from './core/http/errors.interceptor';
 import { XSRF_COOKIE_NAME, XSRF_HEADER_NAME } from './core/http/xsrf';
 import { devPanelInterceptor } from './core/dev-panel/dev-panel.interceptor';
 import { provideLogger } from './core/logging/provide-logger';
+import { AppConfigService } from './core/config/app-config';
+import { startUp, SystemAvailability } from './core/system/system-availability';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -25,12 +28,17 @@ export const appConfig: ApplicationConfig = {
       withInterceptors([credentialsInterceptor, correlationInterceptor, devPanelInterceptor, errorsInterceptor]),
     ),
     provideRouter(routes, withComponentInputBinding()),
-    // Ask the gateway who is signed in before the first page, so the header is right from the first paint. The live
-    // connection follows `isLoggedIn()` (LiveSession), so it also starts when the user becomes known later (a failed
-    // first load that a guard retries).
+    // Before the first page: is the demo switched on (after config.json)? Off: the maintenance page and nothing else. On: ask the gateway
+    // who is signed in, so the header is right from the first paint. The live connection follows `isLoggedIn()` (LiveSession), so it also
+    // starts when the user becomes known later (a failed first load that a guard retries).
     provideAppInitializer(() => {
       inject(LiveSession);
-      return inject(AuthStore).load();
+      return startUp({
+        config: inject(AppConfigService),
+        availability: inject(SystemAvailability),
+        auth: inject(AuthStore),
+        location: inject(Location),
+      });
     }),
   ],
 };

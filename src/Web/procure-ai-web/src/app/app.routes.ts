@@ -20,5 +20,11 @@ export const routes: Routes = [
   },
   { path: 'forbidden', title: 'No access', component: ForbiddenPage },
   { path: 'unavailable', title: 'Unavailable', component: UnavailablePage },
+  // While the demo is switched off the app shows only this page (App renders it without the shell).
+  {
+    path: 'maintenance',
+    title: 'Switched off',
+    loadComponent: () => import('./features/maintenance/maintenance.page').then((m) => m.MaintenancePage),
+  },
   { path: '**', title: 'Not found', component: NotFoundPage },
 ];

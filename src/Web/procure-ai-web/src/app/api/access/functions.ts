@@ -25,5 +25,9 @@ export type { GetUserName$Params as GetUserName$Params } from './fn/access/get-u
 export { getUserName as getUserName } from './fn/access/get-user-name';
 export type { RegisterDemoUser$Params as RegisterDemoUser$Params } from './fn/access/register-demo-user';
 export { registerDemoUser as registerDemoUser } from './fn/access/register-demo-user';
+export type { GetSystemAvailability$Params as GetSystemAvailability$Params } from './fn/system/get-system-availability';
+export { getSystemAvailability as getSystemAvailability } from './fn/system/get-system-availability';
+export type { SetSystemAvailability$Params as SetSystemAvailability$Params } from './fn/system/set-system-availability';
+export { setSystemAvailability as setSystemAvailability } from './fn/system/set-system-availability';
 export type { ListUserTenants$Params as ListUserTenants$Params } from './fn/user-tenants/list-user-tenants';
 export { listUserTenants as listUserTenants } from './fn/user-tenants/list-user-tenants';

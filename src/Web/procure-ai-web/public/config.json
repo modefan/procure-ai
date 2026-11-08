@@ -25,5 +25,9 @@
   },
   "devPanel": {
     "enabled": true
+  },
+  "maintenance": {
+    "contactUrl": "",
+    "contactLabel": ""
   }
 }

@@ -362,6 +362,8 @@ web:
     cache: { staleMs: 30000, trailingReloadMs: 2000 }
     observability: { dashboardUrl: "" }
     devPanel: { enabled: false }
+    # The maintenance page's "request access" link while the demo is switched off (empty: no link); the GitOps env values set it.
+    maintenance: { contactUrl: "", contactLabel: "" }
 
 # --- The demo data (templates/demo-data.yaml, plan 07 ruling 13): ProcureAi.DemoData through the gateway with the admin key. ---
 # demo-seed runs when global.demo.seed is on, demo-reset when global.demo.reset is on.

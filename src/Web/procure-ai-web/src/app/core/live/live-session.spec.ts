@@ -5,6 +5,7 @@ import { provideRouter, Router } from '@angular/router';
 import { AuthStore } from '../auth/auth.store';
 import { LiveConnection } from './live-connection';
 import { LiveSession } from './live-session';
+import { SystemAvailability } from '../system/system-availability';
 
 describe('LiveSession', () => {
   const tom = { userId: 'u1', name: 'Tom', tenantId: 'acme', roles: [], permissions: [] };
@@ -38,6 +39,27 @@ describe('LiveSession', () => {
     (await vi.waitFor(() => http.expectOne('/bff/logout'))).flush(null, { status: 204, statusText: 'No Content' });
     await out;
     TestBed.tick();
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it('switching the demo off stops the connection of a signed-in user', async () => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
+    const live = TestBed.inject(LiveConnection);
+    const start = vi.spyOn(live, 'start').mockImplementation(() => undefined);
+    const stop = vi.spyOn(live, 'stop').mockResolvedValue();
+    const http = TestBed.inject(HttpTestingController);
+    const auth = TestBed.inject(AuthStore);
+    TestBed.inject(LiveSession);
+    const load = auth.load();
+    (await vi.waitFor(() => http.expectOne('/bff/user'))).flush(tom);
+    await load;
+    TestBed.tick();
+    expect(start).toHaveBeenCalled();
+    stop.mockClear();
+
+    TestBed.inject(SystemAvailability).markDisabled(null);
+    TestBed.tick();
+
     expect(stop).toHaveBeenCalled();
   });
 });

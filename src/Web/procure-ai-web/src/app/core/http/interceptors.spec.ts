@@ -9,6 +9,7 @@ import { AppConfigService } from '../config/app-config';
 import { credentialsInterceptor } from './credentials.interceptor';
 import { correlationInterceptor } from './correlation.interceptor';
 import { errorsInterceptor, SKIP_FORBIDDEN_REDIRECT } from './errors.interceptor';
+import { SYSTEM_DISABLED_TYPE, SystemAvailability } from '../system/system-availability';
 
 describe('http interceptors', () => {
   let http: HttpClient;
@@ -84,6 +85,30 @@ describe('http interceptors', () => {
     expect(read.request.headers.has('X-XSRF-TOKEN')).toBe(false);
     read.flush([]);
     await get;
+  });
+
+  it('503 system-disabled marks the demo off and goes to the maintenance page, without logging an error', async () => {
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const call = firstValueFrom(http.get('/api/v1/requests')).catch((e: unknown) => e);
+    backend
+      .expectOne('/api/v1/requests')
+      .flush({ type: SYSTEM_DISABLED_TYPE, status: 503, detail: 'Back on Monday.' }, { status: 503, statusText: 'Service Unavailable' });
+
+    expect(await call).toBeInstanceOf(HttpErrorResponse);
+    expect(navigate).toHaveBeenCalledWith('/maintenance');
+    const availability = TestBed.inject(SystemAvailability);
+    expect(availability.disabled()).toBe(true);
+    expect(availability.message()).toBe('Back on Monday.');
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('any other 503 does not go to the maintenance page', async () => {
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+
+    await fail(firstValueFrom(http.get('/api/v1/requests')), '/api/v1/requests', 503);
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(TestBed.inject(SystemAvailability).disabled()).toBe(false);
   });
 
   it('403 goes to the forbidden page', async () => {

@@ -51,6 +51,14 @@ export interface DevPanelConfig {
   enabled: boolean;
 }
 
+/** The maintenance page (shown while the demo is switched off). */
+export interface MaintenanceConfig {
+  /** Where a visitor can ask for the demo to be switched on (https:, http: or mailto:); empty = no contact link. */
+  contactUrl: string;
+  /** The text of that link; empty = "Request access". */
+  contactLabel: string;
+}
+
 export interface AppConfig {
   /** Absolute origin of the gateway when the app is not served by it (development only); empty = same origin. */
   apiBaseUrl: string;
@@ -60,6 +68,7 @@ export interface AppConfig {
   cache: CacheConfig;
   observability: ObservabilityConfig;
   devPanel: DevPanelConfig;
+  maintenance: MaintenanceConfig;
 }
 
 /**
@@ -69,9 +78,17 @@ export interface AppConfig {
 @Service()
 export class AppConfigService {
   readonly config = signal<AppConfig>(structuredClone(environment));
+  private loading: Promise<void> | null = null;
 
-  /** Loads config.json. Never fails: a missing or broken file leaves the defaults in place. */
-  async load(): Promise<void> {
+  /**
+   * Loads config.json (once: later calls share the first load, so an initializer that needs the config can wait for it). Never fails:
+   * a missing or broken file leaves the defaults in place.
+   */
+  load(): Promise<void> {
+    return (this.loading ??= this.fetchConfig());
+  }
+
+  private async fetchConfig(): Promise<void> {
     try {
       const response = await fetch('config.json', { cache: 'no-store' });
       if (!response.ok) {
@@ -93,6 +110,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const cache = (isRecord(source['cache']) ? source['cache'] : {}) as Record<string, unknown>;
   const observability = (isRecord(source['observability']) ? source['observability'] : {}) as Record<string, unknown>;
   const devPanel = (isRecord(source['devPanel']) ? source['devPanel'] : {}) as Record<string, unknown>;
+  const maintenance = (isRecord(source['maintenance']) ? source['maintenance'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
@@ -118,6 +136,10 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
       dashboardUrl: typeof observability['dashboardUrl'] === 'string' ? observability['dashboardUrl'] : defaults.observability.dashboardUrl,
     },
     devPanel: { enabled: typeof devPanel['enabled'] === 'boolean' ? devPanel['enabled'] : defaults.devPanel.enabled },
+    maintenance: {
+      contactUrl: contactUrl(maintenance['contactUrl'], defaults.maintenance.contactUrl),
+      contactLabel: typeof maintenance['contactLabel'] === 'string' ? maintenance['contactLabel'].trim() : defaults.maintenance.contactLabel,
+    },
   };
 }
 
@@ -131,6 +153,10 @@ const delays = (value: unknown, fallback: number[]): number[] =>
   Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
     ? (value as number[])
     : fallback;
+
+/** Only a link a visitor can safely follow: https:, http: or mailto:. Anything else (javascript:, relative) keeps the default. */
+const contactUrl = (value: unknown, fallback: string): string =>
+  typeof value === 'string' && /^(https?:\/\/|mailto:)\S+$/i.test(value.trim()) ? value.trim() : value === '' ? '' : fallback;
 
 /** Loads config.json before the app finishes starting. List it before every provider that reads the config. */
 export function provideAppConfig(): EnvironmentProviders {
