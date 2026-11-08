@@ -14,7 +14,7 @@ public sealed class SystemSwitchRuleTests
     private static readonly SystemAvailabilityOptions Configured = new()
     {
         BlockedPaths = ["/api", "/bff", "/hubs"],
-        AllowedPaths = ["/api/v1/system/availability"],
+        AllowedPaths = ["/api/v1/system/availability", "/bff/logout", "/bff/logout-all"],
     };
 
     [Theory]
@@ -45,6 +45,8 @@ public sealed class SystemSwitchRuleTests
     [InlineData("/apis")]
     [InlineData("/bffx/user")]
     [InlineData("/hubsy")]
+    [InlineData("/bff/logout")]
+    [InlineData("/bff/logout-all")]
     public void Passes_while_off(string path) =>
         SystemAvailabilityMiddleware.Applies(new PathString(path), Configured).ShouldBeFalse(path);
 
