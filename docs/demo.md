@@ -81,9 +81,16 @@ Invoke-RestMethod -Method Put -Uri https://<host>/api/v1/system/availability -He
 ```
 
 ```bash
-curl -X PUT https://<host>/api/v1/system/availability -H "X-Api-Key: $DEMO_ADMIN_API_KEY" -H 'Content-Type: application/json'      -d '{"enabled": false, "message": "Paused until Monday."}'
+curl -X PUT https://<host>/api/v1/system/availability -H "X-Api-Key: $DEMO_ADMIN_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"enabled": false, "message": "Paused until Monday."}'
 curl -X PUT https://<host>/api/v1/system/availability -H "X-Api-Key: $DEMO_ADMIN_API_KEY" -H 'Content-Type: application/json' -d '{"enabled": true}'
 ```
+
+Live connections (SignalR) that were open when the demo was switched off are not cut: the gateway only refuses new requests, so an open
+connection keeps carrying presence heartbeats until the browser's next HTTP call or reconnect gets the 503, which takes it to the
+maintenance page and stops the connection. The gateway reads the switch as its own service account (so a flood of anonymous reads through
+it cannot starve that read at Access's rate limiter), and anonymously when it cannot get a token. The web app waits at most
+`maintenance.checkTimeoutMs` (config.json, 4 s) for the switch at start-up, then starts as if it were on.
 
 This is separate from the nightly reset's short maintenance window (writes only, a Redis flag with a TTL).
 
