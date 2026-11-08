@@ -145,6 +145,29 @@ public sealed class ProviderFailureTests(AssistantApp app)
     }
 
     [Fact]
+    public async Task The_cap_is_checked_again_before_the_answer_call()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new() { ["AI:DailyTokenCapPerTenant"] = "1000" });
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
+        var conversation = await CreateAsync(instance.Client, token);
+        // One token below the cap: the question passes the check at its start, and its query embedding (1 token) reaches the cap.
+        await instance.Services.GetRequiredService<ITenantTokenBudget>().AddAsync(tenant, 999, Ct);
+
+        var result = await AskAsync(instance.Client, token, conversation, Question);
+
+        result.Status.ShouldBe(HttpStatusCode.OK, "the stream had started: the refusal is its error event");
+        var error = result.Of("error").Single().Data;
+        error.GetProperty("status").GetInt32().ShouldBe(429);
+        error.GetProperty("title").GetString().ShouldBe(AnswerStreamer.TokenCapTitle);
+        model.EmbeddingRequests.ShouldBe(1);
+        model.ChatRequests.ShouldBe(0, "neither the guard classifier nor the answer was called");
+        var saved = await WaitForLastMessageAsync(instance.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");
+        saved.GetProperty("status").GetString().ShouldBe("Failed");
+    }
+
+    [Fact]
     public async Task Every_model_path_counts_against_the_tenants_daily_total()
     {
         await using var model = await StubModelServer.StartAsync();
@@ -219,8 +242,11 @@ public sealed class ProviderFailureTests(AssistantApp app)
         var marker = $"zzfilter{Guid.NewGuid():N}"[..20];
         var logs = new CapturingSink();
         await using var model = await StubModelServer.StartAsync();
-        await using var instance = await StartAsync(model, new(), services => services.AddSingleton<ILogEventSink>(logs));
-        var token = User(AssistantApp.NewTenant());
+        // A large output limit, so a charge of the prompt alone is told apart from the whole reservation.
+        await using var instance = await StartAsync(
+            model, new() { ["AI:Chat:MaxOutputTokens"] = "10000" }, services => services.AddSingleton<ILogEventSink>(logs));
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
         model.FailAnswers(request => StubModelError.ContentFilter($"Prompt: {request}"));
 
         var result = await AskAsync(instance.Client, token, await CreateAsync(instance.Client, token), $"{Question} {marker}");
@@ -234,6 +260,10 @@ public sealed class ProviderFailureTests(AssistantApp app)
         events.ShouldContain(e => e.Level == LogEventLevel.Warning && e.RenderMessage().Contains("content filter"));
         events.ShouldNotContain(e => e.Level >= LogEventLevel.Error, "a content filter refusal is not an error of ours");
         events.Select(Render).ShouldNotContain(line => line.Contains(marker) || line.Contains("content management policy"));
+        // Azure bills a prompt-filtered call for the prompt's evaluation: the prompt part of the reservation stays, the output part not.
+        var used = (await instance.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(tenant, Ct)).Used;
+        used.ShouldBeGreaterThan(100, "the answer prompt (sources, tools, question) is charged");
+        used.ShouldBeLessThan(10_000, "nothing was generated, so the output limit is not charged");
     }
 
     [Fact]

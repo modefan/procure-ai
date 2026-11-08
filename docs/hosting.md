@@ -323,9 +323,11 @@ organisations. Worst case: 3 x 150 000 x 30 days plus the two seeds, which are c
 "Daily token cap"), is about 14 M tokens. Priced as if 20 % were output (measured: about 5 %), that is $0.60 per 1 M and **$8.40 a month**,
 under the Azure budget alert. Every model call reserves an estimate (its prompt plus its output limit) before it is made and settles it
 with the real usage after, so calls already in flight count when the cap is checked, and an answer whose visitor closed the tab
-mid-stream keeps its reservation (it may have been billed); only a call that certainly reached no model (open breaker, 429, a refused
-prompt) gives it back. The overshoot is therefore at most the difference between the estimates and the real usage of the calls that
-started just before the cap was reached, a few thousand tokens per organisation, so the $8.40 is close to a ceiling. Per user the Assistant also allows 50 questions a
+mid-stream keeps its reservation (it may have been billed); a refused prompt (400, Azure's content filter) keeps the prompt part, as
+Azure bills its evaluation; only a call Azure does not process (401, 403, 404, 429, an open breaker, no connection) gives it back. A
+question is checked against the cap when it starts and again right before its answer call, but questions that passed before the cap was
+reached still run to the end (each about 2-3 k tokens): a scripted burst of questions fired together at the cap can add about USD 1-2
+once (still under the USD 10 alert), bounded by the per-user quota and the `chat` deployment's 50 requests a minute. Per user the Assistant also allows 50 questions a
 day, and the demo login 30 sign-ins a minute per visitor address (300 a minute in all).
 
 **Azure guards.** The budget `procure-ai-10usd` on the subscription: USD 10 a month, e-mails to the Azure account's address at 50 %,

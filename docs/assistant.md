@@ -118,7 +118,8 @@ produced are billed. The provider's error bodies (which can echo the prompt) are
 before anything logs them. When Azure's own content filter refuses a prompt (400 `content_filter`), the question is blocked like one
 our guard caught (422 "I can't help with that", reason `provider_filter`, a Warning in the log), not a failure. When Azure filters
 the *answer* instead (the stream ends normally with `finish_reason: content_filter`, the text cut short), the answer is saved as
-Blocked with the flag `output:provider_filter` and the same 422 event, never kept as a normal answer; its usage still counts.
+Blocked with the flag `output:provider_filter` and the same 422 event, never kept as a normal answer; the call still counts (a stream with
+its reported usage, a non-streamed call with its whole reservation).
 
 **Daily token cap.** Each tenant may use `AI:DailyTokenCapPerTenant` tokens a day (default 200 000; 150 000 on the live demo,
 procure-ai-gitops `envs/hosted/procure-ai.yaml`; SAST calendar day). Every
@@ -134,9 +135,12 @@ the live demo (2026-11-08). Every model call **reserves** an estimate on the ten
 characters / `AI:CharsPerTokenEstimate`, default 4, plus its output limit) and settles it with the usage the provider reports after it.
 So the check before new work also sees the calls already in flight (all the tenant's users, on every instance), and a call that ends
 without reporting usage keeps its reservation when the provider may have billed it: a visitor who closes the tab mid-answer (the usage
-comes in the stream's last chunk), a timeout, a provider error. Only a call that certainly reached no model gives it back: an open
-circuit breaker, a 4xx such as 429 or Azure's prompt filter, a connection that was never made. The cap can still be passed by the
-difference between the estimates and the real usage of the calls that started just before it was reached.
+comes in the stream's last chunk), a timeout, a 5xx. A 400 (Azure's prompt content filter, an input limit) keeps the prompt part:
+Azure bills the prompt's evaluation. Only a call Azure documents as unprocessed gives it back: 401, 403, 404 or 429, an open circuit
+breaker, a connection that was never made. The question flow checks the cap when the question starts and again right before the guard
+classifier and the answer call. Questions that passed those checks before the cap was reached still run to the end (each about 2-3 k
+tokens), so a scripted burst of questions fired together at the cap can add about USD 1-2 once, bounded by the per-user quota and the
+deployment's 50 requests a minute.
 
 **To recheck when the model or deployment changes.** `AI:Chat:ReasoningEffort` `None` is sent as `reasoning_effort: "none"`. Azure's
 gpt-5-mini 2025-08-07 accepts it (0 reasoning tokens, checked 2026-11-07), but OpenAI documents `minimal` as gpt-5-mini's lowest
