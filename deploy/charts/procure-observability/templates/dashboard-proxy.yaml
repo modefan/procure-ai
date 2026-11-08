@@ -1,0 +1,15 @@
+{{- if .Values.dashboard.proxy.enabled }}
+{{- $labels := dict "root" $ "name" "aspire-dashboard" }}
+# The dashboard pod's nginx (dashboard.proxy, plan 08b finding 2): its nginx.conf and the blank-table workaround it adds to every page.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aspire-dashboard-proxy
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+data:
+  nginx.conf: |
+    {{- .Files.Get "files/dashboard-proxy.conf" | replace "__DASHBOARD_PORT__" "18888" | nindent 4 }}
+  virtualize-nudge.js: |
+    {{- .Files.Get "files/virtualize-nudge.js" | nindent 4 }}
+{{- end }}

@@ -1,7 +1,10 @@
 {{- $d := .Values.dashboard }}
 {{- $labels := dict "root" $ "name" "aspire-dashboard" }}
+{{- /* With the proxy (dashboard.proxy, plan 08b finding 2) the port named http is nginx's, and the dashboard's frontend is "frontend". */}}
+{{- $frontendPort := ternary "frontend" "http" $d.proxy.enabled }}
 # The standalone Aspire dashboard: frontend on 18888 behind Traefik (Keycloak OIDC, dashboard-viewer only), OTLP gRPC on 18889 for the
 # collector (no key; network-policies.yaml lets only the collector in). Telemetry is kept in memory and lost on restart (CLAUDE.md).
+# With dashboard.proxy.enabled, nginx in the same pod (port http, 8080) sits in front of the frontend and adds the blank-table workaround.
 apiVersion: v1
 kind: Service
 metadata:
@@ -39,6 +42,11 @@ spec:
     metadata:
       labels:
         {{- include "procure-observability.labels" $labels | nindent 8 }}
+      {{- if $d.proxy.enabled }}
+      annotations:
+        # A changed proxy config or script restarts the pod (subPath mounts are not updated in place).
+        checksum/proxy: {{ print (.Files.Get "files/dashboard-proxy.conf") (.Files.Get "files/virtualize-nudge.js") | sha256sum }}
+      {{- end }}
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -52,7 +60,7 @@ spec:
           image: {{ $d.image | quote }}
           imagePullPolicy: {{ $d.imagePullPolicy }}
           ports:
-            - name: http
+            - name: {{ $frontendPort }}
               containerPort: 18888
               protocol: TCP
             - name: otlp-grpc
@@ -63,8 +71,8 @@ spec:
               value: http://+:18888
             - name: DOTNET_DASHBOARD_OTLP_ENDPOINT_URL
               value: http://+:18889
-            # The address the browser uses (Traefik, TLS). 13.6.2 still rejects Blazor's WebSocket upgrade behind the proxy ("disallowed
-            # Origin"); the browser falls back to long polling, which works.
+            # The address the browser uses (Traefik, TLS). Blazor's WebSocket only passes the dashboard's Origin check because the
+            # Ingress forces X-Forwarded-Proto: https (Middleware aspire-dashboard-forwarded-proto below).
             - name: Dashboard__Frontend__PublicUrl
               value: {{ printf "https://%s" .Values.hosts.dashboard }}
             # Browser sign-in with Keycloak (code flow + PKCE, confidential client).
@@ -123,9 +131,45 @@ spec:
                 - ALL
           startupProbe:
             tcpSocket:
-              port: http
+              port: {{ $frontendPort }}
             periodSeconds: 2
             failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: {{ $frontendPort }}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ $frontendPort }}
+            periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: procure-ca
+              mountPath: {{ $d.caTrust.mountPath }}
+              readOnly: true
+        {{- if $d.proxy.enabled }}
+        {{- $p := $d.proxy }}
+        # nginx in front of the frontend (files/dashboard-proxy.conf): passes everything through and adds /_procure/virtualize-nudge.js
+        # to every page. Started without the image's entrypoint scripts (they rewrite files under /etc/nginx, which is read-only here).
+        - name: proxy
+          image: {{ $p.image | quote }}
+          imagePullPolicy: {{ $p.imagePullPolicy }}
+          command: ["nginx", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+          securityContext:
+            runAsUser: {{ $p.uid }}
+            runAsGroup: {{ $p.uid }}
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           readinessProbe:
             tcpSocket:
               port: http
@@ -135,11 +179,17 @@ spec:
               port: http
             periodSeconds: 20
           volumeMounts:
-            - name: tmp
+            - name: proxy-tmp
               mountPath: /tmp
-            - name: procure-ca
-              mountPath: {{ $d.caTrust.mountPath }}
+            - name: proxy
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
               readOnly: true
+            - name: proxy
+              mountPath: /etc/procure-dashboard-proxy/virtualize-nudge.js
+              subPath: virtualize-nudge.js
+              readOnly: true
+        {{- end }}
       volumes:
         # The dashboard's SQLite telemetry database (values.yaml dashboard.tmpSizeLimit).
         - name: tmp
@@ -148,6 +198,32 @@ spec:
         - name: procure-ca
           configMap:
             name: {{ $d.caTrust.configMap }}
+        {{- if $d.proxy.enabled }}
+        - name: proxy-tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: proxy
+          configMap:
+            name: aspire-dashboard-proxy
+        {{- end }}
+---
+# Blazor's WebSocket (/_blazor) behind Traefik (plan 08b finding 1). Traefik sends X-Forwarded-Proto: wss on a WebSocket upgrade over TLS
+# (ws on plain http). With forwarded headers trusted, the dashboard (13.6) then sees Request.Scheme "wss", and its WebSocketOriginValidator
+# compares the browser's Origin (https://<host>) with scheme + host of the request: "https" is not "wss", so EVERY circuit got 403
+# "Origin not allowed" and the pages stayed without data (the earlier comment here, "falls back to long polling", was wrong). TLS always ends at
+# Traefik for this host (http only redirects), so the scheme the browser used is always https: the Middleware sets exactly that on every
+# request of the dashboard's Ingress. The origin check stays meaningful: a foreign Origin (another scheme or host) still gets 403
+# (tests: helm-unittest here, the live check procure-ai-gitops tests/Test-Dashboard.ps1).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: aspire-dashboard-forwarded-proto
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: https
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -155,6 +231,8 @@ metadata:
   name: aspire-dashboard
   labels:
     {{- include "procure-observability.labels" $labels | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-aspire-dashboard-forwarded-proto@kubernetescrd
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
   # No secretName: Traefik serves its default certificate (TLSStore `default`: the local CA's from bootstrap/new-local-ca.ps1; Let's Encrypt's on hosted).

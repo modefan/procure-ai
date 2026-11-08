@@ -50,6 +50,22 @@ dashboard:
   caTrust:
     configMap: procure-ca
     mountPath: /etc/procure-ca
+  # Plan 08b finding 2: Structured logs and Traces often loaded blank (no rows, for good) when the browser is far from the VM. The cause is
+  # a race in the dashboard's virtualized grid (13.6.2 and 13.6.4; files/virtualize-nudge.js has the details and the measurements). The
+  # workaround: nginx in the dashboard's pod passes everything through and adds files/virtualize-nudge.js to every page, which re-measures a
+  # grid that stays blank. Switch it off (enabled: false; the Service then points at the dashboard itself) once an Aspire release fixes the
+  # race: procure-ai-gitops tests/Test-Dashboard.ps1 -NoNudge shows whether the tables load without it.
+  proxy:
+    enabled: true
+    # The web image's base (src/Web/procure-ai-web/Dockerfile): unprivileged nginx, with the sub module (sub_filter) built in.
+    image: docker.io/nginxinc/nginx-unprivileged:1.30.6-alpine-slim
+    imagePullPolicy: IfNotPresent
+    # The image's nginx user.
+    uid: 101
+    # One worker, no buffering: 5 MiB measured in Docker (2026-11-08).
+    resources:
+      limits: { memory: 32Mi, cpu: 200m }
+      requests: { memory: 16Mi, cpu: 10m }
 
 networkPolicies:
   enabled: true
@@ -225,15 +241,54 @@ opentelemetry-collector:
               - 'delete_key(log.attributes, "client.address")'
               - 'delete_key(log.attributes, "http.client_ip")'
               - 'delete_key(log.attributes, "RemoteIpAddress")'
-      # Background database and cache calls without a parent span (Wolverine's durability polling, Audit's pgaudit reader, the Redis
-      # backplane, Mongo health pings): ~30 root traces a second filled the dashboard's trace limit in under three minutes and evicted
-      # every request's trace. Only those root spans are dropped; database spans inside a request's trace stay. (A processor beyond the
-      # plan's memory_limiter, k8sattributes, batch; plan 07 Task 7 report.)
-      filter/background-db:
+      # Connection churn in the platform's own logs (plan 08b finding 3). Measured on the hosted VM 2026-11-08: 584 log lines a minute
+      # reached the dashboard, 464 of them RabbitMQ's four info lines per AMQP connection (accepting, authenticated, granted access,
+      # closing: the apps' readiness checks open a connection on every probe, ~2 a second) and 80 MongoDB's per-connection lines (the
+      # kubelet's mongosh and TCP probes: accepted, client metadata, TLS handshake, the "No SSL certificate provided by peer" warning that
+      # every client without a client certificate gets, not authenticating / authenticated, auth metrics, first command, ended). The
+      # 5 000-line cap held 8.6 minutes and pushed the apps' logs out. Also MongoDB's routine checkpoint messages (WiredTiger, level
+      # INFO, ~8 a minute; a checkpoint's warnings and errors stay). Exactly those lines are dropped, matched by level and message, for these two resources
+      # only. Everything else stays, including every other warning and error of both (a refused login, a connection closed with an error,
+      # slow queries, checkpoints). Tested against the real image with samples: tests/collector/Test-CollectorRedaction.ps1.
+      filter/platform-noise:
         error_mode: ignore
-        traces:
-          span:
-            - IsRootSpan() and (span.attributes["db.system.name"] != nil or span.attributes["db.system"] != nil)
+        logs:
+          log_record:
+            - 'resource.attributes["service.name"] == "rabbitmq" and IsString(log.body) and IsMatch(log.body.string, "^\\S+ \\S+ \\[info\\] <[^>]+> (accepting AMQP connection |closing AMQP connection |connection \\S+ -> \\S+: user ''[^'']*'' authenticated and granted access to vhost |User ''[^'']*'' authenticated successfully)")'
+            - 'resource.attributes["service.name"] == "mongo" and IsString(log.body) and IsMatch(log.body.string, "^\\{\"t\":\\{[^}]*\\},\"s\":\"I\",\\s*\"c\":\"(NETWORK|ACCESS)\",\\s*\"id\":\\d+,\\s*\"ctx\":\"[^\"]*\",\"msg\":\"(Connection accepted|Connection ended|client metadata|Ingress TLS handshake complete|Connection not authenticating|Successfully authenticated|Auth metrics report|Received first command on ingress connection since session start or auth handshake)\"")'
+            - 'resource.attributes["service.name"] == "mongo" and IsString(log.body) and IsMatch(log.body.string, "^\\{\"t\":\\{[^}]*\\},\"s\":\"I\",\\s*\"c\":\"WTCHKPT\",.*\"category\":\"WT_VERB_CHECKPOINT(_PROGRESS)?\",.*\"verbose_level\":\"INFO\"")'
+            - 'resource.attributes["service.name"] == "mongo" and IsString(log.body) and IsMatch(log.body.string, "^\\{\"t\":\\{[^}]*\\},\"s\":\"W\",\\s*\"c\":\"NETWORK\",\\s*\"id\":23234,\\s*\"ctx\":\"[^\"]*\",\"msg\":\"No SSL certificate provided by peer\"")'
+      # Background traces (plan 08b finding 3; replaces plan 07's span filter filter/background-db). A whole trace is dropped when its
+      # root span is background work that no request or message caused:
+      #   - a database or cache call without a parent (Wolverine's durability polling, Audit's pgaudit reader, the Redis backplane, the
+      #     MongoDB readiness ping): ~30 root traces a second filled the trace limit in under three minutes (plan 07 Task 7);
+      #   - Wolverine's node-assignment poll (root span wolverine_node_assignments with six Postgres spans, every ~12 s in every service);
+      #   - the System status page's poll of the supplier simulator's chaos switch (a root GET .../api/v1/simulators/chaos).
+      # Measured on the hosted VM 2026-11-08: these were 92 % of all traces (12 operations at ~4.8 a minute each), requests 5 %.
+      # Trace-level, not span-level: plan 07's filter dropped only the root span, so its children (the MongoDB driver's command span under
+      # its operation span) still showed up as traces of their own ("assistant-api: ping", "aggregate"). A root that ended in an error is
+      # kept, and so is every trace with any other root (requests, messages, scheduled jobs). The spans of a trace wait decision_wait
+      # before they go on to the dashboard. Tested against the real image: tests/collector/Test-CollectorRedaction.ps1.
+      tail_sampling:
+        decision_wait: 5s
+        num_traces: 20000
+        expected_new_traces_per_sec: 50
+        decision_cache:
+          sampled_cache_size: 20000
+          non_sampled_cache_size: 20000
+        policies:
+          - name: drop-background-roots
+            type: drop
+            drop:
+              drop_sub_policy:
+                - name: background-root
+                  type: ottl_condition
+                  ottl_condition:
+                    error_mode: ignore
+                    span:
+                      - 'IsRootSpan() and span.status.code != STATUS_CODE_ERROR and (span.attributes["db.system.name"] != nil or span.attributes["db.system"] != nil or span.name == "wolverine_node_assignments" or (span.kind == SPAN_KIND_CLIENT and IsString(span.attributes["url.full"]) and IsMatch(span.attributes["url.full"], "/api/v1/simulators/chaos$")))'
+          - name: keep-everything-else
+            type: always_sample
       batch: {}
     exporters:
       otlp:
@@ -248,7 +303,7 @@ opentelemetry-collector:
       pipelines:
         logs:
           receivers: [otlp, filelog]
-          processors: [memory_limiter, k8sattributes, transform/redact, transform/client-address, batch]
+          processors: [memory_limiter, filter/platform-noise, k8sattributes, transform/redact, transform/client-address, batch]
           exporters: [otlp]
         metrics:
           receivers: [otlp]
@@ -256,5 +311,7 @@ opentelemetry-collector:
           exporters: [otlp]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, filter/background-db, k8sattributes, transform/client-address, batch]
+          # k8sattributes before tail_sampling: it finds the pod by the connection's address, which tail_sampling's regrouped batches no
+          # longer carry.
+          processors: [memory_limiter, k8sattributes, tail_sampling, transform/client-address, batch]
           exporters: [otlp]

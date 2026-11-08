@@ -367,8 +367,10 @@ jobs:
           helm template procure-ai deploy/charts/procure-ai --namespace procure --set global.imageTag=ci \
               --set global.demo.seed=true --set global.demo.reset=true \
             | kubeconform -strict -summary
+          # The dashboard Ingress's Traefik Middleware (plan 08b) against the community CRD schema catalog, as in the next step.
           helm template observability deploy/charts/procure-observability --namespace observability \
-            | kubeconform -strict -summary
+            | kubeconform -strict -summary -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
       # Plan 08 final review B I1: render every chart with each GitOps environment's values (envs/local and envs/hosted), as Argo CD renders
       # them, so a chart change that breaks an environment's values (a renamed key, a branch only hosted uses: publicPathsOnly,

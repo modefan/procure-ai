@@ -38,15 +38,15 @@ tests:
           path: data.relay
           pattern: '/var/log/pods/(?:argocd|kube-system|observability)_'
 
-  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to the dashboard (logs also through transform/redact)
+  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to the dashboard (logs also through filter/platform-noise and transform/redact, traces through tail_sampling)
     template: charts/opentelemetry-collector/templates/configmap-agent.yaml
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/platform-noise\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
       - matchRegex:
           path: data.relay
-          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/background-db\s*\n\s*- k8s_?attributes\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- tail_sampling\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
       - matchRegex:
           path: data.relay
           pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
@@ -79,15 +79,37 @@ tests:
           path: data.relay
           pattern: '(?s)(traces|metrics):\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact'
 
-  # Background database and cache calls without a parent (Wolverine's durability polling, Audit's pgaudit reader, the Redis backplane,
-  # Mongo health pings) are ~30 root traces a second; they filled the dashboard's trace limit in under three minutes and evicted every
-  # request's trace. Only those root spans are dropped; database spans inside a request's trace stay.
-  - it: collector drops background database root spans only
+  # Plan 08b finding 3 (replaces plan 07's span filter filter/background-db, which dropped only the root span and left its children as
+  # traces of their own): whole background traces are dropped (a database or cache root, Wolverine's node-assignment poll, the
+  # chaos-switch poll), unless their root failed; every other trace is kept. The behaviour is tested against the real collector image in
+  # tests/collector/Test-CollectorRedaction.ps1; this pins the wiring. (Long OTTL strings are folded over lines in the rendered YAML.)
+  - it: collector drops whole background traces only
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - notMatchRegex:
+          path: data.relay
+          pattern: 'filter/background-db'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)tail_sampling:\s+decision_cache:.*decision_wait: 5s'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)policies:\s+- drop:\s+drop_sub_policy:\s+- name: background-root\s+ottl_condition:\s+error_mode: ignore\s+span:\s+- .?IsRootSpan\(\)\s+and\s+span\.status\.code\s+!=\s+STATUS_CODE_ERROR\s+and'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)background-root.*wolverine_node_assignments.*SPAN_KIND_CLIENT.*/api/v1/simulators/chaos\$.*name: drop-background-roots\s+type: drop\s+- name: keep-everything-else\s+type: always_sample'
+
+  # Plan 08b finding 3: RabbitMQ's and MongoDB's per-connection lines (readiness probes) are dropped, only for those two resources and
+  # matched by level and message; tested with samples in tests/collector/Test-CollectorRedaction.ps1.
+  - it: collector drops only the platform's connection churn from the logs
     template: charts/opentelemetry-collector/templates/configmap-agent.yaml
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)filter/background-db:\s*\n\s*error_mode: ignore\s*\n\s*traces:\s*\n\s*span:\s*\n\s*- IsRootSpan\(\) and \(span\.attributes\["db\.system\.name"\] != nil or span\.attributes\["db\.system"\]\s+!= nil\)\s*\n'
+          pattern: '(?s)filter/platform-noise:\s+error_mode: ignore\s+logs:\s+log_record:\s+- .?resource\.attributes\["service\.name"\] == "rabbitmq"\s+and\s+IsString\(log\.body\)\s+and\s+IsMatch\(log\.body\.string,\s+"\^'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)filter/platform-noise:.*resource\.attributes\["service\.name"\] == "mongo"\s+and.*\\"s\\":\\"I\\".*resource\.attributes\["service\.name"\] == "mongo"\s+and.*\\"s\\":\\"W\\".*\\"id\\":23234'
 
   # Review 12c M1: every OTTL path has its context prefix (the unprefixed form is the legacy one; the collector rewrites it with a
   # notice). Test-CollectorRedaction.ps1 also fails on that notice in the real collector's log.

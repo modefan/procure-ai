@@ -179,7 +179,7 @@ ignore certificate errors.
 | Keycloak | 26.8.1, production mode (`start --optimized`, realm baked into `infra/keycloak`) |
 | keycloak-config-cli | 6.5.1, the build for Keycloak 26.5.5 (`keycloakConfig.image`; move to a 26.8 build once one is published) |
 | Debezium Server | 3.7.0.Final (`infra/debezium`) |
-| OpenTelemetry Collector chart / Aspire dashboard | 0.178.2 / 13.6.2 |
+| OpenTelemetry Collector chart / Aspire dashboard | 0.178.2 / 13.6.2 (with nginx-unprivileged 1.30.6 in its pod, plan 08b) |
 | Helm (chart checks) | 3.20 with helm-unittest 1.2.1 and kubeconform 0.8.0 (CI job `charts`) |
 
 ## Bootstrap a cluster
@@ -270,6 +270,7 @@ All in the GitOps repo's `tests/` unless noted. They need the cluster running an
 | `Test-LocalCa.ps1` | The local CA's name constraints (no cluster needed) |
 | `Test-Upgrade.ps1` | A new revision reruns every migration Job before the pods change; a revision whose Requests migration fails keeps the old pods serving and turns the root Application `Degraded` within 5 minutes (throwaway branches, restored afterwards) |
 | `Test-RestartKeepsData.ps1` | `k3d cluster stop/start` and deleted Postgres and MongoDB pods keep every row, document and Debezium position; a new change still reaches the data change log within 30 s |
+| `Test-Dashboard.ps1` | The Aspire dashboard as an operator uses it (plan 08b; also the last step of `Test-FreshCluster.ps1`): Microsoft Edge signs in as the demo admin, Structured logs and Traces show rows on every full page load, requests-api's logs and the gateway's and requests-api's traces have rows from the last 10 minutes, and Blazor's WebSocket accepts the dashboard's own Origin and refuses a foreign one. Run it after every push or deploy that reaches a cluster |
 | End-to-end tests (this repo) | The browser suite against `https://procure.localtest.me` (below) |
 
 The end-to-end tests run against the cluster instead of an AppHost when `PROCUREAI_E2E_GATEWAY_URL` is set. They rerun on kept data,
@@ -302,6 +303,40 @@ tested against the pinned collector image over sample logs in the real formats:
 Limit: only `key=value` text is masked; JSON-style bodies (`"username":"x"`) are not. Quoted values may contain spaces (`username="Mary Jane"`).
 A RabbitMQ node name such as `rabbit@rabbitmq-0.rabbitmq.procure.svc` looks like an e-mail address and is masked too.
 
+## The Aspire dashboard: what makes it work (plan 08b)
+
+On 2026-11-08 the hosted dashboard had shown no data for days while every smoke check passed. Three causes, each fixed in the
+`procure-observability` chart and checked by the GitOps repo's `tests/Test-Dashboard.ps1` (above):
+
+1. **Blazor's WebSocket was refused behind Traefik.** On a WebSocket upgrade over TLS Traefik sends `X-Forwarded-Proto: wss`. The
+   dashboard trusts forwarded headers (it must, for its OIDC redirect URI), so its request scheme became `wss`, and its Origin check
+   (13.6) compared the browser's `https://dashboard...` with `wss://dashboard...` and answered 403 to every circuit. There is no
+   working fallback; the pages simply stayed empty. The dashboard's Ingress now carries the Traefik Middleware
+   `aspire-dashboard-forwarded-proto`, which sets `X-Forwarded-Proto: https` (TLS always ends at Traefik for this host; http only
+   redirects). A foreign Origin, or the dashboard's host with `http://`, still gets 403.
+2. **Tables stayed blank after a full page load.** Structured logs and Traces are virtualized grids (Blazor `Virtualize` in a Fluent
+   data grid). They first render with no items, then with the real count, scrolled to the newest row at the bottom. With a far-away
+   browser (about 180 ms round trip from South Africa to the VM) the browser's spacer measurements race with the server's renders and
+   the grid can end up waiting for rows it never requests: no rows, both spacers in view, so no IntersectionObserver callback ever
+   comes again. Resizing the window re-observes the spacers, which is why that "fixed" it. Measured with the dashboard image in Docker
+   and a proxy adding 90 ms each way: 9 of 10 Structured logs loads blank (13.6.4 too: 11 of 20), 0 of 10 without the delay, and also
+   with no telemetry arriving at all (so the update rate is not the cause). On the VM: 5 of 6 loads blank. Upstream (Aspire 13.6.2 and
+   13.6.4, the newest); no setting avoids it. The workaround: nginx in the dashboard's pod (`dashboard.proxy`, the web image's
+   `nginx-unprivileged`) passes everything through unchanged and adds one same-origin script, `/_procure/virtualize-nudge.js`, to every
+   page. Once a second it looks for a grid that has rows but has rendered none for a second and narrows it by one pixel for two frames,
+   which re-observes the spacers as a window resize does. With it: 20 of 20 loads in the lab and 20 of 20 on the VM showed rows within
+   6 s. To retire it after an Aspire upgrade: `Test-Dashboard.ps1 -NoNudge` (blocks the script); when every load still shows rows, set
+   `dashboard.proxy.enabled: false`.
+3. **Noise filled the 5 000-row caps.** Measured on the VM before the fix: 584 log lines a minute, 79 % RabbitMQ's four lines per AMQP
+   connection (the apps' readiness checks connect on every probe) and 14 % MongoDB's per-connection lines (the kubelet's probes), so the
+   log cap held 8.6 minutes; 61 traces a minute, 92 % background (Wolverine's `wolverine_node_assignments` poll in every service,
+   MongoDB readiness pings whose parent span had been dropped, the System status page's poll of the chaos switch), so request traces
+   were 5 %. The collector now drops exactly those log lines (`filter/platform-noise`, by resource, level and message; every warning
+   and error stays) and whole background traces (`tail_sampling`: a trace whose root is a parentless database or cache call, the
+   node-assignment poll or the chaos-switch GET, unless that root failed; traces wait 5 s in the collector). After: 23 log lines a
+   minute (cap about 3.5 hours) and 3.5 traces a minute, all requests and messages (cap about a day), measured on the VM 2026-11-08.
+   Both are tested against the real collector image (`Test-CollectorRedaction.ps1`, sample lines and OTLP traces).
+
 ## Measured memory
 
 Measured 2026-11-05 on the 10 GiB node with everything deployed (plan 07 complete, observability on): `docker stats` of the k3d node and
@@ -333,6 +368,9 @@ API server.
   kubectl --context k3d-procure -n procure exec deploy/keycloak -- sh -c 'export KC_CLI_PASSWORD="$KC_BOOTSTRAP_ADMIN_PASSWORD"; /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --config /tmp/kcadm.config && /opt/keycloak/bin/kcadm.sh get clients -r procure -q clientId=aspire-dashboard --fields id,redirectUris,optionalClientScopes --config /tmp/kcadm.config; rm -f /tmp/kcadm.config'
   ```
 
+- **The dashboard shows no data, or a table stays empty.** Run `tests/Test-Dashboard.ps1` in the GitOps repo (`-Environment hosted` for
+  the VM): it says which part fails ("The Aspire dashboard: what makes it work" above). A 403 for the dashboard's own Origin means the
+  Ingress lost its `X-Forwarded-Proto` middleware; blank tables with the script blocked or missing mean the dashboard pod's proxy is off.
 - **The dashboard says the sign-in failed, or shows 404 after signing in.** Only users with the `aspire-dashboard` client role
   `dashboard-viewer` get in (the demo admin); everyone else ends on a 404. A Keycloak error page about the redirect URI or scope means the
   realm on the server differs from Git: check the last `keycloak-config` Job.

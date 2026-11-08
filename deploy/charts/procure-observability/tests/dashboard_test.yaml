@@ -2,6 +2,7 @@
 suite: dashboard
 templates:
   - dashboard.yaml
+  - dashboard-proxy.yaml
 release:
   name: observability
   namespace: observability
@@ -72,8 +73,7 @@ tests:
   # Security-guidance finding on the first commit: the dashboard API (telemetry API /api/telemetry and the MCP server, Dashboard:Api in
   # 13.6) has its own auth mode and is not needed here, so it is switched off (both keys 13.6.2 reads: Dashboard:Api:Disabled and
   # Dashboard:Api:Enabled), and its MCP port 18891 is neither a container port nor in the Service.
-  # Its public address behind Traefik (the URL it shows and links to). Note: 13.6.2 still rejects Blazor's WebSocket behind the proxy
-  # ("disallowed Origin"), and the browser falls back to long polling, which works (plan 07 Task 7 report).
+  # Its public address behind Traefik (the URL it shows and links to).
   - it: dashboard knows its public url
     documentSelector:
       path: kind
@@ -146,6 +146,44 @@ tests:
             port:
               name: http
 
+  # Plan 08b finding 1: Traefik sends X-Forwarded-Proto: wss on WebSocket upgrades, the dashboard's Origin check then compared https
+  # with wss and refused every Blazor circuit (403). The Ingress forces https, the scheme the browser always uses for this host.
+  - it: dashboard ingress forces X-Forwarded-Proto https through its middleware
+    documentSelector:
+      path: kind
+      value: Ingress
+    asserts:
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+          value: observability-aspire-dashboard-forwarded-proto@kubernetescrd
+      # One Ingress for every path of the host, so /_blazor gets the middleware too (no path of its own that could miss it).
+      - lengthEqual:
+          path: spec.rules[0].http.paths
+          count: 1
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /
+
+  - it: dashboard forwarded-proto middleware sets exactly https and nothing else
+    documentSelector:
+      path: kind
+      value: Middleware
+    asserts:
+      - isKind:
+          of: Middleware
+      - equal:
+          path: apiVersion
+          value: traefik.io/v1alpha1
+      - equal:
+          path: metadata.name
+          value: aspire-dashboard-forwarded-proto
+      - equal:
+          path: spec
+          value:
+            headers:
+              customRequestHeaders:
+                X-Forwarded-Proto: https
+
   - it: dashboard service exposes the frontend and the otlp grpc port only
     documentSelector:
       path: kind
@@ -189,3 +227,86 @@ tests:
           content:
             name: Dashboard__TelemetryLimits__MaxMetricsCount
             value: "200"
+
+  # Plan 08b finding 2: nginx in the dashboard's pod adds the blank-table workaround (files/virtualize-nudge.js) to every page. The
+  # Service and the NetworkPolicy's port `http` now lead to nginx; the dashboard's own frontend port is `frontend`.
+  - it: dashboard proxy sits in front of the frontend in the same pod
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports[0]
+          value: { name: frontend, containerPort: 18888, protocol: TCP }
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: frontend
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: proxy
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^docker\.io/nginxinc/nginx-unprivileged:\d+\.\d+\.\d+-alpine-slim$'
+      - equal:
+          path: spec.template.spec.containers[1].command
+          value: ["nginx", "-g", "daemon off;"]
+      - equal:
+          path: spec.template.spec.containers[1].ports
+          value:
+            - { name: http, containerPort: 8080, protocol: TCP }
+      - equal:
+          path: spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content: { name: proxy, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true }
+      - exists:
+          path: spec.template.metadata.annotations["checksum/proxy"]
+
+  - it: dashboard proxy config passes everything through and adds the nudge script
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - equal:
+          path: metadata.name
+          value: aspire-dashboard-proxy
+      - matchRegex:
+          path: data["nginx.conf"]
+          pattern: 'proxy_pass http://127\.0\.0\.1:18888;'
+      - matchRegex:
+          path: data["nginx.conf"]
+          pattern: 'sub_filter ''</head>'' ''<script src="/_procure/virtualize-nudge\.js"></script></head>'';'
+      # Forwarded headers and the Host pass through unchanged, so the WebSocket Origin check and the redirect URI see what they saw before.
+      - matchRegex:
+          path: data["nginx.conf"]
+          pattern: 'proxy_set_header Host \$http_host;'
+      - matchRegex:
+          path: data["nginx.conf"]
+          pattern: 'proxy_set_header X-Forwarded-Proto \$http_x_forwarded_proto;'
+      - matchRegex:
+          path: data["nginx.conf"]
+          pattern: 'proxy_set_header Connection \$connection_upgrade;'
+      - notMatchRegex:
+          path: data["nginx.conf"]
+          pattern: '__DASHBOARD_PORT__'
+      - matchRegex:
+          path: data["virtualize-nudge.js"]
+          pattern: 'table\.fluent-data-grid'
+
+  - it: without the proxy the dashboard's frontend is port http again
+    set:
+      dashboard.proxy.enabled: false
+    asserts:
+      # No proxy ConfigMap.
+      - hasDocuments:
+          count: 0
+        template: dashboard-proxy.yaml
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].name
+          value: http
+        documentSelector: { path: kind, value: Deployment }
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+        documentSelector: { path: kind, value: Deployment }
