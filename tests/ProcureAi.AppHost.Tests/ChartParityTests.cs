@@ -73,6 +73,14 @@ public sealed partial class ChartParityTests
         name == "SSL_CERT_DIR"
         || (app == "gateway" && name.StartsWith("ForwardedHeaders__", StringComparison.Ordinal));
 
+    /// <summary>
+    /// The services' trusted proxies are addresses, which differ by design: loopback under the AppHost (two names), the pod network in the
+    /// cluster (one). <see cref="Every_service_api_trusts_a_proxy_for_the_forwarded_scheme"/> checks both sides have them.
+    /// </summary>
+    private static bool TrustedProxyAddress(string name) =>
+        name.StartsWith("ForwardedHeaders__KnownProxies__", StringComparison.Ordinal)
+        || name.StartsWith("ForwardedHeaders__KnownNetworks__", StringComparison.Ordinal);
+
     /// <summary>The Angular dev server's own settings under the AppHost (<c>ng serve --port</c>, Node heap); the cluster serves the build with nginx.</summary>
     private static readonly Dictionary<string, string[]> AppHostOnly = new(StringComparer.Ordinal)
     {
@@ -99,7 +107,7 @@ public sealed partial class ChartParityTests
             foreach (var (app, workloads) in Workloads)
             {
                 var expected = appHost.TryGetValue(app, out var env)
-                    ? env.Keys.Where(n => !IgnoredEverywhere(n) && !(AppHostOnly.TryGetValue(app, out var only) && only.Contains(n))).ToHashSet(StringComparer.Ordinal)
+                    ? env.Keys.Where(n => !IgnoredEverywhere(n) && !TrustedProxyAddress(n) && !(AppHostOnly.TryGetValue(app, out var only) && only.Contains(n))).ToHashSet(StringComparer.Ordinal)
                     : throw new Xunit.Sdk.XunitException($"AppHost resource {app} is gone; remove it from Workloads.");
                 foreach (var workload in workloads)
                 {
@@ -109,7 +117,7 @@ public sealed partial class ChartParityTests
                         continue;
                     }
 
-                    var actual = actualEnv.Keys.Where(n => !IgnoredEverywhere(n) && !ChartOnly(app, n)).ToHashSet(StringComparer.Ordinal);
+                    var actual = actualEnv.Keys.Where(n => !IgnoredEverywhere(n) && !TrustedProxyAddress(n) && !ChartOnly(app, n)).ToHashSet(StringComparer.Ordinal);
                     var missing = expected.Except(actual).Order(StringComparer.Ordinal).ToList();
                     // A migrate Job shares its app's env and secretEnv (plan 07 Task 5), so it may carry more than the AppHost's migrate resource.
                     var extra = workload.StartsWith("Job/", StringComparison.Ordinal) && app.EndsWith("-migrate", StringComparison.Ordinal)
@@ -128,6 +136,38 @@ public sealed partial class ChartParityTests
             }
 
             problems.ShouldBeEmpty($"chart rendered with {label}");
+        }
+    }
+
+    /// <summary>
+    /// Plan 08b Task 2: every service API trusts the gateway's <c>X-Forwarded-Proto</c> (loopback under the AppHost, the pod network in
+    /// the cluster), so the OpenAPI documents name the https address the browser used and Swagger UI's "Try it out" works.
+    /// </summary>
+    [Fact]
+    public async Task Every_service_api_trusts_a_proxy_for_the_forwarded_scheme()
+    {
+        var helm = Helm.FindOnPath();
+        if (helm is null)
+        {
+            Assert.Skip("helm is not on PATH: the umbrella chart cannot be rendered (CI's charts job and the PC have it).");
+        }
+
+        var apis = Workloads.Keys.Where(app => app.EndsWith("-api", StringComparison.Ordinal)).ToList();
+        apis.Count.ShouldBe(10);
+        var appHost = await AppHostEnvironmentsAsync();
+        foreach (var api in apis)
+        {
+            appHost[api].ShouldContainKeyAndValue("ForwardedHeaders__KnownProxies__0", "127.0.0.1", api);
+            appHost[api].ShouldContainKeyAndValue("ForwardedHeaders__KnownProxies__1", "::1", api);
+        }
+
+        foreach (var (label, rendered) in await Helm.RenderUmbrellaVariantsAsync(helm))
+        {
+            var chart = RenderedChart.Workloads(rendered);
+            foreach (var api in apis)
+            {
+                chart[Workloads[api][0]].ShouldContainKeyAndValue("ForwardedHeaders__KnownNetworks__0", "10.42.0.0/16", $"{label}: {api}");
+            }
         }
     }
 

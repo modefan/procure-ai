@@ -1,0 +1,97 @@
+# Plan 08b Task 2: Swagger UI on https. Every service API trusts the pod network (the gateway behind Traefik) for X-Forwarded-Proto, so
+# its OpenAPI document names https://<app host>/; without it the document said http:// and the browser blocked "Try it out" as mixed
+# content. Which headers a service takes (the scheme only) is its appsettings.json (ForwardedHeaders:Headers), not the chart.
+suite: forwarded headers
+set:
+  global.imageTag: abc1234
+tests:
+  - it: access-api trusts the pod network for the forwarded scheme
+    template: charts/access/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: approvals-api trusts the pod network for the forwarded scheme
+    template: charts/approvals/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: assistant-api trusts the pod network for the forwarded scheme
+    template: charts/assistant/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: audit-api trusts the pod network for the forwarded scheme
+    template: charts/audit/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: budgets-api trusts the pod network for the forwarded scheme
+    template: charts/budgets/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: invoicing-api trusts the pod network for the forwarded scheme
+    template: charts/invoicing/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: notifications-api trusts the pod network for the forwarded scheme
+    template: charts/notifications/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: purchasing-api trusts the pod network for the forwarded scheme
+    template: charts/purchasing/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: requests-api trusts the pod network for the forwarded scheme
+    template: charts/requests/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: suppliers-api trusts the pod network for the forwarded scheme
+    template: charts/suppliers/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16

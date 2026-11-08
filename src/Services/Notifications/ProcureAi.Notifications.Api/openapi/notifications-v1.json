@@ -23,7 +23,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/notifications/{id}/read": {
@@ -76,7 +90,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/notifications/read-all": {
@@ -100,7 +128,21 @@
           "204": {
             "description": "No Content"
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/notifications/system-status": {
@@ -140,7 +182,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     }
   },
@@ -448,8 +504,14 @@
     "securitySchemes": {
       "ApiKey": {
         "type": "apiKey",
-        "description": "The admin API key (Claude's testing access). Send X-Tenant-Id with it on tenant endpoints.",
+        "description": "The admin API key (Claude's and the operator's access; all permissions in every organisation). Tenant endpoints also need TenantId below.",
         "name": "X-Api-Key",
+        "in": "header"
+      },
+      "TenantId": {
+        "type": "apiKey",
+        "description": "Only with the admin API key: the organisation a tenant endpoint acts in, e.g. acme or globex. Sent as X-Tenant-Id on the endpoints that need one (their lock lists TenantId). Without it they answer 400. A Keycloak login (OAuth2) takes the organisation from the token and ignores this header.",
+        "name": "X-Tenant-Id",
         "in": "header"
       },
       "OAuth2": {

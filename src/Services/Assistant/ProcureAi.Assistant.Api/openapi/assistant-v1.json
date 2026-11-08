@@ -69,7 +69,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/admin/conversations/{id}": {
@@ -120,7 +134,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/info": {
@@ -140,7 +168,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/conversations": {
@@ -163,7 +205,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -192,7 +248,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/conversations/{id}": {
@@ -243,7 +313,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -285,7 +369,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/quota": {
@@ -305,7 +403,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/conversations/{id}/messages": {
@@ -406,7 +518,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/invoice-scans": {
@@ -572,7 +698,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/internal/invoice-scans/{id}": {
@@ -623,7 +763,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/policy-documents": {
@@ -682,7 +836,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -830,7 +998,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/policy-documents/{id}": {
@@ -881,7 +1063,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -992,7 +1188,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     },
     "/api/v1/assistant/policy-documents/{id}/file": {
@@ -1207,7 +1417,21 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKey": [ ],
+            "TenantId": [ ]
+          },
+          {
+            "OAuth2": [
+              "email",
+              "openid",
+              "organization",
+              "profile"
+            ]
+          }
+        ]
       }
     }
   },
@@ -2040,8 +2264,14 @@
     "securitySchemes": {
       "ApiKey": {
         "type": "apiKey",
-        "description": "The admin API key (Claude's testing access). Send X-Tenant-Id with it on tenant endpoints.",
+        "description": "The admin API key (Claude's and the operator's access; all permissions in every organisation). Tenant endpoints also need TenantId below.",
         "name": "X-Api-Key",
+        "in": "header"
+      },
+      "TenantId": {
+        "type": "apiKey",
+        "description": "Only with the admin API key: the organisation a tenant endpoint acts in, e.g. acme or globex. Sent as X-Tenant-Id on the endpoints that need one (their lock lists TenantId). Without it they answer 400. A Keycloak login (OAuth2) takes the organisation from the token and ignores this header.",
+        "name": "X-Tenant-Id",
         "in": "header"
       },
       "OAuth2": {

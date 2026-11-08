@@ -100,6 +100,8 @@ public class RateLimitPartitionTests
     {
         var config = Limit(2);
         config["ForwardedHeaders:KnownProxies:0"] = "10.0.0.1";
+        // The gateway's setting (its appsettings.json); a service takes only the scheme (OpenApiOperatorAccessTests).
+        config["ForwardedHeaders:Headers"] = "XForwardedFor, XForwardedProto";
         await using var app = await TestHost.StartAsync(config);
         var client = app.GetTestClient();
 

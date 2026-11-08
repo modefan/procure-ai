@@ -248,6 +248,7 @@ where 80/443 do not answer.
 | `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's `/admin`, master realm, welcome page and `/metrics` answer 404, also through path tricks (`/realms/procure/../master` sent as is, `%2e%2e`, `//`), and the procure realm's discovery 200; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404; every host sends HSTS and no Server header names a version; an echo pod behind a throwaway Ingress sees this PC's public address in `X-Forwarded-For` (Review Focus 5; prints "matches", never the address) |
 | `tests/Test-Dashboard.ps1 -Environment hosted` | The Aspire dashboard works for Dale (plan 08b): Microsoft Edge signs in at `https://dashboard.daleabels.com` as the demo admin, Structured logs and Traces show rows on every full page load, and requests-api and the gateway have rows from the last 10 minutes; Blazor's WebSocket accepts the dashboard's own Origin and refuses a foreign one. **After every push or deploy** (also part of `Test-FreshCluster.ps1 -Environment hosted -WatchOnly`); procure-ai `docs/kubernetes.md` "The Aspire dashboard: what makes it work" |
 | `tests/Test-Smoke.ps1 -Environment hosted` | The local smoke checks against the public hosts (gateway, Keycloak, demo login, seeded data with the hosted admin key `DEMO_ADMIN_API_KEY_HOSTED`, dashboard sign-in by role, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For`, pgaudit roles, realm drift) |
+| `tests/Test-Swagger.ps1 -Environment hosted` (in **procure-ai**) | Swagger from the browser (plan 08b): the page lists all 10 definitions; every document names exactly one server, `https://procure.daleabels.com/` (an `http://` one is blocked as mixed content); every document offers ApiKey (`X-Api-Key`), TenantId (`X-Tenant-Id`) and OAuth2; one GET per service sent to the document's server with the key (`DEMO_ADMIN_API_KEY_HOSTED`), plus `X-Tenant-Id` where the operation asks for TenantId, answers 200; a tenant endpoint without `X-Tenant-Id` answers 400; the demo switch's GET answers 200. `-PutSwitchSameState` also PUTs the state it read (never by default, so a run does not touch the live switch). `-Environment local` runs it against the k3d cluster, `-Environment apphost -GatewayUrl https://localhost:<port>` against an AppHost |
 | `tests/Test-FreshCluster.ps1 -Environment hosted -WatchOnly [-Since <push time>]` | Every Application Synced and Healthy, every pod Ready and stable, then the smoke checks (the hosted cluster is never deleted by a test). With `-Since`, the deploy pushed at that time must have synced procure-ai, and its wave order is checked (platform first); without it a sync older than the watch is reported as "wave order NOT CHECKED" |
 | `tests/Test-RestartKeepsData.ps1 -Environment hosted -Reboot` | Review Focus 4: a VM reboot; the cluster converges on its own within 15 minutes, Postgres shut down cleanly (no crash recovery in its log), every row, document and replication slot survives, every Debezium resumes, a new change reaches the data change log. The demo is live: a visitor or the 02:00 reset between the two counts gives a false FAIL, never a false PASS |
 | `tests/Test-WalSlotsAdvance.ps1 -Environment hosted -IdleMinutes 360 -WatchWholeWindow` | Review Focus 1: after a WAL burst in an uncaptured database, every slot catches up, then stays below 64 MB of lag for the whole six idle hours |
@@ -275,6 +276,42 @@ Secret and survives as is.
 A VM reboot leaves the pods the kubelet's graceful shutdown ended as `Failed` objects ("terminated in response to imminent node
 shutdown"); their Deployments and StatefulSets replace them. They hold no resources. Remove them with
 `kubectl delete pods -A --field-selector=status.phase=Failed` when they clutter the list.
+
+## Operate from the browser (plan 08b)
+
+Dale watches and runs the live system from any browser on his PC, without SSH or kubectl. Argo CD (below) stays behind the tunnel.
+
+| What | Where | Sign-in |
+|---|---|---|
+| Logs, traces and metrics | `https://dashboard.daleabels.com` (Aspire dashboard): *Structured logs*, *Traces*, *Metrics*, filtered by service | Keycloak (realm `procure`): a user with the client role `dashboard-viewer`, which the demo admin user has |
+| Every endpoint of every service | `https://procure.daleabels.com/swagger`, one definition per service (10, top right) | *Authorize* with the admin API key (below) |
+| How the services are doing | the app, *Admin* -> *System status* ([admin.md](admin.md)): health, instances, circuit breakers, sagas, outbox, dead letters, alerts, a link to the dashboard | the demo admin (permission `admin.system`); the same data with the key: `GET /api/v1/notifications/system-status` (notifications definition) |
+| The demo on or off | Swagger, *access* definition, *System* -> `PUT /api/v1/system/availability` | the admin API key only (no user, not even an admin) |
+
+**Swagger with the admin API key:**
+
+1. Open `https://procure.daleabels.com/swagger` and pick a definition (requests, access, budgets, ...).
+2. Click *Authorize*. **ApiKey**: the hosted admin API key (DEMO PASSWORDS.txt, the hosted admin API key entry; the same value is in the
+   user env var `DEMO_ADMIN_API_KEY_HOSTED`); *Authorize*. **TenantId**: the organisation the tenant endpoints act in, `acme` or
+   `globex`; *Authorize*; *Close*. The key carries every permission in every organisation, as `claude-admin` in the audit.
+3. Open an endpoint, *Try it out*, *Execute*. Tenant endpoints show ApiKey and TenantId under their lock and get `X-Tenant-Id` with
+   every call; the others get only the key. A tenant endpoint without TenantId answers 400 `X-Tenant-Id header is required`.
+4. The page keeps both values only while it stays open (a reload forgets them). They are never stored in the browser on purpose
+   (no persistAuthorization): the key opens every organisation, and the app on the same origin could otherwise read it.
+
+*OAuth2* in the same dialog signs in at Keycloak as a demo user instead: calls then act as that user in their own organisation, with
+their own permissions (no TenantId needed).
+
+**Switching the demo off and on** (what it does: [demo.md](demo.md), "Switching the demo off"). In the *access* definition, *System*:
+`GET /api/v1/system/availability` shows the state. `PUT /api/v1/system/availability`, *Try it out*, body
+`{ "enabled": false, "message": "The demo is paused to save costs." }` switches it off (visitors get the maintenance page; the message is
+optional), `{ "enabled": true }` switches it on. While the demo is off, Swagger and every call with the key keep working.
+
+**Why the documents name https.** Swagger UI calls the URL in each document's `servers`. The gateway forwards the scheme the browser used
+(`X-Forwarded-Proto: https`, from Traefik) to the services, and each service trusts its callers on the pod network for that one header
+(`ForwardedHeaders__KnownNetworks__0`; `ForwardedHeaders:Headers` = `XForwardedProto` in its appsettings.json), never for a client
+address. Until plan 08b the services trusted no proxy, their documents said `http://procure.daleabels.com/`, and the browser blocked every
+*Try it out* from the https page as mixed content. `procure-ai/tests/Test-Swagger.ps1 -Environment hosted` checks it (table above).
 
 ## Argo CD on the VM (plan 08 Task 12c)
 

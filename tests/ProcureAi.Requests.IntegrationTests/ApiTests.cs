@@ -753,6 +753,7 @@ public sealed class ApiTests(InfraFixture infra) : IAsyncLifetime
         Bound<RateLimitingOptions>().ShouldBeEquivalentTo(new RateLimitingOptions());
         var forwarded = Bound<ForwardedHeadersSettings>();
         forwarded.ForwardLimit.ShouldBe(new ForwardedHeadersSettings().ForwardLimit);
+        forwarded.Headers.ShouldBe(new ForwardedHeadersSettings().Headers);
         forwarded.HasTrustedProxies.ShouldBeFalse();
     }
 

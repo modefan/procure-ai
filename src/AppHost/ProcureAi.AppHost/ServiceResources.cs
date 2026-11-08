@@ -236,6 +236,11 @@ public static class ServiceResources
             .WithEnvironment("Auth__Internal__ClientSecret", shared.InternalClientSecret)
             .WithEnvironment("Auth__Internal__TokenUrl", ReferenceExpression.Create($"{shared.KeycloakAuthority}/protocol/openid-connect/token"))
             .WithOtlpEndpoint(shared.OtlpEndpoint)
+            // The gateway on this PC forwards the scheme the browser used (https), so Swagger UI's servers are https (plan 08b Task 2).
+            // Loopback only (the gateway and Aspire's endpoint proxy); the service takes only the scheme (ForwardedHeaders:Headers).
+            // Listing them also ends Aspire's ASPNETCORE_FORWARDEDHEADERS_ENABLED default of trusting every address.
+            .WithEnvironment("ForwardedHeaders__KnownProxies__0", "127.0.0.1")
+            .WithEnvironment("ForwardedHeaders__KnownProxies__1", "::1")
             .WaitFor(shared.Keycloak)
             .WaitFor(shared.RabbitMq)
             .WaitFor(shared.Redis)

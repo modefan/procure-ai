@@ -16,7 +16,7 @@ public static class ForwardedHeadersSetup
         services.AddOptions<ForwardedHeadersOptions>()
             .Configure<IOptions<ForwardedHeadersSettings>>((options, settings) =>
             {
-                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                options.ForwardedHeaders = settings.Value.Headers;
                 options.ForwardLimit = settings.Value.ForwardLimit;
                 // Replace the framework's loopback defaults: only the configured proxies are trusted.
                 options.KnownProxies.Clear();
@@ -34,7 +34,7 @@ public static class ForwardedHeadersSetup
         return services;
     }
 
-    /// <summary>Applies <c>X-Forwarded-For/-Proto</c> from trusted proxies. Does nothing when none are configured.</summary>
+    /// <summary>Applies the configured <c>X-Forwarded-*</c> headers from trusted proxies. Does nothing when none are configured.</summary>
     public static WebApplication UseProcureAiForwardedHeaders(this WebApplication app)
     {
         if (app.Services.GetRequiredService<IOptions<ForwardedHeadersSettings>>().Value.HasTrustedProxies)
