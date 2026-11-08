@@ -165,6 +165,36 @@ public sealed class RealmFileTests
     }
 
     [Fact]
+    public void Ops_realm_sign_in_always_needs_the_one_time_code()
+    {
+        // Security review of R6c: the built-in browser flow asks for OTP only when the user has one ("Condition - User Configured"), so a
+        // user whose authenticator was deleted, or who was created without the Configure OTP action, would sign in with a password alone.
+        // Realm ops binds its own flows: the OTP Form is REQUIRED (a user without an authenticator must set one up before the sign-in
+        // completes), and password grants need the code as well.
+        OpsRealm.GetProperty("browserFlow").GetString().ShouldBe("ops browser");
+        OpsRealm.GetProperty("directGrantFlow").GetString().ShouldBe("ops direct grant");
+        var flows = OpsRealm.GetProperty("authenticationFlows").EnumerateArray().ToDictionary(f => f.GetProperty("alias").GetString()!);
+
+        string[] Steps(string alias) => flows[alias].GetProperty("authenticationExecutions").EnumerateArray()
+            .Select(e => $"{(e.TryGetProperty("authenticator", out var a) ? a.GetString() : "flow:" + e.GetProperty("flowAlias").GetString())}={e.GetProperty("requirement").GetString()}")
+            .ToArray();
+
+        Steps("ops browser").ShouldBe(["auth-cookie=ALTERNATIVE", "flow:ops browser forms=ALTERNATIVE"]);
+        Steps("ops browser forms").ShouldBe(["auth-username-password-form=REQUIRED", "auth-otp-form=REQUIRED"]);
+        Steps("ops direct grant").ShouldBe(
+            ["direct-grant-validate-username=REQUIRED", "direct-grant-validate-password=REQUIRED", "direct-grant-validate-otp=REQUIRED"]);
+        // No conditional step anywhere: nothing can make the code optional.
+        foreach (var flow in flows.Values)
+        {
+            flow.GetProperty("authenticationExecutions").EnumerateArray()
+                .Select(e => e.TryGetProperty("authenticator", out var a) ? a.GetString() : null)
+                .ShouldNotContain(x => x != null && x.StartsWith("conditional-", StringComparison.Ordinal), flow.GetProperty("alias").GetString());
+            flow.GetProperty("authenticationExecutions").EnumerateArray().Select(e => e.GetProperty("requirement").GetString())
+                .ShouldNotContain("CONDITIONAL");
+        }
+    }
+
+    [Fact]
     public void Demo_realm_has_no_argocd_client_or_admins_group()
     {
         // Ruling R6c: the demo realm (public, shared users, no lockout) is not Argo CD's directory any more.

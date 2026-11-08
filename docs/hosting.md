@@ -303,9 +303,17 @@ demo realm `procure`:
 - Realm `ops` holds only the client `argocd`, the group `argocd-admins` and the users someone makes with `add-argocd-admin.ps1` (none in
   the file). Its sign-in page is public at `https://auth.daleabels.com/realms/ops/` (the browser must reach it), so it has its own
   protection: a **temporary lockout after 5 wrong passwords** (1 minute, 1 minute more per further 5, at most 15 minutes, never
-  permanent; two failures within a second lock for a minute too), and an **authenticator app for every user**. Configure OTP is a default
-  required action, so the first sign-in asks to scan a QR code, and every sign-in after that asks for the 6-digit code. No
-  self-registration, no password reset by e-mail. The rate limit of the whole Keycloak host applies as well (security baseline above).
+  permanent; two failures within a second lock for a minute too), and an **authenticator app for every user**. The realm binds its own
+  sign-in flow (`ops browser`: password AND the OTP form, both REQUIRED, no "only if configured" condition), so a user without an
+  authenticator (new, or one whose authenticator was deleted) must set one up before the sign-in completes. A password alone never
+  signs in. Password grants (`ops direct grant`, e.g. through the built-in `admin-cli` client) need the code too; for a user without
+  an authenticator Keycloak refuses them with a server error (it cannot run the setup there), which still issues no token. Configure
+  OTP is also a default required action of new users. No self-registration, no password reset by e-mail. The rate limit of the whole
+  Keycloak host applies as well (security baseline above).
+- Proven live on 2026-11-08 (security review of the first version, which used Keycloak's conditional OTP): a throwaway user created
+  without any required action got the authenticator-setup page after the right password, and no code; it signed in only after setting
+  one up; after its OTP credential was deleted and its required actions cleared, the right password again led only to the setup page.
+  Password grants without the code were refused in every state. The user was deleted.
 - Proven live on 2026-11-08 with a throwaway user, before the push (realm applied by a one-off keycloak-config Job, Argo CD's issuer
   switched by hand with auto-sync paused, then restored):
   - Argo CD's `/auth/login` redirects to `.../realms/ops/protocol/openid-connect/auth`;
@@ -341,10 +349,14 @@ cd procure-ai-gitops
 3. The first time, Keycloak shows a QR code ("Mobile Authenticator Setup"). Scan it with the authenticator app, type the 6-digit code it
    shows, give the device a name, and submit. Argo CD then opens with admin rights.
 4. From then on every sign-in asks for the password and then the app's current code.
-5. Five wrong passwords in a row lock the user for a minute (longer if it goes on). Wait and try again. If the phone is lost: break-glass
-   `admin` still works, and `./bootstrap/add-argocd-admin.ps1 -UserName you@example.com -ResetPassword` sets a new password. Removing the
-   old authenticator needs kcadm in the pod (`kcadm.sh delete users/<id>/credentials/<otp id> -r ops`), after which the next sign-in asks
-   for a new one.
+5. Five wrong passwords in a row lock the user for a minute (longer if it goes on). Wait and try again.
+6. **Lost phone (recovery):** break-glass `admin` still works. Delete the old authenticator and require a new one, through the tunnel
+   with kcadm in the Keycloak pod, as the bootstrap admin (the same sign-in `add-argocd-admin.ps1` uses):
+   `kcadm.sh get users/<id>/credentials -r ops` (note the `otp` entry's id), `kcadm.sh delete users/<id>/credentials/<otp id> -r ops`,
+   then `kcadm.sh update users/<id> -r ops -s 'requiredActions=["CONFIGURE_TOTP"]'`. Running `./bootstrap/add-argocd-admin.ps1
+   -UserName you@example.com` again also re-adds Configure OTP to a user without an authenticator. The next sign-in shows a new QR
+   code. Even without the required action the flow insists on it (the OTP form is required), so deleting the credential never opens a
+   password-only way in. A new password: `add-argocd-admin.ps1 ... -ResetPassword`.
 
 - The realm uses the e-mail address as the user name, so `-UserName` is your address and you sign in with it.
 - The user is created enabled and e-mail verified, must set up the authenticator app at the first sign-in (the script also adds that
