@@ -83,6 +83,7 @@ keycloak:
   database: keycloakdb         # role keycloak, created by infra/postgres/initdb/02-keycloak.sh
   dbUser: keycloak
   # Keycloak trusts X-Forwarded-* only from these (Traefik's pods; k3s pod CIDR). Only Traefik and Access may connect (networkPolicies).
+  # Equal to procure-ai global.podCidr (the pod network the gateway and the service APIs trust).
   proxyTrustedAddresses: 10.42.0.0/16
   ingress:
     # true: the ingress routes only Keycloak's public paths /realms/<realm>/ for the realms below and /resources/ (plan 08 ruling 4: a
@@ -195,6 +196,8 @@ networkPolicies:
   # keycloak.proxyTrustedAddresses). Any pod that can connect to them could claim any client address (rate limits, audit, Keycloak's
   # brute-force detection), so the namespace-wide rule leaves them out and only Traefik (kube-system) plus the callers listed here
   # (pod labels in namespace procure) reach their http port (plan 08 ruling 5). Kubelet probes come from the node and are not affected.
+  # Not listed, on purpose: the service APIs. They trust the pod network (procure-ai global.podCidr) for X-Forwarded-Proto only (their
+  # ForwardedHeaders:Headers), never for a client address, so any pod may keep calling them; a policy here would cut service-to-service calls.
   forwardedHeaderTrusting:
     # The demo seed and the nightly reset (procure-ai templates/demo-data.yaml) call the gateway's Service with the admin key.
     gateway:

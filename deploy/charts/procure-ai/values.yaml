@@ -19,6 +19,10 @@ global:
   imagePullSecrets:
     - ghcr-pull
   port: 8080
+  # The cluster's pod network (k3s/k3d default --cluster-cidr), from which the apps trust forwarded headers: the gateway X-Forwarded-For
+  # and -Proto (Traefik's pods), the service APIs X-Forwarded-Proto only (the gateway). Keep equal to procure-platform's
+  # keycloak.proxyTrustedAddresses (a different chart, so it is a copy there).
+  podCidr: 10.42.0.0/16
   hosts:
     # The app as the browser opens it (the gateway's ingress; links in the notification emails).
     app: procure.localtest.me
@@ -64,7 +68,7 @@ global:
       # https://<app host>/ and Swagger UI's "Try it out" is not blocked as mixed content (plan 08b Task 2). Services take only the
       # scheme from it (ForwardedHeaders:Headers = XForwardedProto in their appsettings.json), never a client address, so trusting the
       # pod network needs no NetworkPolicy like the gateway's (a forged scheme changes only that caller's own document).
-      ForwardedHeaders__KnownNetworks__0: 10.42.0.0/16
+      ForwardedHeaders__KnownNetworks__0: '{{ .Values.global.podCidr }}'
     # Services on Postgres: every Npgsql pool capped so all fit max_connections 200 (Resources:Postgres:PoolSizePerService, Task 0c; the
     # budget in ServiceResourcesTests.Pool_sizes_fit_max_connections assumes one replica per service).
     postgres:
@@ -316,7 +320,7 @@ gateway:
     Auth__Internal__TokenUrl: 'https://{{ .Values.global.hosts.keycloak }}/realms/procure/protocol/openid-connect/token'
     # Traefik's pods (k3s pod CIDR); ForwardLimit 1 (appsettings): Traefik is the one proxy in front. The whole pod network is trusted,
     # so the platform's NetworkPolicy allow-direct-callers-gateway lets only Traefik and the demo-data Jobs connect (plan 08 ruling 5).
-    ForwardedHeaders__KnownNetworks__0: 10.42.0.0/16
+    ForwardedHeaders__KnownNetworks__0: '{{ .Values.global.podCidr }}'
     ReverseProxy__Clusters__requests__Destinations__d1__Address: 'http://requests-api:{{ .Values.global.port }}'
     ReverseProxy__Clusters__access__Destinations__d1__Address: 'http://access-api:{{ .Values.global.port }}'
     ReverseProxy__Clusters__budgets__Destinations__d1__Address: 'http://budgets-api:{{ .Values.global.port }}'

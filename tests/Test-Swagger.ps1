@@ -10,7 +10,8 @@
        mixed content.
     3. Every document offers the security schemes ApiKey (X-Api-Key), TenantId (X-Tenant-Id) and OAuth2.
     4. One GET per service, sent to <the document's server> + path with the admin key, and with X-Tenant-Id only where the operation's
-       own security asks for TenantId (as Swagger UI sends it), answers 200.
+       own security asks for TenantId (as Swagger UI sends it), answers 200. The key goes only to a server equal to the https gateway
+       URL; any other server (http, another host or port) fails the check without a call, so a wrong document never leaks the key.
     5. A tenant endpoint called with the key but without X-Tenant-Id answers 400 (the TenantId requirement is real).
     6. The demo switch: GET /api/v1/system/availability with the key answers 200 with `enabled`. With -PutSwitchSameState also the
        admin-key-only PUT, sending the state it just read (the switch "sets the state": the same body changes nothing). Never on by
@@ -45,6 +46,9 @@ if (-not $GatewayUrl) {
     }
 }
 $GatewayUrl = $GatewayUrl.TrimEnd('/')
+# The key only ever travels over https: a plain http URL would send it in cleartext before any redirect comes back.
+$gatewayUri = [Uri] $GatewayUrl
+if ($gatewayUri.Scheme -ne 'https') { throw "-GatewayUrl must be https (got $GatewayUrl): the admin key is never sent over plain http." }
 $keyVar = if ($Environment -eq 'hosted') { 'DEMO_ADMIN_API_KEY_HOSTED' } else { 'DEMO_ADMIN_API_KEY' }
 $key = [Environment]::GetEnvironmentVariable($keyVar, 'Process')
 if (-not $key) { $key = [Environment]::GetEnvironmentVariable($keyVar, 'User') }
@@ -146,7 +150,10 @@ try {
         $path = $probes[$name]
         $operation = $document.paths[$path]?['get']
         if (-not $operation) { Fail "$name document has no GET $path"; continue }
-        $server = @($document.servers)[0].url.TrimEnd('/')
+        $server = "$(@($document.servers)[0].url)".TrimEnd('/')
+        # Never send the key to a server the document names unless it is exactly the gateway URL checked above (same scheme, host and
+        # port): a wrong document (http, or another host) is the failure this script looks for, and must not leak the key.
+        if ($server -ne $GatewayUrl) { Fail "$name not calling '$server' with the key (it is not $GatewayUrl)"; continue }
         $needsTenant = @($operation.security | Where-Object { $_.Keys -contains 'TenantId' }).Count -gt 0
         $headers = @('-H', "@$keyHeaders")
         if ($needsTenant) { $headers += @('-H', "X-Tenant-Id: $Tenant") }

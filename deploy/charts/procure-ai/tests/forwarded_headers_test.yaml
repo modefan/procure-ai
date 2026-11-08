@@ -95,3 +95,23 @@ tests:
           content:
             name: ForwardedHeaders__KnownNetworks__0
             value: 10.42.0.0/16
+  - it: the gateway trusts the pod network (Traefik) for forwarded headers, from the one global.podCidr
+    template: charts/gateway/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.42.0.0/16
+  - it: a different pod network reaches the service APIs too
+    template: charts/requests/templates/deployment.yaml
+    documentSelector: { path: kind, value: Deployment }
+    set:
+      global.podCidr: 10.52.0.0/16
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ForwardedHeaders__KnownNetworks__0
+            value: 10.52.0.0/16
