@@ -49,7 +49,7 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     public async Task Browser_calls_get_503_while_the_demo_is_off()
     {
         var tom = await SignedInAsync();
-        SwitchOff("Back on Monday.");
+        await SwitchOffAsync("Back on Monday.");
         var seenBefore = _gateway.Stub.Seen.Count;
 
         await ExpectDisabledAsync(await tom.GetAsync(Api, Ct), "Back on Monday.");
@@ -67,7 +67,7 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     [Fact]
     public async Task Without_a_message_the_503_has_the_default_text()
     {
-        SwitchOff(null);
+        await SwitchOffAsync(null);
 
         using var response = await Browser().GetAsync(Api, Ct);
 
@@ -78,7 +78,7 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     [Fact]
     public async Task The_switch_health_swagger_and_the_web_app_stay_reachable_while_off()
     {
-        SwitchOff("Off.");
+        await SwitchOffAsync("Off.");
         var browser = Browser();
 
         using (var read = await browser.GetAsync(Availability, Ct))
@@ -117,7 +117,7 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     [Fact]
     public async Task Admin_key_calls_pass_while_off()
     {
-        SwitchOff("Off.");
+        await SwitchOffAsync("Off.");
 
         using var response = await Browser().SendAsync(Request(HttpMethod.Post, Api, ("X-Api-Key", TestAuth.ApiKey), ("X-Tenant-Id", "acme")), Ct);
 
@@ -128,7 +128,7 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     [Fact]
     public async Task Switching_back_on_lets_calls_through_within_the_cache_duration()
     {
-        SwitchOff("Off.");
+        await SwitchOffAsync("Off.");
         await ExpectDisabledAsync(await Browser().GetAsync(Api, Ct), "Off.");
 
         _gateway.Access.SystemEnabled = true;
@@ -152,7 +152,7 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     [Fact]
     public async Task With_Access_down_the_last_answer_is_kept()
     {
-        SwitchOff("Kept.");
+        await SwitchOffAsync("Kept.");
         await ExpectDisabledAsync(await Browser().GetAsync(Api, Ct), "Kept.");
 
         _gateway.Access.AvailabilityDown = true;
@@ -171,10 +171,15 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
         _gateway.Stub.Last.Path.ShouldBe(Api);
     }
 
-    private void SwitchOff(string? message)
+    /// <summary>
+    /// Switches the stub Access off and waits out the gateway's cache (1 s here): a call made before (the sign-in, say) may have cached
+    /// "on", and the gateway sees the change only once that entry expires, as it does in production.
+    /// </summary>
+    private async Task SwitchOffAsync(string? message)
     {
         _gateway.Access.SystemMessage = message;
         _gateway.Access.SystemEnabled = false;
+        await Task.Delay(TimeSpan.FromSeconds(1.5), Ct);
     }
 
     private static async Task<JsonElement> ExpectDisabledAsync(HttpResponseMessage response, string? expectedDetail)
