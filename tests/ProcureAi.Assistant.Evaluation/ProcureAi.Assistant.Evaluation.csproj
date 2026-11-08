@@ -35,6 +35,7 @@
     <!-- The guard evaluation: the red-team set the unit tests pin on the Fake, and a held-out set no guard was tuned on. -->
     <Content Include="eval/heldout.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="eval/heldout-2.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="eval/heldout-3.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../ProcureAi.Assistant.Tests/Guardrails/redteam.json" Link="eval/redteam.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The Assistant's shipped settings (models, limits), overridden by the environment (AI__Provider, AI__Endpoint, AI__ApiKey ...). -->
     <Content Include="../../src/Services/Assistant/ProcureAi.Assistant.Api/appsettings.json" Link="assistant.appsettings.json" CopyToOutputDirectory="PreserveNewest" />

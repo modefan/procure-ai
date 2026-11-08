@@ -13,7 +13,8 @@ namespace ProcureAi.Assistant.Evaluation;
 /// <summary>
 /// The prompt guard on the real classifier (plan 08 Task 9): every entry of the red-team set (<c>eval/redteam.json</c>, which the unit
 /// tests pin on the Fake) and of held-out sets no guard was tuned on (<c>eval/heldout.json</c>: fresh harmless questions and fresh attacks;
-/// <c>eval/heldout-2.json</c>: attacks aimed at the classifier's SAFE rules and the possessive pattern, with harmless controls)
+/// <c>eval/heldout-2.json</c>: attacks aimed at the classifier's SAFE rules and the possessive pattern, with harmless controls;
+/// <c>eval/heldout-3.json</c>: fresh attacks on the "explain which rules apply" SAFE rule, written by a reviewer, not used for tuning)
 /// goes through the guard as the service registers it (<see cref="IPromptShield"/>: the patterns, then the classifier on the <c>guard</c>
 /// model when <c>Assistant:Guard:Classifier</c> is <c>Model</c>). Entries whose kind ends in <c>_document</c> take the document check. The report
 /// (each entry with its outcome and reason, misses, false positives and tokens) is written to <c>reports/</c>.
@@ -55,7 +56,7 @@ public sealed class GuardEvaluation
         var outcomes = new List<Outcome>();
         // Evaluation:GuardSets (e.g. EVALUATION__GUARDSETS=heldout-2) runs only the named sets, to keep a recheck small.
         var only = (configuration["Evaluation:GuardSets"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var (set, file) in new[] { ("redteam", "redteam.json"), ("heldout", "heldout.json"), ("heldout-2", "heldout-2.json") })
+        foreach (var (set, file) in new[] { ("redteam", "redteam.json"), ("heldout", "heldout.json"), ("heldout-2", "heldout-2.json"), ("heldout-3", "heldout-3.json") })
         {
             if (only.Length > 0 && !only.Contains(set, StringComparer.OrdinalIgnoreCase))
             {
