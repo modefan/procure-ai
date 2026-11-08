@@ -18,6 +18,17 @@ public static class ServiceClientSetup
         where TClient : class
         where TImplementation : class, TClient
     {
+        services.AddProcureAiServiceTokens();
+        return services.AddHttpClient<TClient, TImplementation>(client => client.BaseAddress = new Uri($"http://{serviceName}"))
+            .AddHttpMessageHandler<ServiceTokenHandler>();
+    }
+
+    /// <summary>
+    /// This service's own client-credentials login (<see cref="ServiceTokenProvider"/>, one per service, shared by all its service clients)
+    /// and <see cref="ServiceTokenHandler"/>. Needs <c>Auth:Internal</c> configured, which is validated at startup. Safe to call more than once.
+    /// </summary>
+    public static IServiceCollection AddProcureAiServiceTokens(this IServiceCollection services)
+    {
         services.AddOptions<InternalClientOptions>()
             .BindConfiguration(InternalClientOptions.SectionName)
             .ValidateDataAnnotations()
@@ -28,8 +39,6 @@ public static class ServiceClientSetup
         services.TryAddTransient<ServiceTokenHandler>();
         // The token request itself must not carry a token: a named client without the handler.
         services.AddHttpClient(ServiceTokenProvider.HttpClientName);
-
-        return services.AddHttpClient<TClient, TImplementation>(client => client.BaseAddress = new Uri($"http://{serviceName}"))
-            .AddHttpMessageHandler<ServiceTokenHandler>();
+        return services;
     }
 }

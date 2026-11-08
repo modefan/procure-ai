@@ -30,6 +30,13 @@ public sealed class SystemAvailabilityOptions : ServiceClientResilienceOptions, 
     [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
     public TimeSpan FailSafeThrottleDuration { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// How long the read waits for the gateway's service token before it reads anonymously instead (Keycloak slow or down; a cached token is
+    /// instant). Kept well under <c>AttemptTimeout</c>.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:00.050", "00:00:10")]
+    public TimeSpan TokenTimeout { get; set; } = TimeSpan.FromSeconds(1);
+
     /// <summary>The <c>Retry-After</c> of the 503 (whole seconds).</summary>
     [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
     public TimeSpan RetryAfter { get; set; } = TimeSpan.FromMinutes(5);
@@ -47,6 +54,13 @@ public sealed class SystemAvailabilityOptions : ServiceClientResilienceOptions, 
     /// </summary>
     public string[] AllowedPaths { get; set; } = [];
 
+    /// <summary>
+    /// Paths that must stay reachable while the demo is off, whatever is configured: the switch (the web app reads it to show the maintenance
+    /// page, the admin key turns the demo back on through it), the web app's <c>config.json</c>, health and Swagger UI. A blocked path that
+    /// covers one of them (or <c>/</c>, which covers the web app itself) is refused at start-up unless an allowed path opens it again.
+    /// </summary>
+    public static readonly string[] AlwaysReachable = ["/api/v1/system/availability", "/config.json", "/health", "/swagger"];
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         foreach (var path in BlockedPaths.Concat(AllowedPaths))
@@ -57,5 +71,36 @@ public sealed class SystemAvailabilityOptions : ServiceClientResilienceOptions, 
                     $"'{path}' is not a path ('/segment[/segment...]', no trailing '/').", [nameof(BlockedPaths), nameof(AllowedPaths)]);
             }
         }
+
+        foreach (var blocked in BlockedPaths.Where(IsPath))
+        {
+            if (blocked == "/")
+            {
+                yield return new ValidationResult(
+                    "'/' cannot be blocked: it would refuse the web app (and its maintenance page) too.", [nameof(BlockedPaths)]);
+                continue;
+            }
+
+            foreach (var reachable in AlwaysReachable.Where(reachable => Covers(blocked, reachable)
+                && !AllowedPaths.Where(IsPath).Any(allowed => Covers(allowed, reachable))))
+            {
+                yield return new ValidationResult(
+                    $"The blocked path '{blocked}' would refuse '{reachable}', which must stay reachable while the demo is off.",
+                    [nameof(BlockedPaths)]);
+            }
+        }
+
+        foreach (var allowed in AllowedPaths.Where(IsPath).Where(allowed => !BlockedPaths.Where(IsPath).Any(blocked => Covers(blocked, allowed))))
+        {
+            yield return new ValidationResult(
+                $"The allowed path '{allowed}' is not below any blocked path, so it has no effect.", [nameof(AllowedPaths)]);
+        }
     }
+
+    private static bool IsPath(string path) => !string.IsNullOrWhiteSpace(path) && path.StartsWith('/');
+
+    /// <summary>True when <paramref name="path"/> is <paramref name="prefix"/> or below it (whole segments, any casing), as the middleware matches.</summary>
+    private static bool Covers(string prefix, string path) =>
+        new Microsoft.AspNetCore.Http.PathString(path).StartsWithSegments(prefix.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+        || prefix == "/";
 }

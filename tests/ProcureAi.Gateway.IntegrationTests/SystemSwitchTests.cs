@@ -163,6 +163,43 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
     }
 
     [Fact]
+    public async Task The_gateway_reads_the_switch_as_itself_and_proxied_reads_stay_anonymous()
+    {
+        using (var call = await Browser().SendAsync(Request(HttpMethod.Get, Api, ("Authorization", "Bearer a-token")), Ct))
+        {
+            call.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        // Its own read: the service token and its name, so Access counts it in the gateway service account's partition, not in the
+        // anonymous one that every proxied browser read shares (they all come from the gateway's address).
+        var own = _gateway.Access.AvailabilityReads.ShouldHaveSingleItem();
+        own.HasBearer.ShouldBeTrue();
+        own.CallingService.ShouldBe("gateway");
+
+        // A visitor's read of the switch is proxied as it came: no token of the gateway's, and a claimed calling service is no credential.
+        using (var read = await Browser().SendAsync(Request(HttpMethod.Get, Availability, ("X-Calling-Service", "gateway")), Ct))
+        {
+            read.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        _gateway.Access.AvailabilityReads.Count.ShouldBe(2);
+        _gateway.Access.AvailabilityReads[^1].HasBearer.ShouldBeFalse("the gateway never lends its token to a proxied call");
+    }
+
+    [Fact]
+    public async Task Without_a_service_token_the_switch_is_still_read()
+    {
+        _gateway.Access.TokenDown = true;
+        _gateway.Access.SystemMessage = "Off.";
+        _gateway.Access.SystemEnabled = false;
+
+        await ExpectDisabledAsync(await Browser().GetAsync(Api, Ct), "Off.");
+
+        var read = _gateway.Access.AvailabilityReads.ShouldHaveSingleItem();
+        read.HasBearer.ShouldBeFalse("read anonymously: a Keycloak outage must not make the switch unreadable");
+    }
+
+    [Fact]
     public async Task While_on_nothing_changes()
     {
         using var response = await Browser().SendAsync(Request(HttpMethod.Get, Api, ("Authorization", "Bearer a-token")), Ct);
@@ -197,6 +234,17 @@ public sealed class SystemSwitchTests(KeycloakFixture keycloak, RedisFixture red
             if (expectedDetail is not null)
             {
                 problem.GetProperty("detail").GetString().ShouldBe(expectedDetail);
+            }
+
+            // The stored message as such (null without one), so the web app shows the same texts however it learnt the demo is off.
+            var message = problem.GetProperty("message");
+            if (expectedDetail is null)
+            {
+                message.ValueKind.ShouldBe(JsonValueKind.Null);
+            }
+            else
+            {
+                message.GetString().ShouldBe(expectedDetail);
             }
 
             return problem;

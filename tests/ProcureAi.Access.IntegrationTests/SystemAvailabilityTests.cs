@@ -123,14 +123,50 @@ public sealed class SystemAvailabilityTests(AccessInfraFixture infra)
         (await GetAsync(client)).ShouldBe(new SystemAvailabilityDto(false, "Off for the night."));
     }
 
-    private async Task<(AccessApiFactory Factory, string Database)> FactoryAsync(bool demoReset = false)
+    [Fact]
+    public async Task The_gateways_own_read_is_not_starved_by_a_flood_of_anonymous_reads()
+    {
+        // Behind the gateway every anonymous browser read comes from the gateway's address, so they share one partition. The gateway's
+        // own read carries its service token and counts in that account's partition, which no header can claim.
+        var (factory, _) = await FactoryAsync(new Dictionary<string, string?>
+        {
+            ["RateLimiting:PermitLimit"] = "3",
+            ["RateLimiting:WindowSeconds"] = "3600",
+        });
+        await using var _ = factory;
+        using var client = factory.CreateClient();
+        for (var i = 0; i < 3; i++)
+        {
+            (await client.GetAsync(Path, Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        using (var flooded = await client.GetAsync(Path, Ct))
+        {
+            flooded.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "the anonymous partition is used up");
+        }
+
+        using (var spoofed = new HttpRequestMessage(HttpMethod.Get, Path))
+        {
+            spoofed.Headers.Add("X-Calling-Service", "gateway");
+            spoofed.Headers.Add("X-Forwarded-For", "203.0.113.9");
+            (await client.SendAsync(spoofed, Ct)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "headers are no way out of it");
+        }
+
+        using var gateway = new HttpRequestMessage(HttpMethod.Get, Path);
+        gateway.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestAuth.CreateServiceToken("procure-internal"));
+        gateway.Headers.Add("X-Calling-Service", "gateway");
+        using var read = await client.SendAsync(gateway, Ct);
+        read.StatusCode.ShouldBe(HttpStatusCode.OK, await read.Content.ReadAsStringAsync(Ct));
+        (await read.Content.ReadFromJsonAsync<SystemAvailabilityDto>(Json, Ct)).ShouldBe(new SystemAvailabilityDto(true, null));
+    }
+
+    private Task<(AccessApiFactory Factory, string Database)> FactoryAsync(bool demoReset = false) =>
+        FactoryAsync(demoReset ? new Dictionary<string, string?> { ["DemoReset:Enabled"] = "true" } : new Dictionary<string, string?>());
+
+    private async Task<(AccessApiFactory Factory, string Database)> FactoryAsync(Dictionary<string, string?> extra)
     {
         var database = await infra.CreateSeededDatabaseAsync($"system_{Guid.NewGuid():N}");
-        var settings = new Dictionary<string, string?> { ["ConnectionStrings:accessdb"] = database };
-        if (demoReset)
-        {
-            settings["DemoReset:Enabled"] = "true";
-        }
+        var settings = new Dictionary<string, string?>(extra) { ["ConnectionStrings:accessdb"] = database };
 
         return (new AccessApiFactory(infra, settings: settings), database);
     }

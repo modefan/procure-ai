@@ -60,6 +60,9 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>When true, Access answers 503 (the token endpoint keeps working).</summary>
     public volatile bool Down;
 
+    /// <summary>When true, the token endpoint answers 503 (a Keycloak outage); Access itself keeps working.</summary>
+    public volatile bool TokenDown;
+
     /// <summary>Makes each effective-access answer slow, so concurrent callers overlap.</summary>
     public TimeSpan Delay { get; set; }
 
@@ -159,6 +162,11 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>How often the system switch was read.</summary>
     public int AvailabilityCalls => Volatile.Read(ref _availabilityCalls);
 
+    private readonly ConcurrentQueue<StubAccessCall> _availabilityReads = new();
+
+    /// <summary>Every read of the system switch (kept apart from <see cref="Calls"/>, which other tests count).</summary>
+    public IReadOnlyList<StubAccessCall> AvailabilityReads => [.. _availabilityReads];
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -170,7 +178,9 @@ public sealed class StubAccessServer : IAsyncDisposable
         var app = builder.Build();
         var stub = new StubAccessServer(app);
 
-        app.MapPost("/token", () => Results.Json(new { access_token = "stub-token", expires_in = 300, token_type = "Bearer" }));
+        app.MapPost("/token", () => stub.TokenDown
+            ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
+            : Results.Json(new { access_token = "stub-token", expires_in = 300, token_type = "Bearer" }));
         app.MapGet("/api/v1/access/internal/effective", async (HttpContext http, string userId, string[] roles) =>
         {
             Interlocked.Increment(ref stub._effectiveCalls);
@@ -193,9 +203,12 @@ public sealed class StubAccessServer : IAsyncDisposable
             return Results.Json(new { permissions, costCenterCodes, approvalLimit = 50000m });
         });
         // Not recorded in Calls: the gateway reads it for every browser call, which would drown what the tests look for.
-        app.MapGet("/api/v1/system/availability", () =>
+        app.MapGet("/api/v1/system/availability", (HttpContext http) =>
         {
             Interlocked.Increment(ref stub._availabilityCalls);
+            stub._availabilityReads.Enqueue(new StubAccessCall(
+                http.Request.Path.Value!, Header(http, "X-Tenant-Id"), Header(http, "X-Calling-Service"),
+                Header(http, "X-On-Behalf-Of-User"), http.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.Ordinal)));
             return stub.AvailabilityDown
                 ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
                 : Results.Json(new { enabled = stub.SystemEnabled, message = stub.SystemMessage });
