@@ -195,11 +195,33 @@ public sealed class RealmFileTests
     }
 
     [Fact]
+    public void Demo_realm_allows_no_password_grant_through_admin_cli()
+    {
+        // Re-review m3: the demo realm has no lockout (shared users), so its built-in public client admin-cli must not take password grants
+        // at the token endpoint. Listed in the file with Keycloak's defaults except directAccessGrantsEnabled.
+        var adminCli = Client("admin-cli");
+        adminCli.GetProperty("directAccessGrantsEnabled").GetBoolean().ShouldBeFalse();
+        adminCli.GetProperty("publicClient").GetBoolean().ShouldBeTrue();
+        adminCli.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeFalse();
+        adminCli.GetProperty("serviceAccountsEnabled").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Ops_realm_signs_in_by_private_user_name_only()
+    {
+        // Re-review m4: with the e-mail address as sign-in name, a stranger who knows Dale's (public commit) address could keep his user
+        // locked out. Realm ops signs in by a user name published nowhere.
+        OpsRealm.GetProperty("registrationEmailAsUsername").GetBoolean().ShouldBeFalse();
+        OpsRealm.GetProperty("loginWithEmailAllowed").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
     public void Demo_realm_has_no_argocd_client_or_admins_group()
     {
         // Ruling R6c: the demo realm (public, shared users, no lockout) is not Argo CD's directory any more.
         Realm.GetProperty("clients").EnumerateArray().Select(c => c.GetProperty("clientId").GetString()).ShouldNotContain("argocd");
-        Realm.TryGetProperty("groups", out _).ShouldBeFalse();
+        // An empty list, not a missing key: keycloak-config-cli only removes groups it created when the file lists groups at all.
+        Realm.GetProperty("groups").GetArrayLength().ShouldBe(0);
     }
 
     [Fact]

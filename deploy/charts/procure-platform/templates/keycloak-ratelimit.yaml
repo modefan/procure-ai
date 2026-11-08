@@ -9,6 +9,9 @@ so IPv6 grouping does not apply.
                             wins in Traefik): inside the cluster the gateway reaches the same host through Traefik (CoreDNS rewrite), so
                             the gateway pod is ONE source for every visitor's code exchange, refresh and demo login; this limit is sized
                             for that. Any other spelling of the token path falls back to the stricter keycloak-ratelimit.
+Traefik keeps one bucket per router, so per path prefix of the host (each realm, /resources/, each token endpoint), not one per host.
+The token precedence relies on Traefik's default path cleaning (sanitizePath): never set entryPoints.*.http.sanitizePath=false, or
+/realms/x/protocol/openid-connect/token/../auth would reach the auth endpoint through the looser token router.
 */}}
 {{- $rl := .Values.keycloak.ingress.rateLimit }}
 {{- if $rl.enabled }}

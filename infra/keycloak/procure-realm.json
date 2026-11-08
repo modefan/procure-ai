@@ -120,6 +120,7 @@
       ]
     }
   ],
+  "groups": [],
   "users": [
     {
       "id": "00000000-0000-4000-8000-000000000001",
@@ -400,6 +401,18 @@
     }
   ],
   "clients": [
+    {
+      "clientId": "admin-cli",
+      "description": "Built-in admin CLI client, unused by the app. Listed only to turn password grants off: the demo realm has no lockout (plan 08 fix wave re-review m3). Other fields: Keycloak defaults.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocol": "openid-connect"
+    },
     {
       "clientId": "procure-gateway",
       "name": "Procure gateway (BFF)",

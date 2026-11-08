@@ -70,12 +70,20 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
   running realm too). The demo users are shared and their names public, so a lockout let any stranger keep every "log in as" button
   failing with a few wrong passwords a minute (the review of R6; the lockout was live for half an hour on 2026-11-08).
   - Traefik RateLimit middlewares (procure-platform `keycloak.ingress.rateLimit`, on in `envs/hosted/platform.yaml`; ruling R6c).
-  - **Every path** of `auth.daleabels.com`: 120 a minute, bursts of 60, per address. The keycloak Ingress itself carries the middleware,
-    so no spelling of a sign-in path (`;x=1` matrix parameters, encoded or upper-case segments) reaches Keycloak without the limit.
+  - **Every path** of `auth.daleabels.com`: 120 a minute, bursts of 60, per address **and per path prefix** (Traefik keeps one
+    bucket per router: the procure realm, the ops realm and `/resources/` each have their own). The keycloak Ingress itself carries the
+    middleware, so no spelling of a sign-in path (`;x=1` matrix parameters, encoded or upper-case segments) reaches Keycloak without the
+    limit. The token precedence relies on Traefik's default path cleaning; never set `sanitizePath=false` on an entry point.
   - The token endpoints (`/realms/<realm>/protocol/openid-connect/token`): their own Ingress and a higher limit, 600 a minute, bursts of
     120. Inside the cluster the gateway reaches them through Traefik too (CoreDNS rewrite), so the gateway pod is one address for every
     visitor's code exchange, refresh and demo login; that limit is sized for all of them together. Another spelling of the token path
     falls back to the stricter limit above.
+  - The gateway's back-channel logout (`end_session` at `/realms/procure/protocol/openid-connect/logout`) and its discovery and key
+    fetches share the gateway pod's `/realms/procure/` bucket (120 a minute). In normal use that is far from full; a scripted demo-login
+    and logout loop from four or more addresses could fill it. Keycloak's session then stays open until it expires (the gateway logs a
+    warning and removes its own session anyway), so nothing is exposed (re-review m2, documented rather than exempting the pod CIDR).
+  - The demo realm's built-in `admin-cli` client takes no password grants (`directAccessGrantsEnabled: false` in the realm file;
+    re-review m3), so the token endpoint offers no public client for password guessing in a realm without lockout.
   - Over a limit Traefik answers 429. Traefik sees the visitor's own address (host ports) and trusts no `X-Forwarded-For`, so a header
     cannot dodge the limit. IPv6 grouping does not apply: the host has A records only.
   - `tests/Test-PublicSurface.ps1` step 9b fires bursts at a matrix-parameter variant of the sign-in path and at the realm's discovery
@@ -339,30 +347,37 @@ Aegis, 1Password, ...):
 
 ```powershell
 cd procure-ai-gitops
-./bootstrap/add-argocd-admin.ps1 -UserName you@example.com -FirstName Dale -LastName Abels   # asks for the password twice
+./bootstrap/add-argocd-admin.ps1 -UserName <private name> -Email you@example.com -FirstName Dale -LastName Abels   # asks for the password twice
 ./bootstrap/hosted/open-argocd.ps1                                                           # then "Log in via Keycloak"
 ```
 
-1. Run the first line: it creates your user in realm `ops` and adds it to the group `argocd-admins`.
+1. Pick a **user name that is published nowhere** (not an e-mail address, not your git or GitHub name): realm `ops` signs in by user
+   name only, and a known name could be locked out by a stranger with wrong passwords. Run the first line with it; `-Email` is any
+   address of yours (the profile needs one; it is not a sign-in name). It creates your user in realm `ops` and adds it to the group
+   `argocd-admins`. **Sign in right after running it** (step 2): until the authenticator is set up, whoever knows the password could
+   enrol theirs.
 2. Open Argo CD with the second line and choose "Log in via Keycloak". The page says "Procure AI operations" (realm `ops`). Sign in with
-   your address and password.
+   your user name and password.
 3. The first time, Keycloak shows a QR code ("Mobile Authenticator Setup"). Scan it with the authenticator app, type the 6-digit code it
    shows, give the device a name, and submit. Argo CD then opens with admin rights.
 4. From then on every sign-in asks for the password and then the app's current code.
-5. Five wrong passwords in a row lock the user for a minute (longer if it goes on). Wait and try again.
+5. Five wrong passwords in a row lock the user for a minute (longer if it goes on, at most 15 minutes). Wait and try again. Someone who
+   knew your user name could keep it locked this way; break-glass `admin` and Claude's token still work then, and a new private user
+   name fixes it.
 6. **Lost phone (recovery):** break-glass `admin` still works. Delete the old authenticator and require a new one, through the tunnel
    with kcadm in the Keycloak pod, as the bootstrap admin (the same sign-in `add-argocd-admin.ps1` uses):
    `kcadm.sh get users/<id>/credentials -r ops` (note the `otp` entry's id), `kcadm.sh delete users/<id>/credentials/<otp id> -r ops`,
    then `kcadm.sh update users/<id> -r ops -s 'requiredActions=["CONFIGURE_TOTP"]'`. Running `./bootstrap/add-argocd-admin.ps1
-   -UserName you@example.com` again also re-adds Configure OTP to a user without an authenticator. The next sign-in shows a new QR
+   -UserName <your name>` again also re-adds Configure OTP to a user without an authenticator (appended to any other pending
+   actions). Sign in right after the reset, for the same reason as in step 1. The next sign-in shows a new QR
    code. Even without the required action the flow insists on it (the OTP form is required), so deleting the credential never opens a
    password-only way in. A new password: `add-argocd-admin.ps1 ... -ResetPassword`.
 
-- The realm uses the e-mail address as the user name, so `-UserName` is your address and you sign in with it.
+- The sign-in name is `-UserName` (lower-case letters, digits, `.`, `_`, `-`; no `@`); e-mail sign-in is off in realm `ops`.
 - The user is created enabled and e-mail verified, must set up the authenticator app at the first sign-in (the script also adds that
   required action to an existing user without one), and is added to `argocd-admins`. Argo CD's *User Info* then shows that group.
-- The script refuses, before changing anything: an address in a demo domain (`*.test`), a service account, one of the demo realm file's
-  fixed user IDs, and an address that finds a different user by e-mail than by user name (no e-mail fallback).
+- The script refuses, before changing anything: an e-mail in a demo domain (`*.test`), an e-mail address as user name, a service
+  account, one of the demo realm file's fixed user IDs, and an `-Email` that already belongs to a different user (no e-mail fallback).
   `tests/Test-AddArgocdAdmin.ps1` in the GitOps repo proves each refusal against the live Keycloak.
 - The user exists in realm `ops` only, so it cannot sign in to the procure app (another realm).
 - Run it again with `-ResetPassword` for a new password, or `-Remove` to take the admin role away (the user stays).
