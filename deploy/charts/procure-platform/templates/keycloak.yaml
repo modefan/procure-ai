@@ -162,6 +162,11 @@ metadata:
   name: keycloak
   labels:
     {{- include "procure-platform.labels" $labels | nindent 4 }}
+  {{- if .Values.keycloak.ingress.rateLimit.enabled }}
+  annotations:
+    # Every path of the host is rate-limited per client address (templates/keycloak-ratelimit.yaml, plan 08 fix wave ruling R6c).
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-keycloak-ratelimit@kubernetescrd
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
   # No secretName: Traefik serves its default certificate (TLSStore `default`: the local CA's from bootstrap/new-local-ca.ps1; Let's Encrypt's on hosted).

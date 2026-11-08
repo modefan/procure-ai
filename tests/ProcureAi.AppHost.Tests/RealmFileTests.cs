@@ -14,6 +14,7 @@ public sealed class RealmFileTests
     private const string ArgoCdBaseUrl = "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}";
 
     private static readonly JsonElement Realm = JsonDocument.Parse(File.ReadAllText("procure-realm.json")).RootElement;
+    private static readonly JsonElement OpsRealm = JsonDocument.Parse(File.ReadAllText("ops-realm.json")).RootElement;
 
     [Fact]
     public void Realm_has_dashboard_client_with_placeholder_secret()
@@ -104,11 +105,12 @@ public sealed class RealmFileTests
     }
 
     [Fact]
-    public void Realm_has_argocd_client_with_pkce_and_a_groups_claim()
+    public void Ops_realm_has_argocd_client_with_pkce_and_a_groups_claim()
     {
-        // Plan 08 Task 12c: Argo CD signs people in with Keycloak (public client, code flow + PKCE, no secret: Argo CD's documented Keycloak
-        // setup), and maps the group argocd-admins to role:admin from a plain `groups` claim (GitOps repo argocd/values.yaml).
-        var argocd = Client("argocd");
+        // Plan 08 Task 12c, moved to realm ops by fix wave ruling R6c: Argo CD signs people in with Keycloak (public client, code flow + PKCE,
+        // no secret: Argo CD's documented Keycloak setup), and maps the group argocd-admins to role:admin from a plain `groups` claim
+        // (GitOps repo argocd/values.yaml).
+        var argocd = OpsRealm.GetProperty("clients").EnumerateArray().Single(c => c.GetProperty("clientId").GetString() == "argocd");
         argocd.GetProperty("publicClient").GetBoolean().ShouldBeTrue();
         argocd.TryGetProperty("secret", out _).ShouldBeFalse();
         argocd.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeTrue();
@@ -132,16 +134,42 @@ public sealed class RealmFileTests
     }
 
     [Fact]
-    public void Realm_has_the_argocd_admins_group_and_no_demo_user_is_in_it()
+    public void Ops_realm_has_the_argocd_admins_group_and_no_users()
     {
-        Realm.GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("name").GetString()).ShouldContain("argocd-admins");
-        // Dale adds his own user by hand (CLAUDE.md "Hosting plan"); the public demo users never get Argo CD rights.
-        foreach (var user in Realm.GetProperty("users").EnumerateArray())
-        {
-            if (user.TryGetProperty("groups", out var userGroups))
-                userGroups.EnumerateArray().Select(g => g.GetString()!.TrimStart('/'))
-                    .ShouldNotContain("argocd-admins", user.GetProperty("username").GetString());
-        }
+        OpsRealm.GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("name").GetString()).ShouldBe(["argocd-admins"]);
+        // Dale creates his own user (bootstrap/add-argocd-admin.ps1 in the GitOps repo); the file holds no user, so no demo user can exist
+        // in the realm Argo CD trusts.
+        OpsRealm.TryGetProperty("users", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Ops_realm_requires_otp_locks_out_guessers_and_allows_no_self_service()
+    {
+        // Ruling R6c: unlike the demo realm (shared users, no lockout), every ops user is a person's own: a temporary lockout after 5 failed
+        // passwords (1 minute more per further 5, at most 15 minutes, never permanent), and an authenticator app for everyone (Configure
+        // OTP is a default required action of every new user; the browser flow then asks for the code at every sign-in).
+        OpsRealm.GetProperty("realm").GetString().ShouldBe("ops");
+        OpsRealm.GetProperty("bruteForceProtected").GetBoolean().ShouldBeTrue();
+        OpsRealm.GetProperty("permanentLockout").GetBoolean().ShouldBeFalse();
+        OpsRealm.GetProperty("failureFactor").GetInt32().ShouldBe(5);
+        OpsRealm.GetProperty("maxFailureWaitSeconds").GetInt32().ShouldBe(900);
+        var totp = OpsRealm.GetProperty("requiredActions").EnumerateArray().Single(a => a.GetProperty("alias").GetString() == "CONFIGURE_TOTP");
+        totp.GetProperty("enabled").GetBoolean().ShouldBeTrue();
+        totp.GetProperty("defaultAction").GetBoolean().ShouldBeTrue();
+        OpsRealm.GetProperty("otpPolicyType").GetString().ShouldBe("totp");
+        OpsRealm.GetProperty("otpPolicyDigits").GetInt32().ShouldBe(6);
+        OpsRealm.GetProperty("otpPolicyPeriod").GetInt32().ShouldBe(30);
+        OpsRealm.GetProperty("registrationAllowed").GetBoolean().ShouldBeFalse();
+        OpsRealm.GetProperty("resetPasswordAllowed").GetBoolean().ShouldBeFalse();
+        OpsRealm.GetProperty("clients").EnumerateArray().Select(c => c.GetProperty("clientId").GetString()).ShouldBe(["argocd"]);
+    }
+
+    [Fact]
+    public void Demo_realm_has_no_argocd_client_or_admins_group()
+    {
+        // Ruling R6c: the demo realm (public, shared users, no lockout) is not Argo CD's directory any more.
+        Realm.GetProperty("clients").EnumerateArray().Select(c => c.GetProperty("clientId").GetString()).ShouldNotContain("argocd");
+        Realm.TryGetProperty("groups", out _).ShouldBeFalse();
     }
 
     [Fact]

@@ -68,15 +68,22 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
 - **Password guessing on Keycloak** (plan 08 fix wave ruling R6b). Slowed **per client address** at Traefik, not by locking users:
   Keycloak's per-user lockout is off (`bruteForceProtected: false` in the realm file, explicitly, so keycloak-config-cli turns it off on a
   running realm too). The demo users are shared and their names public, so a lockout let any stranger keep every "log in as" button
-  failing with a few wrong passwords a minute (the review of R6; the lockout was live for a few hours on 2026-11-08). Traefik RateLimit
-  middlewares (procure-platform `keycloak.ingress.rateLimit`, on in `envs/hosted/platform.yaml`) cover the procure realm's sign-in page
-  and form posts (`.../protocol/openid-connect/auth`, `.../login-actions/`: 60 a minute, bursts of 30, per address) and the token endpoint
-  (`.../protocol/openid-connect/token`: 600 a minute, bursts of 120). Inside the cluster the gateway reaches the token endpoint through
-  Traefik too (CoreDNS rewrite), so the gateway pod is one address for every visitor's code exchange, refresh and demo login; that limit is
-  sized for all of them together. Over a limit Traefik answers 429. Traefik sees the visitor's own address (host ports) and trusts no
-  `X-Forwarded-For`, so the limit cannot be dodged by a header. Proven on 2026-11-08: a throwaway user took 31 wrong passwords and then
-  signed in with the right one (no lockout); the login-path limit, applied for a minute as a copy, let 32 of 80 parallel requests through
-  and answered 429 to 48.
+  failing with a few wrong passwords a minute (the review of R6; the lockout was live for half an hour on 2026-11-08).
+  - Traefik RateLimit middlewares (procure-platform `keycloak.ingress.rateLimit`, on in `envs/hosted/platform.yaml`; ruling R6c).
+  - **Every path** of `auth.daleabels.com`: 120 a minute, bursts of 60, per address. The keycloak Ingress itself carries the middleware,
+    so no spelling of a sign-in path (`;x=1` matrix parameters, encoded or upper-case segments) reaches Keycloak without the limit.
+  - The token endpoints (`/realms/<realm>/protocol/openid-connect/token`): their own Ingress and a higher limit, 600 a minute, bursts of
+    120. Inside the cluster the gateway reaches them through Traefik too (CoreDNS rewrite), so the gateway pod is one address for every
+    visitor's code exchange, refresh and demo login; that limit is sized for all of them together. Another spelling of the token path
+    falls back to the stricter limit above.
+  - Over a limit Traefik answers 429. Traefik sees the visitor's own address (host ports) and trusts no `X-Forwarded-For`, so a header
+    cannot dodge the limit. IPv6 grouping does not apply: the host has A records only.
+  - `tests/Test-PublicSurface.ps1` step 9b fires bursts at a matrix-parameter variant of the sign-in path and at the realm's discovery
+    document, and needs 429s from both.
+  - Proven on 2026-11-08 that the lockout is off: a throwaway user took 31 wrong passwords and then signed in with the right one. The
+    earlier login-path-only middleware, applied for a minute as a copy, let 32 of 80 parallel requests through and answered 429 to 48.
+    The every-path version is proven after the push (Test-PublicSurface 9b).
+  - Realm `ops` (Argo CD's sign-in) is different: personal users, so it has a lockout and OTP (below).
 - **Secrets.** Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
 - **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
   `%USERPROFILE%\.procure-ai\hosted\` on Dale's PC (current user only) and are listed by name in DEMO PASSWORDS.txt. The hosted Secrets
@@ -275,8 +282,9 @@ Who can sign in, and with what rights:
 
 | Who | How | Rights |
 |---|---|---|
-| Dale (and anyone else in the Keycloak group `argocd-admins`) | "Log in via Keycloak": realm `procure`, client `argocd` (public, code flow + PKCE, no secret), like Argo CD signing in with AD at work | `role:admin` |
-| Any other Keycloak user (the public demo users) | can sign in | nothing: no Application, project, log or action (`policy.default` is empty) |
+| Dale (and anyone else in the group `argocd-admins` of realm `ops`) | "Log in via Keycloak": realm `ops`, client `argocd` (public, code flow + PKCE, no secret), password and then the authenticator app's 6-digit code, like Argo CD signing in with AD at work | `role:admin` |
+| Any other user of realm `ops` (none exists unless someone makes one) | can sign in | nothing: no Application, project, log or action (`policy.default` is empty) |
+| The public demo users (realm `procure`) | cannot sign in to Argo CD at all (another realm) | - |
 | `admin` | break-glass, for when Keycloak is down: user `admin`, password in DEMO PASSWORDS.txt ("=== Argo CD ===") and Secret `argocd/argocd-initial-admin-secret` | `role:admin` |
 | `claude` | API token only (no UI login): `Authorization: Bearer $env:ARGOCD_AUTH_TOKEN_HOSTED` on Argo CD's REST API; a new token from `./bootstrap/new-argocd-token.ps1 -Environment hosted` | `role:admin` |
 
@@ -286,21 +294,40 @@ CLI's callback `http://localhost:8085/auth/callback`, which the client deliberat
 cluster argocd-server accepts no connection at all (a NetworkPolicy in `envs/hosted/argocd.yaml`: no pod can try the admin password; the
 port-forward does not go through the pod network).
 
-**Trust boundary.** The `procure` realm is also Argo CD's admin directory: whoever can add a user to `argocd-admins` becomes Argo CD admin
-and so cluster admin. Besides the Keycloak bootstrap admin, Access's service account `procure-access-admin` (roles `manage-users` and
-`manage-realm`, for the demo's organizations) can do that, so a compromise of the Access service or its client secret reaches the cluster,
-not only the realm; the tunnel still stands in front of Argo CD. Accepted for the demo (one directory, like AD at work); a separate,
-non-public `ops` realm for Argo CD would remove it. The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC),
-`envs/hosted/argocd.yaml` (url, OIDC issuer) and `envs/hosted/apps.yaml` (admin login on, no ingress). Keycloak's side (client
-`argocd`, group `argocd-admins`, the `groups` claim) is in `infra/keycloak/procure-realm.json`; its redirect URIs follow the platform
-chart's `keycloak.argocdUrl` (`http://127.0.0.1:8080` on hosted, so the port-forward must use port 8080 for the Keycloak sign-in).
+**Realm `ops`: Argo CD's own directory** (plan 08 fix wave ruling R6c). Argo CD signs people in from realm `ops`, not from the public
+demo realm `procure`:
+
+- The demo realm has shared users whose names are public, and no per-user lockout (it would let anyone keep them locked, ruling R6b).
+  Access's service account `procure-access-admin` (`manage-users`, `manage-realm`) can change users there. None of that reaches realm
+  `ops`: Access's roles are on realm `procure` only, so a compromise of the Access service no longer reaches Argo CD and the cluster.
+- Realm `ops` holds only the client `argocd`, the group `argocd-admins` and the users someone makes with `add-argocd-admin.ps1` (none in
+  the file). Its sign-in page is public at `https://auth.daleabels.com/realms/ops/` (the browser must reach it), so it has its own
+  protection: a **temporary lockout after 5 wrong passwords** (1 minute, 1 minute more per further 5, at most 15 minutes, never
+  permanent; two failures within a second lock for a minute too), and an **authenticator app for every user**. Configure OTP is a default
+  required action, so the first sign-in asks to scan a QR code, and every sign-in after that asks for the 6-digit code. No
+  self-registration, no password reset by e-mail. The rate limit of the whole Keycloak host applies as well (security baseline above).
+- Proven live on 2026-11-08 with a throwaway user, before the push (realm applied by a one-off keycloak-config Job, Argo CD's issuer
+  switched by hand with auto-sync paused, then restored):
+  - Argo CD's `/auth/login` redirects to `.../realms/ops/protocol/openid-connect/auth`;
+  - the first sign-in showed the authenticator-app setup;
+  - without the group the user signed in and saw 0 Applications; after joining `argocd-admins`, password plus code showed all 5;
+  - 5 wrong passwords locked the user, and the right password was refused while locked;
+  - break-glass `admin` and the `claude` token still saw all 5 Applications;
+  - the throwaway user was deleted.
+
+The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC), `envs/hosted/argocd.yaml` (url, OIDC issuer
+`https://auth.daleabels.com/realms/ops`) and `envs/hosted/apps.yaml` (admin login on, no ingress). Keycloak's side (realm, client
+`argocd`, group `argocd-admins`, the `groups` claim, lockout, OTP) is in `infra/keycloak/ops-realm.json`. The keycloak-config Job applies
+it next to `procure-realm.json` on every sync. Its redirect URIs follow the platform chart's `keycloak.argocdUrl` (`http://127.0.0.1:8080`
+on hosted, so the port-forward must use port 8080 for the Keycloak sign-in).
 
 ### Your own Keycloak user for Argo CD
 
 Claude does not create it: you pick your own user name and password. Keycloak's admin console cannot be used for this on the VM: the
-public host serves only `/realms/procure/`, and the console always sends the browser to that public host (also through a port-forward).
-So a script does it with Keycloak's own admin CLI inside the Keycloak pod, through the tunnel; it asks for the password and never shows
-or stores it:
+public host serves only `/realms/procure/` and `/realms/ops/`, and the console always sends the browser to that public host (also
+through a port-forward). So a script does it with Keycloak's own admin CLI inside the Keycloak pod, through the tunnel; it asks for the
+password and never shows or stores it. You need an authenticator app on your phone (Microsoft Authenticator, Google Authenticator,
+Aegis, 1Password, ...):
 
 ```powershell
 cd procure-ai-gitops
@@ -308,14 +335,24 @@ cd procure-ai-gitops
 ./bootstrap/hosted/open-argocd.ps1                                                           # then "Log in via Keycloak"
 ```
 
+1. Run the first line: it creates your user in realm `ops` and adds it to the group `argocd-admins`.
+2. Open Argo CD with the second line and choose "Log in via Keycloak". The page says "Procure AI operations" (realm `ops`). Sign in with
+   your address and password.
+3. The first time, Keycloak shows a QR code ("Mobile Authenticator Setup"). Scan it with the authenticator app, type the 6-digit code it
+   shows, give the device a name, and submit. Argo CD then opens with admin rights.
+4. From then on every sign-in asks for the password and then the app's current code.
+5. Five wrong passwords in a row lock the user for a minute (longer if it goes on). Wait and try again. If the phone is lost: break-glass
+   `admin` still works, and `./bootstrap/add-argocd-admin.ps1 -UserName you@example.com -ResetPassword` sets a new password. Removing the
+   old authenticator needs kcadm in the pod (`kcadm.sh delete users/<id>/credentials/<otp id> -r ops`), after which the next sign-in asks
+   for a new one.
+
 - The realm uses the e-mail address as the user name, so `-UserName` is your address and you sign in with it.
-- The user is created enabled, e-mail verified and in no organization (so it is not a tenant user of the demo), and added to the group
-  `argocd-admins`. Argo CD's *User Info* then shows that group.
-- The script refuses demo users, before changing anything: an address in a demo domain (`*.test`), a service account, one of the realm
-  file's fixed user IDs, a member of any organization, and an address that finds a different user by e-mail than by user name (no
-  e-mail fallback). `tests/Test-AddArgocdAdmin.ps1` in the GitOps repo proves each refusal against the live Keycloak.
-- Signing in to the procure app with this user does not make it a demo user: the gateway joins tenantless users to the Demo company only
-  when `Registration:Enabled` is on (off, like self-registration, `docs/demo.md`). It would see no company and no data.
+- The user is created enabled and e-mail verified, must set up the authenticator app at the first sign-in (the script also adds that
+  required action to an existing user without one), and is added to `argocd-admins`. Argo CD's *User Info* then shows that group.
+- The script refuses, before changing anything: an address in a demo domain (`*.test`), a service account, one of the demo realm file's
+  fixed user IDs, and an address that finds a different user by e-mail than by user name (no e-mail fallback).
+  `tests/Test-AddArgocdAdmin.ps1` in the GitOps repo proves each refusal against the live Keycloak.
+- The user exists in realm `ops` only, so it cannot sign in to the procure app (another realm).
 - Run it again with `-ResetPassword` for a new password, or `-Remove` to take the admin role away (the user stays).
 - Nothing in Git lists your user, so the keycloak-config Job (it re-applies the realm file on every sync) leaves it and its group
   membership alone.
@@ -325,7 +362,7 @@ cd procure-ai-gitops
 
 1. **Is it the demo switch?** `https://procure.daleabels.com/` shows the maintenance page when the demo is switched off on purpose
    (`docs/demo.md`). Nothing is broken then.
-2. **Open Argo CD:** `./bootstrap/hosted/open-argocd.ps1`, "Log in via Keycloak". If Keycloak itself is down (the sign-in page does not
+2. **Open Argo CD:** `./bootstrap/hosted/open-argocd.ps1`, "Log in via Keycloak" (password, then the authenticator app's code). If Keycloak itself is down (the sign-in page does not
    load), sign in as `admin` (break-glass, above).
 3. **Find the broken part.** The *Applications* page: `root`, `argocd`, `platform`, `observability`, `procure-ai`. A red heart
    (*Degraded*) or a yellow circle (*Progressing* for minutes) is where to look. Open that Application; the tree shows each Deployment,

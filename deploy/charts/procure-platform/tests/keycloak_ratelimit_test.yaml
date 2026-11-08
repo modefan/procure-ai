@@ -1,59 +1,74 @@
 suite: keycloak rate limit
 templates:
   - keycloak-ratelimit.yaml
+  - keycloak.yaml
 set:
   global.imageTag: abc1234
 tests:
-  - it: renders nothing by default (local cluster)
+  - it: renders no limit by default (local cluster)
+    template: keycloak-ratelimit.yaml
     asserts:
       - hasDocuments:
           count: 0
 
-  - it: limits the sign-in paths per client address when enabled
+  - it: leaves the keycloak Ingress without a middleware by default
+    template: keycloak.yaml
+    documentSelector: { path: kind, value: Ingress }
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  - it: limits every path of the host, per client address, when enabled
     set:
       keycloak.ingress.rateLimit.enabled: true
+    template: keycloak.yaml
+    documentSelector: { path: kind, value: Ingress }
+    asserts:
+      # The middleware sits on the Ingress that routes the whole host, so a path variant (;jsessionid=, %2F, upper case) that misses the
+      # token Ingress's exact prefix still passes this limit: there is no router on the host without one.
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+          value: NAMESPACE-keycloak-ratelimit@kubernetescrd
+
+  - it: renders both middlewares and the token Ingress when enabled
+    set:
+      keycloak.ingress.rateLimit.enabled: true
+      keycloak.ingress.publicRealms: [procure, ops]
+    template: keycloak-ratelimit.yaml
     asserts:
       - hasDocuments:
-          count: 4
+          count: 3
       - equal:
           path: spec.rateLimit
-          value: { average: 60, period: 1m, burst: 30 }
-        documentSelector: { path: metadata.name, value: keycloak-login-ratelimit }
+          value: { average: 120, period: 1m, burst: 60 }
+        documentSelector: { path: metadata.name, value: keycloak-ratelimit }
+      # No sourceCriterion: the remote address (never a header a client could set).
       - notExists:
           path: spec.rateLimit.sourceCriterion
-        documentSelector: { path: metadata.name, value: keycloak-login-ratelimit }
+        documentSelector: { path: metadata.name, value: keycloak-ratelimit }
       - equal:
           path: spec.rateLimit
           value: { average: 600, period: 1m, burst: 120 }
         documentSelector: { path: metadata.name, value: keycloak-token-ratelimit }
       - equal:
           path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
-          value: NAMESPACE-keycloak-login-ratelimit@kubernetescrd
-        documentSelector: { path: metadata.name, value: keycloak-login }
-      - equal:
-          path: spec.rules[0].host
-          value: auth.procure.localtest.me
-        documentSelector: { path: metadata.name, value: keycloak-login }
+          value: NAMESPACE-keycloak-token-ratelimit@kubernetescrd
+        documentSelector: { path: metadata.name, value: keycloak-token }
       - lengthEqual: { path: "spec.rules[0].http.paths", count: 2 }
-        documentSelector: { path: metadata.name, value: keycloak-login }
-      - equal: { path: "spec.rules[0].http.paths[0].path", value: "/realms/procure/protocol/openid-connect/auth" }
-        documentSelector: { path: metadata.name, value: keycloak-login }
-      - equal: { path: "spec.rules[0].http.paths[1].path", value: "/realms/procure/login-actions/" }
-        documentSelector: { path: metadata.name, value: keycloak-login }
-      - lengthEqual: { path: "spec.rules[0].http.paths", count: 1 }
         documentSelector: { path: metadata.name, value: keycloak-token }
       - equal: { path: "spec.rules[0].http.paths[0].path", value: "/realms/procure/protocol/openid-connect/token" }
         documentSelector: { path: metadata.name, value: keycloak-token }
-      - equal:
-          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
-          value: NAMESPACE-keycloak-token-ratelimit@kubernetescrd
+      - equal: { path: "spec.rules[0].http.paths[1].path", value: "/realms/ops/protocol/openid-connect/token" }
+        documentSelector: { path: metadata.name, value: keycloak-token }
+      - equal: { path: "spec.rules[0].host", value: auth.procure.localtest.me }
         documentSelector: { path: metadata.name, value: keycloak-token }
 
   - it: takes its numbers from values
     set:
       keycloak.ingress.rateLimit.enabled: true
-      keycloak.ingress.rateLimit.login: { average: 5, period: 10s, burst: 2 }
-    documentSelector: { path: metadata.name, value: keycloak-login-ratelimit }
+      keycloak.ingress.rateLimit.all: { average: 5, period: 10s, burst: 2 }
+    template: keycloak-ratelimit.yaml
+    documentSelector: { path: metadata.name, value: keycloak-ratelimit }
     asserts:
       - equal:
           path: spec.rateLimit
@@ -63,6 +78,7 @@ tests:
     set:
       keycloak.ingress.rateLimit.enabled: true
       keycloak.ingress.rateLimit.token.burst: 0
+    template: keycloak-ratelimit.yaml
     asserts:
       - failedTemplate:
           errorPattern: keycloak.ingress.rateLimit.token needs average, period and burst

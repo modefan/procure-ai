@@ -28,7 +28,9 @@ tests:
           path: spec.template.spec.initContainers[0].args[0]
           value: |
             set -eu
-            sed -E 's/\$\{(KC_[A-Z0-9_]+):([^-])/${\1:-\2/g' /opt/keycloak/data/import/procure-realm.json > /config/procure-realm.json
+            for realm in procure ops; do
+              sed -E 's/\$\{(KC_[A-Z0-9_]+):([^-])/${\1:-\2/g' "/opt/keycloak/data/import/$realm-realm.json" > "/config/$realm-realm.json"
+            done
       # No secret reaches the init container.
       - notExists: { path: 'spec.template.spec.initContainers[0].env' }
 
@@ -37,7 +39,7 @@ tests:
       - equal: { path: 'spec.template.spec.containers[0].image', value: docker.io/adorsys/keycloak-config-cli:6.5.1-26.5.5 }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KEYCLOAK_URL, value: http://keycloak:8080 } }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KEYCLOAK_AVAILABILITYCHECK_ENABLED, value: "true" } }
-      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_FILES_LOCATIONS, value: file:/config/procure-realm.json } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_FILES_LOCATIONS, value: "file:/config/procure-realm.json,file:/config/ops-realm.json" } }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_VARSUBSTITUTION_ENABLED, value: "true" } }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_VARSUBSTITUTION_PREFIX, value: "${" } }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_VARSUBSTITUTION_SUFFIX, value: "}" } }

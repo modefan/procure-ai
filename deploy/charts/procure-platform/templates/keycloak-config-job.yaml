@@ -5,8 +5,8 @@
 # (adorsys, Apache 2.0) against the running Keycloak on every sync with the same file, so Git is the source of truth for the realm;
 # a change made by hand in the admin console is put back by the next sync. Keycloak's own first-start import stays (a fresh install
 # works without the Job; the Job then finds the realm as the file describes it and changes nothing).
-#   realm file    the init container copies procure-realm.json out of the deployed Keycloak image (the same bytes Keycloak imported, no copy
-#                 in the chart) and rewrites only the defaults' syntax: Keycloak writes ${KC_X:default}, keycloak-config-cli (Apache
+#   realm files   the init container copies procure-realm.json (the demo realm) and ops-realm.json (realm ops: Argo CD's sign-in, plan 08
+#                 fix wave ruling R6c) out of the deployed Keycloak image (the same bytes Keycloak imported, no copy in the chart) and rewrites only the defaults' syntax: Keycloak writes ${KC_X:default}, keycloak-config-cli (Apache
 #                 Commons Text) ${KC_X:-default}. No value passes through sed: keycloak-config-cli fills every ${KC_...} placeholder from
 #                 its environment, the same variables and Secret keys as the Keycloak Deployment.
 #   when          a Sync hook in wave 1: Argo CD starts it once wave 0 (Keycloak's Deployment) is Healthy, i.e. Keycloak is Ready, next
@@ -51,7 +51,9 @@ spec:
           args:
             - |
               set -eu
-              sed -E 's/\$\{(KC_[A-Z0-9_]+):([^-])/${\1:-\2/g' /opt/keycloak/data/import/procure-realm.json > /config/procure-realm.json
+              for realm in procure ops; do
+                sed -E 's/\$\{(KC_[A-Z0-9_]+):([^-])/${\1:-\2/g' "/opt/keycloak/data/import/$realm-realm.json" > "/config/$realm-realm.json"
+              done
           resources:
             {{- toYaml .Values.helperResources | nindent 12 }}
           {{- include "procure-platform.containerSecurity" . | nindent 10 }}
@@ -80,7 +82,7 @@ spec:
                   name: procure-keycloak
                   key: admin-password
             - name: IMPORT_FILES_LOCATIONS
-              value: file:/config/procure-realm.json
+              value: file:/config/procure-realm.json,file:/config/ops-realm.json
             # Apply the file on every run, not only when it changed: the cache would skip an unchanged file and keep a hand change.
             - name: IMPORT_CACHE_ENABLED
               value: "false"
