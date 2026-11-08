@@ -300,19 +300,19 @@ cd procure-ai-gitops
 
 ## What it costs, and how to stop it
 
-Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 1 = R 16.54, EUR 1 = USD 1.1165 = R 18.46.
+Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 1 = R 16,54, EUR 1 = USD 1.1165 = R 18,46. Rand amounts in the en-ZA format (R 258,50).
 
 | Item | Per month | USD | ZAR |
 |---|---|---|---|
-| Contabo Cloud VPS 8 (order 15654477, monthly term) | EUR 14.00 (0 % VAT on the invoice), Contabo's list price | 15.63 | 258.50 |
-| Domain `daleabels.com` (Cloudflare Registrar, USD 11.17 a year, auto-renew, expires 2027-11-07) | one twelfth | 0.93 | 15.40 |
-| Azure Foundry, **expected** (about 1.3 M tokens: the nightly re-seed of Acme and Globex, ~16 000 tokens a night, and ~10 questions a day) | gpt-5-mini $0.25 in / $2.00 out per 1 M, embeddings $0.022 per 1 M | 0.40-0.80 | 7-13 |
-| Azure Foundry, **worst case under the caps** (every organisation at its daily cap every day, below) | 14 M tokens at $0.60 per 1 M | 8.40 | 139 |
+| Contabo Cloud VPS 8 (order 15654477, monthly term) | EUR 14.00 (0 % VAT on the invoice), Contabo's list price | 15.63 | R 258,50 |
+| Domain `daleabels.com` (Cloudflare Registrar, USD 11.17 a year, auto-renew, expires 2027-11-07) | one twelfth | 0.93 | R 15,40 |
+| Azure Foundry, **expected** (about 1.0 M tokens: the nightly re-seed of Acme and Globex, ~16 000 tokens a night, 0.5 M a month, and ~10 questions a day of ~1 800 tokens, 0.5 M a month) | gpt-5-mini $0.25 in / $2.00 out per 1 M, embeddings $0.022 per 1 M | 0.40-0.80 | R 7-13 |
+| Azure Foundry, **worst case under the caps** (every organisation at its daily cap every day, below) | 14 M tokens at $0.60 per 1 M | 8.40 | R 139 |
 | GitHub (repos, Actions inside the free 2 000 private minutes; free once public), GHCR images | free | 0 | 0 |
 | Cloudflare DNS, Let's Encrypt certificate, cert-manager | free | 0 | 0 |
 | Contabo firewall, SSH key secret, IPv4 and IPv6 (included with the VPS) | free | 0 | 0 |
-| **Total, expected** | | **about 17.00-17.40** | **about 281-287** |
-| **Total, worst case** | | **about 25.00** | **about 413** |
+| **Total, expected** | | **about 17.00-17.40** | **about R 281-287** |
+| **Total, worst case** | | **about 25.00** | **about R 413** |
 
 **The AI cost is capped by the app, not by Azure.** Each organisation may use `AI:DailyTokenCapPerTenant` tokens a day, **150 000 on the
 live demo** (`envs/hosted/procure-ai.yaml` in the GitOps repo, with the arithmetic). Measured on the live demo (2026-11-08): a policy
@@ -322,14 +322,15 @@ organisation. There are three organisations (Acme, Globex, Demo); self-registrat
 organisations. Worst case: 3 x 150 000 x 30 days plus the two seeds, which are counted but never stopped (procure-ai `docs/assistant.md`,
 "Daily token cap"), is about 14 M tokens. Priced as if 20 % were output (measured: about 5 %), that is $0.60 per 1 M and **$8.40 a month**,
 under the Azure budget alert. Questions already running when the cap is reached still finish; the `chat` deployment's limit of 50 000
-tokens and 50 requests a minute bounds that overshoot. Per user the Assistant also allows 50 questions a day, and the demo login 30 sign-ins
-a minute per visitor address (300 a minute in all).
+tokens and 50 requests a minute bounds that overshoot. So the $8.40 is not a hard ceiling: add **at most about USD 1-2 once** for a
+scripted burst of questions fired together at the cap (still under the USD 10 alert). Per user the Assistant also allows 50 questions a
+day, and the demo login 30 sign-ins a minute per visitor address (300 a minute in all).
 
-**Azure guards.** The budget `procure-ai-10usd` on the subscription: USD 10 a month, e-mails to the Azure account's address at 50 % and
-100 % of the actual cost and at 100 % of the forecast. Cost Management cannot send a test e-mail: only a real threshold proves the
-e-mail. The deployments: `chat` (gpt-5-mini, GlobalStandard, capacity 50: 50 000
-tokens and 50 requests a minute, read from Azure's `x-ratelimit-limit-*` answer headers on 2026-11-08) and `embeddings`
-(text-embedding-3-small, DataZoneStandard, 100 000 tokens a minute). The Azure account is a **Free Trial** (USD 200 credit, spending limit
+**Azure guards.** The budget `procure-ai-10usd` on the subscription: USD 10 a month, e-mails to the Azure account's address at 50 %,
+80 % and 100 % of the actual cost and at 100 % of the forecast (80 % added 2026-11-08; spend that day USD 0.13). Cost Management cannot
+send a test e-mail: only a real threshold proves the e-mail. The deployments, checked through Azure Resource Manager and Azure's
+`x-ratelimit-limit-*` answer headers on 2026-11-08: `chat` (gpt-5-mini, GlobalStandard, capacity 50: 50 000 tokens and 50 requests a
+minute) and `embeddings` (text-embedding-3-small, DataZoneStandard, capacity 100: 100 000 tokens a minute). The Azure account is a **Free Trial** (USD 200 credit, spending limit
 on) that ends about **2026-12-07**. Until then the credit pays and nothing is billed to the card. After that, Azure stops the deployments
 unless the account is upgraded to pay-as-you-go, which is Dale's call. Without the upgrade, switch the live demo to the Fake model first
 (below), so the Assistant gives scripted answers instead of errors.
@@ -340,7 +341,7 @@ unless the account is upgraded to pay-as-you-go, which is Dale's call. Without t
 |---|---|---|---|
 | Visitors using the demo, incl. its AI | The demo switch off (`PUT /api/v1/system/availability`, `docs/demo.md` "Switching the demo off"): every visitor sees the maintenance page | Every visitor's AI cost; the nightly re-seed still runs (about 16 000 tokens, under USD 0.01 a night) | The switch on |
 | All Azure AI cost, demo still usable | In the GitOps repo `envs/hosted/procure-ai.yaml`, `AI__Provider: Fake` (and remove the `AI__Endpoint` and `AI__ApiKey` lines), push: Argo CD rolls the Assistant to the keyless Fake model (scripted answers, no tokens). The stored vectors came from the other model and match poorly, so after switching (either way) the nightly re-seed embeds the policy again; replace it on the policy documents screen to have it at once | All of Azure | The old values back, push |
-| Azure entirely | Delete the two deployments (`az cognitiveservices account deployment delete ... -n chat` and `-n embeddings`); first switch to Fake as above. A deployment costs nothing while unused (pay per token), so this only matters when the account is closed | Nothing extra while unused | Recreate them as in plan 08 Task 9 (`chat` gpt-5-mini 2025-08-07 GlobalStandard 50, `embeddings` text-embedding-3-small DataZoneStandard 100) |
+| Azure entirely | Delete the two deployments (`az cognitiveservices account deployment delete -g <resource group> -n procureai-foundry-862eee --deployment-name chat`, then the same with `--deployment-name embeddings`; `-n` is the Foundry account, not the deployment; the resource group comes from `az cognitiveservices account list --query "[?name=='procureai-foundry-862eee'].resourceGroup" -o tsv`); first switch to Fake as above. A deployment costs nothing while unused (pay per token), so this only matters when the account is closed | Nothing extra while unused | Recreate them as in plan 08 Task 9 (`chat` gpt-5-mini 2025-08-07 GlobalStandard 50, `embeddings` text-embedding-3-small DataZoneStandard 100) |
 | The VPS | Cancel it in the Contabo panel (below) | EUR 14 a month | A new order, then `new-hosted-cluster.ps1` and the steps above |
 | The domain | Turn auto-renew off in the Cloudflare dashboard (it then lapses on 2027-11-07) | USD 11.17 a year | Auto-renew on |
 

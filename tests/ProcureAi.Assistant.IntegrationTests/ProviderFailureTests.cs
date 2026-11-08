@@ -242,7 +242,9 @@ public sealed class ProviderFailureTests(AssistantApp app)
         // document is made a user's upload, so it stands for any queued upload of a capped tenant; Acme's stays the demo seed's own.
         var (seeded, uploaded) = (DemoSeeder.Documents[0], DemoSeeder.Documents[1]);
         await CapSeededTenantsAsync(1);
-        var usedBefore = (await app.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(seeded.TenantId, Ct)).Used;
+        var budget = app.Services.GetRequiredService<ITenantTokenBudget>();
+        var usedBefore = (await budget.GetAsync(seeded.TenantId, Ct)).Used;
+        var cappedUsedBefore = (await budget.GetAsync(uploaded.TenantId, Ct)).Used;
         await using var instance = await StartAsync(
             model,
             new()
@@ -259,9 +261,14 @@ public sealed class ProviderFailureTests(AssistantApp app)
         // The nightly reset deletes the policy and seeds it again: a tenant someone capped between midnight and the reset must not lose
         // its policy for the whole day. The seed is one fixed document, so letting it through bounds what it can spend.
         await PolicyDocumentsApi.WaitForStatusAsync(instance.Client, PolicyDocumentsApi.Admin(seeded.TenantId), seeded.DocumentId, "Ready");
-        var usedAfter = (await app.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(seeded.TenantId, Ct)).Used;
+        var usedAfter = (await budget.GetAsync(seeded.TenantId, Ct)).Used;
         usedAfter.ShouldBeGreaterThan(usedBefore, "the seed's ingestion still counts for its tenant");
         model.EmbeddingRequests.ShouldBeGreaterThan(0, "the seed's chunks were embedded");
+
+        // The stub serves both tenants, so its counts cannot tell them apart; the capped tenant's own total can. Every model call of a
+        // job is counted against its tenant (AiUsageScope), so an unchanged total proves the capped upload reached no model, not even
+        // the document guard before a later per-batch stop. Read after the seed is Ready, so a late count would have landed by now.
+        (await budget.GetAsync(uploaded.TenantId, Ct)).Used.ShouldBe(cappedUsedBefore, "the capped tenant's upload made no model call");
     }
 
     [Fact]

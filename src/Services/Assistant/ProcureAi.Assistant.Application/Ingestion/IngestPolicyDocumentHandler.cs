@@ -68,7 +68,15 @@ public sealed class PolicyIngestion(
     /// <summary>How often a commit that lost a race on the document row (a replace or remove meanwhile) is tried again.</summary>
     private const int CommitAttempts = 3;
 
-    /// <param name="Seeded">The demo seed's own document (uploaded by <see cref="SystemCaller"/>): counted, but never stopped by the cap.</param>
+    /// <summary>
+    /// The demo seed's own document: the first version, uploaded by <see cref="SystemCaller"/> (<c>DemoSeeder</c>). Its ingestion is counted
+    /// against the tenant's daily token total but never stopped by the cap. Any later version is a user's replacement (a replace records
+    /// the user as the uploader), and requiring version 1 keeps a future internal upload without an on-behalf-of user from slipping past
+    /// the cap through a replace.
+    /// </summary>
+    public static bool IsDemoSeed(string uploadedBy, int version) => uploadedBy == SystemCaller.Id && version == 1;
+
+    /// <param name="Seeded">The demo seed's own document (<see cref="IsDemoSeed"/>): counted, but never stopped by the cap.</param>
     private sealed record Job(
         Guid DocumentId, int Version, string TenantId, string Title, string ContentType, byte[] Content, int ProgressStep, bool Seeded);
 
@@ -177,7 +185,7 @@ public sealed class PolicyIngestion(
 
             job = new Job(
                 document.Id, message.Version, document.TenantId, document.Title, file.ContentType, file.Content, document.Progress / 10 * 10,
-                document.UploadedBy == SystemCaller.Id);
+                IsDemoSeed(document.UploadedBy, message.Version));
         }, cancellationToken);
         return job;
     }

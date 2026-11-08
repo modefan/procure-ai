@@ -120,8 +120,8 @@ embeddings of an ingestion (counted for the document's tenant). Once the total r
 replacements and invoice scans are refused with 429 "The assistant has reached today's limit for your organisation." and
 `Retry-After` until midnight. An ingestion checks the cap when it starts (also a queued job and every retry) and before each batch of
 chunks; once the cap is reached it stops, and the version ends Failed ("Your organisation reached today's AI limit; upload the file
-again tomorrow."), with the current version still searchable. The demo seed's own policy document (uploaded by the system, seeded again by the nightly reset at
-02:00) is counted but never stopped: otherwise a tenant someone capped between midnight and the reset would have no policy for the whole
+again tomorrow."), with the current version still searchable. The demo seed's own policy document (its first version, uploaded by the system, seeded again by the nightly
+reset at 02:00; `PolicyIngestion.IsDemoSeed`) is counted but never stopped; any replacement is stopped as usual: otherwise a tenant someone capped between midnight and the reset would have no policy for the whole
 day. It is one fixed document a night: the whole nightly re-seed of a tenant (policy and past purchases) used 7 959 tokens for Globex on
 the live demo (2026-11-08). The check happens before the work and the count after it, so every call already in flight for the
 tenant (all its users, on every instance) still finishes and counts: the cap can be passed by that much. Only the per-user rate

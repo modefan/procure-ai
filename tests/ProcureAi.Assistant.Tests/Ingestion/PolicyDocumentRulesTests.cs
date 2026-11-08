@@ -2,6 +2,7 @@ using System.Text;
 using ProcureAi.Assistant.Application;
 using ProcureAi.Assistant.Application.Ingestion;
 using ProcureAi.Assistant.Domain;
+using ProcureAi.BuildingBlocks.Application;
 using ProcureAi.BuildingBlocks.Domain;
 using Shouldly;
 
@@ -24,6 +25,27 @@ public sealed class PolicyDocumentRulesTests
     [InlineData("policy.md", "", null)]
     public void File_type_comes_from_content_and_extension(string fileName, string content, string? expected) =>
         PolicyFileType.Detect(fileName, Encoding.UTF8.GetBytes(content)).ShouldBe(expected);
+
+    // The token cap exemption (plan 08 Task 13): only the demo seed's own first version, never a replacement or a user's upload.
+    [Theory]
+    [InlineData(SystemCaller.Id, 1, true)]
+    [InlineData(SystemCaller.Id, 2, false)]
+    [InlineData(SystemCaller.Id, 7, false)]
+    [InlineData("4f1c2b9e-7a3d-4e8f-9b61-2c5d8e0a1f37", 1, false)]
+    [InlineData("service:requests", 1, false)]
+    public void Only_the_demo_seeds_first_version_is_exempt_from_the_token_cap(string uploadedBy, int version, bool exempt) =>
+        PolicyIngestion.IsDemoSeed(uploadedBy, version).ShouldBe(exempt);
+
+    [Fact]
+    public void A_system_document_replaced_by_the_system_is_no_longer_the_demo_seed()
+    {
+        var document = new PolicyDocument(Guid.NewGuid(), "acme", "Policy", "policy.md", SystemCaller.Id, At);
+        PolicyIngestion.IsDemoSeed(document.UploadedBy, document.Version).ShouldBeTrue();
+
+        document.ReplaceFile("policy-v2.md", SystemCaller.Id, At);
+
+        PolicyIngestion.IsDemoSeed(document.UploadedBy, document.Version).ShouldBeFalse("a replacement is never the seed, whoever uploads it");
+    }
 
     [Fact]
     public void Retry_schedule_defaults_to_10_seconds_1_minute_5_minutes_and_rejects_nonsense()
