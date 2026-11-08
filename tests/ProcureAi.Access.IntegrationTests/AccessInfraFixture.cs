@@ -8,7 +8,7 @@ namespace ProcureAi.Access.IntegrationTests;
 
 /// <summary>The shared service infrastructure with the Access database migrated and demo-seeded by the real <c>--migrate</c> step.</summary>
 public sealed class AccessInfraFixture()
-    : ServiceInfraFixture("accessdb", "permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries")
+    : ServiceInfraFixture("accessdb", "permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "system_settings", "audit_entries")
 {
     /// <summary>
     /// A new tenant with the default matrix and one user (Maria, manager, R 200 000), for a test that changes data. Tests never

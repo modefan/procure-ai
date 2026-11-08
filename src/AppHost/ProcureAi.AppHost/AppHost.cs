@@ -176,7 +176,7 @@ var shared = new SharedResources(
     debeziumMongoPassword.Resource, debeziumHeartbeatIntervalMs);
 
 var accessApi = builder.AddProcureAiService<Projects.ProcureAi_Access_Api>(
-    new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),
+    new ServiceSpec("access", ResourceNames.AccessDb, CapturedTables: ["permission_matrices", "permission_grants", "departments", "cost_centers", "tenant_users", "system_settings", "audit_entries"], GatewayCluster: "access", ApiRoutePrefix: "/api/access"),
     shared)
     // Self-registration (Task 4): only Access talks to the Keycloak admin API, as `procure-access-admin`. No other service gets this secret.
     .WithEnvironment("Keycloak__AdminBaseUrl", keycloak.GetEndpoint("http"))
