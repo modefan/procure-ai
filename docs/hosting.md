@@ -300,7 +300,7 @@ cd procure-ai-gitops
 
 ## What it costs, and how to stop it
 
-Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 1 = R 16,54, EUR 1 = USD 1.1165 = R 18,46. Rand amounts in the en-ZA format (R 258,50).
+Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 1 = R 16,54, EUR 1 = USD 1.1165 = R 18,47. Rand amounts in the en-ZA format (R 258,50).
 
 | Item | Per month | USD | ZAR |
 |---|---|---|---|
