@@ -62,7 +62,7 @@ spec:
         - port: otlp-grpc
           protocol: TCP
 ---
-# 4. Traefik (kube-system) may reach the dashboard's frontend (port http), nothing else.
+# 4. Traefik (kube-system) may reach the dashboard's port http (nginx, dashboard.proxy; the frontend itself without the proxy), nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

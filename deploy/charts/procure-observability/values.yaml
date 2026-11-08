@@ -267,7 +267,8 @@ opentelemetry-collector:
       # Measured on the hosted VM 2026-11-08: these were 92 % of all traces (12 operations at ~4.8 a minute each), requests 5 %.
       # Trace-level, not span-level: plan 07's filter dropped only the root span, so its children (the MongoDB driver's command span under
       # its operation span) still showed up as traces of their own ("assistant-api: ping", "aggregate"). A root that ended in an error is
-      # kept, and so is every trace with any other root (requests, messages, scheduled jobs). The spans of a trace wait decision_wait
+      # kept, and so is every trace with any other root (requests, messages, scheduled jobs). The drop is whole-trace: a failing child span
+      # (e.g. a Postgres error) under a background root that ended OK is dropped with it; its error log line still reaches the dashboard. The spans of a trace wait decision_wait
       # before they go on to the dashboard. Tested against the real image: tests/collector/Test-CollectorRedaction.ps1.
       tail_sampling:
         decision_wait: 5s

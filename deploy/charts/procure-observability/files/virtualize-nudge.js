@@ -8,11 +8,11 @@
 // something resizes a spacer (resizing the window does; that re-observes the spacers). Measured in a lab (the dashboard image in Docker,
 // a proxy adding 90 ms each way): 9 of 10 loads blank without this script, 0 of 10 without the added delay.
 //
-// This script does what the window resize does, only when needed: once a second it looks for a data grid that has rows
+// This script does what the window resize does, only when needed: every half second it looks for a data grid that has rows
 // (aria-rowcount > 1, the header row counts as one) but has rendered none for at least a second, and narrows that table by one pixel for
 // two animation frames. The spacers' ResizeObserver then re-observes them and the grid asks for its rows. A grid with rows, an empty grid
 // and every other page are left alone. Served by the dashboard pod's proxy (dashboard-proxy.conf), same origin, so the dashboard's CSP
-// (script-src 'self') allows it. Remove it (dashboard.virtualizeNudge.enabled) once an Aspire release fixes the race: the live check
+// (script-src 'self') allows it. Remove it (dashboard.proxy.enabled: false) once an Aspire release fixes the race: the live check
 // procure-ai-gitops tests/Test-Dashboard.ps1 -NoNudge shows whether the tables load without it.
 (function () {
   'use strict';

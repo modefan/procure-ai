@@ -270,7 +270,7 @@ All in the GitOps repo's `tests/` unless noted. They need the cluster running an
 | `Test-LocalCa.ps1` | The local CA's name constraints (no cluster needed) |
 | `Test-Upgrade.ps1` | A new revision reruns every migration Job before the pods change; a revision whose Requests migration fails keeps the old pods serving and turns the root Application `Degraded` within 5 minutes (throwaway branches, restored afterwards) |
 | `Test-RestartKeepsData.ps1` | `k3d cluster stop/start` and deleted Postgres and MongoDB pods keep every row, document and Debezium position; a new change still reaches the data change log within 30 s |
-| `Test-Dashboard.ps1` | The Aspire dashboard as an operator uses it (plan 08b; also the last step of `Test-FreshCluster.ps1`): Microsoft Edge signs in as the demo admin, Structured logs and Traces show rows on every full page load, requests-api has log and trace rows from the last 10 minutes (the newest trace starting at the gateway), and Blazor's WebSocket accepts the dashboard's own Origin and refuses a foreign one. Run it after every push or deploy that reaches a cluster |
+| `Test-Dashboard.ps1` | The Aspire dashboard as an operator uses it (plan 08b; also the last step of `Test-FreshCluster.ps1`): Microsoft Edge signs in as the demo admin, Structured logs and Traces show rows on every full page load, requests-api has log rows and the gateway and requests-api have trace rows from the last 10 minutes (some starting at the gateway), and Blazor's WebSocket accepts the dashboard's own Origin and refuses a foreign one. Run it after every push or deploy that reaches a cluster |
 | End-to-end tests (this repo) | The browser suite against `https://procure.localtest.me` (below) |
 
 The end-to-end tests run against the cluster instead of an AppHost when `PROCUREAI_E2E_GATEWAY_URL` is set. They rerun on kept data,
@@ -312,8 +312,8 @@ On 2026-11-08 the hosted dashboard had shown no data for days while every smoke 
    dashboard trusts forwarded headers (it must, for its OIDC redirect URI), so its request scheme became `wss`, and its Origin check
    (13.6) compared the browser's `https://dashboard...` with `wss://dashboard...` and answered 403 to every circuit. There is no
    working fallback; the pages simply stayed empty. The dashboard's Ingress now carries the Traefik Middleware
-   `aspire-dashboard-forwarded-proto`, which sets `X-Forwarded-Proto: https` (TLS always ends at Traefik for this host; http only
-   redirects). A foreign Origin, or the dashboard's host with `http://`, still gets 403.
+   `aspire-dashboard-forwarded-proto`, which sets `X-Forwarded-Proto: https`; the Ingress serves only the websecure (https) entry
+   point, so that is always true (hosted also redirects http; on local, plain http gets 404). A foreign Origin, or the dashboard's host with `http://`, still gets 403.
 2. **Tables stayed blank after a full page load.** Structured logs and Traces are virtualized grids (Blazor `Virtualize` in a Fluent
    data grid). They first render with no items, then with the real count, scrolled to the newest row at the bottom. With a far-away
    browser (about 180 ms round trip from South Africa to the VM) the browser's spacer measurements race with the server's renders and
@@ -323,7 +323,7 @@ On 2026-11-08 the hosted dashboard had shown no data for days while every smoke 
    with no telemetry arriving at all (so the update rate is not the cause). On the VM: 5 of 6 loads blank. Upstream (Aspire 13.6.2 and
    13.6.4, the newest); no setting avoids it. The workaround: nginx in the dashboard's pod (`dashboard.proxy`, the web image's
    `nginx-unprivileged`) passes everything through unchanged and adds one same-origin script, `/_procure/virtualize-nudge.js`, to every
-   page. Once a second it looks for a grid that has rows but has rendered none for a second and narrows it by one pixel for two frames,
+   page. Every half second it looks for a grid that has rows but has rendered none for a second and narrows it by one pixel for two frames,
    which re-observes the spacers as a window resize does. With it: 20 of 20 loads in the lab and 20 of 20 on the VM showed rows within
    6 s. To retire it after an Aspire upgrade: `Test-Dashboard.ps1 -NoNudge` (blocks the script); when every load still shows rows, set
    `dashboard.proxy.enabled: false`.
@@ -331,10 +331,11 @@ On 2026-11-08 the hosted dashboard had shown no data for days while every smoke 
    connection (the apps' readiness checks connect on every probe) and 14 % MongoDB's per-connection lines (the kubelet's probes), so the
    log cap held 8.6 minutes; 61 traces a minute, 92 % background (Wolverine's `wolverine_node_assignments` poll in every service,
    MongoDB readiness pings whose parent span had been dropped, the System status page's poll of the chaos switch), so request traces
-   were 5 %. The collector now drops exactly those log lines (`filter/platform-noise`, by resource, level and message; every warning
-   and error stays) and whole background traces (`tail_sampling`: a trace whose root is a parentless database or cache call, the
-   node-assignment poll or the chaos-switch GET, unless that root failed; traces wait 5 s in the collector). After: 23 log lines a
-   minute (cap about 3.5 hours) and 3.5 traces a minute, all requests and messages (cap about a day), measured on the VM 2026-11-08.
+   were 5 %. The collector now drops exactly those log lines (`filter/platform-noise`, by resource, level and message; every other warning
+   and error stays, only MongoDB's per-connection warning "No SSL certificate provided by peer" is dropped) and whole background traces (`tail_sampling`: a trace whose root is a parentless database or cache call, the
+   node-assignment poll or the chaos-switch GET, unless that root failed; traces wait 5 s in the collector). After: 12 log lines a
+   minute (cap about 6.8 hours) and 2.1 traces a minute, all requests and messages (cap about 39 hours on the idle demo), measured on the
+   VM 2026-11-08. A failing child span under a background root that ended OK is dropped with its trace; its error log line stays.
    Both are tested against the real collector image (`Test-CollectorRedaction.ps1`, sample lines and OTLP traces).
 
 ## Measured memory

@@ -156,6 +156,10 @@ tests:
       - equal:
           path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
           value: observability-aspire-dashboard-forwarded-proto@kubernetescrd
+      # https only, so the forced https is true on every cluster (local has no http redirect).
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.entrypoints"]
+          value: websecure
       # One Ingress for every path of the host, so /_blazor gets the middleware too (no path of its own that could miss it).
       - lengthEqual:
           path: spec.rules[0].http.paths

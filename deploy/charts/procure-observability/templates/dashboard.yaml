@@ -67,6 +67,9 @@ spec:
               containerPort: 18889
               protocol: TCP
           env:
+            # All pod addresses (the kubelet's tcpSocket probes need the pod IP). With the proxy, only the NetworkPolicy keeps other pods
+            # from reaching this port directly (Traefik may reach port http = nginx only); with networkPolicies.enabled false the frontend
+            # is reachable inside the cluster without nginx (accepted: it still needs the Keycloak sign-in).
             - name: ASPNETCORE_URLS
               value: http://+:18888
             - name: DOTNET_DASHBOARD_OTLP_ENDPOINT_URL
@@ -211,8 +214,9 @@ spec:
 # (ws on plain http). With forwarded headers trusted, the dashboard (13.6) then sees Request.Scheme "wss", and its WebSocketOriginValidator
 # compares the browser's Origin (https://<host>) with scheme + host of the request: "https" is not "wss", so EVERY circuit got 403
 # "Origin not allowed" and the pages stayed without data (the earlier comment here, "falls back to long polling", was wrong). TLS always ends at
-# Traefik for this host (http only redirects), so the scheme the browser used is always https: the Middleware sets exactly that on every
-# request of the dashboard's Ingress. The origin check stays meaningful: a foreign Origin (another scheme or host) still gets 403
+# Traefik for this host and the Ingress serves the websecure (https) entry point only (hosted also redirects http; local has no redirect,
+# so plain http gets 404 there instead of a page told it is https): the scheme the browser used is always https, and the Middleware sets
+# exactly that on every request of the dashboard's Ingress. The origin check stays meaningful: a foreign Origin (another scheme or host) still gets 403
 # (tests: helm-unittest here, the live check procure-ai-gitops tests/Test-Dashboard.ps1).
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -232,6 +236,8 @@ metadata:
   labels:
     {{- include "procure-observability.labels" $labels | nindent 4 }}
   annotations:
+    # https only: the forced X-Forwarded-Proto: https is then true by construction.
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-aspire-dashboard-forwarded-proto@kubernetescrd
 spec:
   ingressClassName: {{ .Values.ingressClassName }}

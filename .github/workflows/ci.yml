@@ -370,7 +370,7 @@ jobs:
           # The dashboard Ingress's Traefik Middleware (plan 08b) against the community CRD schema catalog, as in the next step.
           helm template observability deploy/charts/procure-observability --namespace observability \
             | kubeconform -strict -summary -schema-location default \
-                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/49729e49e8f062933e3716a26540d41b0cd0856c/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
       # Plan 08 final review B I1: render every chart with each GitOps environment's values (envs/local and envs/hosted), as Argo CD renders
       # them, so a chart change that breaks an environment's values (a renamed key, a branch only hosted uses: publicPathsOnly,
@@ -380,7 +380,7 @@ jobs:
         run: |
           set -euo pipefail
           # Custom resources (the hosted Keycloak rate limit's Traefik Middleware) against the community CRD schema catalog.
-          crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/49729e49e8f062933e3716a26540d41b0cd0856c/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
           kc() { kubeconform -strict -summary -schema-location default -schema-location "$crds"; }
           for env in local hosted; do
             dir="../procure-ai-gitops/envs/$env"
