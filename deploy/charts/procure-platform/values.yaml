@@ -91,6 +91,18 @@ keycloak:
     publicPathsOnly: false
     # The realms the public host serves when publicPathsOnly is on (the app's realm; never master).
     publicRealms: [procure]
+    # Per-client-address rate limits on the sign-in paths of publicRealms (templates/keycloak-ratelimit.yaml; plan 08 fix wave ruling R6b:
+    # slows password guessing without Keycloak's per-user lockout, which a stranger could use to keep the shared demo users locked).
+    # Traefik RateLimit: `average` requests per `period`, bursts up to `burst`; over it, 429. Off by default (the local cluster); the
+    # hosted values switch it on.
+    rateLimit:
+      enabled: false
+      # The browser's sign-in page and form posts. One sign-in is 2-4 requests; 60 a minute with a burst of 30 lets a reviewer sign in
+      # and out as every demo role in a row, and allows a guesser about one password a second.
+      login: { average: 60, period: 1m, burst: 30 }
+      # The token endpoint. The gateway pod is one source for every visitor (code exchanges, refreshes, the demo login's password grant,
+      # itself capped at 300 a minute), so this is sized for all visitors together; an outside guesser still gets at most 10 a second.
+      token: { average: 600, period: 1m, burst: 120 }
   # Argo CD's address as the browser opens it (the argocd client's redirect URIs <url>/auth/callback and <url>/pkce/verify, web origin
   # and logout: KC_ARGOCD_BASE_URL, plan 08 Task 12c). Equal to configs.cm.url in the GitOps repo's envs/<env>/argocd.yaml. The default
   # is the hosted VM's (no ingress: the port-forward of bootstrap/hosted/open-argocd.ps1); local sets https://argocd.procure.localtest.me.

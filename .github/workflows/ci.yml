@@ -377,17 +377,20 @@ jobs:
       - name: Render every chart with each GitOps environment's values (kubeconform -strict)
         run: |
           set -euo pipefail
+          # Custom resources (the hosted Keycloak rate limit's Traefik Middleware) against the community CRD schema catalog.
+          crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          kc() { kubeconform -strict -summary -schema-location default -schema-location "$crds"; }
           for env in local hosted; do
             dir="../procure-ai-gitops/envs/$env"
             for file in platform procure-ai observability; do test -f "$dir/$file.yaml"; done
             echo "== envs/$env"
             helm template platform deploy/charts/procure-platform --namespace procure -f "$dir/platform.yaml" --set global.imageTag=ci \
-              | kubeconform -strict -summary
+              | kc
             helm template procure-ai deploy/charts/procure-ai --namespace procure -f "$dir/procure-ai.yaml" --set global.imageTag=ci \
-              | kubeconform -strict -summary
+              | kc
             helm template observability deploy/charts/procure-observability --namespace observability -f "$dir/observability.yaml" \
                 --set global.imageTag=ci \
-              | kubeconform -strict -summary
+              | kc
           done
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0

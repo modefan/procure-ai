@@ -65,11 +65,18 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
   limit of 256 MiB (31 MiB at idle, measured 2026-11-08), so a connection flood restarts Traefik instead of eating the node's headroom.
 - **No ServiceLB.** k3s runs with `disable: [servicelb]` (`/etc/rancher/k3s/config.yaml`): Traefik takes 80/443 as host ports, and a
   future LoadBalancer Service would otherwise get svclb host ports on every interface. It stays Pending instead.
-- **Keycloak brute-force protection** (realm file, plan 08 fix wave ruling R6). After 30 wrong passwords for one user, that user is
-  locked for 1 minute, 1 minute more per further 30, at most 5 minutes; temporary only (never permanent); the count is forgotten after an
-  hour without failures. The demo users are shared, so a visitor who guesses wrong on purpose can lock one only briefly; it unlocks by
-  itself. Keycloak's "quick login" lock (two failures within a moment) is off (1 ms), because two fast wrong guesses would lock a demo
-  user at once. Proven live on 2026-11-08 with a throwaway user (30 failures, then locked, the right password refused; cleared and deleted).
+- **Password guessing on Keycloak** (plan 08 fix wave ruling R6b). Slowed **per client address** at Traefik, not by locking users:
+  Keycloak's per-user lockout is off (`bruteForceProtected: false` in the realm file, explicitly, so keycloak-config-cli turns it off on a
+  running realm too). The demo users are shared and their names public, so a lockout let any stranger keep every "log in as" button
+  failing with a few wrong passwords a minute (the review of R6; the lockout was live for a few hours on 2026-11-08). Traefik RateLimit
+  middlewares (procure-platform `keycloak.ingress.rateLimit`, on in `envs/hosted/platform.yaml`) cover the procure realm's sign-in page
+  and form posts (`.../protocol/openid-connect/auth`, `.../login-actions/`: 60 a minute, bursts of 30, per address) and the token endpoint
+  (`.../protocol/openid-connect/token`: 600 a minute, bursts of 120). Inside the cluster the gateway reaches the token endpoint through
+  Traefik too (CoreDNS rewrite), so the gateway pod is one address for every visitor's code exchange, refresh and demo login; that limit is
+  sized for all of them together. Over a limit Traefik answers 429. Traefik sees the visitor's own address (host ports) and trusts no
+  `X-Forwarded-For`, so the limit cannot be dodged by a header. Proven on 2026-11-08: a throwaway user took 31 wrong passwords and then
+  signed in with the right one (no lockout); the login-path limit, applied for a minute as a copy, let 32 of 80 parallel requests through
+  and answered 429 to 48.
 - **Secrets.** Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
 - **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
   `%USERPROFILE%\.procure-ai\hosted\` on Dale's PC (current user only) and are listed by name in DEMO PASSWORDS.txt. The hosted Secrets
@@ -395,7 +402,7 @@ notes), then `./tests/Test-RenderEnvs.ps1` (renders the new chart with both envi
 `./tests/Test-ArgocdNetworkPolicy.ps1` (the hosted NetworkPolicies must still match the chart's), push. Argo CD syncs its own
 Application to the new chart; check that all five Applications are Synced/Healthy afterwards.
 
-**The kubeconfig on Dale's PC** holds k3s's admin client certificate (one year). k3s renews its certificates on a restart within 90 days
+**The kubeconfig on Dale's PC** holds k3s's admin client certificate (one year). k3s renews its certificates on a restart when they are expired or within 120 days
 of expiry; the PC's copy then stops working. Test-HostBaseline fails when it has fewer than 30 days left; then restart k3s at a quiet time
 (an upgrade or `sudo systemctl restart k3s`) and run `./bootstrap/hosted/new-hosted-cluster.ps1 -KubeconfigOnly`.
 
@@ -408,38 +415,45 @@ reinstall):
 
   ```powershell
   . ./bootstrap/common.ps1
-  Invoke-HostedSsh -Command "sudo grep -q '^disable:' /etc/rancher/k3s/config.yaml || printf 'disable:\n  - servicelb\n' | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null; sudo systemctl restart k3s"
+  # 1. Append, only if the file has no disable: key yet. A missing final newline is added first (else disable: would join the last line).
+  Invoke-HostedSsh -Command 'f=/etc/rancher/k3s/config.yaml; sudo grep -q "^disable:" $f && exit 0; [ -z "$(sudo tail -c1 $f)" ] || echo | sudo tee -a $f >/dev/null; printf "disable:\n  - servicelb\n" | sudo tee -a $f >/dev/null'
+  # 2. Look at the end of the file before restarting: k3s does not start with a broken config, and the node is reachable only over SSH.
+  Invoke-HostedSsh -Command 'sudo tail -n 4 /etc/rancher/k3s/config.yaml'
+  # 3. Only when the last two lines are exactly "disable:" and "  - servicelb":
+  Invoke-HostedSsh -Command 'sudo systemctl restart k3s'
   ```
 
   Then Test-HostBaseline: both checks pass (k3s without ServiceLB, Traefik memory limit).
 
-## Offline backup and recovery
+## Backup copies and recovery
 
 Everything the hosted setup needs that is not in a repo lives only on Dale's PC: the VM's SSH key, `known_hosts`, the Terraform state,
 `host.json` and the kubeconfig (`%USERPROFILE%\.procure-ai\hosted\`), the deploy keys (`...\deploy-keys\`), the CAs, the two
-user-secrets stores and DEMO PASSWORDS.txt. Losing the PC would leave only destructive paths (a reinstall to adopt the VM, the VNC
-console, new secrets for everything).
+user-secrets stores, the Contabo MFA recovery codes and DEMO PASSWORDS.txt. Losing the PC would leave only destructive paths (a
+reinstall to adopt the VM, the VNC console, new secrets for everything).
 
-**Offline backup** (plan 08 fix wave ruling R4):
+**Backup copies** (Dale's decision 2026-11-08: plain files, no encryption, replacing ruling R4's encrypted archive):
 
 ```powershell
 cd procure-ai-gitops
-./bootstrap/hosted/backup-hosted.ps1 -Destination <folder>       # procure-ai-offline-<date>.tar.gz.gpg
-./bootstrap/hosted/backup-hosted.ps1 -Verify <that file>          # decrypts in a temporary folder, lists the files, deletes them again
+./bootstrap/hosted/backup-hosted.ps1          # mirrors every item into both folders below, then compares every file by SHA-256
+./bootstrap/hosted/backup-hosted.ps1 -Check   # only compares: OK, MISMATCH, MISSING or EXTRA per file; exit 1 when not all OK
 ```
 
-The archive is GnuPG-encrypted (symmetric AES-256; gpg ships with Git for Windows) with the passphrase "Offline backup passphrase" in
-DEMO PASSWORDS.txt (section "procure-ai offline backup", generated on the first run). **Dale: choose where the archive is kept** (a USB
-drive, a second disk, a cloud folder you already use; the script refuses a folder in a git repo and the Desktop), and **keep the
-passphrase somewhere off this PC too** (password manager or paper): the copy in DEMO PASSWORDS.txt is inside the archive it opens. Run it
-again after a reinstall, a new or rotated secret, or a new deploy key. Nothing is uploaded anywhere by the script.
+The copies go to `C:\Users\User\OneDrive\procure-ai secrets` (OneDrive, so off the PC) and `C:\Users\User\Documents\procure-ai secrets`,
+each with the same layout: `DEMO PASSWORDS.txt`, `hosted\` (without its run-time files: `tunnel.pid`, logs, WAL-test files),
+`deploy-keys\`, `local-ca\`, `user-secrets\procure-ai-hosted\`, `user-secrets\procure-ai-apphost\`, `contabo-recovery-codes.txt`
+(from `%USERPROFILE%\Downloads`) and a `README.txt` naming each item's original. A file the original no longer has is removed from the
+copy. The script prints names and counts only, never contents. **Run it after any change** to a secret, key, the Terraform state or
+DEMO PASSWORDS.txt (a reinstall, `new-secrets.ps1` generating a value, a new deploy key or token).
 
 **Recovering the hosted setup** (the VM still runs; the PC or the folder is lost):
 
 1. A PC with the tools of "Bringing it up", the env vars (the tokens are in DEMO PASSWORDS.txt), and both repos cloned.
-2. Restore from the archive (`gpg --decrypt <file> > backup.tar.gz`, `tar -xzf backup.tar.gz` in an empty folder): `procure-ai\*` to
-   `%USERPROFILE%\.procure-ai\`, `user-secrets\<id>\secrets.json` to `%APPDATA%\Microsoft\UserSecrets\<id>\`, DEMO PASSWORDS.txt to
-   the Desktop. Delete the extracted folder afterwards.
+2. Copy each item from `OneDrive\procure-ai secrets` back to its original (the `README.txt` there lists them): `hosted\`,
+   `deploy-keys\` and `local-ca\` to `%USERPROFILE%\.procure-ai\`, `user-secrets\<id>\` to `%APPDATA%\Microsoft\UserSecrets\<id>\`,
+   DEMO PASSWORDS.txt to the Desktop. `new-hosted-cluster.ps1 -KubeconfigOnly` (step 4) sets the hosted folder back to current-user-only
+   permissions, which OpenSSH requires for the key.
 3. With the SSH key back but the Terraform state lost (or too old): `./bootstrap/hosted/new-hosted-cluster.ps1 -Import -PlanOnly`, then
    without `-PlanOnly`. It finds the VM, its firewall, the SSH key secret and the three A records through the APIs and imports them into
    the state. **Nothing is reinstalled or recreated**: the plan guard refuses any create (except a DNS record that does not exist at
@@ -447,9 +461,9 @@ again after a reinstall, a new or rotated secret, or a new deploy key. Nothing i
    reinstalls only for image, key, user data, root password or default user changes, and only reads the instance otherwise). Proven on
    2026-11-08 against an empty state: 6 imports, 0 to add, 0 to destroy, one in-place update of `existing_instance_id` only; a normal plan
    on the real state afterwards showed 0 changes.
-4. Then `new-hosted-cluster.ps1 -KubeconfigOnly` if the kubeconfig was not restored, and `Test-HostBaseline.ps1`.
+4. Then `new-hosted-cluster.ps1 -KubeconfigOnly`, and `Test-HostBaseline.ps1`.
 
-Without the archive: the SSH key is gone, so only the Contabo VNC console (root password in DEMO PASSWORDS.txt, if that survived) reaches
+Without the copies: the SSH key is gone, so only the Contabo VNC console (root password in DEMO PASSWORDS.txt, if that survived) reaches
 the VM, and the hosted secrets must be generated again (`new-secrets.ps1 -Environment hosted` makes new ones; every database, Keycloak
 and Debezium secret then differs from what the volumes hold). The realistic way back is then a deliberate `-Reinstall`: the demo data is
 reseeded every night, so nothing that matters is lost, only the time to bring it up again.

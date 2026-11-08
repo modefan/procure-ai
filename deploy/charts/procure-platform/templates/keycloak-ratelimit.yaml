@@ -1,0 +1,60 @@
+{{- /*
+Rate limits on Keycloak's sign-in paths (plan 08 fix wave ruling R6b, replacing Keycloak's brute-force lockout, which let anyone keep the
+shared demo users locked). Traefik RateLimit Middlewares, per client address: Traefik takes 80/443 as host ports, so the remote address
+is the visitor's own (no X-Forwarded-For is trusted, and no ipStrategy reads one). Separate Ingresses for the paths only, so their routers
+(longer path prefixes win in Traefik) carry the middleware while the rest of the host keeps the plain keycloak Ingress.
+  login   /realms/<realm>/protocol/openid-connect/auth and /realms/<realm>/login-actions/: the browser's sign-in page and form posts.
+  token   /realms/<realm>/protocol/openid-connect/token: password and code grants. Inside the cluster the gateway reaches the same host
+          through Traefik (CoreDNS rewrite), so the gateway pod is ONE source for every visitor's code exchange, refresh and demo login:
+          this limit is sized for that, not for a single browser.
+*/}}
+{{- $rl := .Values.keycloak.ingress.rateLimit }}
+{{- if $rl.enabled }}
+{{- if not .Values.keycloak.ingress.publicRealms }}{{ fail "keycloak.ingress.rateLimit needs keycloak.ingress.publicRealms" }}{{ end }}
+{{- $labels := dict "root" $ "name" "keycloak" }}
+{{- range $kind := list "login" "token" }}
+{{- $limit := index $rl $kind }}
+{{- if not (and $limit.average $limit.period $limit.burst) }}{{ fail (printf "keycloak.ingress.rateLimit.%s needs average, period and burst" $kind) }}{{ end }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: keycloak-{{ $kind }}-ratelimit
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ $limit.average }}
+    period: {{ $limit.period }}
+    burst: {{ $limit.burst }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-{{ $kind }}
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ $.Release.Namespace }}-keycloak-{{ $kind }}-ratelimit@kubernetescrd
+spec:
+  ingressClassName: {{ $.Values.ingressClassName }}
+  tls:
+    - hosts:
+        - {{ $.Values.hosts.keycloak }}
+  rules:
+    - host: {{ $.Values.hosts.keycloak }}
+      http:
+        paths:
+          {{- range $realm := $.Values.keycloak.ingress.publicRealms }}
+          {{- range $path := ternary (list "protocol/openid-connect/auth" "login-actions/") (list "protocol/openid-connect/token") (eq $kind "login") }}
+          - path: /realms/{{ $realm }}/{{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  name: http
+          {{- end }}
+          {{- end }}
+{{- end }}
+{{- end }}

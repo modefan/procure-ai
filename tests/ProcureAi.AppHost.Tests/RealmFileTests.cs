@@ -153,21 +153,15 @@ public sealed class RealmFileTests
     }
 
     [Fact]
-    public void Realm_limits_password_guessing_without_long_lockouts()
+    public void Realm_has_no_per_user_lockout()
     {
-        // Plan 08 fix wave ruling R6 (final review B M1): the public Keycloak took unlimited password guesses, also for the argocd-admins
-        // members. Brute-force detection is on, but the demo users are shared, so a visitor who guesses wrong on purpose may lock one out
-        // only briefly: temporary lockouts only (never permanent), after 30 failures, 1 minute more per further 30, at most 5 minutes,
-        // the count forgotten after an hour without failures. The quick-login check (two failures within a moment lock at once) is off
-        // (1 ms): it would let two fast wrong guesses lock a demo user; the failure count limits guessing on its own.
-        Realm.GetProperty("bruteForceProtected").GetBoolean().ShouldBeTrue();
+        // Plan 08 fix wave ruling R6b (replaces R6): Keycloak's brute-force detection locks a user after failed passwords, and the demo users
+        // are shared and their names public, so a stranger could keep every "log in as" button failing with a few wrong passwords a minute.
+        // Off, explicitly: keycloak-config-cli writes only the keys the file has, so a missing key would leave a running realm locked-on.
+        // Password guessing is slowed per client address at Traefik instead (procure-platform keycloak.ingress.rateLimit).
+        Realm.GetProperty("bruteForceProtected").GetBoolean().ShouldBeFalse();
         Realm.GetProperty("permanentLockout").GetBoolean().ShouldBeFalse();
-        Realm.GetProperty("maxTemporaryLockouts").GetInt32().ShouldBe(0);
-        Realm.GetProperty("bruteForceStrategy").GetString().ShouldBe("MULTIPLE");
-        Realm.GetProperty("failureFactor").GetInt32().ShouldBe(30);
-        Realm.GetProperty("waitIncrementSeconds").GetInt32().ShouldBe(60);
-        Realm.GetProperty("maxFailureWaitSeconds").GetInt32().ShouldBeLessThanOrEqualTo(300);
-        Realm.GetProperty("maxDeltaTimeSeconds").GetInt32().ShouldBe(3600);
+        // The quick-login lock (two failures within a moment) stays off too, should detection ever be turned on again.
         Realm.GetProperty("quickLoginCheckMilliSeconds").GetInt64().ShouldBe(1);
     }
 
