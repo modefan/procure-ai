@@ -269,6 +269,35 @@ public sealed class ProviderFailureTests(AssistantApp app)
     }
 
     [Fact]
+    public async Task Answer_refused_by_the_provider_or_the_breaker_gives_its_reservation_back()
+    {
+        await using var model = await StubModelServer.StartAsync();
+        await using var instance = await StartAsync(model, new()
+        {
+            ["AI:Resilience:ProviderMaxRetries"] = "0",
+            ["AI:Resilience:MinimumThroughput"] = "2",
+            ["AI:Resilience:FailureRatio"] = "0.5",
+            ["AI:Resilience:BreakDuration"] = "00:05:00",
+        });
+        var tenant = AssistantApp.NewTenant();
+        var token = User(tenant);
+        var outputLimit = instance.Services.GetRequiredService<IOptions<AiOptions>>().Value.Chat.MaxOutputTokens;
+        model.FailAnswers(_ => RateLimited());
+
+        // Two 429s (the provider generated nothing), then the open breaker refuses the third answer before the provider is asked.
+        for (var i = 0; i < 3; i++)
+        {
+            var failed = await AskAsync(instance.Client, token, await CreateAsync(instance.Client, token), Question);
+            failed.Of("error").Single().Data.GetProperty("status").GetInt32().ShouldBe(503);
+        }
+
+        model.AnswerRequests.ShouldBe(2, "the third was refused by the open breaker");
+        // Only the three query embeddings (one token each) count: none of the answer reservations was kept.
+        (await instance.Services.GetRequiredService<ITenantTokenBudget>().GetAsync(tenant, Ct)).Used
+            .ShouldBeLessThan(outputLimit, "refused calls reached no model and are not charged");
+    }
+
+    [Fact]
     public async Task Answer_cut_by_the_providers_output_filter_is_a_blocked_answer()
     {
         var logs = new CapturingSink();

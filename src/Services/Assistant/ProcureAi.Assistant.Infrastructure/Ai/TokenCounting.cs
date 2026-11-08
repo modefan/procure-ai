@@ -1,8 +1,11 @@
+using System.ClientModel;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Polly;
 using ProcureAi.Assistant.Application.Ai;
 using ProcureAi.Assistant.Application.Chat;
+using ProcureAi.Assistant.Application.Guardrails;
 
 namespace ProcureAi.Assistant.Infrastructure.Ai;
 
@@ -10,8 +13,10 @@ namespace ProcureAi.Assistant.Infrastructure.Ai;
 /// The counting stage of every chat pipeline: each call is charged to the daily total of the tenant of the flow (<see cref="AiUsageScope"/>),
 /// whatever the task (answer, rewrite, classifier, scan, chunk context, rerank). Before the call an estimate is reserved
 /// (<see cref="TokenEstimator"/>: the prompt size plus the call's output limit); after it the reservation is settled with the input and
-/// output tokens the provider reported (for a stream, in its last updates). A call that reports no usage, because the client left mid-stream
-/// or the provider failed, keeps its reservation: the provider may have billed it. A Redis failure is logged and the call goes on.
+/// output tokens the provider reported (for a stream, in its last updates). A call that ends without usage keeps its reservation when the
+/// provider may have billed it (the client left or the call timed out after the request was sent, a provider error, a stream that started),
+/// and gives it back when no generation can have happened (<see cref="TokenCounting.CertainlyNotBilled"/>: an open breaker, a rejection,
+/// a 4xx such as 429 or the prompt content filter, a connection that was never made). A Redis failure is logged and the call goes on.
 /// </summary>
 internal sealed class TokenCountingChatClient(IChatClient inner, ITenantTokenBudget budget, TokenEstimator estimator, ILogger logger)
     : DelegatingChatClient(inner)
@@ -22,9 +27,22 @@ internal sealed class TokenCountingChatClient(IChatClient inner, ITenantTokenBud
         var tenant = AiUsageScope.Tenant;
         var list = messages as IList<ChatMessage> ?? [.. messages];
         var reservation = await TokenCounting.ReserveAsync(budget, logger, tenant, estimator.ForChat(list, options));
-        var response = await base.GetResponseAsync(list, options, cancellationToken);
-        await TokenCounting.SettleAsync(budget, logger, tenant, reservation, response.Usage is { } usage ? TokenCounting.Total(usage) : null);
-        return response;
+        long? used = null;
+        try
+        {
+            var response = await base.GetResponseAsync(list, options, cancellationToken);
+            used = response.Usage is { } usage ? TokenCounting.Total(usage) : null;
+            return response;
+        }
+        catch (Exception exception) when (TokenCounting.CertainlyNotBilled(exception, cancellationToken))
+        {
+            used = 0;
+            throw;
+        }
+        finally
+        {
+            await TokenCounting.SettleAsync(budget, logger, tenant, reservation, used);
+        }
     }
 
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -34,21 +52,43 @@ internal sealed class TokenCountingChatClient(IChatClient inner, ITenantTokenBud
         var list = messages as IList<ChatMessage> ?? [.. messages];
         var reservation = await TokenCounting.ReserveAsync(budget, logger, tenant, estimator.ForChat(list, options));
         long? tokens = null;
+        var started = false;
+        var refund = false;
         try
         {
-            await foreach (var update in base.GetStreamingResponseAsync(list, options, cancellationToken))
+            await using var updates = base.GetStreamingResponseAsync(list, options, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            while (true)
             {
-                foreach (var usage in update.Contents.OfType<UsageContent>())
+                bool more;
+                try
+                {
+                    more = await updates.MoveNextAsync();
+                }
+                catch (Exception exception) when (!started && TokenCounting.CertainlyNotBilled(exception, cancellationToken))
+                {
+                    // Refused before anything was generated: nothing to charge.
+                    refund = true;
+                    throw;
+                }
+
+                if (!more)
+                {
+                    break;
+                }
+
+                started = true;
+                foreach (var usage in updates.Current.Contents.OfType<UsageContent>())
                 {
                     tokens = (tokens ?? 0) + TokenCounting.Total(usage.Details);
                 }
 
-                yield return update;
+                yield return updates.Current;
             }
         }
         finally
         {
-            await TokenCounting.SettleAsync(budget, logger, tenant, reservation, tokens);
+            // A stream that started and gave no usage (the client left, a timeout, an error mid-stream) keeps its reservation.
+            await TokenCounting.SettleAsync(budget, logger, tenant, reservation, tokens ?? (refund ? 0 : null));
         }
     }
 }
@@ -64,9 +104,22 @@ internal sealed class TokenCountingEmbeddingGenerator(
         var tenant = AiUsageScope.Tenant;
         var list = values as IList<string> ?? [.. values];
         var reservation = await TokenCounting.ReserveAsync(budget, logger, tenant, estimator.ForEmbeddings(list));
-        var embeddings = await base.GenerateAsync(list, options, cancellationToken);
-        await TokenCounting.SettleAsync(budget, logger, tenant, reservation, embeddings.Usage?.InputTokenCount);
-        return embeddings;
+        long? used = null;
+        try
+        {
+            var embeddings = await base.GenerateAsync(list, options, cancellationToken);
+            used = embeddings.Usage?.InputTokenCount;
+            return embeddings;
+        }
+        catch (Exception exception) when (TokenCounting.CertainlyNotBilled(exception, cancellationToken))
+        {
+            used = 0;
+            throw;
+        }
+        finally
+        {
+            await TokenCounting.SettleAsync(budget, logger, tenant, reservation, used);
+        }
     }
 }
 
@@ -112,6 +165,40 @@ internal sealed class TokenEstimator(int charsPerToken)
 
 internal static class TokenCounting
 {
+    /// <summary>
+    /// Whether a failed call certainly reached no model, so its reservation is given back: the circuit breaker refused it (open or
+    /// isolated) or another resilience stage rejected it (<see cref="ExecutionRejectedException"/>), the provider refused the request with a
+    /// 4xx (429 rate limit, a bad request, the prompt content filter, which <see cref="ProviderErrors"/> turns into an input-stage
+    /// <see cref="GuardBlockedException"/>), or no connection was ever made. Everything else keeps the reservation: the caller's
+    /// cancellation and timeouts (the request may be with the provider already), 5xx answers and connections that broke after the request
+    /// was sent. When in doubt the call is charged, never free.
+    /// </summary>
+    public static bool CertainlyNotBilled(Exception exception, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case ExecutionRejectedException:
+                case GuardBlockedException { Stage: GuardBlockedException.InputStage }:
+                case ClientResultException { Status: >= 400 and < 500 and not 408 }:
+                case HttpRequestException
+                {
+                    HttpRequestError: HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError
+                        or HttpRequestError.SecureConnectionError or HttpRequestError.ProxyTunnelError,
+                }:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     public static long Total(UsageDetails usage) => (usage.InputTokenCount ?? 0) + (usage.OutputTokenCount ?? 0);
 
     /// <summary>Reserves the estimate on the tenant's total; null without a tenant, or when Redis failed (the usage is then added after the call).</summary>
@@ -134,7 +221,8 @@ internal static class TokenCounting
     }
 
     /// <summary>
-    /// Settles the reservation with the reported usage, or keeps it when none was reported. Without a reservation the usage is added.
+    /// Settles the reservation with the used tokens (0 gives it back), or keeps it when <paramref name="usedTokens"/> is null (nothing
+    /// reported, may have been billed). Without a reservation the used tokens are added.
     /// </summary>
     public static async Task SettleAsync(
         ITenantTokenBudget budget, ILogger logger, string? tenant, TokenReservation? reservation, long? usedTokens)

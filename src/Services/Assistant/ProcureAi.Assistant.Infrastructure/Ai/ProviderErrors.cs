@@ -15,7 +15,7 @@ namespace ProcureAi.Assistant.Infrastructure.Ai;
 /// is thrown on as a new <see cref="ClientResultException"/> with the same response (its <see cref="ClientResultException.Status"/>, so
 /// <see cref="AiFailures"/> and the circuit breaker see the same failure) and a message of our own: the HTTP status and the error code,
 /// when the code is a plain identifier (<c>rate_limit_exceeded</c>, <c>unsupported_value</c>). The original is not kept as the inner
-/// exception, since logs print inner exceptions too. A content filter refusal becomes a <see cref="GuardBlockedException"/>.
+/// exception, since logs print inner exceptions too (a failed connection keeps only its <see cref="HttpRequestError"/>). A content filter refusal becomes a <see cref="GuardBlockedException"/>.
 /// </summary>
 internal static partial class ProviderErrors
 {
@@ -40,7 +40,12 @@ internal static partial class ProviderErrors
         var message = code is null
             ? string.Create(CultureInfo.InvariantCulture, $"The model provider answered HTTP {status}.")
             : string.Create(CultureInfo.InvariantCulture, $"The model provider answered HTTP {status} ({code}).");
-        return new ClientResultException(message, response);
+        // No answer at all (status 0): keep only the kind of network failure (a message of our own), so the counting stage can tell a
+        // connection that was never made (nothing billed) from one that broke after the request was sent.
+        var network = response is null && exception.InnerException is HttpRequestException { HttpRequestError: var error }
+            ? new HttpRequestException(error, string.Create(CultureInfo.InvariantCulture, $"The connection to the model provider failed ({error})."))
+            : null;
+        return new ClientResultException(message, response, network);
     }
 
     /// <summary>The error code of an OpenAI-style error body (<c>error.code</c>, else <c>error.type</c>) when it is a plain identifier.</summary>
