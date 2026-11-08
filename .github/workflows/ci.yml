@@ -290,7 +290,7 @@ jobs:
     # Chart checks (plan 07 ruling 9) and the AppHost's chart parity guards (ChartParityTests, PlatformChartTests, ChartDebeziumTests;
     # plan 07 final review M3): no containers, every push. Tool versions pinned as on the PC
     # (plan 07 Task 2). The GitOps repo is checked out next to this one (procure-ai-gitops beside procure-ai, as on the PC), so the
-    # parity tests also render the umbrella with envs/local/procure-ai.yaml; it is read with a read-only deploy key (repository secret
+    # parity tests also render the umbrella with envs/local/ and envs/hosted/procure-ai.yaml; it is read with a read-only deploy key (repository secret
     # GITOPS_READ_KEY_CI, deploy key "procure-ai CI charts job (read-only)"; no key is needed once the GitOps repo is public).
     name: Helm charts and chart parity
     needs: [weekly-gate]
@@ -330,9 +330,13 @@ jobs:
         run: |
           set -euo pipefail
           helm dependency build deploy/charts/procure-ai --skip-refresh
-          # The observability chart depends on the official collector chart (version and digest pinned in its Chart.lock).
+          # The observability chart depends on the official collector chart (version and digest pinned in its Chart.lock). Its archive is
+          # committed (Argo CD renders without downloading it, plan 08 fix wave); the build downloads the release again and the diff
+          # proves the committed archive is byte for byte the published one.
           helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
           helm dependency build deploy/charts/procure-observability
+          git diff --exit-code -- deploy/charts/procure-observability/charts
+          test -z "$(git status --porcelain -- deploy/charts/procure-observability/charts)"
 
       - name: helm lint
         run: |
@@ -366,6 +370,26 @@ jobs:
           helm template observability deploy/charts/procure-observability --namespace observability \
             | kubeconform -strict -summary
 
+      # Plan 08 final review B I1: render every chart with each GitOps environment's values (envs/local and envs/hosted), as Argo CD renders
+      # them, so a chart change that breaks an environment's values (a renamed key, a branch only hosted uses: publicPathsOnly,
+      # publicRealms, mailpit off, assistant.secretEnv, web.configJson) fails here instead of in Argo CD on the public VM. The GitOps repo
+      # has no CI; its own tests/Test-RenderEnvs.ps1 renders the same before every values push there.
+      - name: Render every chart with each GitOps environment's values (kubeconform -strict)
+        run: |
+          set -euo pipefail
+          for env in local hosted; do
+            dir="../procure-ai-gitops/envs/$env"
+            for file in platform procure-ai observability; do test -f "$dir/$file.yaml"; done
+            echo "== envs/$env"
+            helm template platform deploy/charts/procure-platform --namespace procure -f "$dir/platform.yaml" --set global.imageTag=ci \
+              | kubeconform -strict -summary
+            helm template procure-ai deploy/charts/procure-ai --namespace procure -f "$dir/procure-ai.yaml" --set global.imageTag=ci \
+              | kubeconform -strict -summary
+            helm template observability deploy/charts/procure-observability --namespace observability -f "$dir/observability.yaml" \
+                --set global.imageTag=ci \
+              | kubeconform -strict -summary
+          done
+
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: procure-ai/global.json
@@ -381,9 +405,10 @@ jobs:
       - name: Build the AppHost tests
         run: dotnet build tests/ProcureAi.AppHost.Tests -c Release -warnaserror -m:4
 
-      # The parity tests use the GitOps env file only when they find it; fail here instead of letting them silently check less.
-      - name: GitOps env file is beside the repo
-        run: test -f ../procure-ai-gitops/envs/local/procure-ai.yaml
+      # The parity tests use the GitOps env files (local and hosted) only when they find them; fail here instead of letting them silently
+      # check less.
+      - name: GitOps env files are beside the repo
+        run: test -f ../procure-ai-gitops/envs/local/procure-ai.yaml && test -f ../procure-ai-gitops/envs/hosted/procure-ai.yaml
 
       # Only the chart parity classes (seconds); the AppHost's other tests are a long suite in the dotnet job. --fail-skips: a test that
       # skips because helm is missing fails here (MTP needs the value: "--fail-skips on").

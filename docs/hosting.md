@@ -61,12 +61,28 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
   The profile check is a probe of the attachment the kernel really uses: a copy of `grep` at a path of k3s's runc pattern
   (`data/<dir>/bin/runc`) must print the label `runc (unconfined)`. If a k3s release ever ships runc outside `data/<hash>/bin`, or
   Ubuntu renames its `runc` profile, that check (and the stacked-label check) is the alarm.
-- **Memory reservations** (24 GB VM): kube 1.5 GiB, system 512 MiB, eviction below 1 GiB free.
+- **Memory reservations** (24 GB VM): kube 1.5 GiB, system 512 MiB, eviction below 1 GiB free. Traefik, the public edge, has a memory
+  limit of 256 MiB (31 MiB at idle, measured 2026-11-08), so a connection flood restarts Traefik instead of eating the node's headroom.
+- **No ServiceLB.** k3s runs with `disable: [servicelb]` (`/etc/rancher/k3s/config.yaml`): Traefik takes 80/443 as host ports, and a
+  future LoadBalancer Service would otherwise get svclb host ports on every interface. It stays Pending instead.
+- **Keycloak brute-force protection** (realm file, plan 08 fix wave ruling R6). After 30 wrong passwords for one user, that user is
+  locked for 1 minute, 1 minute more per further 30, at most 5 minutes; temporary only (never permanent); the count is forgotten after an
+  hour without failures. The demo users are shared, so a visitor who guesses wrong on purpose can lock one only briefly; it unlocks by
+  itself. Keycloak's "quick login" lock (two failures within a moment) is off (1 ms), because two fast wrong guesses would lock a demo
+  user at once. Proven live on 2026-11-08 with a throwaway user (30 failures, then locked, the right password refused; cleared and deleted).
 - **Secrets.** Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
 - **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
   `%USERPROFILE%\.procure-ai\hosted\` on Dale's PC (current user only) and are listed by name in DEMO PASSWORDS.txt. The hosted Secrets
   come from their own user-secrets store `procure-ai-hosted` (`new-secrets.ps1 -Environment hosted`), so the public demo shares no secret
-  with the local setup. The registry pull Secret uses a read-only GHCR token, not the GitHub CLI token.
+  with the local setup. The registry pull Secret uses a read-only GHCR token, not the GitHub CLI token. **That token expires on
+  2027-02-05** (`GhcrPullTokenExpires` in `bootstrap/common.ps1`; Test-HostBaseline warns 21 days before and fails after). While the
+  packages are private, an expired token makes the next deploy fail with ImagePullBackOff (running pods keep their cached images). Renew:
+  a new classic token with only `read:packages`, into DEMO PASSWORDS.txt and the user env var `GHCR_READ_TOKEN`, then
+  `new-secrets.ps1 -Environment hosted` and the new date in `common.ps1`. Not needed once the packages are public.
+- **Every generated secret is also in DEMO PASSWORDS.txt.** `new-secrets.ps1` copies every value of the user-secrets store it reads
+  into DEMO PASSWORDS.txt on every run (section "procure-ai hosted (Contabo) secrets", or "procure-ai local: all AppHost user secrets"),
+  so a generated or rotated value is never only in the store. The file is rewritten only when a value changed, through a temporary file,
+  and no `.bak` copy stays on the Desktop.
 
 ## Bringing it up (from Dale's PC)
 
@@ -109,6 +125,31 @@ After a reinstall, check once by hand the things the baseline cannot see from ou
 - a second `-PlanOnly` shows no changes.
 
 The Argo CD UI has no public address: `./bootstrap/hosted/open-argocd.ps1` opens it (see "Argo CD on the VM" below).
+
+### Changing the hosted values
+
+Argo CD renders `envs/hosted/` on the public VM; a values file that does not render (a typo, a renamed key) shows up there first as a
+ComparisonError or a failed sync. Two checks render it earlier (plan 08 final review B I1):
+
+- **procure-ai CI** (charts job, every push): every chart with `envs/local/` and `envs/hosted/` values through `kubeconform -strict`,
+  and the chart parity tests (`ChartParityTests`) against both environments' `procure-ai.yaml`. A chart change that needs a new hosted
+  value fails CI, so push the GitOps values first (GitOps pushes cost no Actions minutes).
+- **procure-ai-gitops has no CI**, so before every push there that changes `envs/`, `apps/` or `argocd/`:
+
+  ```powershell
+  cd procure-ai-gitops
+  ./tests/Test-RenderEnvs.ps1                       # both environments, charts at each env's appRevision, Argo CD's chart
+  ./tests/Test-RenderEnvs.ps1 -Environment hosted -AppRef WORKTREE -AppRepo ..\procure-ai.worktrees\<branch>   # an unpushed chart change
+  ```
+
+  It renders as Argo CD's repo-server does (dependencies as committed; `helm dependency build` only for one missing from `charts/`).
+
+**Chart downloads.** Argo CD's repo-server renders without GitHub Pages now (cold renders timed out on its 504s): the collector chart
+`opentelemetry-collector-0.178.2.tgz` is committed in `deploy/charts/procure-observability/charts/` (CI re-downloads it and fails if the
+bytes differ), and Argo CD's own chart comes from its OCI copy `ghcr.io/argoproj/argo-helm` (`apps/values.yaml`; `install-argocd.ps1`
+installs from the same registry). After the next push that touches either, check on the VM with a hard refresh of `observability` and
+`argocd` in Argo CD (or `kubectl -n argocd annotate application observability argocd.argoproj.io/refresh=hard --overwrite`): both must
+stay Synced without a ComparisonError.
 
 ## The public environment (plan 08 Task 12)
 
@@ -298,6 +339,121 @@ cd procure-ai-gitops
    last resort; k3s and every app come back by themselves after a reboot.
 8. Afterwards: `./bootstrap/hosted/open-argocd.ps1 -Close`.
 
+**Holding the public demo during an incident** (plan 08 fix wave ruling R5). Every green push to procure-ai main bumps
+`envs/hosted/release.yaml` and Argo CD deploys it, and a revision pinned by hand there holds only until the next publish. To freeze what
+runs while you investigate, pause auto-sync, `root` first (it would otherwise put the child's sync policy back) and then `procure-ai`:
+
+- in the Argo CD UI: open `root`, *Details*, *Sync policy*: *Disable auto-sync*; the same on `procure-ai`;
+- or through the tunnel: `kubectl -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'`, then
+  the same with `procure-ai`.
+
+Argo CD then shows new commits as *OutOfSync* but deploys nothing; the publish workflow keeps bumping `release.yaml`. To resume, pin the
+revision you want in `envs/hosted/release.yaml` first (a full SHA whose images are in GHCR) if the newest is not wanted, then turn
+auto-sync back on for `root` (UI, or `kubectl -n argocd patch application root --type merge -p
+'{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'`; re-running `./bootstrap/install-argocd.ps1 -Environment hosted`
+also restores it): its self-heal restores `procure-ai`'s sync policy from the apps chart. The switch that hides the demo from visitors is a different tool: the demo switch (`docs/demo.md`).
+
+## Watching the demo: uptime and certificate
+
+`procure-ai-gitops/.github/workflows/uptime.yml` runs **once a day** (07:17 South African time) while the repos are private, about 30 of
+the 2 000 private Actions minutes a month (plan 08 fix wave ruling R2); going public moves it to every 30 minutes. It fails, and GitHub
+e-mails Dale, when the gateway's readiness, the web app, Keycloak's realm or Access (the demo switch) does not answer, or when the
+certificate of `procure`, `auth` or `dashboard.daleabels.com` has **fewer than 21 days** left. cert-manager renews at 30 days, so that
+failure means renewal has been failing for 9 days and there is still a week before browsers refuse the site (HSTS: no click-through).
+Let's Encrypt sends no expiry e-mails any more, so this is the only warning. Then: `kubectl -n ingress-tls describe
+certificate,certificaterequest,order,challenge` through the tunnel (HTTP-01 must reach the solver through Traefik on port 80).
+`bootstrap/hosted/Test-HostBaseline.ps1` checks the same certificate from inside (Ready, production issuer, more than 21 days).
+
+## Keeping the node current (upgrades)
+
+Unattended upgrades cover Ubuntu's packages only. k3s brings its own containerd, runc, Traefik, CoreDNS and flannel, so the
+internet-facing node gets their fixes only through a k3s upgrade. **Once a month**, together with the pending-reboot check of
+Test-HostBaseline, and whenever a k3s patch release fixes a CVE in one of them:
+
+1. **Plan** (read-only): `./bootstrap/hosted/upgrade-k3s.ps1`. It shows the running version, the newest stable patch of the same minor
+   and the embedded component versions of both (containerd, runc, Traefik, ...), and warns when Traefik's major or minor changes. Read the
+   k3s release notes. A Traefik minor or major change: compare `bootstrap/hosted/traefik-config.yaml` (host ports, redirect, HSTS
+   middleware, ingressEndpoint, resources) with the bundled chart's upgrade notes first. A new Kubernetes minor: only with `-Version`,
+   one minor at a time, after the Kubernetes upgrade notes. Downgrades are refused.
+2. **Upgrade** at a quiet time (not near the 02:00 reset): `./bootstrap/hosted/upgrade-k3s.ps1 -Version <vX.Y.Z+k3sN> -Apply`. It sets
+   the version in the VM's `/usr/local/sbin/install-k3s.sh` and runs it (the release's own install script, which checks the binary's
+   checksum and restarts k3s with the same config; the API is away for seconds, pods keep running), waits until the node is Ready on the
+   new version, fetches the kubeconfig again (`new-hosted-cluster.ps1 -KubeconfigOnly`) and runs Test-HostBaseline. Its AppArmor probe
+   proves the runc profile attaches to the new `data/<hash>/bin/runc` (the profile's path is a pattern, so a new hash needs no change).
+3. **Pin it:** set `HostedK3sVersion` in `bootstrap/common.ps1` to the new version and commit (Test-HostBaseline's k3s check fails
+   until then; cloud-init gets the pin from it on the next reinstall).
+4. **Edge and app:** `./bootstrap/hosted/install-cert-manager.ps1 -Production` (re-applies `traefik-config.yaml` and waits for Traefik's
+   rollout with host ports), `./tests/Test-PublicSurface.ps1`, `./tests/Test-FreshCluster.ps1 -Environment hosted -WatchOnly`.
+
+**cert-manager** (pinned 1.21.3 in `install-cert-manager.ps1`): read the release's upgrade notes, render the new chart once with
+`helm template cert-manager oci://quay.io/jetstack/charts/cert-manager --version <new> --set crds.enabled=true | kubeconform -strict
+-ignore-missing-schemas`, then `./bootstrap/hosted/install-cert-manager.ps1 -Production -CertManagerVersion <new>` and change the default
+in the script. The certificate stays (it is a Secret); Test-HostBaseline checks it afterwards.
+
+**Argo CD** manages itself: raise `argocd.chartVersion` in `apps/values.yaml` of the GitOps repo (after the chart's and Argo CD's upgrade
+notes), then `./tests/Test-RenderEnvs.ps1` (renders the new chart with both environments' values) and
+`./tests/Test-ArgocdNetworkPolicy.ps1` (the hosted NetworkPolicies must still match the chart's), push. Argo CD syncs its own
+Application to the new chart; check that all five Applications are Synced/Healthy afterwards.
+
+**The kubeconfig on Dale's PC** holds k3s's admin client certificate (one year). k3s renews its certificates on a restart within 90 days
+of expiry; the PC's copy then stops working. Test-HostBaseline fails when it has fewer than 30 days left; then restart k3s at a quiet time
+(an upgrade or `sudo systemctl restart k3s`) and run `./bootstrap/hosted/new-hosted-cluster.ps1 -KubeconfigOnly`.
+
+**One-time steps after the plan 08 fix wave push** (the changes are committed, the running VM needs them once; cloud-init has them for a
+reinstall):
+
+- Traefik's memory limit: `./bootstrap/hosted/install-cert-manager.ps1 -Production` (applies `traefik-config.yaml`; Traefik restarts once,
+  a few seconds without ingress).
+- ServiceLB off (nothing uses a LoadBalancer Service; checked 2026-11-08):
+
+  ```powershell
+  . ./bootstrap/common.ps1
+  Invoke-HostedSsh -Command "sudo grep -q '^disable:' /etc/rancher/k3s/config.yaml || printf 'disable:\n  - servicelb\n' | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null; sudo systemctl restart k3s"
+  ```
+
+  Then Test-HostBaseline: both checks pass (k3s without ServiceLB, Traefik memory limit).
+
+## Offline backup and recovery
+
+Everything the hosted setup needs that is not in a repo lives only on Dale's PC: the VM's SSH key, `known_hosts`, the Terraform state,
+`host.json` and the kubeconfig (`%USERPROFILE%\.procure-ai\hosted\`), the deploy keys (`...\deploy-keys\`), the CAs, the two
+user-secrets stores and DEMO PASSWORDS.txt. Losing the PC would leave only destructive paths (a reinstall to adopt the VM, the VNC
+console, new secrets for everything).
+
+**Offline backup** (plan 08 fix wave ruling R4):
+
+```powershell
+cd procure-ai-gitops
+./bootstrap/hosted/backup-hosted.ps1 -Destination <folder>       # procure-ai-offline-<date>.tar.gz.gpg
+./bootstrap/hosted/backup-hosted.ps1 -Verify <that file>          # decrypts in a temporary folder, lists the files, deletes them again
+```
+
+The archive is GnuPG-encrypted (symmetric AES-256; gpg ships with Git for Windows) with the passphrase "Offline backup passphrase" in
+DEMO PASSWORDS.txt (section "procure-ai offline backup", generated on the first run). **Dale: choose where the archive is kept** (a USB
+drive, a second disk, a cloud folder you already use; the script refuses a folder in a git repo and the Desktop), and **keep the
+passphrase somewhere off this PC too** (password manager or paper): the copy in DEMO PASSWORDS.txt is inside the archive it opens. Run it
+again after a reinstall, a new or rotated secret, or a new deploy key. Nothing is uploaded anywhere by the script.
+
+**Recovering the hosted setup** (the VM still runs; the PC or the folder is lost):
+
+1. A PC with the tools of "Bringing it up", the env vars (the tokens are in DEMO PASSWORDS.txt), and both repos cloned.
+2. Restore from the archive (`gpg --decrypt <file> > backup.tar.gz`, `tar -xzf backup.tar.gz` in an empty folder): `procure-ai\*` to
+   `%USERPROFILE%\.procure-ai\`, `user-secrets\<id>\secrets.json` to `%APPDATA%\Microsoft\UserSecrets\<id>\`, DEMO PASSWORDS.txt to
+   the Desktop. Delete the extracted folder afterwards.
+3. With the SSH key back but the Terraform state lost (or too old): `./bootstrap/hosted/new-hosted-cluster.ps1 -Import -PlanOnly`, then
+   without `-PlanOnly`. It finds the VM, its firewall, the SSH key secret and the three A records through the APIs and imports them into
+   the state. **Nothing is reinstalled or recreated**: the plan guard refuses any create (except a DNS record that does not exist at
+   all), any delete, and any change to the instance except `existing_instance_id` (which the provider's import leaves empty; its update
+   reinstalls only for image, key, user data, root password or default user changes, and only reads the instance otherwise). Proven on
+   2026-11-08 against an empty state: 6 imports, 0 to add, 0 to destroy, one in-place update of `existing_instance_id` only; a normal plan
+   on the real state afterwards showed 0 changes.
+4. Then `new-hosted-cluster.ps1 -KubeconfigOnly` if the kubeconfig was not restored, and `Test-HostBaseline.ps1`.
+
+Without the archive: the SSH key is gone, so only the Contabo VNC console (root password in DEMO PASSWORDS.txt, if that survived) reaches
+the VM, and the hosted secrets must be generated again (`new-secrets.ps1 -Environment hosted` makes new ones; every database, Keycloak
+and Debezium secret then differs from what the volumes hold). The realistic way back is then a deliberate `-Reinstall`: the demo data is
+reseeded every night, so nothing that matters is lost, only the time to bring it up again.
+
 ## What it costs, and how to stop it
 
 Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 1 = R 16,54, EUR 1 = USD 1.1165 = R 18,47. Rand amounts in the en-ZA format (R 258,50).
@@ -308,7 +464,7 @@ Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 
 | Domain `daleabels.com` (Cloudflare Registrar, USD 11.17 a year, auto-renew, expires 2027-11-07) | one twelfth | 0.93 | R 15,40 |
 | Azure Foundry, **expected** (about 1.0 M tokens: the nightly re-seed of Acme and Globex, ~16 000 tokens a night, 0.5 M a month, and ~10 questions a day of ~1 800 tokens, 0.5 M a month) | gpt-5-mini $0.25 in / $2.00 out per 1 M, embeddings $0.022 per 1 M | 0.40-0.80 | R 7-13 |
 | Azure Foundry, **worst case under the caps** (every organisation at its daily cap every day, below) | 14 M tokens at $0.60 per 1 M | 8.40 | R 139 |
-| GitHub (repos, Actions inside the free 2 000 private minutes; free once public), GHCR images | free | 0 | 0 |
+| GitHub (repos, Actions inside the free 2 000 private minutes, of which the daily uptime check takes about 30; free once public), GHCR images | free | 0 | 0 |
 | Cloudflare DNS, Let's Encrypt certificate, cert-manager | free | 0 | 0 |
 | Contabo firewall, SSH key secret, IPv4 and IPv6 (included with the VPS) | free | 0 | 0 |
 | **Total, expected** | | **about 17.00-17.40** | **about R 281-287** |

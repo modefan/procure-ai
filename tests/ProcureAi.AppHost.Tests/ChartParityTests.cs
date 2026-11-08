@@ -11,7 +11,9 @@ namespace ProcureAi.AppHost.Tests;
 /// Plan 07 Task 5: the AppHost stays the source of truth for wiring. The umbrella chart <c>deploy/charts/procure-ai</c> must give every app
 /// the same environment variable names the AppHost gives it (values differ: hosts, TLS, secrets by reference), so a setting added to the
 /// AppHost and forgotten in the chart (or the other way round) fails here. Renders the umbrella with <c>helm template</c>, with its default
-/// values and, when the GitOps repo is cloned next to this one, with <c>envs/local/procure-ai.yaml</c> too. Skipped without <c>helm</c>.
+/// values and, when the GitOps repo is cloned next to this one, with <c>envs/local/procure-ai.yaml</c> and <c>envs/hosted/procure-ai.yaml</c>
+/// too (plan 08 final review B I1: the hosted values were never rendered before Argo CD rendered them on the public VM). Skipped without
+/// <c>helm</c>.
 /// </summary>
 public sealed partial class ChartParityTests
 {
@@ -231,7 +233,10 @@ public sealed partial class ChartParityTests
                 .FirstOrDefault(File.Exists);
         }
 
-        /// <summary>The umbrella rendered with its defaults (demo switches on) and, when the GitOps repo is cloned next to procure-ai, with the local env file.</summary>
+        /// <summary>
+        /// The umbrella rendered with its defaults (demo switches on) and, when the GitOps repo is cloned next to procure-ai, with each
+        /// environment's values file (local and hosted, as Argo CD renders them).
+        /// </summary>
         public static async Task<List<(string Label, string Rendered)>> RenderUmbrellaVariantsAsync(string helm)
         {
             var root = RepositoryRoot();
@@ -246,21 +251,29 @@ public sealed partial class ChartParityTests
                     "template", "procure-ai", umbrella, "--namespace", "procure", "--set", "global.imageTag=test",
                     "--set", "global.demo.seed=true", "--set", "global.demo.reset=true"])),
             };
-            if (LocalEnvFile(root) is { } local)
+            if (GitOpsRepository(root) is { } gitops)
             {
-                variants.Add(($"{local}", await RunAsync(helm, ["template", "procure-ai", umbrella, "--namespace", "procure", "-f", local, "--set", "global.imageTag=test"])));
+                foreach (var env in EnvironmentNames)
+                {
+                    var file = Path.Combine(gitops, "envs", env, "procure-ai.yaml");
+                    File.Exists(file).ShouldBeTrue($"{file} is missing (every environment of the GitOps repo is rendered)");
+                    variants.Add(($"{file}", await RunAsync(helm, ["template", "procure-ai", umbrella, "--namespace", "procure", "-f", file, "--set", "global.imageTag=test"])));
+                }
             }
 
             return variants;
         }
 
-        private static string? LocalEnvFile(string root)
+        /// <summary>The GitOps repo's environments (envs/&lt;name&gt;/procure-ai.yaml) that Argo CD deploys.</summary>
+        private static readonly string[] EnvironmentNames = ["local", "hosted"];
+
+        private static string? GitOpsRepository(string root)
         {
             // procure-ai and procure-ai-gitops are siblings in C:\Projects\2026; a worktree sits one level deeper (procure-ai.worktrees\<branch>).
             for (var dir = new DirectoryInfo(root).Parent; dir is not null; dir = dir.Parent)
             {
-                var candidate = Path.Combine(dir.FullName, "procure-ai-gitops", "envs", "local", "procure-ai.yaml");
-                if (File.Exists(candidate))
+                var candidate = Path.Combine(dir.FullName, "procure-ai-gitops");
+                if (File.Exists(Path.Combine(candidate, "envs", "local", "procure-ai.yaml")))
                 {
                     return candidate;
                 }

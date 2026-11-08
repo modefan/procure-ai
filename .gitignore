@@ -497,7 +497,10 @@ dist/
 tests/ProcureAi.Assistant.Evaluation/reports/
 
 # Helm chart dependencies (helm dependency build: deploy/charts/procure-ai/charts/procure-app-*.tgz)
-deploy/charts/*/charts/
+deploy/charts/*/charts/*
+# Except the collector chart (plan 08 fix wave, known item 2): committed, so Argo CD's repo-server renders procure-observability without
+# downloading it from open-telemetry.github.io (GitHub 504s timed out cold renders). The same bytes as the release (digest checked in CI).
+!deploy/charts/procure-observability/charts/opentelemetry-collector-*.tgz
 
 # Collector redaction test samples (real-format CRI log lines with invented values)
 !deploy/charts/procure-observability/tests/collector/samples/*.log
