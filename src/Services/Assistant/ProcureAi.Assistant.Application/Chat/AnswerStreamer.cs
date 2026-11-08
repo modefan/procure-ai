@@ -327,8 +327,17 @@ public sealed class AnswerStreamer(
                 {
                     // Our guards passed it, the provider's content filter did not: worth a look, but not a failure of ours.
                     metrics.GuardBlock(blocked.Stage, blocked.Reason);
-                    logger.LogWarning(
-                        "The model provider's content filter refused a question in conversation {ConversationId}", conversation.Id);
+                    if (blocked.Stage == GuardBlockedException.InputStage)
+                    {
+                        logger.LogWarning(
+                            "The model provider's content filter refused a question in conversation {ConversationId}", conversation.Id);
+                    }
+                    else
+                    {
+                        // Azure ends a filtered completion with finish_reason content_filter (ProviderErrorChatClient).
+                        logger.LogWarning(
+                            "The model provider's content filter refused an answer in conversation {ConversationId}", conversation.Id);
+                    }
                 }
 
                 answer.Status = MessageStatus.Blocked;

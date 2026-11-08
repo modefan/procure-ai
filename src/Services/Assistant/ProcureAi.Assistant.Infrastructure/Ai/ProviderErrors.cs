@@ -34,7 +34,6 @@ internal static partial class ProviderErrors
             return new GuardBlockedException(GuardBlockedException.InputStage, GuardReasons.ProviderFilter);
         }
 
-
         var response = exception.GetRawResponse();
         var status = exception.Status;
         var code = response is null ? null : CodeOf(response.Content);
@@ -82,26 +81,35 @@ internal static partial class ProviderErrors
     private static partial Regex PlainCode();
 }
 
-/// <summary>The innermost stage over the provider's chat client: <see cref="ProviderErrors"/>.</summary>
+/// <summary>
+/// The innermost stage over the provider's chat client: <see cref="ProviderErrors"/>, and the provider's content filter on the answer
+/// itself. Azure filters a completion by ending it normally with <c>finish_reason: content_filter</c> (the text cut short or empty), not
+/// with an error; such a call is a guard block at the output stage (<see cref="GuardReasons.ProviderFilter"/>), so the cut answer is never
+/// kept as a normal one. A stream is read to its end first, so the usage in its last update still reaches the counting stage.
+/// </summary>
 internal sealed class ProviderErrorChatClient(IChatClient inner) : DelegatingChatClient(inner)
 {
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
+        ChatResponse response;
         try
         {
-            return await base.GetResponseAsync(messages, options, cancellationToken);
+            response = await base.GetResponseAsync(messages, options, cancellationToken);
         }
         catch (ClientResultException exception)
         {
             throw ProviderErrors.Scrub(exception);
         }
+
+        return response.FinishReason == ChatFinishReason.ContentFilter ? throw OutputFiltered() : response;
     }
 
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using var updates = base.GetStreamingResponseAsync(messages, options, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        var filtered = false;
         while (true)
         {
             bool more;
@@ -116,12 +124,29 @@ internal sealed class ProviderErrorChatClient(IChatClient inner) : DelegatingCha
 
             if (!more)
             {
-                yield break;
+                break;
             }
 
-            yield return updates.Current;
+            var update = updates.Current;
+            if (update.FinishReason == ChatFinishReason.ContentFilter)
+            {
+                filtered = true;
+            }
+
+            // After the filter only what carries no answer text is passed on (the usage), so nothing filtered reaches the client.
+            if (!filtered || string.IsNullOrEmpty(update.Text))
+            {
+                yield return update;
+            }
+        }
+
+        if (filtered)
+        {
+            throw OutputFiltered();
         }
     }
+
+    private static GuardBlockedException OutputFiltered() => new(GuardBlockedException.OutputStage, GuardReasons.ProviderFilter);
 }
 
 /// <summary>The innermost stage over the provider's embedding generator: <see cref="ProviderErrors"/>.</summary>

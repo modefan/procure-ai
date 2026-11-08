@@ -54,6 +54,8 @@ public sealed class StubModelServer : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly ConcurrentQueue<StubModelError> _answerErrors = new();
     private Func<string, StubModelError>? _failAll;
+    private volatile StubAnswerMode _answerMode;
+    private readonly TaskCompletionSource _answerStalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _answerRequests;
     private int _chatRequests;
     private int _embeddingRequests;
@@ -76,6 +78,15 @@ public sealed class StubModelServer : IAsyncDisposable
     /// <summary>A scan's reply: a valid invoice for the scan task's structured output.</summary>
     public const string ScanJson =
         """{"supplierName":"Stub Supplier (Pty) Ltd","supplierVatNumber":"4123456789","invoiceNumber":"INV-1","invoiceDate":"2026-10-20","orderNumber":null,"lines":[{"description":"Desk","quantity":1,"unitPriceExclVat":100,"lineTotalExclVat":100}],"vat":15,"totalExclVat":100,"totalInclVat":115}""";
+
+    /// <summary>
+    /// How streamed answers end: normally, stalled after their first text until the caller hangs up (<see cref="AnswerStalled"/> completes
+    /// once one is), or cut by the content filter (<c>finish_reason: content_filter</c>, then the usage, as Azure ends a filtered completion).
+    /// </summary>
+    public void AnswerMode(StubAnswerMode mode) => _answerMode = mode;
+
+    /// <summary>Completes when a stalled answer has sent its first text (<see cref="StubAnswerMode.Stall"/>).</summary>
+    public Task AnswerStalled => _answerStalled.Task;
 
     public void EnqueueAnswerError(StubModelError error) => _answerErrors.Enqueue(error);
 
@@ -127,7 +138,7 @@ public sealed class StubModelServer : IAsyncDisposable
                 : "ok";
             if (streamed)
             {
-                await WriteStreamAsync(http, text);
+                await WriteStreamAsync(http, text, answer ? stub._answerMode : StubAnswerMode.Normal, stub._answerStalled);
             }
             else
             {
@@ -187,7 +198,7 @@ public sealed class StubModelServer : IAsyncDisposable
         await http.Response.WriteAsync(JsonSerializer.Serialize(value), http.RequestAborted);
     }
 
-    private static async Task WriteStreamAsync(HttpContext http, string text)
+    private static async Task WriteStreamAsync(HttpContext http, string text, StubAnswerMode mode, TaskCompletionSource stalled)
     {
         http.Response.ContentType = "text/event-stream";
         async Task Send(object chunk)
@@ -200,7 +211,14 @@ public sealed class StubModelServer : IAsyncDisposable
             new { id = "chatcmpl-stub", @object = "chat.completion.chunk", created = 0, model = "chat", choices, usage };
 
         await Send(Chunk([new { index = 0, delta = new { role = "assistant", content = text }, finish_reason = (string?)null }]));
-        await Send(Chunk([new { index = 0, delta = new { }, finish_reason = "stop" }]));
+        if (mode == StubAnswerMode.Stall)
+        {
+            // The first text is out; the rest (and the usage) never comes before the caller hangs up.
+            stalled.TrySetResult();
+            await Task.Delay(Timeout.Infinite, http.RequestAborted);
+        }
+
+        await Send(Chunk([new { index = 0, delta = new { }, finish_reason = mode == StubAnswerMode.Filter ? "content_filter" : "stop" }]));
         await Send(Chunk([], Usage()));
         await http.Response.WriteAsync("data: [DONE]\n\n", http.RequestAborted);
     }
@@ -210,4 +228,12 @@ public sealed class StubModelServer : IAsyncDisposable
         await _app.StopAsync();
         await _app.DisposeAsync();
     }
+}
+
+/// <summary>How the stub's streamed answers end (<see cref="StubModelServer.AnswerMode"/>).</summary>
+public enum StubAnswerMode
+{
+    Normal,
+    Stall,
+    Filter,
 }

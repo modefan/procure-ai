@@ -10,7 +10,7 @@ namespace ProcureAi.Assistant.Infrastructure.Chat;
 /// <summary>
 /// The daily token cap per tenant in Redis (<c>AI:DailyTokenCapPerTenant</c>): one counter per tenant and calendar day of
 /// <c>Assistant:Quota:TimeZone</c>, key <c>assistant:tokens:{tenant}:{yyyy-MM-dd}</c>, kept two days, added to with <c>INCRBY</c> (atomic
-/// across instances). The clock is the injected <see cref="TimeProvider"/>.
+/// across instances): reservations before each model call, settled with the real usage after it (<see cref="ITenantTokenBudget"/>). The clock is the injected <see cref="TimeProvider"/>.
 /// </summary>
 internal sealed class RedisTenantTokenBudget(
     IConnectionMultiplexer redis, IOptions<AssistantOptions> options, IOptions<AiOptions> ai, TimeProvider time) : ITenantTokenBudget
@@ -22,8 +22,8 @@ internal sealed class RedisTenantTokenBudget(
 
     public async Task<TokenBudget> GetAsync(string tenantId, CancellationToken cancellationToken)
     {
-        var (key, resetsAt) = Today(tenantId);
-        var value = await redis.GetDatabase().StringGetAsync(key);
+        var (day, resetsAt) = Today();
+        var value = await redis.GetDatabase().StringGetAsync(Key(tenantId, day));
         return new TokenBudget(value.TryParse(out long used) ? used : 0, ai.Value.DailyTokenCapPerTenant, resetsAt);
     }
 
@@ -34,18 +34,47 @@ internal sealed class RedisTenantTokenBudget(
             return;
         }
 
-        var (key, _) = Today(tenantId);
+        var (day, _) = Today();
+        await IncrementAsync(Key(tenantId, day), tokens);
+    }
+
+    public async Task<TokenReservation> ReserveAsync(string tenantId, long tokens, CancellationToken cancellationToken)
+    {
+        var (day, _) = Today();
+        var reserved = Math.Max(tokens, 0);
+        if (reserved > 0)
+        {
+            await IncrementAsync(Key(tenantId, day), reserved);
+        }
+
+        return new TokenReservation(tenantId, day, reserved);
+    }
+
+    public async Task SettleAsync(TokenReservation reservation, long usedTokens, CancellationToken cancellationToken)
+    {
+        var difference = Math.Max(usedTokens, 0) - reservation.Tokens;
+        if (difference != 0)
+        {
+            await IncrementAsync(Key(reservation.TenantId, reservation.Day), difference);
+        }
+    }
+
+    private async Task IncrementAsync(RedisKey key, long tokens)
+    {
         var database = redis.GetDatabase();
         await database.StringIncrementAsync(key, tokens);
         await database.KeyExpireAsync(key, KeyLifetime);
     }
 
-    private (RedisKey Key, DateTimeOffset ResetsAt) Today(string tenantId)
+    private static RedisKey Key(string tenantId, DateOnly day) =>
+        $"assistant:tokens:{tenantId}:{day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+
+    private (DateOnly Day, DateTimeOffset ResetsAt) Today()
     {
         var zone = options.Value.Quota.FindTimeZone() ?? TimeZoneInfo.Utc;
         var day = TimeZoneInfo.ConvertTime(time.GetUtcNow(), zone).Date;
         var midnight = day.AddDays(1);
         var resetsAt = new DateTimeOffset(midnight, zone.GetUtcOffset(midnight)).ToUniversalTime();
-        return ($"assistant:tokens:{tenantId}:{day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", resetsAt);
+        return (DateOnly.FromDateTime(day), resetsAt);
     }
 }

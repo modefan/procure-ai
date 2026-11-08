@@ -71,6 +71,13 @@ public sealed class AiOptions : IValidatableObject
     [Range(1, 1_000_000_000)]
     public long DailyTokenCapPerTenant { get; set; } = 200_000;
 
+    /// <summary>
+    /// How many characters of prompt count as one token when a call's tokens are reserved before it is made (the reservation is the prompt
+    /// estimate plus the call's output limit; it is settled with the provider's reported usage afterwards, and kept when none arrives).
+    /// </summary>
+    [Range(1, 16)]
+    public int CharsPerTokenEstimate { get; set; } = 4;
+
     public bool IsFake => Provider == AiProvider.Fake;
 
     /// <summary>Whether the provider is an OpenAI-compatible endpoint (<see cref="AiProvider.OpenAI"/> or <see cref="AiProvider.AzureFoundry"/>).</summary>
