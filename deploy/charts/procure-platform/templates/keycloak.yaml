@@ -162,7 +162,7 @@ metadata:
     {{- include "procure-platform.labels" $labels | nindent 4 }}
 spec:
   ingressClassName: {{ .Values.ingressClassName }}
-  # No secretName: Traefik serves its default certificate (the local CA's, set by the TLSStore from bootstrap/new-local-ca.ps1).
+  # No secretName: Traefik serves its default certificate (TLSStore `default`: the local CA's from bootstrap/new-local-ca.ps1; Let's Encrypt's on hosted).
   tls:
     - hosts:
         - {{ .Values.hosts.keycloak }}

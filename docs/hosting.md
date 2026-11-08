@@ -12,12 +12,12 @@ SSH tunnel.
 | Piece | Choice | Why |
 |---|---|---|
 | VM | **Contabo Cloud VPS 8**: 8 vCPU x86, 24 GB, 300 GB SSD, region EU (data center "European Union 2"), Ubuntu 26.04 LTS. Instance `203735351`, IPv4 `45.13.235.178`, IPv6 `2a02:c207:2373:5351::1` | The full stack needs about 9 GiB plus Argo CD. x86 runs the published images as they are. Ubuntu 24.04 is the fallback if k3s ever misbehaves on 26.04 (`image_id` in `infra/hosted/variables.tf`). |
-| Kubernetes | **k3s** v1.35.10+k3s1 (single node, the local cluster's minor), with Traefik and ServiceLB as shipped, flannel **host-gw** and IPv4 only | Same distribution as the local k3d cluster. host-gw needs no tunnel on one node and opens no socket; VXLAN would listen on UDP 8472, an unauthenticated way into the pod network. |
+| Kubernetes | **k3s** v1.35.10+k3s1 (single node, the local cluster's minor), with Traefik as shipped (on host ports 80/443, not behind ServiceLB; Task 12), flannel **host-gw** and IPv4 only | Same distribution as the local k3d cluster. host-gw needs no tunnel on one node and opens no socket; VXLAN would listen on UDP 8472, an unauthenticated way into the pod network. |
 | Network | Two firewalls. Contabo's firewall allows inbound **only TCP 22, 80, 443** (IPv4 and IPv6), then Contabo's own "block all traffic" rule. On the VM, the nftables table `inet procure_host` (cloud-init, service `procure-host-firewall`) lets in only replies, 22, 80, 443 and the ICMPv6 that IPv6 needs on `eth0`, and forwards only 80/443 to pods (never a NodePort). No ping: the VM does not answer it, which does not mean it is down. | The Kubernetes API, the kubelet and kube-proxy's health port listen only on the node address `10.0.1.2`. That address is on a dummy interface, because Contabo's private networks are a paid add-on. |
 | GitOps | Argo CD on the VM, root Application on `envs/hosted/` (platform, observability, procure-ai). The publish workflow bumps `envs/hosted/release.yaml` together with `envs/local/release.yaml`, so the public demo follows main | Same app of apps and charts as local; only the values in `envs/hosted/` differ. |
-| Edge | Traefik as k3s ships it, configured by a HelmChartConfig: http answers with a permanent redirect to https, and its Service keeps the visitor's address (`externalTrafficPolicy: Local`). One Let's Encrypt certificate (cert-manager, HTTP-01) for `procure`, `auth` and `dashboard.daleabels.com` is Traefik's default certificate | The charts stay as they are: every Ingress without its own secret gets the default certificate, as the local CA's does locally. One certificate is one ACME order and one renewal. |
+| Edge | Traefik as k3s ships it, configured by a HelmChartConfig: http answers with a permanent redirect to https, every https answer carries HSTS, and Traefik takes 80/443 itself as host ports so it sees the visitor's address (its Service is a ClusterIP). One Let's Encrypt certificate (cert-manager, HTTP-01) for `procure`, `auth` and `dashboard.daleabels.com` is Traefik's default certificate | The charts stay as they are: every Ingress without its own secret gets the default certificate, as the local CA's does locally. One certificate is one ACME order and one renewal. |
 | Models | Azure Foundry (Task 9): deployments `chat` (gpt-5-mini) and `embeddings` (text-embedding-3-small, 1536 dimensions), key in Secret `procure-ai-provider` | Configuration only (`envs/hosted/procure-ai.yaml`); local and CI keep the Fake provider. |
-| DNS | Cloudflare (`daleabels.com`): an **A** record each for `procure`, `auth` and `dashboard`, DNS only (not proxied), TTL 300 s. **No AAAA**: k3s is IPv4 only (ServiceLB publishes host ports for IPv4 only), so IPv6 visitors and Let's Encrypt would reach an address where 80/443 do not answer. IPv6-only visitors cannot reach the demo. Task 12 decided to stay IPv4-only (below). | Kept by the same Terraform root (official `cloudflare/cloudflare` provider, account-owned token with DNS Write on this zone only). The apex and other records are not touched. |
+| DNS | Cloudflare (`daleabels.com`): an **A** record each for `procure`, `auth` and `dashboard`, DNS only (not proxied), TTL 300 s. **No AAAA**: k3s is IPv4 only (Traefik's host ports are IPv4 only), so IPv6 visitors and Let's Encrypt would reach an address where 80/443 do not answer. IPv6-only visitors cannot reach the demo. Task 12 decided to stay IPv4-only (below). | Kept by the same Terraform root (official `cloudflare/cloudflare` provider, account-owned token with DNS Write on this zone only). The apex and other records are not touched. |
 
 **Why Contabo and not Hetzner.** Plan 08 chose Hetzner (cx43, EUR 15.99 a month). But every affordable 16 GB type (cx43, cx53, cax31,
 cpx41) was sold out in all EU locations for the whole day of 2026-11-07. The next types in stock cost EUR 69 or more. The Terraform for
@@ -58,6 +58,9 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
   Both kernel restrictions stay on, containers keep containerd's profile, and containerd's profile accepts signals from `runc`, so
   stopping containers works. Test-HostBaseline checks the sysctls, the profile, that no process carries a stacked label and that the
   kernel log has no container signal denials. Lifting the sysctl instead was rejected in review (a host-wide security control).
+  The profile check is a probe of the attachment the kernel really uses: a copy of `grep` at a path of k3s's runc pattern
+  (`data/<dir>/bin/runc`) must print the label `runc (unconfined)`. If a k3s release ever ships runc outside `data/<hash>/bin`, or
+  Ubuntu renames its `runc` profile, that check (and the stacked-label check) is the alarm.
 - **Memory reservations** (24 GB VM): kube 1.5 GiB, system 512 MiB, eviction below 1 GiB free.
 - **Secrets.** Kubernetes Secrets are encrypted at rest (k3s `secrets-encryption`).
 - **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
@@ -113,8 +116,8 @@ After the VM is up (above), four more steps make it the public demo. All are saf
 
 ```powershell
 cd procure-ai-gitops
-./bootstrap/hosted/install-cert-manager.ps1 -Issuer staging      # first time: prove the ACME flow on Let's Encrypt's staging CA
-./bootstrap/hosted/install-cert-manager.ps1 -Issuer production   # then the real certificate (the default; later runs change nothing)
+./bootstrap/hosted/install-cert-manager.ps1                     # first time: staging (the default), proves the ACME flow
+./bootstrap/hosted/install-cert-manager.ps1 -Production         # then the real certificate; every later run needs -Production too
 ./bootstrap/new-local-ca.ps1 -Environment hosted                 # the VM's own internal CA for MongoDB's TLS (no browser sees it)
 ./bootstrap/new-secrets.ps1 -Environment hosted                  # incl. procure-ai-provider (Azure Foundry key from AZURE_FOUNDRY_API_KEY)
 # Argo CD (install-argocd.ps1 -Environment hosted, above) then brings up envs/hosted on its own.
@@ -125,11 +128,18 @@ cd procure-ai-gitops
 `install-cert-manager.ps1` does the edge:
 
 - **Traefik** (HelmChartConfig `kube-system/traefik`): `http://` answers 301 to `https://` with path and query kept, for every host.
-  Let's Encrypt's HTTP-01 check follows that redirect to port 443, where cert-manager's solver Ingress answers. The Service has
-  `externalTrafficPolicy: Local`, so ServiceLB forwards without SNAT and Traefik sees the visitor's address. Traefik trusts no incoming
-  `X-Forwarded-*` (nothing sits in front of the VM), puts the visitor's address into `X-Forwarded-For`, and the gateway trusts that
-  header from the pod network only, where only Traefik may connect (plan 08 ruling 5). The gateway's rate limits and logs see the real
-  client address.
+  Let's Encrypt's HTTP-01 check follows that redirect to port 443, where cert-manager's solver Ingress answers. Every https answer
+  carries `Strict-Transport-Security: max-age=31536000` (a Headers middleware on the websecure entry point; no `includeSubDomains`, no
+  preload, nothing hard to undo).
+- **The visitor's address.** k3s's ServiceLB cannot keep it: its svclb pod DNATs to the node and masquerades, so Traefik saw every
+  visitor as that pod's address, also with `externalTrafficPolicy: Local` (measured in Task 12's fix round; all visitors shared one
+  rate-limit bucket). So Traefik binds 80 and 443 itself as **host ports** (the CNI portmap plugin DNATs and keeps the source address)
+  and its Service is a plain ClusterIP: no ServiceLB pod, no NodePorts. The host firewall is unchanged (it forwards only connections to
+  80/443). A Traefik rollout replaces the pod (maxSurge 0: the new pod cannot bind the ports while the old one holds them), a few
+  seconds without ingress, only when this config or k3s's Traefik changes. Ingresses get `procure.daleabels.com` as their status
+  address. Traefik trusts no incoming `X-Forwarded-*` (nothing sits in front of the VM), puts the visitor's address into
+  `X-Forwarded-For`, and the gateway trusts that header from the pod network only, where only Traefik may connect (plan 08 ruling 5).
+  The gateway's rate limits see the real client address; `Test-PublicSurface.ps1` proves it with an echo pod.
 - **CoreDNS:** inside the cluster `auth.daleabels.com` resolves to Traefik, so pods fetch Keycloak's discovery and keys through the same
   host name and certificate as the browser (the hosted twin of the local rewrite).
 - **cert-manager** 1.21.3 from the official OCI chart (`oci://quay.io/jetstack/charts/cert-manager`), CRDs installed and kept by the
@@ -137,8 +147,9 @@ cd procure-ai-gitops
   account e-mail comes from the user env var `PROCURE_ACME_EMAIL`, not from a repo.
 - **The certificate:** Certificate `ingress-tls/procure-public` (ECDSA P-256, a new key on each renewal) for the three hosts, Secret
   `procure-public-tls`, and the TLSStore `ingress-tls/default` that makes it Traefik's default. It lives in its own namespace because
-  `procure` denies all ingress traffic by default, which would block cert-manager's solver pod. Let's Encrypt certificates last 90 days;
-  cert-manager renews 30 days before the end.
+  `procure` denies all ingress traffic by default, which would block cert-manager's solver pod. Let's Encrypt certificates currently last 90 days
+  (Let's Encrypt is shortening them); cert-manager renews when a third of the lifetime is left, and Test-PublicSurface wants at least 14
+  days left.
 
 What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/realms/procure/` and `/resources/` (no admin console, admin
 API, master realm or welcome page; `publicRealms` in the platform chart); no Mailpit ingress; Argo CD without admin user and ingress;
@@ -147,8 +158,17 @@ Assistant on Azure Foundry (`AI__Provider=AzureFoundry`, deployments `chat` and 
 output tokens per call, the app's default daily token cap per tenant); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
 Postgres 20 GiB, MongoDB 5 GiB, RabbitMQ 2 GiB volumes.
 
+**Rollouts on hosted keep the chart's default surge** (a new pod next to the old one, then the switch), unlike local's maxSurge 0. The
+Postgres connection budget was sized for one pod per service (`MaxPoolSize` 8 x 17 pools fits `max_connections` 200), and during a surge
+old and new pods hold pools at once. Measured on the VM (Task 12 fix round, 2026-11-08): 61 client connections idle, **85 at the peak**
+of a restart of all 13 app Deployments at once, back to 63 when done. Pools open connections on demand, so the theoretical 2 x 193 needs
+every pool of old and new pods full at the same moment. If it ever happens, a new pod fails its readiness while the old one keeps
+serving (surge) and a failed migration hook stops the sync where Argo CD shows it; the fix is then `maxSurge: 0` in
+`envs/hosted/procure-ai.yaml` or a higher `appHostResources.Postgres.MaxConnections` (a Postgres restart). Check after a deploy:
+`kubectl exec postgres-0 -c postgres -- psql -U postgres -tAc "select count(*) from pg_stat_activity where backend_type='client backend'"`.
+
 **IPv4 only (decided in Task 12).** The DNS names have A records only. Dual-stack would need a k3s reinstall with IPv6 cluster and
-service CIDRs (a k3s cluster's address families cannot be changed in place), IPv6 on ServiceLB and Traefik, a second set of firewall
+service CIDRs (a k3s cluster's address families cannot be changed in place), IPv6 host ports for Traefik, a second set of firewall
 rules, and AAAA records, for a demo that reviewers open from office and home networks that all reach IPv4. Cost of the choice: an
 IPv6-only visitor cannot open the demo. `Test-PublicSurface.ps1` fails if an AAAA record appears, because it would point at an address
 where 80/443 do not answer.
@@ -157,12 +177,12 @@ where 80/443 do not answer.
 
 | Script (procure-ai-gitops) | What it proves |
 |---|---|
-| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's `/admin`, master realm, welcome page and `/metrics` answer 404 and the procure realm's discovery 200; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404 |
+| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's `/admin`, master realm, welcome page and `/metrics` answer 404, also through path tricks (`/realms/procure/../master` sent as is, `%2e%2e`, `//`), and the procure realm's discovery 200; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404; every host sends HSTS and no Server header names a version; an echo pod behind a throwaway Ingress sees this PC's public address in `X-Forwarded-For` (Review Focus 5; prints "matches", never the address) |
 | `tests/Test-Smoke.ps1 -Environment hosted` | The local smoke checks against the public hosts (gateway, Keycloak, demo login, seeded data with the hosted admin key `DEMO_ADMIN_API_KEY_HOSTED`, dashboard sign-in by role, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For`, pgaudit roles, realm drift) |
-| `tests/Test-FreshCluster.ps1 -Environment hosted -WatchOnly` | Every Application Synced and Healthy, every pod Ready and stable, then the smoke checks (the hosted cluster is never deleted by a test) |
-| `tests/Test-RestartKeepsData.ps1 -Environment hosted -Reboot` | Review Focus 4: a VM reboot; the cluster converges on its own within 15 minutes, Postgres shut down cleanly (no crash recovery in its log), every row, document and replication slot survives, every Debezium resumes, a new change reaches the data change log |
+| `tests/Test-FreshCluster.ps1 -Environment hosted -WatchOnly [-Since <push time>]` | Every Application Synced and Healthy, every pod Ready and stable, then the smoke checks (the hosted cluster is never deleted by a test). With `-Since`, the deploy pushed at that time must have synced procure-ai, and its wave order is checked (platform first); without it a sync older than the watch is reported as "wave order NOT CHECKED" |
+| `tests/Test-RestartKeepsData.ps1 -Environment hosted -Reboot` | Review Focus 4: a VM reboot; the cluster converges on its own within 15 minutes, Postgres shut down cleanly (no crash recovery in its log), every row, document and replication slot survives, every Debezium resumes, a new change reaches the data change log. The demo is live: a visitor or the 02:00 reset between the two counts gives a false FAIL, never a false PASS |
 | `tests/Test-WalSlotsAdvance.ps1 -Environment hosted -IdleMinutes 360 -WatchWholeWindow` | Review Focus 1: after a WAL burst in an uncaptured database, every slot catches up, then stays below 64 MB of lag for the whole six idle hours |
-| End-to-end tests, external target | The browser suite against `https://procure.daleabels.com` (procure-ai `docs/kubernetes.md`; for the hosted demo also `PROCUREAI_E2E_USER_SECRETS_ID=procure-ai-hosted`, `DEMO_ADMIN_API_KEY` = the hosted key, `KUBECONFIG` = the hosted kubeconfig and `PROCUREAI_E2E_KUBE_CONTEXT=procure-hosted`, and `-trait- "Model=Fake"` too: the one test of the Fake model's scripted answer cannot pass against the real model) |
+| End-to-end tests, external target | The browser suite against `https://procure.daleabels.com` (procure-ai `docs/kubernetes.md`; for the hosted demo also `PROCUREAI_E2E_KEYCLOAK_URL=https://auth.daleabels.com` (the default, `auth.` + the gateway's host, does not fit; without it every Keycloak sign-in waits 60 s and fails), `PROCUREAI_E2E_USER_SECRETS_ID=procure-ai-hosted`, from which the tests then also take the admin key, never from `DEMO_ADMIN_API_KEY`, `KUBECONFIG` = the hosted kubeconfig and `PROCUREAI_E2E_KUBE_CONTEXT=procure-hosted`, and `-trait- "Model=Fake"` too: the one test of the Fake model's scripted answer cannot pass against the real model) |
 
 ### Size on the VM (measured 2026-11-07, `kubectl top`)
 
