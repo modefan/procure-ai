@@ -145,6 +145,20 @@ public sealed class StubAccessServer : IAsyncDisposable
     /// <summary>The tenants <c>internal/users/{userId}/tenants</c> lists for one user (in this order); users without any get an empty list.</summary>
     public void SetUserTenants(string userId, params (string Id, string Name)[] tenants) => _userTenants[userId] = tenants;
 
+    /// <summary>The system switch the stub answers on <c>GET api/v1/system/availability</c> (on, no message, until a test changes it).</summary>
+    public volatile bool SystemEnabled = true;
+
+    /// <summary>The maintenance message of the system switch (null: none).</summary>
+    public volatile string? SystemMessage;
+
+    /// <summary>When true, the availability read answers 503 (the rest of the stub keeps working).</summary>
+    public volatile bool AvailabilityDown;
+
+    private int _availabilityCalls;
+
+    /// <summary>How often the system switch was read.</summary>
+    public int AvailabilityCalls => Volatile.Read(ref _availabilityCalls);
+
     /// <summary>Replaces the matrix of one tenant with exactly these roles.</summary>
     public void SetMatrix(string tenantId, Dictionary<string, string[]> roles) => _matrices[tenantId] = roles;
 
@@ -177,6 +191,21 @@ public sealed class StubAccessServer : IAsyncDisposable
             var permissions = matrix.Where(r => wanted.Contains(r.Key)).SelectMany(r => r.Value).Distinct().Order(StringComparer.Ordinal);
             var costCenterCodes = stub._costCenters.GetValueOrDefault((tenant, userId)) ?? ["CC-100"];
             return Results.Json(new { permissions, costCenterCodes, approvalLimit = 50000m });
+        });
+        // Not recorded in Calls: the gateway reads it for every browser call, which would drown what the tests look for.
+        app.MapGet("/api/v1/system/availability", () =>
+        {
+            Interlocked.Increment(ref stub._availabilityCalls);
+            return stub.AvailabilityDown
+                ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
+                : Results.Json(new { enabled = stub.SystemEnabled, message = stub.SystemMessage });
+        });
+        // The admin key's switch as the real Access takes it (the stub checks no key: the tests check that the gateway lets it through).
+        app.MapPut("/api/v1/system/availability", (StubAvailabilityBody body) =>
+        {
+            stub.SystemEnabled = body.Enabled;
+            stub.SystemMessage = body.Message;
+            return Results.Json(new { enabled = stub.SystemEnabled, message = stub.SystemMessage });
         });
         app.MapPost("/api/v1/access/internal/registrations", async (HttpContext http, StubRegistrationBody body) =>
         {
@@ -310,6 +339,8 @@ public sealed class StubAccessServer : IAsyncDisposable
     }
 
     private sealed record StubRegistrationBody(string UserId);
+
+    private sealed record StubAvailabilityBody(bool Enabled, string? Message);
 
     private void Record(HttpContext http) =>
         _calls.Enqueue(new StubAccessCall(

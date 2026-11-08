@@ -57,6 +57,8 @@ public static class GatewayApp
         services.AddDemoEntryRateLimit();
         // The nightly demo reset's maintenance window: users' writes get 503 while ProcureAi.DemoData holds the flag (plan 07 Task 0b).
         services.AddMaintenanceWindow(configuration);
+        // The demo's on/off switch (plan 08 Task 12b): read from Access, cached; while off, browser calls get 503.
+        services.AddSystemAvailability(configuration);
         services.AddGatewaySwagger(configuration);
 
         AddRedis(builder);
@@ -88,6 +90,8 @@ public static class GatewayApp
         app.UseStatusCodePages();
         // By client IP, before authentication: it also protects the login endpoints.
         app.UseRateLimiter();
+        // Before everything else that reads the session or proxies: while the demo is switched off, no browser call gets further.
+        app.UseMiddleware<SystemAvailabilityMiddleware>();
         // Before authentication and the proxy: a write during the demo reset never reaches a service or the session store.
         app.UseMiddleware<MaintenanceMiddleware>();
         app.UseGatewaySwagger();

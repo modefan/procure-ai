@@ -102,6 +102,9 @@ public sealed class GatewayHost : IAsyncDisposable
             settings[key] = value;
         }
 
+        // The routes to Access (the system switch) reach the stub Access too.
+        settings["ReverseProxy:Clusters:access:Destinations:d1:Address"] = access.Url;
+
         // A null value removes a test default, so the gateway's own configuration (appsettings.json) applies.
         foreach (var (key, value) in extra ?? [])
         {
