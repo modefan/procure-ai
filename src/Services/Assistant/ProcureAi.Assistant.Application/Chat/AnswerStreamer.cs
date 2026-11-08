@@ -247,10 +247,12 @@ public sealed class AnswerStreamer(
         yield return SseEvent.OfSources(answer.Sources);
 
         // The cap again, right before the expensive calls (the guard classifier and the answer): the rewrite and the query embedding,
-        // or other questions of the tenant meanwhile, may have reached it since the check at the start.
+        // or other questions of the tenant meanwhile, may have reached it since the check at the start. Like that check, a refusal here
+        // costs no quota: the question counted at the start is given back.
         if (await TokenCapReachedAsync(conversation.TenantId, cancellationToken))
         {
             metrics.Question("over_token_cap");
+            await quota.ReturnAsync(conversation.TenantId, conversation.UserId, CancellationToken.None);
             answer.Status = MessageStatus.Failed;
             await SaveAsync(answer, conversation);
             await held.DisposeAsync();
@@ -259,7 +261,7 @@ public sealed class AnswerStreamer(
         }
 
         // 2. The answer, streamed, with the tools of this question (they act as the caller and number new sources on from these).
-        var prompt =PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
+        var prompt = PromptBuilder.Build(hits!, answer.Sources, history, question.Text);
         var tools = toolsFactory.Create(answer.Sources, purchasesAllowed);
         answer.Tools = tools.Session;
         var chatOptions = new ChatOptions

@@ -165,6 +165,8 @@ public sealed class ProviderFailureTests(AssistantApp app)
         model.ChatRequests.ShouldBe(0, "neither the guard classifier nor the answer was called");
         var saved = await WaitForLastMessageAsync(instance.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");
         saved.GetProperty("status").GetString().ShouldBe("Failed");
+        (await GetOkAsync(instance.Client, ChatApi.Quota, token)).GetProperty("used").GetInt32()
+            .ShouldBe(0, "like the check at the start, a refusal at the cap costs no quota");
     }
 
     [Fact]

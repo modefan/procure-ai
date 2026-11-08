@@ -139,8 +139,8 @@ comes in the stream's last chunk), a timeout, a 5xx. A 400 (Azure's prompt conte
 Azure bills the prompt's evaluation. Only a call Azure documents as unprocessed gives it back: 401, 403, 404 or 429, an open circuit
 breaker, a connection that was never made. The question flow checks the cap when the question starts and again right before the guard
 classifier and the answer call. Questions that passed those checks before the cap was reached still run to the end (each about 2-3 k
-tokens), so a scripted burst of questions fired together at the cap can add about USD 1-2 once, bounded by the per-user quota and the
-deployment's 50 requests a minute.
+tokens), so a scripted burst of questions fired together at the cap can still add the questions already past their checks, at
+most what the deployment's 50 requests a minute let through (a few US cents per organisation and day, bounded by the per-user quota).
 
 **To recheck when the model or deployment changes.** `AI:Chat:ReasoningEffort` `None` is sent as `reasoning_effort: "none"`. Azure's
 gpt-5-mini 2025-08-07 accepts it (0 reasoning tokens, checked 2026-11-07), but OpenAI documents `minimal` as gpt-5-mini's lowest

@@ -20,7 +20,8 @@ public sealed record TokenReservation(string TenantId, DateOnly Day, long Tokens
 /// request was sent) keeps its reservation, so a cancelled answer is still charged. Questions, uploads, replacements and scans are refused
 /// once the day's total has reached the cap (a question also right before its answer call). Calls in flight are already reserved, so a new
 /// check sees them, but work that passed its check before the cap was reached still runs to the end: a scripted burst of questions fired
-/// together at the cap can add about USD 1-2 once, bounded by the per-user quota and the deployment's rate limit.
+/// together at the cap can still add the questions already past their checks, at most what the deployment's 50 requests a minute let
+/// through (a few US cents per organisation and day, bounded by the per-user quota).
 /// </summary>
 public interface ITenantTokenBudget
 {

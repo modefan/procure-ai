@@ -326,8 +326,9 @@ with the real usage after, so calls already in flight count when the cap is chec
 mid-stream keeps its reservation (it may have been billed); a refused prompt (400, Azure's content filter) keeps the prompt part, as
 Azure bills its evaluation; only a call Azure does not process (401, 403, 404, 429, an open breaker, no connection) gives it back. A
 question is checked against the cap when it starts and again right before its answer call, but questions that passed before the cap was
-reached still run to the end (each about 2-3 k tokens): a scripted burst of questions fired together at the cap can add about USD 1-2
-once (still under the USD 10 alert), bounded by the per-user quota and the `chat` deployment's 50 requests a minute. Per user the Assistant also allows 50 questions a
+reached still run to the end (each about 2-3 k tokens): a scripted burst of questions fired together at the cap can still add the
+questions already past their checks, at most what the `chat` deployment's 50 requests a minute let through (a few US cents per
+organisation and day, bounded by the per-user quota). Per user the Assistant also allows 50 questions a
 day, and the demo login 30 sign-ins a minute per visitor address (300 a minute in all).
 
 **Azure guards.** The budget `procure-ai-10usd` on the subscription: USD 10 a month, e-mails to the Azure account's address at 50 %,
