@@ -63,7 +63,7 @@ All hostnames are under `*.localtest.me`, which resolves to 127.0.0.1, so no hos
 | `https://procure.localtest.me` | The app (web and gateway on one origin) |
 | `https://auth.procure.localtest.me` | Keycloak (issuer `https://auth.procure.localtest.me/realms/procure`) |
 | `https://dashboard.procure.localtest.me` | Aspire dashboard (Keycloak sign-in; only users with the client role `dashboard-viewer`, the demo admin) |
-| `https://argocd.procure.localtest.me` | Argo CD (user `admin`, password in Secret `argocd/argocd-initial-admin-secret`) |
+| `https://argocd.procure.localtest.me` | Argo CD: "Log in via Keycloak" (members of the group `argocd-admins` only, `bootstrap/add-argocd-admin.ps1 -Environment local`; any other user sees nothing), or user `admin` (password in Secret `argocd/argocd-initial-admin-secret`). Claude: `bootstrap/new-argocd-token.ps1` (user env var `ARGOCD_AUTH_TOKEN_LOCAL`). A cluster made before plan 08 Task 12c needs `bootstrap/new-local-ca.ps1` once more (ConfigMap `argocd/procure-ca`, so Argo CD trusts Keycloak's certificate) |
 | `https://mail.procure.localtest.me` | Mailpit (the demo's outgoing mail) |
 
 The cluster publishes its ports on the PC's loopback address only (`127.0.0.1:80`, `127.0.0.1:443` and the Kubernetes API on

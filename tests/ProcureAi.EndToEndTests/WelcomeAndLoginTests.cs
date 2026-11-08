@@ -16,7 +16,7 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
     private const string AppChunkMarker = "No purchase requests yet";
 
     [Fact]
-    public async Task Welcome_shows_login_and_register_when_logged_out()
+    public async Task Welcome_shows_login_but_no_register_when_logged_out()
     {
         fixture.RequireReady();
         await using var context = await fixture.NewContextAsync();
@@ -27,7 +27,8 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Welcome to ProcureAI" })).ToBeVisibleAsync();
         var main = page.Locator("main");
         await Assertions.Expect(main.GetByRole(AriaRole.Link, new() { Name = "Log in" })).ToBeVisibleAsync();
-        await Assertions.Expect(main.GetByRole(AriaRole.Link, new() { Name = "Register" })).ToBeVisibleAsync();
+        // Self-registration is off (plan 08 Task 12c: the realm's registrationAllowed and the app's registration.enabled).
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Register" })).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByTestId("feature-tile")).ToHaveCountAsync(4);
     }
 
@@ -42,6 +43,8 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         await page.GotoAsync(new Uri(fixture.GatewayUrl, "/app/requests").ToString());
         await page.WaitForURLAsync(KeycloakLogin(), new() { Timeout = (float)Wait.TotalMilliseconds });
         await Assertions.Expect(page.Locator("#username")).ToBeVisibleAsync();
+        // Keycloak offers no sign-up (registrationAllowed false, plan 08 Task 12c): no "Register" link on its login page.
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Register" })).ToHaveCountAsync(0);
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         // The main evidence is the redirect itself: authGuard is a canMatch guard, so for a visitor the `app` route never

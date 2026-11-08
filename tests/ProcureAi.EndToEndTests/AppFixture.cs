@@ -148,6 +148,22 @@ public sealed class AppFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// True for a gateway on this PC: a loopback address, <c>localhost</c> and its subdomains, or <c>*.localtest.me</c> (the local k3d
+    /// cluster's names, which resolve to 127.0.0.1).
+    /// </summary>
+    public static bool IsLocalTarget(Uri gateway)
+    {
+        var host = gateway.IdnHost.TrimEnd('.').ToLowerInvariant();
+        if (System.Net.IPAddress.TryParse(host.Trim('[', ']'), out var address))
+        {
+            return System.Net.IPAddress.IsLoopback(address);
+        }
+
+        return host == "localhost" || host.EndsWith(".localhost", StringComparison.Ordinal)
+            || host == "localtest.me" || host.EndsWith(".localtest.me", StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// External target: no AppHost. The deployment must be up and seeded (on the k3d cluster Argo CD's demo-seed hook has run); the fixture
     /// only waits for the gateway's readiness, so a deployment that is still starting does not fail every test.
     /// </summary>
@@ -158,6 +174,14 @@ public sealed class AppFixture : IAsyncLifetime
         var keycloak = Environment.GetEnvironmentVariable(KeycloakUrlVariable);
         KeycloakUrl = new Uri(string.IsNullOrWhiteSpace(keycloak) ? $"{GatewayUrl.Scheme}://auth.{GatewayUrl.Authority}" : keycloak);
         var targetStore = Environment.GetEnvironmentVariable(UserSecretsIdVariable) is { Length: > 0 } id ? id : null;
+        // A remote deployment has its own secrets store (plan 08 ruling 11). Without it the fixture would send DEMO_ADMIN_API_KEY, the local
+        // key, to that host before the first test fails on the demo password (Task 12 re-review minor 2): refuse before any request.
+        if (targetStore is null && !IsLocalTarget(GatewayUrl))
+        {
+            throw new InvalidOperationException(
+                $"{GatewayUrlVariable} points at {GatewayUrl.Host}, which is not this PC, but {UserSecretsIdVariable} is not set. Set it to that "
+                + "deployment's user-secrets store (e.g. procure-ai-hosted, docs/hosting.md); the local admin key is never sent to another host.");
+        }
         var secrets = new ConfigurationBuilder()
             .AddUserSecrets(targetStore ?? AppHostUserSecretsId)
             .Build();

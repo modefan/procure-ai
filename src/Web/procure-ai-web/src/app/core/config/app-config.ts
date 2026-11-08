@@ -51,6 +51,15 @@ export interface DevPanelConfig {
   enabled: boolean;
 }
 
+/** Self-registration: the "Register" links and the /register route. */
+export interface RegistrationConfig {
+  /**
+   * Show "Register" (Keycloak's sign-up form). Off by default: the realm does not allow self-registration (plan 08 Task 12c), so the
+   * link would end on Keycloak's error page. Turn it on together with the realm's registrationAllowed.
+   */
+  enabled: boolean;
+}
+
 /** The maintenance page (shown while the demo is switched off). */
 export interface MaintenanceConfig {
   /** Where a visitor can ask for the demo to be switched on (https:, http: or mailto:); empty = no contact link. */
@@ -73,6 +82,7 @@ export interface AppConfig {
   cache: CacheConfig;
   observability: ObservabilityConfig;
   devPanel: DevPanelConfig;
+  registration: RegistrationConfig;
   maintenance: MaintenanceConfig;
 }
 
@@ -115,6 +125,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const cache = (isRecord(source['cache']) ? source['cache'] : {}) as Record<string, unknown>;
   const observability = (isRecord(source['observability']) ? source['observability'] : {}) as Record<string, unknown>;
   const devPanel = (isRecord(source['devPanel']) ? source['devPanel'] : {}) as Record<string, unknown>;
+  const registration = (isRecord(source['registration']) ? source['registration'] : {}) as Record<string, unknown>;
   const maintenance = (isRecord(source['maintenance']) ? source['maintenance'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
@@ -141,6 +152,9 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
       dashboardUrl: typeof observability['dashboardUrl'] === 'string' ? observability['dashboardUrl'] : defaults.observability.dashboardUrl,
     },
     devPanel: { enabled: typeof devPanel['enabled'] === 'boolean' ? devPanel['enabled'] : defaults.devPanel.enabled },
+    registration: {
+      enabled: typeof registration['enabled'] === 'boolean' ? registration['enabled'] : defaults.registration.enabled,
+    },
     maintenance: {
       contactUrl: contactUrl(maintenance['contactUrl'], defaults.maintenance.contactUrl),
       contactLabel: typeof maintenance['contactLabel'] === 'string' ? maintenance['contactLabel'].trim() : defaults.maintenance.contactLabel,

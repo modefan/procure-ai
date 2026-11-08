@@ -45,6 +45,8 @@ tests:
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: IMPORT_CACHE_ENABLED, value: "false" } }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KC_APP_BASE_URL, value: https://procure.localtest.me } }
       - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KC_DASHBOARD_BASE_URL, value: https://dashboard.procure.localtest.me } }
+      # Argo CD's redirect base (plan 08 Task 12c): the hosted port-forward by default.
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: KC_ARGOCD_BASE_URL, value: "http://127.0.0.1:8080" } }
 
   - it: manages only what the file declares and keeps self-registered organization members
     asserts:

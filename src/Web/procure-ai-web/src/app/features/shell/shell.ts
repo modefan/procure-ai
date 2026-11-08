@@ -5,6 +5,7 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } fro
 import { filter } from 'rxjs';
 import { ApprovalsStore } from '../approvals/approvals.store';
 import { AuthStore } from '../../core/auth/auth.store';
+import { AppConfigService } from '../../core/config/app-config';
 import { LiveConnection } from '../../core/live/live-connection';
 import { NotificationsStore } from '../../core/live/notifications.store';
 import { CacheRegistry } from '../../core/state/cache-registry';
@@ -38,7 +39,7 @@ const ADMIN_LINKS: NavLink[] = [
 
 /**
  * The frame around every page: skip link, header with the menu for what this user may open, and the page
- * outlet. Signed out, the header shows only Welcome, Log in and Register; the app links appear after sign-in.
+ * outlet. Signed out, the header shows only Welcome, Log in and (where registration is on) Register; the app links appear after sign-in.
  */
 @Component({
   selector: 'app-shell',
@@ -161,7 +162,9 @@ const ADMIN_LINKS: NavLink[] = [
             </div>
           } @else {
             <a routerLink="/login" class="btn-primary">Log in</a>
-            <a routerLink="/register" class="btn-secondary">Register</a>
+            @if (registrationEnabled()) {
+              <a routerLink="/register" class="btn-secondary">Register</a>
+            }
           }
         </div>
       </div>
@@ -260,6 +263,9 @@ export class Shell {
   protected readonly fadeEnd = signal(false);
   protected readonly auth = inject(AuthStore);
   protected readonly devPanel = inject(DevPanelStore);
+  /** "Register" only where the identity provider allows self-registration (runtime config, off by default). */
+  private readonly appConfig = inject(AppConfigService);
+  protected readonly registrationEnabled = computed(() => this.appConfig.config().registration.enabled);
   /** Room at the bottom of the page so the open sheet does not cover its end. */
   protected readonly mainPadding = computed(() => (!this.devPanelShown() ? '' : this.devPanel.collapsed() ? 'pb-14' : 'pb-[42vh]'));
   /** The "Behind the scenes" sheet is on screen: enabled in the config, opened by the user, and somebody is signed in. */

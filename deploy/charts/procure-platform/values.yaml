@@ -91,6 +91,10 @@ keycloak:
     publicPathsOnly: false
     # The realms the public host serves when publicPathsOnly is on (the app's realm; never master).
     publicRealms: [procure]
+  # Argo CD's address as the browser opens it (the argocd client's redirect URIs <url>/auth/callback and <url>/pkce/verify, web origin
+  # and logout: KC_ARGOCD_BASE_URL, plan 08 Task 12c). Equal to configs.cm.url in the GitOps repo's envs/<env>/argocd.yaml. The default
+  # is the hosted VM's (no ingress: the port-forward of bootstrap/hosted/open-argocd.ps1); local sets https://argocd.procure.localtest.me.
+  argocdUrl: http://127.0.0.1:8080
 
 # The keycloak-config Job (templates/keycloak-config-job.yaml, plan 08 ruling 7): keycloak-config-cli applies the realm file to the running
 # Keycloak on every sync. Not under the AppHost (start-dev imports the realm at every start of its fresh container).

@@ -1,6 +1,7 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth.store';
+import { AppConfigService } from '../../core/config/app-config';
 import { DemoLogin, DemoLoginUser } from '../../core/auth/demo-login';
 
 interface FeatureTile {
@@ -28,7 +29,9 @@ interface FeatureTile {
           <a routerLink="/app/dashboard" class="btn-primary">Go to dashboard</a>
         } @else {
           <a routerLink="/login" class="btn-primary">Log in</a>
-          <a routerLink="/register" class="btn-secondary">Register</a>
+          @if (registrationEnabled()) {
+            <a routerLink="/register" class="btn-secondary">Register</a>
+          }
         }
       </div>
 
@@ -86,6 +89,10 @@ interface FeatureTile {
 export class WelcomePage {
   protected readonly auth = inject(AuthStore);
   private readonly demoLogin = inject(DemoLogin);
+  private readonly appConfig = inject(AppConfigService);
+
+  /** "Register" only where the identity provider allows self-registration (runtime config, off by default). */
+  protected readonly registrationEnabled = computed(() => this.appConfig.config().registration.enabled);
 
   /** Empty (no section) until the gateway lists demo users; stays empty when demo login is off. */
   protected readonly demoUsers = signal<readonly DemoLoginUser[]>([]);

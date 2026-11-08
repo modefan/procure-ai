@@ -40,6 +40,13 @@ describe('merge (live and cache settings)', () => {
     expect(merge(environment, {}).devPanel).toEqual(environment.devPanel);
   });
 
+  it('registration.enabled comes from config.json, is off by default and ignores a non-boolean', () => {
+    expect(environment.registration.enabled).toBe(false);
+    expect(merge(environment, { registration: { enabled: true } }).registration.enabled).toBe(true);
+    expect(merge(environment, { registration: { enabled: 'true' } }).registration).toEqual(environment.registration);
+    expect(merge(environment, {}).registration).toEqual(environment.registration);
+  });
+
   it('maintenance contact: a safe link and its label from config.json, anything else is no link', () => {
     expect(merge(environment, {}).maintenance).toEqual({ contactUrl: '', contactLabel: '', checkTimeoutMs: 4000 });
     expect(merge(environment, { maintenance: { contactUrl: 'https://example.org/ask', contactLabel: ' Ask for access ' } }).maintenance)

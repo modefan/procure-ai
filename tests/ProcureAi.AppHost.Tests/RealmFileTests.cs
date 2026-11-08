@@ -11,6 +11,7 @@ public sealed class RealmFileTests
 {
     private const string AppBaseUrl = "${KC_APP_BASE_URL:https://localhost}";
     private const string DashboardBaseUrl = "${KC_DASHBOARD_BASE_URL:https://localhost}";
+    private const string ArgoCdBaseUrl = "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}";
 
     private static readonly JsonElement Realm = JsonDocument.Parse(File.ReadAllText("procure-realm.json")).RootElement;
 
@@ -100,6 +101,55 @@ public sealed class RealmFileTests
 
         var logout = Client("procure-gateway").GetProperty("attributes").GetProperty("post.logout.redirect.uris").GetString()!;
         logout.Split("##").ShouldContain($"{AppBaseUrl}/*");
+    }
+
+    [Fact]
+    public void Realm_has_argocd_client_with_pkce_and_a_groups_claim()
+    {
+        // Plan 08 Task 12c: Argo CD signs people in with Keycloak (public client, code flow + PKCE, no secret: Argo CD's documented Keycloak
+        // setup), and maps the group argocd-admins to role:admin from a plain `groups` claim (GitOps repo argocd/values.yaml).
+        var argocd = Client("argocd");
+        argocd.GetProperty("publicClient").GetBoolean().ShouldBeTrue();
+        argocd.TryGetProperty("secret", out _).ShouldBeFalse();
+        argocd.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeTrue();
+        argocd.GetProperty("directAccessGrantsEnabled").GetBoolean().ShouldBeFalse();
+        argocd.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse();
+        argocd.GetProperty("serviceAccountsEnabled").GetBoolean().ShouldBeFalse();
+        argocd.GetProperty("attributes").GetProperty("pkce.code.challenge.method").GetString().ShouldBe("S256");
+        // Exactly Argo CD's two callbacks (server: /auth/callback, UI with PKCE: /pkce/verify) under the environment's base; no wildcard.
+        Strings(argocd, "redirectUris").ShouldBe([$"{ArgoCdBaseUrl}/auth/callback", $"{ArgoCdBaseUrl}/pkce/verify"]);
+        Strings(argocd, "webOrigins").ShouldBe([ArgoCdBaseUrl]);
+        // Argo CD asks for "openid profile" only (no email or groups scope in this realm); the claims come from the client's own mappers.
+        Strings(argocd, "defaultClientScopes").ShouldBeEmpty();
+        Strings(argocd, "optionalClientScopes").ShouldBe(["profile"]);
+
+        var groups = argocd.GetProperty("protocolMappers").EnumerateArray()
+            .Single(m => m.GetProperty("protocolMapper").GetString() == "oidc-group-membership-mapper");
+        groups.GetProperty("config").GetProperty("claim.name").GetString().ShouldBe("groups");
+        // Plain names ("argocd-admins", not "/argocd-admins"): the RBAC g-line matches the claim exactly.
+        groups.GetProperty("config").GetProperty("full.path").GetString().ShouldBe("false");
+        groups.GetProperty("config").GetProperty("id.token.claim").GetString().ShouldBe("true");
+    }
+
+    [Fact]
+    public void Realm_has_the_argocd_admins_group_and_no_demo_user_is_in_it()
+    {
+        Realm.GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("name").GetString()).ShouldContain("argocd-admins");
+        // Dale adds his own user by hand (CLAUDE.md "Hosting plan"); the public demo users never get Argo CD rights.
+        foreach (var user in Realm.GetProperty("users").EnumerateArray())
+        {
+            if (user.TryGetProperty("groups", out var userGroups))
+                userGroups.EnumerateArray().Select(g => g.GetString()!.TrimStart('/'))
+                    .ShouldNotContain("argocd-admins", user.GetProperty("username").GetString());
+        }
+    }
+
+    [Fact]
+    public void Realm_does_not_allow_self_registration()
+    {
+        // Plan 08 Task 12c: nobody can create an account on the public demo's Keycloak (the login page shows no "Register"). The demo users
+        // are the realm's own; the gateway's registration flow stays in the code and its tests turn registration on in their own realm copy.
+        Realm.GetProperty("registrationAllowed").GetBoolean().ShouldBeFalse();
     }
 
     private static JsonElement Client(string clientId) =>

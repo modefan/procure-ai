@@ -115,6 +115,8 @@ spec:
               value: {{ printf "https://%s" .Values.hosts.app }}
             - name: KC_DASHBOARD_BASE_URL
               value: {{ printf "https://%s" .Values.hosts.dashboard }}
+            - name: KC_ARGOCD_BASE_URL
+              value: {{ .Values.keycloak.argocdUrl | quote }}
           resources:
             {{- toYaml $c.resources | nindent 12 }}
           {{- include "procure-platform.containerSecurity" . | nindent 10 }}

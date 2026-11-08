@@ -4,6 +4,7 @@ import { HttpTestingController, provideHttpClientTesting, TestRequest } from '@a
 import { provideRouter } from '@angular/router';
 import { WelcomePage } from './welcome.page';
 import { AuthStore } from '../../core/auth/auth.store';
+import { AppConfigService } from '../../core/config/app-config';
 import { BrowserLocation } from '../../core/browser/browser-location';
 
 describe('WelcomePage', () => {
@@ -62,12 +63,21 @@ describe('WelcomePage', () => {
   const demoButtons = (element: HTMLElement) =>
     Array.from(element.querySelectorAll<HTMLButtonElement>('[data-testid="demo-login"] button'));
 
-  it('shows Log in and Register when logged out', async () => {
+  it('shows Log in but no Register when logged out (self-registration is off by default)', async () => {
+    const { element } = await render(null);
+
+    expect(actions(element)).toContain('Log in');
+    expect(actions(element)).not.toContain('Register');
+    expect(actions(element)).not.toContain('Go to dashboard');
+  });
+
+  it('shows Register when the runtime config turns registration on', async () => {
+    const config = TestBed.inject(AppConfigService).config;
+    config.set({ ...config(), registration: { enabled: true } });
     const { element } = await render(null);
 
     expect(actions(element)).toContain('Log in');
     expect(actions(element)).toContain('Register');
-    expect(actions(element)).not.toContain('Go to dashboard');
   });
 
   it('shows Go to dashboard when logged in', async () => {

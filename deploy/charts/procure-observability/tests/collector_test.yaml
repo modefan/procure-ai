@@ -43,10 +43,10 @@ tests:
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
       - matchRegex:
           path: data.relay
-          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/background-db\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/background-db\s*\n\s*- k8s_?attributes\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
       - matchRegex:
           path: data.relay
           pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
@@ -70,7 +70,7 @@ tests:
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact\s*\n\s*- batch\s*\n'
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n'
       - matchRegex:
           path: data.relay
           pattern: '(?s)transform/redact:.*?log_statements:'
@@ -137,3 +137,14 @@ tests:
       - equal:
           path: spec.ports[1].port
           value: 4318
+
+  # Plan 08 Task 12c: a visitor's address never reaches the dashboard as a span or log attribute (log bodies: transform/redact).
+  - it: collector deletes client address attributes from spans and logs
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)transform/client-address:.*trace_statements:.*delete_key\(span\.attributes, "client\.address"\).*delete_key\(span\.attributes, "http\.client_ip"\)'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)transform/client-address:.*log_statements:.*delete_key\(log\.attributes, "client\.address"\)'

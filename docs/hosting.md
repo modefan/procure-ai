@@ -80,7 +80,8 @@ cd procure-ai-gitops
 ./bootstrap/hosted/new-hosted-cluster.ps1 -Reinstall  # first time only: adopts and REINSTALLS the VPS, cloud-init, kubeconfig, tunnel, namespaces
 ./bootstrap/hosted/new-hosted-cluster.ps1             # any later time: applies firewall/DNS changes, re-checks SSH, cloud-init, the cluster
 ./bootstrap/new-secrets.ps1 -Environment hosted       # Secrets from the procure-ai-hosted user secrets (generated on the first run)
-./bootstrap/install-argocd.ps1 -Environment hosted    # Argo CD (no admin user, no ingress) and the root Application
+./bootstrap/install-argocd.ps1 -Environment hosted    # Argo CD (Keycloak sign-in, admin as break-glass, no ingress), root Application
+./bootstrap/new-argocd-token.ps1 -Environment hosted  # Claude's API token (account claude) -> user env var ARGOCD_AUTH_TOKEN_HOSTED
 ./bootstrap/hosted/Test-HostBaseline.ps1              # the checks above, from the PC
 ./bootstrap/hosted/open-tunnel.ps1 -Close             # close the tunnel when done
 ```
@@ -107,8 +108,7 @@ After a reinstall, check once by hand the things the baseline cannot see from ou
 - one deliberate reboot brings k3s back;
 - a second `-PlanOnly` shows no changes.
 
-The Argo CD UI has no public address. Open the tunnel, then run
-`kubectl --kubeconfig %USERPROFILE%\.procure-ai\hosted\kubeconfig --context procure-hosted -n argocd port-forward svc/argocd-server 8080:80`.
+The Argo CD UI has no public address: `./bootstrap/hosted/open-argocd.ps1` opens it (see "Argo CD on the VM" below).
 
 ## The public environment (plan 08 Task 12)
 
@@ -142,6 +142,11 @@ cd procure-ai-gitops
   The gateway's rate limits see the real client address; `Test-PublicSurface.ps1` proves it with an echo pod.
 - **CoreDNS:** inside the cluster `auth.daleabels.com` resolves to Traefik, so pods fetch Keycloak's discovery and keys through the same
   host name and certificate as the browser (the hosted twin of the local rewrite).
+- **HSTS and a rebuilt VM.** A browser that opened the demo before keeps the one-year HSTS entry, so while a rebuilt VM serves the
+  staging certificate (the first `install-cert-manager.ps1` run) or Traefik's self-signed default before the first certificate, that
+  browser shows a certificate error it does not let you click through. That is expected for those minutes: test with `curl -k` or
+  `openssl s_client` until `install-cert-manager.ps1 -Production` has run, then the browsers work again. Nothing else needs undoing
+  (no `includeSubDomains`, no preload).
 - **cert-manager** 1.21.3 from the official OCI chart (`oci://quay.io/jetstack/charts/cert-manager`), CRDs installed and kept by the
   chart. Two ClusterIssuers, `letsencrypt-staging` and `letsencrypt-production` (ACME HTTP-01 on Ingress class `traefik`). The ACME
   account e-mail comes from the user env var `PROCURE_ACME_EMAIL`, not from a repo.
@@ -152,7 +157,7 @@ cd procure-ai-gitops
   days left.
 
 What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/realms/procure/` and `/resources/` (no admin console, admin
-API, master realm or welcome page; `publicRealms` in the platform chart); no Mailpit ingress; Argo CD without admin user and ingress;
+API, master realm or welcome page; `publicRealms` in the platform chart); no Mailpit ingress; Argo CD without ingress (Keycloak sign-in; the admin login only as break-glass, through the tunnel);
 the demo switches on (seed, nightly reset at 02:00 Africa/Johannesburg, one-click demo login, the "behind the scenes" panel); the
 Assistant on Azure Foundry (`AI__Provider=AzureFoundry`, deployments `chat` and `embeddings`, no reasoning, no temperature, at least 256
 output tokens per call, the app's default daily token cap per tenant); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
@@ -206,6 +211,78 @@ Secret and survives as is.
 A VM reboot leaves the pods the kubelet's graceful shutdown ended as `Failed` objects ("terminated in response to imminent node
 shutdown"); their Deployments and StatefulSets replace them. They hold no resources. Remove them with
 `kubectl delete pods -A --field-selector=status.phase=Failed` when they clutter the list.
+
+## Argo CD on the VM (plan 08 Task 12c)
+
+Argo CD is the one GUI for the live site (no Rancher, Headlamp or Grafana). It has no public address: it is reached through the SSH
+tunnel and a `kubectl port-forward` on Dale's PC, at `http://127.0.0.1:8080`.
+
+```powershell
+cd procure-ai-gitops
+./bootstrap/hosted/open-argocd.ps1          # tunnel (reused if open) + port-forward to 127.0.0.1:8080 + browser; prints where the passwords are
+./bootstrap/hosted/open-argocd.ps1 -Close   # stops the port-forward, and the tunnel only if this script opened it
+```
+
+Who can sign in, and with what rights:
+
+| Who | How | Rights |
+|---|---|---|
+| Dale (and anyone else in the Keycloak group `argocd-admins`) | "Log in via Keycloak": realm `procure`, client `argocd` (public, code flow + PKCE, no secret), like Argo CD signing in with AD at work | `role:admin` |
+| Any other Keycloak user (the public demo users) | can sign in | nothing: no Application, project, log or action (`policy.default` is empty) |
+| `admin` | break-glass, for when Keycloak is down: user `admin`, password in DEMO PASSWORDS.txt ("=== Argo CD ===") and Secret `argocd/argocd-initial-admin-secret` | `role:admin` |
+| `claude` | API token only (no UI login): `Authorization: Bearer $env:ARGOCD_AUTH_TOKEN_HOSTED` on Argo CD's REST API; a new token from `./bootstrap/new-argocd-token.ps1 -Environment hosted` | `role:admin` |
+
+Without the tunnel nothing of this is reachable. Claude also keeps `kubectl` (and `argocd --core`, which uses the kubeconfig) through the
+tunnel, so no Argo CD admin function depends on Keycloak. The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC),
+`envs/hosted/argocd.yaml` (url, OIDC issuer) and `envs/hosted/apps.yaml` (admin login on, no ingress). Keycloak's side (client
+`argocd`, group `argocd-admins`, the `groups` claim) is in `infra/keycloak/procure-realm.json`; its redirect URIs follow the platform
+chart's `keycloak.argocdUrl` (`http://127.0.0.1:8080` on hosted, so the port-forward must use port 8080 for the Keycloak sign-in).
+
+### Your own Keycloak user for Argo CD
+
+Claude does not create it: you pick your own user name and password. Keycloak's admin console cannot be used for this on the VM: the
+public host serves only `/realms/procure/`, and the console always sends the browser to that public host (also through a port-forward).
+So a script does it with Keycloak's own admin CLI inside the Keycloak pod, through the tunnel; it asks for the password and never shows
+or stores it:
+
+```powershell
+cd procure-ai-gitops
+./bootstrap/add-argocd-admin.ps1 -UserName dale -Email you@example.com -FirstName Dale -LastName Abels   # asks for the password twice
+./bootstrap/hosted/open-argocd.ps1                                                                      # then "Log in via Keycloak"
+```
+
+- The realm uses the e-mail as the user name when one is given, so you sign in with the e-mail address.
+- The user is created enabled, e-mail verified and in no organization (so it is not a tenant user of the demo), and added to the group
+  `argocd-admins`. Argo CD's *User Info* then shows that group.
+- Run it again with `-ResetPassword` for a new password, or `-Remove` to take the admin role away (the user stays).
+- Nothing in Git lists your user, so the keycloak-config Job (it re-applies the realm file on every sync) leaves it and its group
+  membership alone.
+- `-Environment local` does the same on the local k3d cluster.
+
+### The live site is down: what to do
+
+1. **Is it the demo switch?** `https://procure.daleabels.com/` shows the maintenance page when the demo is switched off on purpose
+   (`docs/demo.md`). Nothing is broken then.
+2. **Open Argo CD:** `./bootstrap/hosted/open-argocd.ps1`, "Log in via Keycloak". If Keycloak itself is down (the sign-in page does not
+   load), sign in as `admin` (break-glass, above).
+3. **Find the broken part.** The *Applications* page: `root`, `argocd`, `platform`, `observability`, `procure-ai`. A red heart
+   (*Degraded*) or a yellow circle (*Progressing* for minutes) is where to look. Open that Application; the tree shows each Deployment,
+   StatefulSet and pod with its health. A failed sync (e.g. a migration hook) shows at the top (*Last sync*), with the message.
+4. **Read why.** Click the pod: *Logs* (the container's output; pick the container), *Events* (image pull errors, OOMKilled, failed
+   probes, evictions). `CrashLoopBackOff` plus the last log lines usually say it.
+5. **Fix or restart.**
+   - A pod stuck after a dependency came back (Keycloak, RabbitMQ, Postgres): on its Deployment, its menu -> *Restart*.
+   - Out of sync after a hand change: *Sync* on the Application (auto-sync with self-heal does this by itself within a few minutes).
+   - A failed migration hook: read the Job's log (step 4); fix it in Git (push) or roll back by setting an older `appRevision` in
+     `envs/hosted/release.yaml` of the GitOps repo; Argo CD syncs it.
+   - Postgres and Debezium: restart only when you must (Debezium resumes from its offsets; `Test-WalSlotsAdvance.ps1` checks the slots).
+6. **Traces and logs across services:** `https://dashboard.daleabels.com` (Aspire dashboard; Keycloak sign-in, role `dashboard-viewer`,
+   the demo admin user has it). *Structured logs* filtered by service and level, *Traces* for one request across services. Visitor IP
+   addresses never reach it (the collector masks them in log bodies and drops client-address attributes).
+7. **The VM itself** (Argo CD does not load at all, or every pod is pending): `./bootstrap/hosted/Test-HostBaseline.ps1` (SSH, k3s,
+   firewall, listeners), then `kubectl top node` through the tunnel for memory. The Contabo panel has a VNC console and a reboot as the
+   last resort; k3s and every app come back by themselves after a reboot.
+8. Afterwards: `./bootstrap/hosted/open-argocd.ps1 -Close`.
 
 ## What it costs, and how to stop it
 

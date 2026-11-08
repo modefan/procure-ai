@@ -58,6 +58,12 @@ tests:
           content:
             name: KC_DASHBOARD_BASE_URL
             value: https://dashboard.procure.localtest.me
+      # Argo CD's redirect base (plan 08 Task 12c): the hosted port-forward by default, an environment's own URL when set.
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_ARGOCD_BASE_URL
+            value: http://127.0.0.1:8080
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -156,3 +162,16 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: keycloak.ingress.publicRealms must name at least one realm
+
+  - it: the argocd client's redirect base follows keycloak.argocdUrl (plan 08 Task 12c)
+    set:
+      keycloak.argocdUrl: https://argocd.procure.localtest.me
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_ARGOCD_BASE_URL
+            value: https://argocd.procure.localtest.me

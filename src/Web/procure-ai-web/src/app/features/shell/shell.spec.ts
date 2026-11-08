@@ -197,9 +197,10 @@ describe('Shell header', () => {
     expect(nav.classList.contains('nav-fade-end')).toBe(false);
   });
 
-  it('signed out shows only Log in and Register and no live widgets', async () => {
+  it('signed out shows only Log in (Register only with registration on) and no live widgets', async () => {
     const el = await render();
     expect(text(el.querySelector('header'))).toContain('Log in');
+    expect(text(el.querySelector('header'))).not.toContain('Register');
     expect(el.querySelector('[data-testid=live-indicator]')).toBeNull();
     expect(el.querySelector('[data-testid=bell]')).toBeNull();
   });

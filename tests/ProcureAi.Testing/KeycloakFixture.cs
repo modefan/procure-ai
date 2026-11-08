@@ -46,6 +46,9 @@ public sealed class KeycloakFixture : IAsyncLifetime
     {
         var limits = JsonNode.Parse(await File.ReadAllTextAsync("testcontainers.settings.json"))!["Resources"]!["Keycloak"]!;
         var realm = JsonNode.Parse(await File.ReadAllTextAsync("procure-realm.json"))!.AsObject();
+        // The committed realm allows no self-registration (plan 08 Task 12c); the gateway's registration flow is still code, and its tests
+        // (GatewayTests Register_*, Newly_registered_*) need Keycloak's sign-up form, so this test copy turns it on.
+        realm["registrationAllowed"] = true;
         (realm["clients"] ??= new JsonArray()).AsArray().Add(JsonNode.Parse($$"""
             {
               "clientId": "{{TestClient}}",

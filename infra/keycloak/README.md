@@ -20,7 +20,11 @@
     ask for `organization:<alias>`. Without a choice there is no tenant (never an arbitrary one). The bare `organization` and
     `organization:<alias>` cannot be sent together (Keycloak answers `invalid_scope`); `OrganizationScope.For` replaces the one with the
     other. A refresh keeps the organization of the login.
-- Self-registration: Keycloak cannot auto-join a self-registered user to an organization, so the gateway does it. On the
+- **Self-registration is off** (`registrationAllowed: false`, plan 08 Task 12c): nobody can create an account on the public demo's
+  Keycloak, and the app shows no "Register" link (runtime config `registration.enabled`, off by default; `/register` goes to the login).
+  The flow below stays in the code and its tests (the test Keycloak turns registration on in its own copy of this file); to offer it
+  again, set both `registrationAllowed` here and `registration.enabled` in the web app's config.json.
+- Self-registration (when on): Keycloak cannot auto-join a self-registered user to an organization, so the gateway does it. On the
   first `/bff/user` call of a user with no tenant it asks Access (`POST internal/registrations`, on behalf of that user:
   Access refuses any other user with 403, refuses a user who already belongs to another organization with 409, and reads
   email and name from Keycloak, not from the call), which adds the user to
@@ -39,3 +43,9 @@
   bound to that session) that asks Keycloak for `organization:<alias>` with `prompt=none` (one visible retry if Keycloak needs the
   user). Either way the gateway checks the token is for the same user and that tenant, and replaces the session with a new key.
 - The password-grant test client `test-direct` exists only in the tests, never in this file.
+- `argocd` is Argo CD's sign-in client (plan 08 Task 12c): public, code flow + PKCE (Argo CD's documented Keycloak setup; no secret),
+  redirect URIs `${KC_ARGOCD_BASE_URL}/auth/callback` and `/pkce/verify` (the platform chart's `keycloak.argocdUrl`: the hosted
+  port-forward `http://127.0.0.1:8080` by default, `https://argocd.procure.localtest.me` locally). Its own mappers put `sub`,
+  `preferred_username`, `name`, `email` and `groups` (plain group names) into the ID token. Only members of the group `argocd-admins`
+  get Argo CD's admin role (GitOps repo `argocd/values.yaml`); every other user who signs in gets no rights. No demo user is in the
+  group; Dale adds his own user (docs/hosting.md, "Your own Keycloak user for Argo CD").

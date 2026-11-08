@@ -204,6 +204,25 @@ opentelemetry-collector:
               - 'replace_pattern(body.string, "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "***") where IsString(body)'
               - 'replace_pattern(body.string, "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b", "***") where IsString(body)'
               - 'replace_pattern(body.string, "(^|[^0-9A-Za-z:.])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?|::[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})", "$1***") where IsString(body)'
+      # The visitor's address as an attribute (plan 08 Task 12c; CLAUDE.md "Observability": no personal data). Since Traefik keeps the
+      # client address (hostPorts, plan 08 Task 12), a span or log attribute holding it would carry a visitor's public IP. None of our
+      # instrumentation records one today (checked on the hosted dashboard's database, Task 12c report); this keeps it so if a library
+      # update or a log property starts to. network.peer.address stays: it is the direct peer (a pod or Service address), not the visitor.
+      transform/client-address:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - 'delete_key(span.attributes, "client.address")'
+              - 'delete_key(span.attributes, "http.client_ip")'
+              - 'delete_key(span.attributes, "net.sock.peer.addr")'
+              - 'delete_key(span.attributes, "http.request.header.x-forwarded-for")'
+        log_statements:
+          - context: log
+            statements:
+              - 'delete_key(log.attributes, "client.address")'
+              - 'delete_key(log.attributes, "http.client_ip")'
+              - 'delete_key(log.attributes, "RemoteIpAddress")'
       # Background database and cache calls without a parent span (Wolverine's durability polling, Audit's pgaudit reader, the Redis
       # backplane, Mongo health pings): ~30 root traces a second filled the dashboard's trace limit in under three minutes and evicted
       # every request's trace. Only those root spans are dropped; database spans inside a request's trace stay. (A processor beyond the
@@ -227,7 +246,7 @@ opentelemetry-collector:
       pipelines:
         logs:
           receivers: [otlp, filelog]
-          processors: [memory_limiter, k8sattributes, transform/redact, batch]
+          processors: [memory_limiter, k8sattributes, transform/redact, transform/client-address, batch]
           exporters: [otlp]
         metrics:
           receivers: [otlp]
@@ -235,5 +254,5 @@ opentelemetry-collector:
           exporters: [otlp]
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, filter/background-db, k8sattributes, batch]
+          processors: [memory_limiter, filter/background-db, k8sattributes, transform/client-address, batch]
           exporters: [otlp]

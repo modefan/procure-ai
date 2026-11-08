@@ -31,6 +31,8 @@ export const environment: AppConfig = {
   observability: { dashboardUrl: 'https://localhost:17100' },
   // Off by default; local and demo set it in config.json (the server needs DevPanel:Enabled too).
   devPanel: { enabled: false },
+  // No "Register" link: the realm does not allow self-registration (plan 08 Task 12c). Turn both on together.
+  registration: { enabled: false },
   // The maintenance page's "request access" link. Empty: no link (deployments set their own in config.json).
   maintenance: { contactUrl: '', contactLabel: '', checkTimeoutMs: 4000 },
 };
