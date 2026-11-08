@@ -25,9 +25,10 @@ public interface ISystemAvailabilityClient
 
 /// <summary>
 /// The gateway's read of Access's switch. It is made as the gateway (its client-credentials token and <c>X-Calling-Service</c>), so Access
-/// counts it in the gateway service account's own rate-limit partition: the anonymous browser reads that the gateway proxies all share the
-/// gateway pod's address at Access, and a flood of them must not make this read fail (a freshly started gateway would then fail open). The
-/// partition comes from a validated token, so a visitor cannot claim it with a header. When no token can be had quickly (Keycloak down or
+/// counts it in the internal service accounts' rate-limit partition (the shared <c>procure-internal</c> client, which the other services'
+/// calls to Access use too), not in the anonymous one: the anonymous browser reads that the gateway proxies all share the gateway pod's
+/// address at Access, and a flood of them must not make this read fail (a freshly started gateway would then fail open). The partition
+/// comes from a validated token, so no visitor can reach it or claim it with a header. When no token can be had quickly (Keycloak down or
 /// slow), the read is made anonymously as before: the endpoint is public, and a Keycloak outage must not turn into "cannot read the switch".
 /// Fails fast (<see cref="SystemAvailabilityOptions"/>' retries and timeouts): it sits in front of every browser call.
 /// </summary>
