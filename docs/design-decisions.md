@@ -72,9 +72,10 @@ The full list, with the reasons. The [README](../README.md) has the short versio
 - **RAG built by hand on Microsoft.Extensions.AI.** Chunking, contextual embeddings, hybrid search with rank fusion, the prompt
   and the citations are our own code over `IChatClient` and `IEmbeddingGenerator`, not a managed "file search", so every step
   is visible, testable and tenant-filtered. The provider is configuration (`AI:Provider`).
-- **A deterministic Fake provider, on purpose.** Tests and CI never spend tokens, and the demo runs without any AI account.
-  It also became the demo's model when GitHub Models was retired (2026-07-30); a real provider needs an account, so that is
-  the owner's decision, and the UI says "Demo model" honestly until then.
+- **A deterministic Fake provider, on purpose.** Tests and CI never spend tokens, and the demo runs without any AI account
+  (locally and on a local cluster by default). It stood in as the demo's model after GitHub Models was retired (2026-07-30); the
+  live demo now runs on Azure Foundry (gpt-5-mini and text-embedding-3-small), switched by configuration only, and the UI says
+  "Demo model" wherever the Fake still answers.
 - **Tools as the user.** The model's tools relay the user's own credential, so they can never see more than the user could
   in the app; a service identity would have needed its own, broader permissions.
 - **Guards that stream.** The output guard holds back the last 64 characters of the stream, so a phone number or an email

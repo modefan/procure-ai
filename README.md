@@ -10,10 +10,10 @@ entry form. Under the hood: ten .NET 10 microservices in Clean Architecture, Wol
 BFF at a YARP gateway, Debezium change data capture for a three-layer audit, an Angular 22 app with live updates, and a
 Kubernetes deployment by Argo CD.
 
-> **Live demo: coming soon.** The hosted environment is being set up; the link goes here. Until then it runs locally with
-> [one command](#run-it-locally) or on a [local Kubernetes cluster](#run-it-on-kubernetes).
+> **Live demo: <https://procure.daleabels.com>.** It also runs locally with [one command](#run-it-locally) or on a
+> [local Kubernetes cluster](#run-it-on-kubernetes).
 
-**No sign-up needed:** the welcome page has **Try a demo role** buttons (locally today, and on the live demo once it is up) (Requester Tom, Manager Maria, Department head, Finance
+**No sign-up needed:** the welcome page has **Try a demo role** buttons (on the live demo and locally) (Requester Tom, Manager Maria, Department head, Finance
 Thandi, Admin, Globex manager Ben); one click signs you in as that person. Thandi works for two companies: through the normal
 Keycloak login she gets Keycloak's organization picker between the email and the password, while her button starts straight in
 Acme. All users and the seeded data: [docs/demo.md](docs/demo.md).
@@ -134,9 +134,10 @@ Everything else (architecture, bootstrap, hostnames, versions, memory, troublesh
 - **RAG built by hand on Microsoft.Extensions.AI.** Chunking, contextual embeddings, hybrid search with rank fusion, the prompt and
   the citations are our own code over `IChatClient` and `IEmbeddingGenerator`, so every step is visible, tenant-filtered and
   tested. The provider is configuration; a deterministic fake keeps tests and CI from ever spending tokens.
-- **Hosting plan: Kubernetes and GitOps on one small VM, Azure only for the AI model.** k3s and Argo CD on a single VM mirror an
-  AKS + Argo CD setup for a flat few dollars a month: no paid always-on cloud services beyond that one small VM, and the AI model is
-  paid per use, held down by per-user limits (50 questions a day, 800 tokens per answer). The same charts would run on AKS. Scale-to-zero Azure Container Apps was the
+- **Hosting: Kubernetes and GitOps on one small VM, Azure only for the AI model.** k3s and Argo CD on a single VM mirror an
+  AKS + Argo CD setup for about USD 17 a month (the VM is EUR 14): no paid always-on cloud services beyond that one VM, and the AI
+  model is paid per use, capped by a daily token limit per organisation (150 000 on the live demo, every model call counted) plus
+  per-user limits (50 questions a day, 800 tokens per answer); the worst case under the caps is about USD 25 a month. The same charts would run on AKS. Scale-to-zero Azure Container Apps was the
   alternative; with ten services, eight Debezium Servers and Keycloak, one always-on VM is simpler and cheaper.
 
 The full list (sagas, tombstones, signed webhooks, cumulative three-way matching, fiscal year in SAST, and more), each with its
