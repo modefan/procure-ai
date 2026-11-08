@@ -58,6 +58,35 @@ Keycloak is not touched. Each service deletes with its normal write paths, so th
 never as "changed outside the app". `ProcureAi.DemoData schedule` runs it every night; locally, the dashboard command **Reset demo data**
 on the `demo-data` resource runs it once. There is no reset button in the app.
 
+### Switching the demo off
+
+To save hosting costs the whole demo can be switched off without stopping anything: Access keeps one `system_settings` row (no row = on),
+and while it is off the gateway answers every browser call to `/api/**`, `/bff/**` and the hubs with 503 ProblemDetails of type
+`https://procure-ai/problems/system-disabled` (with `Retry-After`), before sign-in and before anything reaches a service. The web app asks
+the switch before it starts and shows only its maintenance page ("This demo is switched off", the stored message or a default text, and a
+"Request access" link when `maintenance.contactUrl` is set in config.json). The switch itself, health, Swagger UI, the web app's files and
+calls with the admin API key keep working. The gateway reads the switch every `SystemAvailability:CacheDuration` (5 s); if Access cannot be
+reached it keeps the last answer, and if it never had one it lets calls through. The nightly reset never changes the switch; every change is
+in the data change audit (`system_settings`, by `claude-admin`).
+
+Only the admin API key may switch it (`PUT`, any user token is 403); anyone may read it (`GET /api/v1/system/availability`):
+
+```powershell
+$headers = @{ 'X-Api-Key' = $env:DEMO_ADMIN_API_KEY }
+# Off, with an optional message for the maintenance page:
+Invoke-RestMethod -Method Put -Uri https://<host>/api/v1/system/availability -Headers $headers -ContentType 'application/json' `
+    -Body '{ "enabled": false, "message": "The demo is paused to save costs. Ask for access to have it switched on." }'
+# On again:
+Invoke-RestMethod -Method Put -Uri https://<host>/api/v1/system/availability -Headers $headers -ContentType 'application/json' -Body '{ "enabled": true }'
+```
+
+```bash
+curl -X PUT https://<host>/api/v1/system/availability -H "X-Api-Key: $DEMO_ADMIN_API_KEY" -H 'Content-Type: application/json'      -d '{"enabled": false, "message": "Paused until Monday."}'
+curl -X PUT https://<host>/api/v1/system/availability -H "X-Api-Key: $DEMO_ADMIN_API_KEY" -H 'Content-Type: application/json' -d '{"enabled": true}'
+```
+
+This is separate from the nightly reset's short maintenance window (writes only, a Redis flag with a TTL).
+
 ### Try the invoice scan
 
 Acme's first order, **PO-1001**, is seeded from Fabrikam Office: 2 × USB-C Dock and 2 × Laptop Stand, received in full. Fabrikam posts
