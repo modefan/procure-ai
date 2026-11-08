@@ -447,6 +447,13 @@ each with the same layout: `DEMO PASSWORDS.txt`, `hosted\` (without its run-time
 copy. The script prints names and counts only, never contents. **Run it after any change** to a secret, key, the Terraform state or
 DEMO PASSWORDS.txt (a reinstall, `new-secrets.ps1` generating a value, a new deploy key or token).
 
+Who can read the copies: before copying, the script gives each destination folder the same ACL as `%USERPROFILE%\.procure-ai`
+(`Set-CurrentUserOnlyAcl`: only Dale's Windows user, inheritance off at the folder, everything inside inheriting that one rule), and both
+modes check every file and subfolder and report any other identity (`ACCESS` lines, exit 1). OneDrive syncs as Dale's user, so syncing is
+unaffected. A destination inside a git repository is refused before anything is created. Accepted risk (Dale, 2026-11-08, explained to
+him): the OneDrive copy is unencrypted, so anyone who gets into Dale's Microsoft account can read every secret of the demo, and the
+Contabo MFA recovery codes sit in the same folder as the Contabo password.
+
 **Recovering the hosted setup** (the VM still runs; the PC or the folder is lost):
 
 1. A PC with the tools of "Bringing it up", the env vars (the tokens are in DEMO PASSWORDS.txt), and both repos cloned.
