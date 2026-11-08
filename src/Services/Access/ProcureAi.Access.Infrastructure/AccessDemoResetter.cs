@@ -14,7 +14,7 @@ namespace ProcureAi.Access.Infrastructure;
 /// <summary>
 /// The Access part of the nightly demo reset (plan 06 ruling 4): Wolverine's envelopes and the service's own <c>audit_entries</c>, then the matrices, departments, cost centers and
 /// users of every tenant are deleted and <see cref="DemoSeeder"/> writes them again, in one transaction, so no caller ever sees a tenant
-/// without its matrix. Kept: the tenants themselves, and the users who registered themselves into the Demo company (their Keycloak
+/// without its matrix. Kept: the tenants themselves, the system switch (a reset never switches the demo on or off), and the users who registered themselves into the Demo company (their Keycloak
 /// accounts stay too; Keycloak is not touched). Afterwards one <c>AccessChanged(Matrix)</c> per tenant evicts every service's cached Access
 /// answers, also those cached while the reset ran.
 /// </summary>
@@ -33,7 +33,7 @@ public sealed class AccessDemoResetter(
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             var deleted = await EfDemoReset.DeleteAllRowsAsync(
-                db, entity => entity is Tenant || entity is TenantUser { TenantId: DemoTenant } user && !seededDemoUsers.Contains(user.UserId),
+                db, entity => entity is Tenant || entity is SystemSettings || entity is TenantUser { TenantId: DemoTenant } user && !seededDemoUsers.Contains(user.UserId),
                 cancellationToken);
             await DemoSeeder.SeedAsync(db, cancellationToken);
             await transaction.CommitAsync(cancellationToken);

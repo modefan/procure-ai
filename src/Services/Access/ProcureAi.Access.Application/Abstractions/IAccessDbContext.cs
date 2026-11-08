@@ -17,6 +17,9 @@ public interface IAccessDbContext
 
     DbSet<TenantUser> TenantUsers { get; }
 
+    /// <summary>The system-wide switch (one row, no tenant filter).</summary>
+    DbSet<SystemSettings> SystemSettings { get; }
+
     ChangeTracker ChangeTracker { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);

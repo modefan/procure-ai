@@ -59,3 +59,6 @@ public sealed record AccessExplanationDto(
     string UserId, string DisplayName, string TenantId, IReadOnlyList<string> Roles,
     IReadOnlyDictionary<string, IReadOnlyList<string>> PermissionSources, IReadOnlyList<string> CostCenterCodes,
     IReadOnlyList<string> DepartmentCodes, decimal ApprovalLimit, bool IsFinanceApprover);
+
+/// <summary>Whether the demo is switched on, and what the maintenance page says while it is off (null: its default text).</summary>
+public sealed record SystemAvailabilityDto(bool Enabled, string? Message);

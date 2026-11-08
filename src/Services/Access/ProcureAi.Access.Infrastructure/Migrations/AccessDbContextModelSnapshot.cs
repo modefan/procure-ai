@@ -106,6 +106,39 @@ namespace ProcureAi.Access.Infrastructure.Migrations
                     b.ToTable("permission_matrices", (string)null);
                 });
 
+            modelBuilder.Entity("ProcureAi.Access.Domain.SystemSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("ChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("changed_at");
+
+                    b.Property<string>("ChangedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("changed_by");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("message");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("system_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_system_settings_single_row", "id = 1");
+                        });
+                });
+
             modelBuilder.Entity("ProcureAi.Access.Domain.Tenant", b =>
                 {
                     b.Property<string>("Id")

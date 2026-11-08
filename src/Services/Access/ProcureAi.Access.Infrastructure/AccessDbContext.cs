@@ -26,6 +26,9 @@ public sealed class AccessDbContext(DbContextOptions<AccessDbContext> options, I
 
     public DbSet<TenantUser> TenantUsers => Set<TenantUser>();
 
+    /// <summary>The system-wide switch: no tenant filter (it is not tenant data).</summary>
+    public DbSet<SystemSettings> SystemSettings => Set<SystemSettings>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AccessDbContext).Assembly);
