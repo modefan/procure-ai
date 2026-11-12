@@ -1,0 +1,119 @@
+{{- $m := .Values.mongo }}
+{{- $labels := dict "root" $ "name" "mongo-ui" }}
+{{- $s := .Values.stores.mongo }}
+# DbGate (MongoDB web UI) at https://<hosts.mongo> (plan 08b Task 4): browser basic auth with its own login (Secret operator-mongo-ui),
+# two connections defined here (DbGate then offers no "add connection"): "read-only" as operator_reader (read on every app database;
+# DbGate's read-only mode on top) and "root (emergency)" as the server's root user, whose password DbGate asks for (DEMO PASSWORDS.txt).
+# MongoDB requires TLS: the internal CA (ConfigMap procure-ca, bootstrap/new-local-ca.ps1). The member's name in the replica set is
+# `mongo`, so the pod resolves short names in the stores' namespace too (dnsConfig) and the driver finds it.
+{{ include "procure-ops.service" $labels }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-ui
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-ops.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-ops.labels" $labels | nindent 8 }}
+    spec:
+      {{- include "procure-ops.podSecurity" (dict "uid" $m.uid "gid" $m.gid) | nindent 6 }}
+      dnsConfig:
+        searches:
+          - {{ printf "%s.svc.cluster.local" .Values.stores.namespace }}
+      containers:
+        - name: dbgate
+          image: {{ $m.image | quote }}
+          imagePullPolicy: {{ $m.imagePullPolicy }}
+          env:
+            - name: HOME
+              value: /data
+            - name: BASIC_AUTH
+              value: "1"
+            - name: LOGIN
+              value: {{ $m.login | quote }}
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $m.secretName }}
+                  key: password
+            - name: USAGE_ANALYTICS
+              value: "false"
+            - name: CONNECTIONS
+              value: reader,root
+            - name: READER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $m.secretName }}
+                  key: reader-password
+            - name: LABEL_reader
+              value: procure MongoDB (read-only)
+            - name: ENGINE_reader
+              value: mongo@dbgate-plugin-mongo
+            # The password is letters and digits (bootstrap/new-secrets.ps1), so it needs no escaping in the URL.
+            - name: URL_reader
+              value: {{ printf "mongodb://operator_reader:$(READER_PASSWORD)@%s:%d/?authSource=admin&directConnection=true&tls=true&tlsCAFile=/etc/procure-ca/ca.crt" $s.service (int $s.port) | quote }}
+            - name: READONLY_reader
+              value: "1"
+            - name: LABEL_root
+              value: procure MongoDB root (emergency, password from DEMO PASSWORDS.txt)
+            - name: ENGINE_root
+              value: mongo@dbgate-plugin-mongo
+            - name: SERVER_root
+              value: {{ $s.service | quote }}
+            - name: PORT_root
+              value: {{ $s.port | quote }}
+            - name: USER_root
+              value: {{ $s.rootUser | quote }}
+            - name: PASSWORD_MODE_root
+              value: askPassword
+            - name: USE_SSL_root
+              value: "1"
+            - name: SSL_CA_FILE_root
+              value: /etc/procure-ca/ca.crt
+            - name: SSL_REJECT_UNAUTHORIZED_root
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          {{- include "procure-ops.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            - name: procure-ca
+              mountPath: /etc/procure-ca
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: procure-ca
+          configMap:
+            name: procure-ca
+---
+{{ include "procure-ops.ingress" (dict "root" $ "name" "mongo-ui" "host" .Values.hosts.mongo) }}

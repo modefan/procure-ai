@@ -50,6 +50,15 @@ spec:
               # A quoted config string: escape \ and " so any password survives.
               escaped=$(printf '%s' "$REDIS_PASSWORD" | sed 's/[\\"]/\\&/g')
               printf 'requirepass "%s"\n' "$escaped" > /run/redis/redis.conf
+              {{- with .Values.operatorReaders.redis }}{{- if .key }}
+              # The operator's read-only ACL user (plan 08b Task 4; Redis Insight on the public operator host connects as it): only the
+              # SHA-256 of its password goes into the file. Reads of any key, SCAN and what Redis Insight asks about the server; no write,
+              # no KEYS (blocks the server), no FLUSH*, CONFIG, DEBUG, ACL, SCRIPT/EVAL, MONITOR or pub/sub.
+              if [ -n "${OPERATOR_READER_PASSWORD:-}" ]; then
+                hash=$(printf '%s' "$OPERATOR_READER_PASSWORD" | sha256sum | cut -d' ' -f1)
+                printf 'user {{ .user }} reset on #%s ~* resetchannels -@all {{ .commands }}\n' "$hash" >> /run/redis/redis.conf
+              fi
+              {{- end }}{{- end }}
               exec redis-server /run/redis/redis.conf --maxmemory {{ $r.MaxMemory }} --maxmemory-policy {{ $r.MaxMemoryPolicy }}
           env:
             - name: REDIS_PASSWORD
@@ -57,6 +66,14 @@ spec:
                 secretKeyRef:
                   name: procure-redis
                   key: password
+            {{- with .Values.operatorReaders.redis }}{{- if .key }}
+            # The operator's read-only user (operatorReaders.redis), when set: the key must exist (bootstrap/new-secrets.ps1).
+            - name: OPERATOR_READER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-redis
+                  key: {{ .key }}
+            {{- end }}{{- end }}
           ports:
             - name: redis
               containerPort: 6379

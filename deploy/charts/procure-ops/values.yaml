@@ -1,0 +1,86 @@
+# procure-ops: the operator's web UIs for the data stores (plan 08b Task 4), in their own namespace (the GitOps repo's Application
+# `operator`). Dale's rule (2026-11-08): every component reachable from any browser on its own address with its own login, not through
+# Keycloak or the gateway, so he can look when parts of the site are down; only Dale and Claude can sign in (every login is a long
+# generated secret, kept in DEMO PASSWORDS.txt and the cluster Secret only). Environment values (hosts, e-mail) come from the GitOps repo's
+# envs/<env>/operator.yaml. No secrets here: the Secrets below are made by bootstrap/new-secrets.ps1 in the GitOps repo.
+#
+#   tool           host                 login (Secret in this namespace)                     connects as (read-only by default)
+#   pgAdmin        hosts.pgadmin        e-mail + password + authenticator code (operator-pgadmin)   operator_reader; the superuser by typed password
+#   DbGate         hosts.mongo          browser basic auth (operator-mongo-ui)               operator_reader; root by typed password
+#   Redis Insight  hosts.redis          Traefik basic auth (operator-redis-insight-basic-auth)  operator_reader (ACL, reads only)
+#
+# The platform chart lets each tool reach its store (procure-platform operatorAccess.tools) and creates the read-only users
+# (operatorReaders). RabbitMQ's management UI, Keycloak's admin console and the break-glass dashboard are in their own charts.
+
+hosts:
+  pgadmin: pgadmin.procure.localtest.me
+  mongo: mongo.procure.localtest.me
+  redis: redis.procure.localtest.me
+
+ingressClassName: traefik
+
+# Where the stores live (the platform's namespace and Services).
+stores:
+  namespace: procure
+  postgres: { service: postgres, port: 5432 }
+  mongo: { service: mongo, port: 27017, rootUser: admin }
+  redis: { service: redis, port: 6379 }
+
+# Traefik middlewares on every host: a per-client-address rate limit (Traefik takes 80/443 as host ports, so the remote address is the
+# visitor's own; as the platform's keycloak-ratelimit) and security headers. HSTS comes from Traefik's entry point (bootstrap).
+rateLimit: { average: 300, period: 1m, burst: 100 }
+headers:
+  customFrameOptionsValue: SAMEORIGIN
+  contentTypeNosniff: true
+  referrerPolicy: no-referrer
+  customResponseHeaders:
+    X-Robots-Tag: "noindex, nofollow"
+
+networkPolicies:
+  enabled: true
+  # Where cluster DNS runs (egress to it is allowed for every tool).
+  dns:
+    namespace: kube-system
+    podLabels: { k8s-app: kube-dns }
+
+pgadmin:
+  # pgAdmin 4 9.19 (2026-10-29), the newest release; pinned.
+  image: docker.io/dpage/pgadmin4:9.19.0
+  imagePullPolicy: IfNotPresent
+  # The image's pgadmin user (uid 5050, group 0).
+  uid: 5050
+  gid: 0
+  # The one pgAdmin user (an administrator), created at every start from Secret operator-pgadmin (password, totp-base32). pgAdmin wants an
+  # e-mail address as the user name; nothing is ever sent to it.
+  email: operator@procure.localtest.me
+  secretName: operator-pgadmin
+  resources:
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 256Mi, cpu: 50m }
+
+mongo:
+  # DbGate Community 7.3.6 (2026-11-12; GPL-3.0, released every few weeks) as the MongoDB web UI. Not mongo-express: its last release is
+  # 1.0.2 from 2023 and its newest image (2024-11) runs Node 20, which reached its end of life in 2026-04 (plan 08b Task 4 ruling).
+  image: docker.io/dbgate/dbgate:7.3.6-alpine
+  imagePullPolicy: IfNotPresent
+  uid: 1000
+  gid: 1000
+  # Browser basic auth (DbGate's BASIC_AUTH): no token in the browser's storage, the credentials go with every request over https only.
+  login: operator
+  secretName: operator-mongo-ui
+  resources:
+    limits: { memory: 512Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }
+
+redisInsight:
+  # Redis Insight 3.8.0 (2026-07-21), the newest release; pinned. It has no login of its own: Traefik basic auth in front.
+  image: docker.io/redis/redisinsight:3.8.0
+  imagePullPolicy: IfNotPresent
+  uid: 1000
+  gid: 1000
+  secretName: operator-redis-insight
+  # kubernetes.io/basic-auth Secret (username, password) that Traefik's basicAuth middleware reads.
+  basicAuthSecretName: operator-redis-insight-basic-auth
+  resources:
+    limits: { memory: 384Mi, cpu: "1" }
+    requests: { memory: 192Mi, cpu: 50m }

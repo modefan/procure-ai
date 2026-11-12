@@ -1,0 +1,215 @@
+# The operator's direct access (plan 08b Task 4): every component on its own address with its own login, the read-only users the tools
+# connect as, and nothing of it unless an environment switches it on.
+suite: operator access
+templates:
+  - operator-access.yaml
+  - redis.yaml
+  - rabbitmq.yaml
+  - keycloak.yaml
+  - keycloak-config-job.yaml
+  - db-roles-job.yaml
+set:
+  global.imageTag: abc1234
+tests:
+  - it: is off by default (no Ingress, middleware or policy for the operator)
+    template: operator-access.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: nothing operator-related reaches the stores, the broker job or Keycloak by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OPERATOR_READER_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-redis, key: operator-reader-password } }
+        template: redis.yaml
+        documentSelector: { path: kind, value: Deployment }
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: operator
+        template: rabbitmq.yaml
+        documentSelector: { path: kind, value: Job }
+
+  - it: RabbitMQ's management UI gets its own host, rate limit and headers, and Traefik reaches only the management port
+    template: operator-access.yaml
+    set:
+      hosts.rabbitmq: rabbitmq.example.test
+      operatorAccess.rabbitmq.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 4
+      - equal:
+          path: spec.rules[0]
+          value:
+            host: rabbitmq.example.test
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend: { service: { name: rabbitmq, port: { name: management } } }
+        documentSelector: { path: kind, value: Ingress }
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+          value: NAMESPACE-operator-ratelimit@kubernetescrd,NAMESPACE-operator-headers@kubernetescrd
+        documentSelector: { path: kind, value: Ingress }
+      - equal:
+          path: spec.rateLimit
+          value: { average: 300, period: 1m, burst: 100 }
+        documentSelector: { path: metadata.name, value: operator-ratelimit }
+      - equal:
+          path: spec.ingress[0].ports
+          value: [{ port: management, protocol: TCP }]
+        documentSelector: { path: kind, value: NetworkPolicy }
+
+  - it: the management UI needs a host
+    template: operator-access.yaml
+    set:
+      operatorAccess.rabbitmq.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: operatorAccess.rabbitmq.enabled needs hosts.rabbitmq
+
+  - it: each operator tool may reach exactly its own store's port
+    template: operator-access.yaml
+    set:
+      operatorAccess.tools: { postgres: pgadmin, mongo: mongo-ui, redis: redis-insight }
+    asserts:
+      - hasDocuments:
+          count: 3
+      - equal:
+          path: spec
+          value:
+            podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }
+            policyTypes: [Ingress]
+            ingress:
+              - from:
+                  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: operator } }
+                    podSelector: { matchLabels: { app.kubernetes.io/name: pgadmin } }
+                ports:
+                  - { port: 5432, protocol: TCP }
+        documentSelector: { path: metadata.name, value: allow-operator-pgadmin-to-postgres }
+      - equal:
+          path: spec.ingress[0].ports
+          value: [{ port: 6379, protocol: TCP }]
+        documentSelector: { path: metadata.name, value: allow-operator-redis-insight-to-redis }
+
+  - it: Redis gets the read-only ACL user (only the password's SHA-256 in its config) when its key is named
+    template: redis.yaml
+    set:
+      operatorReaders.redis.key: operator-reader-password
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OPERATOR_READER_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-redis, key: operator-reader-password } }
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "user operator_reader reset on #%s ~\\* resetchannels -@all \\+@read -keys "
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'sha256sum'
+
+  - it: the broker job keeps the operator's own management user when it is configured
+    template: rabbitmq.yaml
+    set:
+      rabbitmq.operator: { key: operator-password, user: operator, tags: administrator }
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OPERATOR_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-rabbitmq, key: operator-password } }
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "api/users/operator'"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "tags.*administrator"
+
+  - it: the admin console and the master realm reach the public host only with adminConsole
+    template: keycloak.yaml
+    set:
+      keycloak.ingress.publicPathsOnly: true
+      keycloak.ingress.publicRealms: [procure, ops]
+      keycloak.ingress.adminConsole: true
+    documentSelector: { path: kind, value: Ingress }
+    asserts:
+      - lengthEqual: { path: "spec.rules[0].http.paths", count: 5 }
+      - equal: { path: "spec.rules[0].http.paths[0].path", value: /realms/procure/ }
+      - equal: { path: "spec.rules[0].http.paths[1].path", value: /realms/ops/ }
+      - equal: { path: "spec.rules[0].http.paths[2].path", value: /resources/ }
+      - equal: { path: "spec.rules[0].http.paths[3].path", value: /admin/ }
+      - equal: { path: "spec.rules[0].http.paths[4].path", value: /realms/master/ }
+
+  - it: without adminConsole the master realm stays off the public host
+    template: keycloak.yaml
+    set:
+      keycloak.ingress.publicPathsOnly: true
+      keycloak.ingress.publicRealms: [procure, ops]
+    documentSelector: { path: kind, value: Ingress }
+    asserts:
+      - notContains:
+          path: spec.rules[0].http.paths
+          content:
+            path: /realms/master/
+            pathType: Prefix
+            backend: { service: { name: keycloak, port: { name: http } } }
+          any: true
+
+  - it: the master realm file is applied and Dale's own admin is kept when switched on
+    template: keycloak-config-job.yaml
+    set:
+      keycloakConfig.masterRealm.enabled: true
+      keycloakConfig.operatorUser: { username: operator, passwordKey: operator-password, totpKey: operator-totp-base32 }
+    asserts:
+      - hasDocuments:
+          count: 2
+      - matchRegex:
+          path: data["master-realm.json"]
+          pattern: '"browserFlow": "operator browser"'
+        documentSelector: { path: kind, value: ConfigMap }
+      - matchRegex:
+          path: data["master-realm.json"]
+          pattern: '"authenticator": "auth-otp-form",\s*"authenticatorFlow": false,\s*"requirement": "REQUIRED"'
+        documentSelector: { path: kind, value: ConfigMap }
+      - matchRegex:
+          path: data["master-realm.json"]
+          pattern: '"permanentLockout": false'
+        documentSelector: { path: kind, value: ConfigMap }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: IMPORT_FILES_LOCATIONS, value: "file:/config/procure-realm.json,file:/config/ops-realm.json,file:/master/master-realm.json" }
+        documentSelector: { path: kind, value: Job }
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: operator-user
+        documentSelector: { path: kind, value: Job }
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OPERATOR_TOTP_BASE32
+            valueFrom: { secretKeyRef: { name: procure-keycloak, key: operator-totp-base32 } }
+        documentSelector: { path: kind, value: Job }
+
+  - it: the db-roles job creates the read-only database users only when their keys are named
+    template: db-roles-job.yaml
+    set:
+      operatorReaders.postgresKey: operator-reader-postgres-password
+      operatorReaders.mongoKey: operator-reader-mongo-password
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_OPERATOR_READER_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-db-roles, key: operator-reader-postgres-password } }
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content:
+            name: OPERATOR_READER_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-db-roles, key: operator-reader-mongo-password } }

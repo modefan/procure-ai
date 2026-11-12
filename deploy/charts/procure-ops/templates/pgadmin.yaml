@@ -1,0 +1,147 @@
+{{- $p := .Values.pgadmin }}
+{{- $labels := dict "root" $ "name" "pgadmin" }}
+{{- $pg := .Values.stores.postgres }}
+{{- $pgHost := printf "%s.%s.svc.cluster.local" $pg.service .Values.stores.namespace }}
+# pgAdmin 4 at https://<hosts.pgadmin> (plan 08b Task 4): its own sign-in (e-mail, password, authenticator code), all databases of the
+# Postgres server. Two servers are listed: "read-only" (operator_reader: pg_read_all_data, every database, default_transaction_read_only;
+# the password comes from the mounted Secret and is never stored) and "superuser (emergency)" (postgres; pgAdmin asks for the password,
+# DEMO PASSWORDS.txt, and does not keep it). Everything pgAdmin keeps is in an emptyDir: every start begins from this configuration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgadmin-config
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+data:
+  config_system.py: |-
+    {{- .Files.Get "files/pgadmin/config_system.py" | nindent 4 }}
+  seed-mfa.py: |-
+    {{- .Files.Get "files/pgadmin/seed-mfa.py" | nindent 4 }}
+  servers.json: |-
+    {{- $servers := dict
+          "1" (dict "Name" "procure (read-only)" "Group" "procure" "Host" $pgHost "Port" (int $pg.port) "MaintenanceDB" "postgres"
+                    "Username" "operator_reader" "SSLMode" "prefer" "PasswordExecCommand" "operator-reader"
+                    "Comment" "operator_reader: reads every database, cannot write. Password from the cluster Secret.")
+          "2" (dict "Name" "procure (superuser, emergency)" "Group" "procure" "Host" $pgHost "Port" (int $pg.port) "MaintenanceDB" "postgres"
+                    "Username" "postgres" "SSLMode" "prefer"
+                    "Comment" "Can change anything. Password: DEMO PASSWORDS.txt, procure-ai hosted secrets, postgres-password. Not stored.") }}
+    {{- dict "Servers" $servers | toPrettyJson | nindent 4 }}
+---
+{{ include "procure-ops.service" $labels }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  # pgAdmin's sessions live in its pod: one at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-ops.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-ops.labels" $labels | nindent 8 }}
+      annotations:
+        checksum/config: {{ print (.Files.Get "files/pgadmin/config_system.py") (.Files.Get "files/pgadmin/seed-mfa.py") $pgHost | sha256sum }}
+    spec:
+      {{- include "procure-ops.podSecurity" (dict "uid" $p.uid "gid" $p.gid) | nindent 6 }}
+      containers:
+        - name: pgadmin
+          image: {{ $p.image | quote }}
+          imagePullPolicy: {{ $p.imagePullPolicy }}
+          # The image's entrypoint, with seed-mfa.py next to it (it sets the authenticator once the entrypoint has created the user).
+          command: [bash, -c]
+          args:
+            - /venv/bin/python3 /etc/pgadmin/seed-mfa.py & exec /entrypoint.sh
+          env:
+            - name: PGADMIN_DEFAULT_EMAIL
+              value: {{ $p.email | quote }}
+            - name: PGADMIN_DEFAULT_PASSWORD_FILE
+              value: /etc/pgadmin-secrets/password
+            - name: PGADMIN_LISTEN_PORT
+              value: "8080"
+            # The entrypoint writes config_distro.py at start; the root filesystem is read-only, so it goes to an emptyDir.
+            - name: PGADMIN_CUSTOM_CONFIG_DISTRO_FILE
+              value: /run/pgadmin-config/config_distro.py
+            - name: PGADMIN_SERVER_JSON_FILE
+              value: /etc/pgadmin/servers.json
+            - name: PGADMIN_REPLACE_SERVERS_ON_STARTUP
+              value: "True"
+            # No mail server: the image would start postfix with sudo.
+            - name: PGADMIN_DISABLE_POSTFIX
+              value: "1"
+            - name: GUNICORN_ACCESS_LOGFILE
+              value: "-"
+            - name: HOME
+              value: /var/lib/pgadmin
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # The first start takes a minute or two (database, servers); liveness only counts after it.
+          startupProbe:
+            httpGet:
+              path: /misc/ping
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          # No traffic before the authenticator is set (seed-mfa.py leaves the marker).
+          readinessProbe:
+            exec:
+              command: [test, -f, /var/lib/pgadmin/.mfa-ready]
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /misc/ping
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+          {{- include "procure-ops.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/pgadmin
+            - name: distro
+              mountPath: /run/pgadmin-config
+            - name: run
+              mountPath: /run/pgadmin
+            - name: tmp
+              mountPath: /tmp
+            - name: config
+              mountPath: /etc/pgadmin
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/pgadmin-secrets
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: distro
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: config
+          configMap:
+            name: pgadmin-config
+        # password (the pgAdmin user's), totp-base32 (its authenticator), reader-password (operator_reader's).
+        - name: secrets
+          secret:
+            secretName: {{ $p.secretName }}
+            defaultMode: 0440
+---
+{{ include "procure-ops.ingress" (dict "root" $ "name" "pgadmin" "host" .Values.hosts.pgadmin) }}

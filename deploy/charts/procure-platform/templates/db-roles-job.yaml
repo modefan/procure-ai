@@ -89,6 +89,14 @@ spec:
                 secretKeyRef:
                   name: procure-db-roles
                   key: audit-log-reader-password
+            {{- with .Values.operatorReaders.postgresKey }}
+            # The operator's read-only role operator_reader (plan 08b Task 4), when operatorReaders.postgresKey names its key.
+            - name: DB_OPERATOR_READER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-db-roles
+                  key: {{ . }}
+            {{- end }}
           resources:
             {{- toYaml .Values.helperResources | nindent 12 }}
           {{- include "procure-platform.containerSecurity" . | nindent 10 }}
@@ -134,6 +142,14 @@ spec:
                   key: mongo-password
             - name: DEBEZIUM_MONGO_DATABASES
               value: {{ $mongoDatabases | uniq | join "," | quote }}
+            {{- with .Values.operatorReaders.mongoKey }}
+            # The operator's read-only user operator_reader (plan 08b Task 4), when operatorReaders.mongoKey names its key.
+            - name: OPERATOR_READER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-db-roles
+                  key: {{ . }}
+            {{- end }}
             - name: HOME
               value: /tmp
           resources:

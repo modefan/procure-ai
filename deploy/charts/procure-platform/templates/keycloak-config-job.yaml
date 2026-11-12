@@ -19,7 +19,26 @@
 #   access        the bootstrap admin (Secret procure-keycloak) on the master realm, through the Service: the only account that can change
 #                 the realm on an existing cluster (a realm-scoped client would first have to be created by this very Job); the public
 #                 ingress does not route /admin (publicPathsOnly), and NetworkPolicy allow-direct-callers-keycloak lets this Job's pods in.
+#   master realm  with keycloakConfig.masterRealm.enabled (plan 08b Task 4) also files/keycloak-master-realm.json (ConfigMap
+#                 keycloak-config-master): the admin console's sign-in asks for a one-time code, password guessers are locked out a while.
+#   operator user with keycloakConfig.operatorUser (plan 08b Task 4) a second container (kcadm in our Keycloak image) keeps Dale's own
+#                 master-realm admin: password and authenticator secret from Secret procure-keycloak (keys must exist when it is on).
 {{- if $c.enabled }}
+{{- if $c.masterRealm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-config-master
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+  annotations:
+    # Before the hook Job that mounts it (wave 1).
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  master-realm.json: |-
+    {{- .Files.Get "files/keycloak-master-realm.json" | nindent 4 }}
+---
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -82,7 +101,7 @@ spec:
                   name: procure-keycloak
                   key: admin-password
             - name: IMPORT_FILES_LOCATIONS
-              value: file:/config/procure-realm.json,file:/config/ops-realm.json
+              value: {{ ternary "file:/config/procure-realm.json,file:/config/ops-realm.json,file:/master/master-realm.json" "file:/config/procure-realm.json,file:/config/ops-realm.json" $c.masterRealm.enabled }}
             # Apply the file on every run, not only when it changed: the cache would skip an unchanged file and keep a hand change.
             - name: IMPORT_CACHE_ENABLED
               value: "false"
@@ -128,10 +147,72 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if $c.masterRealm.enabled }}
+            - name: master
+              mountPath: /master
+              readOnly: true
+            {{- end }}
+        {{- with $c.operatorUser }}
+        # Dale's own admin in the master realm (plan 08b Task 4), apart from the bootstrap admin the automation signs in as: password and a
+        # pre-set authenticator (TOTP) secret from Secret procure-keycloak, so Claude can compute the code from DEMO PASSWORDS.txt. Created
+        # when missing; recreated when the TOTP secret changed (its SHA-256 is kept in a user attribute; Keycloak has no API that replaces
+        # an OTP credential); otherwise only the password is set again and the admin role ensured. Secrets go into files in a memory
+        # volume, never argv. Skipped when either key is missing.
+        - name: operator-user
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" $.Values.keycloak.image) | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - {{ $.Files.Get "files/keycloak-operator-user.sh" | quote }}
+          env:
+            - name: OPERATOR_USERNAME
+              value: {{ .username | quote }}
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-password
+            - name: OPERATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: {{ .passwordKey }}
+            - name: OPERATOR_TOTP_BASE32
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: {{ .totpKey }}
+            - name: HOME
+              value: /run/kcadm
+            - name: JAVA_OPTS
+              value: "-Xms32m -Xmx128m -XX:+ExitOnOutOfMemoryError"
+          resources:
+            {{- toYaml $.Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" $ | nindent 10 }}
+          volumeMounts:
+            - name: kcadm
+              mountPath: /run/kcadm
+        {{- end }}
       volumes:
         - name: config
           emptyDir:
             sizeLimit: 8Mi
+        {{- if $c.masterRealm.enabled }}
+        - name: master
+          configMap:
+            name: keycloak-config-master
+        {{- end }}
+        {{- if $c.operatorUser }}
+        - name: kcadm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- end }}
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi

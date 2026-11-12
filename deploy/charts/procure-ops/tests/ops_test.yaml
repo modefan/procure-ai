@@ -1,0 +1,201 @@
+# The operator's web UIs for the data stores (plan 08b Task 4): own logins, read-only by default, locked-down pods, rate limit per host,
+# and each tool reaches only its own store.
+suite: operator tools
+templates:
+  - common.yaml
+  - pgadmin.yaml
+  - mongo-ui.yaml
+  - redis-insight.yaml
+release:
+  name: operator
+  namespace: operator
+tests:
+  - it: every tool runs a pinned current image, non-root, read-only root filesystem, no capabilities, limits and requests
+    documentSelector:
+      path: kind
+      value: Deployment
+      matchMany: true
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^docker\.io/[a-z0-9]+/[a-z0-9]+:\d+\.\d+\.\d+(-alpine)?$'
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      - exists:
+          path: spec.template.spec.containers[0].resources.limits.memory
+      - exists:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+      - exists:
+          path: spec.template.spec.containers[0].resources.requests.memory
+
+  - it: every host has TLS, the rate limit and the security headers in front
+    documentSelector:
+      path: kind
+      value: Ingress
+      matchMany: true
+    asserts:
+      - matchRegex:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+          pattern: '^operator-operator-ratelimit@kubernetescrd,operator-operator-headers@kubernetescrd'
+      - exists:
+          path: spec.tls[0].hosts[0]
+
+  - it: the rate limit is per client address
+    template: common.yaml
+    documentSelector: { path: metadata.name, value: operator-ratelimit }
+    asserts:
+      - equal:
+          path: spec.rateLimit
+          value: { average: 300, period: 1m, burst: 100 }
+
+  - it: Redis Insight has no login of its own, so Traefik's basic auth sits in front and the header never reaches it
+    template: redis-insight.yaml
+    documentSelector: { path: metadata.name, value: redis-insight-basic-auth }
+    asserts:
+      - equal:
+          path: spec.basicAuth
+          value: { secret: operator-redis-insight-basic-auth, realm: procure operator, removeHeader: true }
+
+  - it: Redis Insight's Ingress names the basic-auth middleware after the shared ones
+    template: redis-insight.yaml
+    documentSelector: { path: kind, value: Ingress }
+    asserts:
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+          value: operator-operator-ratelimit@kubernetescrd,operator-operator-headers@kubernetescrd,operator-redis-insight-basic-auth@kubernetescrd
+
+  - it: Redis Insight connects as the read-only ACL user
+    template: redis-insight.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: RI_REDIS_USERNAME, value: operator_reader }
+
+  - it: pgAdmin has its own sign-in with a required authenticator code, stores no database password and runs nothing local
+    template: pgadmin.yaml
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - matchRegex:
+          path: data["config_system.py"]
+          pattern: "AUTHENTICATION_SOURCES = \\['internal'\\]"
+      - matchRegex:
+          path: data["config_system.py"]
+          pattern: "MFA_ENABLED = True\\s+MFA_SUPPORTED_METHODS = \\['authenticator'\\]\\s+MFA_FORCE_REGISTRATION = True"
+      - matchRegex:
+          path: data["config_system.py"]
+          pattern: 'ALLOW_SAVE_PASSWORD = False'
+      - matchRegex:
+          path: data["config_system.py"]
+          pattern: 'ENABLE_PSQL = False'
+      - matchRegex:
+          path: data["config_system.py"]
+          pattern: 'SESSION_COOKIE_SECURE = True'
+      # The read-only server takes its password from the mounted Secret; the superuser one asks for it every time.
+      - matchRegex:
+          path: data["servers.json"]
+          pattern: '"Username": "operator_reader"'
+      - matchRegex:
+          path: data["servers.json"]
+          pattern: '"PasswordExecCommand": "operator-reader"'
+      - notMatchRegex:
+          path: data["servers.json"]
+          pattern: '"Password"\s*:'
+
+  - it: pgAdmin takes no traffic before the authenticator is set
+    template: pgadmin.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command
+          value: [test, -f, /var/lib/pgadmin/.mfa-ready]
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: PGADMIN_DEFAULT_PASSWORD_FILE, value: /etc/pgadmin-secrets/password }
+
+  - it: DbGate signs in with its own basic auth and its default connection is read-only
+    template: mongo-ui.yaml
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: BASIC_AUTH, value: "1" }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: READONLY_reader, value: "1" }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: PASSWORD_MODE_root, value: askPassword }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: USAGE_ANALYTICS, value: "false" }
+
+  - it: the namespace denies all ingress and egress by default
+    template: common.yaml
+    documentSelector: { path: metadata.name, value: default-deny }
+    asserts:
+      - equal:
+          path: spec
+          value: { podSelector: {}, policyTypes: [Ingress, Egress] }
+
+  - it: pgAdmin reaches only Postgres and only Traefik reaches it
+    template: common.yaml
+    documentSelector: { path: metadata.name, value: pgadmin }
+    asserts:
+      - equal:
+          path: spec.egress
+          value:
+            - to:
+                - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: procure } }
+                  podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }
+              ports:
+                - { port: 5432, protocol: TCP }
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels
+          value: { app.kubernetes.io/name: traefik }
+
+  - it: the MongoDB UI reaches only MongoDB
+    template: common.yaml
+    documentSelector: { path: metadata.name, value: mongo-ui }
+    asserts:
+      - equal:
+          path: spec.egress[0].ports
+          value: [{ port: 27017, protocol: TCP }]
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels
+          value: { app.kubernetes.io/name: mongo }
+
+  - it: Redis Insight reaches only Redis
+    template: common.yaml
+    documentSelector: { path: metadata.name, value: redis-insight }
+    asserts:
+      - equal:
+          path: spec.egress[0].ports
+          value: [{ port: 6379, protocol: TCP }]
+
+  - it: no policies when an environment switches them off
+    template: common.yaml
+    set:
+      networkPolicies.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: a tool without a host fails the render
+    template: pgadmin.yaml
+    set:
+      hosts.pgadmin: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: hosts for pgadmin is required

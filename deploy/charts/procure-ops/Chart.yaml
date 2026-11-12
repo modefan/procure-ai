@@ -1,0 +1,10 @@
+apiVersion: v2
+name: procure-ops
+description: >-
+  The operator's web UIs for ProcureAI's data stores (plan 08b Task 4, Dale 2026-11-08): pgAdmin (Postgres), DbGate (MongoDB) and Redis
+  Insight (Redis), each on its own public host with its own login (not Keycloak, not the gateway), so the data can be looked at from any
+  browser when parts of the site are down. They connect as read-only users by default. Own namespace; network policies let each tool
+  reach only its store.
+type: application
+version: 0.1.0
+appVersion: "plan08b"

@@ -7,10 +7,29 @@
 hosts:
   # The dashboard as the browser opens it (the aspire-dashboard client's redirect URI, procure-platform hosts.dashboard).
   dashboard: dashboard.procure.localtest.me
+  # The break-glass dashboard (dashboardDirect).
+  dashboardDirect: dashboard-direct.procure.localtest.me
   # Keycloak; the issuer https://<keycloak>/realms/procure, which pods reach through the CoreDNS rewrite (plan 07 ruling 8).
   keycloak: auth.procure.localtest.me
 
 ingressClassName: traefik
+
+# The break-glass dashboard (templates/dashboard-direct.yaml, plan 08b Task 4): a second dashboard with its own login (Traefik basic auth), not
+# Keycloak, for when Keycloak or the gateway is down. Same settings as `dashboard` below; the collector exports to both (exporter
+# otlp/direct, so keep it on: off, the collector would retry an address that does not exist).
+dashboardDirect:
+  enabled: true
+  # kubernetes.io/basic-auth Secret (username operator, password = DEMO PASSWORDS.txt operator-dashboard-token, 32 letters and digits) that
+  # Traefik's basicAuth middleware reads; bootstrap/new-secrets.ps1 in the GitOps repo makes it.
+  basicAuthSecretName: aspire-dashboard-direct-basic-auth
+  # Per client address, as the operator tools (procure-ops): the dashboard's pages poll, a password guesser gets about one try a second.
+  rateLimit: { average: 300, period: 1m, burst: 100 }
+  headers:
+    customFrameOptionsValue: SAMEORIGIN
+    contentTypeNosniff: true
+    referrerPolicy: no-referrer
+    customResponseHeaders:
+      X-Robots-Tag: "noindex, nofollow"
 
 # The namespace whose pods send OTLP (the apps) and whose platform pods' logs the collector reads.
 appNamespace: procure
@@ -296,6 +315,12 @@ opentelemetry-collector:
         endpoint: aspire-dashboard.observability:18889
         tls:
           insecure: true
+      # The break-glass dashboard (templates/dashboard-direct.yaml, plan 08b Task 4): the same telemetry, so it shows everything while
+      # Keycloak is down. Its own queue: one dashboard being down does not hold up the other.
+      otlp/direct:
+        endpoint: aspire-dashboard-direct.observability:18889
+        tls:
+          insecure: true
     service:
       extensions: [health_check]
       telemetry:
@@ -305,14 +330,14 @@ opentelemetry-collector:
         logs:
           receivers: [otlp, filelog]
           processors: [memory_limiter, filter/platform-noise, k8sattributes, transform/redact, transform/client-address, batch]
-          exporters: [otlp]
+          exporters: [otlp, otlp/direct]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [otlp]
+          exporters: [otlp, otlp/direct]
         traces:
           receivers: [otlp]
           # k8sattributes before tail_sampling: it finds the pod by the connection's address, which tail_sampling's regrouped batches no
           # longer carry.
           processors: [memory_limiter, k8sattributes, tail_sampling, transform/client-address, batch]
-          exporters: [otlp]
+          exporters: [otlp, otlp/direct]

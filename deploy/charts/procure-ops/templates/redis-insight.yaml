@@ -1,0 +1,102 @@
+{{- $r := .Values.redisInsight }}
+{{- $labels := dict "root" $ "name" "redis-insight" }}
+{{- $s := .Values.stores.redis }}
+# Redis Insight at https://<hosts.redis> (plan 08b Task 4). It has no login of its own, so Traefik asks for one first (basicAuth middleware,
+# Secret operator-redis-insight-basic-auth). One connection is defined here: operator_reader, the Redis ACL user that may read keys and
+# ask about the server, nothing else (procure-platform operatorReaders.redis). Redis holds the gateway's session tickets (visitors'
+# tokens): whoever passes this login can read them; only Dale and Claude have it. Its own data (settings, the connection) is an emptyDir:
+# every start begins from this configuration.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redis-insight-basic-auth
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  basicAuth:
+    secret: {{ $r.basicAuthSecretName }}
+    realm: procure operator
+    # Redis Insight must not see the Authorization header.
+    removeHeader: true
+---
+{{ include "procure-ops.service" $labels }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-insight
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "procure-ops.selector" $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "procure-ops.labels" $labels | nindent 8 }}
+    spec:
+      {{- include "procure-ops.podSecurity" (dict "uid" $r.uid "gid" $r.gid) | nindent 6 }}
+      containers:
+        - name: redis-insight
+          image: {{ $r.image | quote }}
+          imagePullPolicy: {{ $r.imagePullPolicy }}
+          env:
+            - name: RI_APP_PORT
+              value: "5540"
+            - name: RI_ACCEPT_TERMS_AND_CONDITIONS
+              value: "true"
+            - name: RI_FILES_LOGGER
+              value: "false"
+            # Encrypts what Redis Insight stores (the connection's password) in its local database.
+            - name: RI_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $r.secretName }}
+                  key: encryption-key
+            - name: RI_REDIS_HOST
+              value: {{ printf "%s.%s.svc.cluster.local" $s.service .Values.stores.namespace | quote }}
+            - name: RI_REDIS_PORT
+              value: {{ $s.port | quote }}
+            - name: RI_REDIS_ALIAS
+              value: procure Redis (read-only)
+            - name: RI_REDIS_USERNAME
+              value: operator_reader
+            - name: RI_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $r.secretName }}
+                  key: reader-password
+          ports:
+            - name: http
+              containerPort: 5540
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml $r.resources | nindent 12 }}
+          {{- include "procure-ops.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+{{ include "procure-ops.ingress" (dict "root" $ "name" "redis-insight" "host" .Values.hosts.redis "extra" (list "redis-insight-basic-auth")) }}

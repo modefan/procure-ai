@@ -64,4 +64,16 @@ ensureUser('debezium', required('DEBEZIUM_MONGO_PASSWORD'), [
   ...[...new Set(captured)].map(d => ({ role: 'read', db: d })),
   { role: 'debeziumChangeStreams', db: 'admin' },
 ]);
+// The operator's read-only user (plan 08b Task 4): what the MongoDB web UI on the public operator host connects as, so looking at the data
+// cannot change it. read on every app database (the services' and the captured ones), nothing else. Only where OPERATOR_READER_PASSWORD
+// is set (the clusters: Secret procure-db-roles, key operator-reader-mongo-password); the AppHost and the tests do not set it, and a user left
+// from an earlier run is then removed.
+const operatorPassword = process.env.OPERATOR_READER_PASSWORD;
+if (operatorPassword) {
+  ensureUser('operator_reader', operatorPassword,
+    [...new Set(['suppliersdb', 'assistantchatdb', ...captured])].map(d => ({ role: 'read', db: d })));
+} else if (admin.runCommand({ usersInfo: { user: 'operator_reader', db: 'admin' } }).users.length > 0) {
+  admin.runCommand({ dropUser: 'operator_reader' });
+  print('user operator_reader: removed (OPERATOR_READER_PASSWORD not set)');
+}
 print('users.js: done');

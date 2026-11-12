@@ -27,6 +27,8 @@ hosts:
   # The standalone Aspire dashboard (the aspire-dashboard client's redirect URI: KC_DASHBOARD_BASE_URL).
   dashboard: dashboard.procure.localtest.me
   mailpit: mail.procure.localtest.me
+  # RabbitMQ's management UI for the operator (operatorAccess.rabbitmq; plan 08b Task 4). Empty: none.
+  rabbitmq: ""
 
 # Mirrors src/AppHost/ProcureAi.AppHost/appsettings.json "Resources" value for value (AppHost.Tests PlatformChartTests checks it).
 # MemoryMb and Cpus are each container's limits (docker --memory / --cpus under the AppHost). Keep one flow mapping per line.
@@ -77,6 +79,11 @@ rabbitmq:
   storage: 1Gi
   # The topic exchange Debezium publishes changes to (ResourceNames.CdcExchange); declared by the rabbitmq-cdc-exchange hook Job.
   cdcExchange: cdc
+  # The operator's own management login (plan 08b Task 4): the rabbitmq-cdc-exchange Job creates or updates this user with the password
+  # from Secret procure-rabbitmq key `key` (when that key exists) on every sync. Not the apps' user: Dale signs in to the management UI
+  # (operatorAccess.rabbitmq) with this one. Tags: administrator (users, policies, purge and move in an emergency).
+  # { key: operator-password, user: operator, tags: administrator } in envs/<env>/platform.yaml; null: none.
+  operator: null
 
 keycloak:
   image: procure-ai-keycloak   # our image (infra/keycloak): kc.sh build --db=postgres --health-enabled=true, realm baked in
@@ -92,6 +99,10 @@ keycloak:
     publicPathsOnly: false
     # The realms the public host serves when publicPathsOnly is on (the app's realm, and ops when Argo CD signs in there; never master).
     publicRealms: [procure]
+    # With publicPathsOnly: also serve the admin console (/admin/) and the master realm (/realms/master/) on the public host (plan 08b
+    # Task 4: Dale manages Keycloak from any browser). The master realm then asks for a one-time code at sign-in and locks out password
+    # guessers for a while (keycloakConfig.masterRealm). Without publicPathsOnly (local) every path is served anyway.
+    adminConsole: false
     # Per-client-address rate limits on Keycloak's host (templates/keycloak-ratelimit.yaml; plan 08 fix wave rulings R6b/R6c: slows
     # password guessing without a per-user lockout in the demo realm, which a stranger could use to keep the shared demo users locked).
     # Traefik RateLimit: `average` requests per `period`, bursts up to `burst`; over it, 429. Off by default (the local cluster); the
@@ -142,6 +153,16 @@ keycloakConfig:
     KC_ACCESS_ADMIN_SECRET: access-admin-secret
     KC_DEMO_LOGIN_SECRET: demo-login-secret
     KC_DASHBOARD_SECRET: dashboard-secret
+  # Also apply files/keycloak-master-realm.json to the master realm (plan 08b Task 4): the admin console's sign-in asks for a one-time code
+  # (OTP Form REQUIRED, as in realm ops), password guessers are locked out for a while (temporary only, at most 15 minutes, so a stranger
+  # cannot keep anyone out for long), no self-registration or password reset. The direct-grant flow stays Keycloak's own (password only):
+  # this Job and Claude's kcadm sign in as the bootstrap admin that way.
+  masterRealm:
+    enabled: false
+  # Dale's own master-realm admin (the Job's operator-user container, files/keycloak-operator-user.sh): Secret procure-keycloak keys; a
+  # missing key skips it (the AppHost and older Secrets). null switches the container off.
+  # { username: operator, passwordKey: operator-password, totpKey: operator-totp-base32 } in envs/<env>/platform.yaml.
+  operatorUser: null
 
 mailpit:
   image: docker.io/axllent/mailpit:v1.32.0
@@ -185,6 +206,52 @@ dbRoles:
   mongoUsers:
     - { env: DB_SUPPLIERS_PASSWORD, key: suppliers-password }
     - { env: DB_ASSISTANT_MONGO_PASSWORD, key: assistant-mongo-password }
+
+# The operator's read-only database users (plan 08b Task 4): what the web UIs of the procure-ops chart connect as by default (pgAdmin,
+# the MongoDB UI, Redis Insight), so looking at the data cannot change it. Each is created only when its Secret key exists (optional
+# secretKeyRefs; bootstrap/new-secrets.ps1 in the GitOps repo generates them), so the AppHost and an older Secret simply get none. Empty
+# a key here to switch that user off entirely. Off by default (no key, no user; a Secret key is never optional): the GitOps repo's
+# envs/<env>/platform.yaml switches them on once bootstrap/new-secrets.ps1 created the keys.
+operatorReaders:
+  # Postgres role operator_reader (infra/postgres/roles.sql): pg_read_all_data, CONNECT on every database; Secret procure-db-roles key
+  # (operator-reader-postgres-password).
+  postgresKey: ""
+  # MongoDB user operator_reader (infra/mongo/users.js): read on every app database; Secret procure-db-roles key
+  # (operator-reader-mongo-password).
+  mongoKey: ""
+  # Redis ACL user (templates/redis.yaml); Secret procure-redis key. `commands` follows `-@all`: every read command but KEYS (it blocks the
+  # server), and what Redis Insight asks about the connection and the server. Nothing that writes, deletes or changes the server.
+  # key: in Secret procure-redis (operator-reader-password); empty: no such user.
+  redis:
+    key: ""
+    user: operator_reader
+    commands: "+@read -keys +info +ping +select +hello +command +client|setname +client|getname +client|id +client|info +client|no-touch"
+
+# The operator's direct access (templates/operator-access.yaml, plan 08b Task 4): each component on its own address with its own login,
+# not behind Keycloak or the gateway, so Dale can look when parts of the site are down.
+operatorAccess:
+  # The namespace of the procure-ops chart (pgAdmin, the MongoDB UI, Redis Insight).
+  namespace: operator
+  # store (pod label app.kubernetes.io/name here) -> the operator tool (pod label app.kubernetes.io/name in `namespace`) that may reach it on
+  # storePorts.<store>. Empty: no operator tool reaches a store.
+  tools: {}
+  storePorts:
+    postgres: 5432
+    mongo: 27017
+    redis: 6379
+  # RabbitMQ's management UI at https://<hosts.rabbitmq> (its own login, the user rabbitmq.operator).
+  rabbitmq:
+    enabled: false
+  # Per client address on the operator hosts (Traefik RateLimit, as keycloak.ingress.rateLimit): a management UI page is a few dozen
+  # requests and polls every few seconds; a password guesser gets about one try a second.
+  rateLimit: { average: 300, period: 1m, burst: 100 }
+  # Traefik Headers middleware: no framing by other sites, no MIME sniffing, no referrer, no search engine.
+  headers:
+    customFrameOptionsValue: SAMEORIGIN
+    contentTypeNosniff: true
+    referrerPolicy: no-referrer
+    customResponseHeaders:
+      X-Robots-Tag: "noindex, nofollow"
 
 curl:
   # Runs the rabbitmq-cdc-exchange Job (the management API PUT that CdcExchangeHealthCheck does under the AppHost).

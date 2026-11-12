@@ -1,0 +1,73 @@
+# The break-glass dashboard (plan 08b Task 4): a second Aspire dashboard with its own login (Traefik basic auth), no Keycloak, the same
+# proxy, limits and Origin handling as the main one, reachable only through Traefik.
+suite: dashboard direct
+templates:
+  - dashboard-direct.yaml
+release:
+  name: observability
+  namespace: observability
+tests:
+  - it: runs without Keycloak and without the dashboard's own token sign-in (Traefik's login is in front)
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - equal:
+          path: metadata.name
+          value: aspire-dashboard-direct
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: Dashboard__Frontend__AuthMode, value: Unsecured }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: Dashboard__Frontend__AuthMode, value: OpenIdConnect }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: Dashboard__Frontend__AuthMode, value: BrowserToken }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: Dashboard__Frontend__PublicUrl, value: https://dashboard-direct.procure.localtest.me }
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^mcr\.microsoft\.com/dotnet/aspire-dashboard:\d+\.\d+\.\d+$'
+      - exists:
+          path: spec.template.spec.containers[0].resources.limits.memory
+
+  - it: its Ingress is https only, forces X-Forwarded-Proto https, then the rate limit, the headers and the basic-auth login
+    documentSelector: { path: kind, value: Ingress }
+    asserts:
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.entrypoints"]
+          value: websecure
+      - equal:
+          path: metadata.annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+          value: observability-aspire-dashboard-direct-forwarded-proto@kubernetescrd,observability-aspire-dashboard-direct-ratelimit@kubernetescrd,observability-aspire-dashboard-direct-headers@kubernetescrd,observability-aspire-dashboard-direct-basic-auth@kubernetescrd
+      - equal:
+          path: spec.rules[0].host
+          value: dashboard-direct.procure.localtest.me
+
+  - it: the login reads the basic-auth Secret and the dashboard never sees the Authorization header
+    documentSelector: { path: metadata.name, value: aspire-dashboard-direct-basic-auth }
+    asserts:
+      - equal:
+          path: spec.basicAuth
+          value: { secret: aspire-dashboard-direct-basic-auth, realm: procure operator, removeHeader: true }
+
+  - it: only Traefik reaches its frontend and only the collector its OTLP port
+    documentSelector: { path: kind, value: NetworkPolicy, matchMany: true }
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/name"]
+          value: aspire-dashboard-direct
+
+  - it: is left out when switched off
+    set:
+      dashboardDirect.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: needs a host
+    set:
+      hosts.dashboardDirect: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: dashboardDirect.enabled needs hosts.dashboardDirect

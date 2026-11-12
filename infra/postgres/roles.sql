@@ -109,6 +109,39 @@ CREATE EXTENSION IF NOT EXISTS vector;
 \getenv cdc_password DB_REQUESTS_CDC_PASSWORD
 \ir roles-database.sql
 
+-- The operator's read-only role (plan 08b Task 4): what pgAdmin on the public operator host connects as by default, so looking at the data
+-- cannot change it. Only where DB_OPERATOR_READER_PASSWORD is set (the clusters: Secret procure-db-roles, key operator-reader-postgres-password);
+-- the AppHost and the tests do not set it, and a role left from an earlier run then loses its login.
+--   operator_reader  LOGIN, member of pg_read_all_data (SELECT on every table, view and sequence of every database, USAGE on every schema,
+--                    tables added later included), CONNECT on every database that allows connections except keycloakdb. No write of
+--                    any kind, no DDL, no replication; it owns nothing.
+-- keycloakdb is left out (plan 08b Task 4 ruling R1): it holds password hashes, one-time-code seeds, client secrets and the realms' signing
+-- keys in many tables, and Keycloak's own schema is not ours to change (no row-level security on its tables). Its CONNECT is revoked
+-- should an earlier run have granted it (PUBLIC has no CONNECT on any database here). Keycloak's data is looked at in its admin console,
+-- or as the superuser in an emergency.
+\connect postgres
+SET client_min_messages = warning;
+SET log_min_error_statement = panic;
+\unset operator_password
+\getenv operator_password DB_OPERATOR_READER_PASSWORD
+\if :{?operator_password}
+SELECT :'operator_password' <> '' AS operator_enabled \gset
+\else
+\set operator_enabled false
+\endif
+\if :operator_enabled
+SELECT 'CREATE ROLE operator_reader' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'operator_reader') \gexec
+ALTER ROLE operator_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT PASSWORD :'operator_password';
+-- Read-only for good: no default transaction that could write, even if a grant ever slipped through.
+ALTER ROLE operator_reader SET default_transaction_read_only = on;
+GRANT pg_read_all_data TO operator_reader;
+SELECT format('GRANT CONNECT ON DATABASE %I TO operator_reader', datname) FROM pg_database
+WHERE datallowconn AND NOT datistemplate AND datname <> 'keycloakdb' \gexec
+SELECT 'REVOKE CONNECT ON DATABASE keycloakdb FROM operator_reader' WHERE EXISTS (SELECT FROM pg_database WHERE datname = 'keycloakdb') \gexec
+\else
+SELECT 'ALTER ROLE operator_reader NOLOGIN' WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'operator_reader') \gexec
+\endif
+
 -- The old shared replication role: its grants went with DROP OWNED in every database above. Should it still hold a privilege somewhere
 -- else (a database not listed here), it stays, without login, and the script says so instead of failing the deployment.
 \connect postgres

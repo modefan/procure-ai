@@ -345,11 +345,12 @@ jobs:
           helm lint deploy/charts/procure-app --set global.imageTag=ci --set name=ci-api --set image.repository=procure-ai-ci
           helm lint deploy/charts/procure-ai --set global.imageTag=ci --set global.demo.seed=true --set global.demo.reset=true
           helm lint deploy/charts/procure-observability
+          helm lint deploy/charts/procure-ops
 
       - name: helm unittest
         run: >-
           helm unittest deploy/charts/procure-platform deploy/charts/procure-app deploy/charts/procure-ai
-          deploy/charts/procure-observability
+          deploy/charts/procure-observability deploy/charts/procure-ops
 
       - name: Collector log redaction (pinned collector image over sample logs)
         shell: pwsh
@@ -369,6 +370,10 @@ jobs:
             | kubeconform -strict -summary
           # The dashboard Ingress's Traefik Middleware (plan 08b) against the community CRD schema catalog, as in the next step.
           helm template observability deploy/charts/procure-observability --namespace observability \
+            | kubeconform -strict -summary -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/49729e49e8f062933e3716a26540d41b0cd0856c/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          # The operator's web UIs (plan 08b Task 4), Traefik Middlewares included.
+          helm template operator deploy/charts/procure-ops --namespace operator \
             | kubeconform -strict -summary -schema-location default \
                 -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/49729e49e8f062933e3716a26540d41b0cd0856c/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
@@ -393,6 +398,10 @@ jobs:
             helm template observability deploy/charts/procure-observability --namespace observability -f "$dir/observability.yaml" \
                 --set global.imageTag=ci \
               | kc
+            # The operator's web UIs (plan 08b Task 4): only once the GitOps repo has their values (pushed after this chart exists).
+            if [ -f "$dir/operator.yaml" ]; then
+              helm template operator deploy/charts/procure-ops --namespace operator -f "$dir/operator.yaml" | kc
+            fi
           done
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0

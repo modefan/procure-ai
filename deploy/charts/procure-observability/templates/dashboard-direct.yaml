@@ -1,0 +1,100 @@
+{{- /*
+The break-glass dashboard (plan 08b Task 4, Dale 2026-11-08): a second Aspire dashboard at https://<hosts.dashboardDirect> with its own login,
+NOT Keycloak, so Dale can read the logs and traces while Keycloak (or the gateway) is down. Traefik asks for it (basicAuth middleware,
+kubernetes.io/basic-auth Secret dashboardDirect.basicAuthSecretName from bootstrap/new-secrets.ps1; bootstrap/hosted/Get-OperatorLogin.ps1
+-Tool dashboard); the dashboard itself runs without a sign-in (templates/_dashboard.tpl says why) and only Traefik reaches it. The collector
+sends everything to both dashboards (exporter otlp/direct in values.yaml); each keeps its own copy in memory. Same image, limits, proxy and
+caps as the main one; its Ingress also has a per-client-address rate limit (password guessing) and the security headers.
+*/}}
+{{- $dd := .Values.dashboardDirect }}
+{{- if $dd.enabled }}
+{{- if not .Values.hosts.dashboardDirect }}{{ fail "dashboardDirect.enabled needs hosts.dashboardDirect" }}{{ end }}
+{{- $labels := dict "root" $ "name" "aspire-dashboard-direct" }}
+{{- $dashboard := dict "root" $ "name" "aspire-dashboard-direct" }}
+{{ include "procure-observability.dashboard" (dict "root" $ "name" "aspire-dashboard-direct" "host" .Values.hosts.dashboardDirect "direct" true
+     "middlewares" (list (printf "%s-aspire-dashboard-direct-ratelimit@kubernetescrd" .Release.Namespace) (printf "%s-aspire-dashboard-direct-headers@kubernetescrd" .Release.Namespace) (printf "%s-aspire-dashboard-direct-basic-auth@kubernetescrd" .Release.Namespace))) }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: aspire-dashboard-direct-basic-auth
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  basicAuth:
+    secret: {{ required "dashboardDirect.basicAuthSecretName is required" $dd.basicAuthSecretName }}
+    realm: procure operator
+    # The dashboard must not see the Authorization header.
+    removeHeader: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: aspire-dashboard-direct-ratelimit
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ $dd.rateLimit.average }}
+    period: {{ $dd.rateLimit.period }}
+    burst: {{ $dd.rateLimit.burst }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: aspire-dashboard-direct-headers
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  headers:
+    {{- toYaml $dd.headers | nindent 4 }}
+{{- if .Values.networkPolicies.enabled }}
+---
+# Its OTLP port has no key either: only the collector may reach it (as the main dashboard, network-policies.yaml 3).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-collector-to-dashboard-direct-otlp
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "procure-observability.selector" $dashboard | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "procure-observability.collectorSelector" $ | nindent 14 }}
+      ports:
+        - port: otlp-grpc
+          protocol: TCP
+---
+# Traefik may reach its frontend (port http), nothing else (as network-policies.yaml 4).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-dashboard-direct
+  labels:
+    {{- include "procure-observability.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "procure-observability.selector" $dashboard | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}
+{{- end }}

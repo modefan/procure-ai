@@ -185,6 +185,11 @@ spec:
           {{- if not .Values.keycloak.ingress.publicRealms }}{{ fail "keycloak.ingress.publicRealms must name at least one realm when publicPathsOnly is on" }}{{ end }}
           {{- range .Values.keycloak.ingress.publicRealms }}{{ $public = append $public (printf "/realms/%s/" .) }}{{ end }}
           {{- $public = append $public "/resources/" }}
+          {{- /* adminConsole (plan 08b Task 4): the admin console, its REST API and the master realm's sign-in, so Dale can manage
+          Keycloak from any browser; the master realm asks for a one-time code (files/keycloak-master-realm.json). */}}
+          {{- if .Values.keycloak.ingress.adminConsole }}
+          {{- $public = concat $public (list "/admin/" "/realms/master/") }}
+          {{- end }}
           {{- end }}
           {{- range (ternary $public (list "/") .Values.keycloak.ingress.publicPathsOnly) }}
           - path: {{ . }}

@@ -1,0 +1,123 @@
+{{- /*
+The operator's direct access to the platform (plan 08b Task 4, Dale 2026-11-08): every component reachable from a browser on its own address
+with its own login, NOT through Keycloak or the gateway, so Dale can still look when parts of the site are down. The web UIs for the data
+stores run in their own namespace (the procure-ops chart); this chart only lets them in and serves what lives here:
+  - RabbitMQ's management UI at https://<hosts.rabbitmq> (its own login; the operator's own user from the rabbitmq-cdc-exchange Job),
+    rate-limited per client address, with security headers.
+  - NetworkPolicies: Traefik may reach RabbitMQ's management port (only with the Ingress on), and each operator tool's pods (namespace
+    operatorAccess.namespace, label app.kubernetes.io/name) exactly its own store's port: pgAdmin Postgres, the MongoDB UI MongoDB, Redis
+    Insight Redis. They sign in there with the read-only users (operatorReaders), or with an admin password Dale types in an emergency.
+The raw ports (5432, 27017, 6379, 5672) never get an Ingress or a host port: they stay inside the cluster.
+*/}}
+{{- $o := .Values.operatorAccess }}
+{{- $labels := dict "root" $ "name" "operator-access" }}
+{{- if $o.rabbitmq.enabled }}
+{{- if not .Values.hosts.rabbitmq }}{{ fail "operatorAccess.rabbitmq.enabled needs hosts.rabbitmq" }}{{ end }}
+---
+# Per client address (Traefik takes 80/443 as host ports, so the remote address is the visitor's own; see keycloak-ratelimit.yaml).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: operator-ratelimit
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ $o.rateLimit.average }}
+    period: {{ $o.rateLimit.period }}
+    burst: {{ $o.rateLimit.burst }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: operator-headers
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  headers:
+    {{- toYaml $o.headers | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rabbitmq-management
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-operator-ratelimit@kubernetescrd,%s-operator-headers@kubernetescrd" .Release.Namespace .Release.Namespace }}
+spec:
+  ingressClassName: {{ .Values.ingressClassName }}
+  # No secretName: Traefik's default certificate (Let's Encrypt on hosted, the local CA's locally), as for every other host.
+  tls:
+    - hosts:
+        - {{ .Values.hosts.rabbitmq }}
+  rules:
+    - host: {{ .Values.hosts.rabbitmq }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rabbitmq
+                port:
+                  name: management
+{{- if .Values.networkPolicies.enabled }}
+---
+# Traefik to RabbitMQ's management port only (not AMQP); the namespace's default-deny keeps the rest closed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-rabbitmq-management
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: management
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- if and .Values.networkPolicies.enabled $o.tools }}
+{{- range $store, $tool := $o.tools }}
+{{- $port := index $o.storePorts $store }}
+{{- if not $port }}{{ fail (printf "operatorAccess.tools.%s: no port in operatorAccess.storePorts" $store) }}{{ end }}
+---
+# The operator's {{ $store }} UI ({{ $tool }} in namespace {{ $o.namespace }}) may reach {{ $store }}:{{ $port }}, nothing else here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-operator-{{ $tool }}-to-{{ $store }}
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $store }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $o.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $tool }}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+{{- end }}
+{{- end }}

@@ -1,0 +1,105 @@
+{{- $labels := dict "root" $ "name" "operator" }}
+# Traefik middlewares of every host (helpers procure-ops.middlewares): a rate limit per client address and security headers.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: operator-ratelimit
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ .Values.rateLimit.average }}
+    period: {{ .Values.rateLimit.period }}
+    burst: {{ .Values.rateLimit.burst }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: operator-headers
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  headers:
+    {{- toYaml .Values.headers | nindent 4 }}
+{{- if .Values.networkPolicies.enabled }}
+{{- $dns := .Values.networkPolicies.dns }}
+---
+# Network policies of this namespace (k3s's policy controller). Ingress AND egress are denied unless allowed below: a tool reaches only
+# DNS and its own store, so a session in a tool cannot be used to probe the rest of the cluster or the internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $dns.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $dns.podLabels | nindent 14 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- range $tool, $store := dict "pgadmin" "postgres" "mongo-ui" "mongo" "redis-insight" "redis" }}
+{{- $s := index $.Values.stores $store }}
+---
+# {{ $tool }}: Traefik may reach its http port; it may reach {{ $store }}:{{ $s.port }} in namespace {{ $.Values.stores.namespace }} (the
+# platform's NetworkPolicy allow-operator-{{ $tool }}-to-{{ $store }} lets it in there).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tool }}
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "procure-ops.selector" (dict "root" $ "name" $tool) | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: http
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.stores.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $s.service }}
+      ports:
+        - port: {{ $s.port }}
+          protocol: TCP
+{{- end }}
+{{- end }}

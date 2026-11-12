@@ -219,8 +219,9 @@ cd procure-ai-gitops
   (Let's Encrypt is shortening them); cert-manager renews when a third of the lifetime is left, and Test-PublicSurface wants at least 14
   days left.
 
-What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/realms/procure/` and `/resources/` (no admin console, admin
-API, master realm or welcome page; `publicRealms` in the platform chart); no Mailpit ingress; Argo CD without ingress (Keycloak sign-in; the admin login only as break-glass, through the tunnel);
+What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/realms/procure/`, `/realms/ops/`, `/resources/` and (plan 08b
+Task 4, `keycloak.ingress.adminConsole`) the admin console with the master realm's sign-in, which always asks for a one-time code (no
+welcome page; `publicRealms` in the platform chart); the operator's own hosts ("Every component on its own address"); no Mailpit ingress; Argo CD without ingress (Keycloak sign-in; the admin login only as break-glass, through the tunnel);
 the demo switches on (seed, nightly reset at 02:00 Africa/Johannesburg, one-click demo login, the "behind the scenes" panel); the
 Assistant on Azure Foundry (`AI__Provider=AzureFoundry`, deployments `chat` and `embeddings`, no reasoning, no temperature, at least 256
 output tokens per call, a daily token cap of 150 000 per organisation, sized below); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
@@ -245,8 +246,9 @@ where 80/443 do not answer.
 
 | Script (procure-ai-gitops) | What it proves |
 |---|---|
-| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's `/admin`, master realm, welcome page and `/metrics` answer 404, also through path tricks (`/realms/procure/../master` sent as is, `%2e%2e`, `//`), and the procure realm's discovery 200; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404; every host sends HSTS and no Server header names a version; an echo pod behind a throwaway Ingress sees this PC's public address in `X-Forwarded-For` (Review Focus 5; prints "matches", never the address) |
+| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's welcome page, `/metrics`, `/health` and `/js` answer 404, also through path tricks (`..` sent as is, `%2e%2e`, `//`); the procure realm's, realm ops' and (plan 08b Task 4) the master realm's discovery 200, the admin console 200 and its REST API 401 without a token; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404; every host sends HSTS and no Server header names a version; an echo pod behind a throwaway Ingress sees this PC's public address in `X-Forwarded-For` (Review Focus 5; prints "matches", never the address) |
 | `tests/Test-Dashboard.ps1 -Environment hosted` | The Aspire dashboard works for Dale (plan 08b): Microsoft Edge signs in at `https://dashboard.daleabels.com` as the demo admin, Structured logs and Traces show rows on every full page load, and requests-api and the gateway have rows from the last 10 minutes; Blazor's WebSocket accepts the dashboard's own Origin and refuses a foreign one. **After every push or deploy** (also part of `Test-FreshCluster.ps1 -Environment hosted -WatchOnly`); procure-ai `docs/kubernetes.md` "The Aspire dashboard: what makes it work" |
+| `tests/Test-OperatorTools.ps1 -Environment hosted` | Plan 08b Task 4: every operator host (pgAdmin, DbGate, Redis Insight, RabbitMQ management, Keycloak's admin console, the break-glass dashboard) answers over TLS with its own login and refuses anonymous requests, the demo users' credentials and well-known defaults; the right logins (DEMO PASSWORDS.txt) get in, pgAdmin and Keycloak only with the current one-time code; each read-only connection really connects and cannot write; the raw store ports do not answer; a burst gets 429 on every host. `-ResolveTo <VM address> -SkipCertificateCheck` before the DNS records and the certificate exist; `-SkipRateLimit` leaves the burst out (it uses up this PC's bucket for a minute). `tests/Test-Dashboard.ps1 -Environment hosted -Direct` checks the break-glass dashboard in a real browser |
 | `tests/Test-Smoke.ps1 -Environment hosted` | The local smoke checks against the public hosts (gateway, Keycloak, demo login, seeded data with the hosted admin key `DEMO_ADMIN_API_KEY_HOSTED`, dashboard sign-in by role, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For`, pgaudit roles, realm drift) |
 | `tests/Test-Swagger.ps1 -Environment hosted` (in **procure-ai**) | Swagger from the browser (plan 08b): the page lists all 10 definitions; every document names exactly one server, `https://procure.daleabels.com/` (an `http://` one is blocked as mixed content); every document offers ApiKey (`X-Api-Key`), TenantId (`X-Tenant-Id`) and OAuth2; one GET per service sent to the document's server with the key (`DEMO_ADMIN_API_KEY_HOSTED`), plus `X-Tenant-Id` where the operation asks for TenantId, answers 200; a tenant endpoint without `X-Tenant-Id` answers 400; the demo switch's GET answers 200. `-PutSwitchSameState` also PUTs the state it read (never by default, so a run does not touch the live switch). `-Environment local` runs it against the k3d cluster, `-Environment apphost -GatewayUrl https://localhost:<port>` against an AppHost |
 | `tests/Test-FreshCluster.ps1 -Environment hosted -WatchOnly [-Since <push time>]` | Every Application Synced and Healthy, every pod Ready and stable, then the smoke checks (the hosted cluster is never deleted by a test). With `-Since`, the deploy pushed at that time must have synced procure-ai, and its wave order is checked (platform first); without it a sync older than the watch is reported as "wave order NOT CHECKED" |
@@ -313,6 +315,56 @@ optional), `{ "enabled": true }` switches it on. While the demo is off, Swagger 
 address. Until plan 08b the services trusted no proxy, their documents said `http://procure.daleabels.com/`, and the browser blocked every
 *Try it out* from the https page as mixed content. `procure-ai/tests/Test-Swagger.ps1 -Environment hosted` checks it (table above).
 
+### Every component on its own address (plan 08b Task 4)
+
+Dale's rule (2026-11-08): each part of the system can be reached from any browser on its own host with **its own login** (not Keycloak's
+demo realm, not the gateway), so he can debug while parts of the site are down. Only Dale and Claude have these logins: every one is a
+long generated value (no default credentials anywhere), kept only in the cluster's Secrets and in DEMO PASSWORDS.txt, section
+"procure-ai hosted (Contabo) secrets" (entry names below; `bootstrap/new-secrets.ps1 -Environment hosted` in the GitOps repo makes them).
+Argo CD is not one of them: it stays behind the SSH tunnel (Dale's call; see "Argo CD on the VM").
+
+| Tool | Address | User name | Password entry | Second factor | Connects as |
+|---|---|---|---|---|---|
+| pgAdmin 9.19 (all Postgres databases) | `https://pgadmin.daleabels.com` | `operator@daleabels.com` | `operator-pgadmin-password` | authenticator code (`operator-pgadmin-totp-base32`) | server *procure (read-only)*: `operator_reader`; server *procure (superuser, emergency)*: `postgres`, password typed each time (`postgres-password`) |
+| DbGate 7.3 (MongoDB) | `https://mongo.daleabels.com` | `operator` | `operator-mongo-ui-password` | none (DbGate has none) | *procure MongoDB (read-only)*: `operator_reader`; *root (emergency)*: `admin`, password asked each time (`mongo-password`) |
+| Redis Insight 3.8 | `https://redis.daleabels.com` | `operator` (Traefik's login in front; Redis Insight has none) | `operator-redis-insight-password` | none | ACL user `operator_reader` (reads only); add a connection as `default` (`redis-password`) for an emergency write |
+| RabbitMQ management | `https://rabbitmq.daleabels.com` | `operator` (administrator tag) | `operator-rabbitmq-password` | none (RabbitMQ has none) | itself |
+| Keycloak admin console (master realm) | `https://auth.daleabels.com/admin/master/console/` | `operator` (realm role admin) | `operator-keycloak-password` | authenticator code, always (`operator-keycloak-totp-base32`) | itself |
+| Aspire dashboard, break-glass copy | `https://dashboard-direct.daleabels.com` | `operator` (Traefik's login in front) | `operator-dashboard-token` | none | the same telemetry as the main dashboard (the collector sends to both) |
+
+**Signing in.** In the GitOps repo: `./bootstrap/hosted/Get-OperatorLogin.ps1 -Tool pgadmin` (or `mongo`, `redis`, `rabbitmq`,
+`keycloak`, `dashboard`; `postgres-admin`, `mongo-admin`, `redis-admin` for the emergency logins inside the tools). It prints the address
+and user name, copies the password to the clipboard (never prints it) and, for pgAdmin and Keycloak, prints the current one-time code,
+computed from the TOTP secret with the server's clock. To use an authenticator app instead, add the Base32 secret from the same entry to it
+as a manual key (SHA-1, 6 digits, 30 s). Claude computes the codes the same way, so it can sign in too.
+
+**Read-only by default.** Each data tool's default connection is a user that cannot change data: Postgres `operator_reader`
+(`pg_read_all_data`, `default_transaction_read_only`; every database but `keycloakdb`, whose password hashes, OTP seeds, client secrets and
+realm keys it cannot open at all: Keycloak's data is looked at in its admin console), MongoDB `operator_reader` (`read` on every app database), Redis `operator_reader` (`+@read` minus `KEYS`; no write, `CONFIG`,
+`FLUSH*`, `EVAL`, `ACL` or pub/sub). The superuser / root logins are for emergencies and are typed each time, never stored by the tool.
+What reading means: Redis holds the gateway's session tickets (visitors' tokens) and Postgres the app data; whoever passes one of these
+logins can read them. Only Dale and Claude have them.
+
+**What protects them.** Traefik in front of every host: TLS (the one Let's Encrypt certificate lists every host), a rate limit per client
+address (300 requests a minute, bursts of 100; over it 429), security headers (`X-Frame-Options: SAMEORIGIN`, `nosniff`, no referrer,
+`noindex`). The raw ports (5432, 27017, 6379, 5672, 15672) never get an Ingress or a host port, and Contabo's firewall lets in only 22,
+80 and 443. NetworkPolicies: each tool (namespace `operator`) reaches only DNS and its own store's port; nothing but Traefik reaches the
+tools; Traefik reaches RabbitMQ's management port, not AMQP. Pods run non-root with a read-only root filesystem, no capabilities and
+memory/CPU limits; images are pinned to the current releases (pgAdmin 9.19.0, DbGate 7.3.6, Redis Insight 3.8.0). Keycloak's master realm
+locks a user out for a while after 5 wrong passwords (at most 15 minutes, never for good) and its browser sign-in always asks for the
+one-time code; pgAdmin's own lockout is off (it would lock its single admin out for good) and the rate limit slows guessing instead.
+One exception (plan 08b Task 4 ruling R3): the bootstrap admin `keycloak-admin` (Secret `procure-keycloak`, the account the
+keycloak-config Job and Claude's kcadm use) has no one-time code, because keycloak-config-cli signs in with a password grant that cannot
+carry one; with the master realm public, its password alone gets an admin token from `https://auth.daleabels.com/realms/master/`. It is
+a 32-character generated value behind the same lockout and rate limit; treat it like a root password (rotate it if it ever leaks).
+Dale accepted that these logins face the internet (2026-11-08): debugging from any browser matters more on this demo.
+
+**Last resort.** Every tool still goes through Traefik on the VM. If Traefik or the VM is down, use the SSH tunnel (`open-tunnel.ps1`,
+then kubectl) or the Contabo panel's VNC console ("The live site is down", step 8).
+
+`tests/Test-OperatorTools.ps1 -Environment hosted` (GitOps repo) checks all of this from Dale's PC (table "Checks against the public
+demo"); `tests/Test-Dashboard.ps1 -Environment hosted -Direct` checks the break-glass dashboard in a real browser.
+
 ## Argo CD on the VM (plan 08 Task 12c)
 
 Argo CD is the one GUI for the live site (no Rancher, Headlamp or Grafana). It has no public address: it is reached through the SSH
@@ -377,9 +429,9 @@ on hosted, so the port-forward must use port 8080 for the Keycloak sign-in).
 
 ### Your own Keycloak user for Argo CD
 
-Claude does not create it: you pick your own user name and password. Keycloak's admin console cannot be used for this on the VM: the
-public host serves only `/realms/procure/` and `/realms/ops/`, and the console always sends the browser to that public host (also
-through a port-forward). So a script does it with Keycloak's own admin CLI inside the Keycloak pod, through the tunnel; it asks for the
+Claude does not create it: you pick your own user name and password. You can do it in Keycloak's admin console (signed in as `operator`,
+"Every component on its own address" above: realm `ops`, *Users*, then the group and the required actions as the script sets them), or
+let a script do it with Keycloak's own admin CLI inside the Keycloak pod, through the tunnel; it asks for the
 password and never shows or stores it. You need an authenticator app on your phone (Microsoft Authenticator, Google Authenticator,
 Aegis, 1Password, ...):
 
@@ -441,14 +493,18 @@ cd procure-ai-gitops
      `envs/hosted/release.yaml` of the GitOps repo; Argo CD syncs it.
    - Postgres and Debezium: restart only when you must (Debezium resumes from its offsets; `Test-WalSlotsAdvance.ps1` checks the slots).
 6. **Traces and logs across services:** `https://dashboard.daleabels.com` (Aspire dashboard; Keycloak sign-in, role `dashboard-viewer`,
-   the demo admin user has it). *Structured logs* filtered by service and level, *Traces* for one request across services. Visitor IP
+   the demo admin user has it). Keycloak down: the same telemetry at `https://dashboard-direct.daleabels.com` (its own login,
+   `Get-OperatorLogin.ps1 -Tool dashboard`). *Structured logs* filtered by service and level, *Traces* for one request across services. Visitor IP
    addresses never reach it (the collector masks them in log bodies and drops client-address attributes). The connection churn of
    RabbitMQ and MongoDB and background traces (Wolverine's polling, readiness pings) are left out, so the caps hold hours of the apps'
    own logs and a day of request traces. If a page stays empty: `./tests/Test-Dashboard.ps1 -Environment hosted` in the GitOps repo.
-7. **The VM itself** (Argo CD does not load at all, or every pod is pending): `./bootstrap/hosted/Test-HostBaseline.ps1` (SSH, k3s,
+7. **Look into the stores and the broker directly** ("Every component on its own address" above): pgAdmin, DbGate, Redis Insight,
+   RabbitMQ management (queues, dead letters, connections) and Keycloak's admin console, each with its own login
+   (`Get-OperatorLogin.ps1 -Tool <tool>`), read-only unless you switch to the emergency login on purpose.
+8. **The VM itself** (Argo CD does not load at all, or every pod is pending): `./bootstrap/hosted/Test-HostBaseline.ps1` (SSH, k3s,
    firewall, listeners), then `kubectl top node` through the tunnel for memory. The Contabo panel has a VNC console and a reboot as the
    last resort; k3s and every app come back by themselves after a reboot.
-8. Afterwards: `./bootstrap/hosted/open-argocd.ps1 -Close`.
+9. Afterwards: `./bootstrap/hosted/open-argocd.ps1 -Close`.
 
 **Holding the public demo during an incident** (plan 08 fix wave ruling R5). Every green push to procure-ai main bumps
 `envs/hosted/release.yaml` and Argo CD deploys it, and a revision pinned by hand there holds only until the next publish. To freeze what

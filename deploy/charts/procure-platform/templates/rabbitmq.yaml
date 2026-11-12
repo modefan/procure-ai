@@ -142,6 +142,21 @@ spec:
                 --data '{"type":"topic","durable":true,"auto_delete":false,"internal":false}' \
                 'http://rabbitmq:15672/api/exchanges/%2F/{{ .Values.rabbitmq.cdcExchange }}'
               echo 'exchange {{ .Values.rabbitmq.cdcExchange }} declared (topic, durable)'
+              {{- with .Values.rabbitmq.operator }}
+              # The operator's own management login (plan 08b Task 4): the user Dale signs in to the management UI with, apart from the
+              # apps' user. Created or updated (password, tags) on every sync when its Secret key exists; user and body on stdin too.
+              if [ -n "${OPERATOR_PASSWORD:-}" ]; then
+                printf 'user = "%s:%s"\ndata = "{\\"password\\":\\"%s\\",\\"tags\\":\\"{{ .tags }}\\"}"\n' \
+                  "$(esc "$RABBITMQ_USER")" "$(esc "$RABBITMQ_PASSWORD")" "$(esc "$(esc "$OPERATOR_PASSWORD")")" \
+                  | curl --config - --silent --show-error --fail-with-body --max-time 10 -o /dev/null \
+                    -X PUT -H 'content-type: application/json' 'http://rabbitmq:15672/api/users/{{ .user }}'
+                printf 'user = "%s:%s"\n' "$(esc "$RABBITMQ_USER")" "$(esc "$RABBITMQ_PASSWORD")" \
+                  | curl --config - --silent --show-error --fail-with-body --max-time 10 -o /dev/null \
+                    -X PUT -H 'content-type: application/json' --data '{"configure":".*","write":".*","read":".*"}' \
+                    'http://rabbitmq:15672/api/permissions/%2F/{{ .user }}'
+                echo 'management user {{ .user }} set (tags {{ .tags }})'
+              fi
+              {{- end }}
           env:
             - name: RABBITMQ_USER
               valueFrom:
@@ -153,6 +168,13 @@ spec:
                 secretKeyRef:
                   name: procure-rabbitmq
                   key: password
+            {{- with .Values.rabbitmq.operator }}
+            - name: OPERATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-rabbitmq
+                  key: {{ .key }}
+            {{- end }}
           resources:
             {{- toYaml .Values.helperResources | nindent 12 }}
           {{- include "procure-platform.containerSecurity" . | nindent 10 }}
