@@ -16,14 +16,22 @@
 #   what it owns  only what the file declares (see keycloakConfig in values.yaml): remote state on, so it deletes only what it imported
 #                 itself; organizations no-delete, so self-registered members of `demo` (Access adds them) stay; users and resource types
 #                 the file does not list (built-in clients and scopes, default roles, flows, required actions) are left alone.
-#   access        the bootstrap admin (Secret procure-keycloak) on the master realm, through the Service: the only account that can change
-#                 the realm on an existing cluster (a realm-scoped client would first have to be created by this very Job); the public
-#                 ingress does not route /admin (publicPathsOnly), and NetworkPolicy allow-direct-callers-keycloak lets this Job's pods in.
+#   access        through the Service (NetworkPolicy allow-direct-callers-keycloak lets this Job's pods in), on the master realm as
+#                 - with keycloakConfig.automationClient (plan 08b Task 4 fix round 1): the confidential master-realm client
+#                   procure-automation (client credentials: no password, no user, so no brute-force lockout can stop a sync). The init
+#                   container automation-client (files/keycloak-automation-client.sh) keeps it, signing in as the bootstrap admin only while
+#                   the client does not work yet (a fresh install, the first sync after the change), and then disables the bootstrap admin
+#                   (break-glass only; procure-ai docs/hosting.md).
+#                 - without it: the bootstrap admin (Secret procure-keycloak, admin-username / admin-password) with its password.
 #   master realm  with keycloakConfig.masterRealm.enabled (plan 08b Task 4) also files/keycloak-master-realm.json (ConfigMap
-#                 keycloak-config-master): the admin console's sign-in asks for a one-time code, password guessers are locked out a while.
+#                 keycloak-config-master): every password sign-in to the master realm (the admin console's browser flow AND password
+#                 grants) asks for a one-time code, password guessers are locked out a while.
 #   operator user with keycloakConfig.operatorUser (plan 08b Task 4) a second container (kcadm in our Keycloak image) keeps Dale's own
 #                 master-realm admin: password and authenticator secret from Secret procure-keycloak (keys must exist when it is on).
 {{- if $c.enabled }}
+{{- if and $c.masterRealm.enabled (not $c.automationClient) }}
+{{- fail "keycloakConfig.masterRealm.enabled needs keycloakConfig.automationClient: the master realm then asks every password sign-in for a one-time code, so the Job must sign in as a client" }}
+{{- end }}
 {{- if $c.masterRealm.enabled }}
 apiVersion: v1
 kind: ConfigMap
@@ -79,6 +87,46 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
+        {{- with $c.automationClient }}
+        # The automation's own master-realm client (plan 08b Task 4 fix round 1; files/keycloak-automation-client.sh): kept before anything
+        # signs in with it; the bootstrap admin is used only while the client does not work yet, then disabled.
+        - name: automation-client
+          image: {{ include "procure-platform.ownImage" (dict "root" $ "image" $.Values.keycloak.image) | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          command: [bash, -c]
+          args:
+            - {{ $.Files.Get "files/keycloak-automation-client.sh" | quote }}
+          env:
+            - name: CLIENT_ID
+              value: {{ .clientId | quote }}
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: {{ .secretKey }}
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: admin-password
+            - name: DISABLE_BOOTSTRAP_ADMIN
+              value: {{ .disableBootstrapAdmin | quote }}
+            - name: HOME
+              value: /run/kcadm-automation
+            - name: JAVA_OPTS
+              value: "-Xms32m -Xmx128m -XX:+ExitOnOutOfMemoryError"
+          resources:
+            {{- toYaml $.Values.helperResources | nindent 12 }}
+          {{- include "procure-platform.containerSecurity" $ | nindent 10 }}
+          volumeMounts:
+            - name: kcadm-automation
+              mountPath: /run/kcadm-automation
+        {{- end }}
       containers:
         - name: keycloak-config
           image: {{ $c.image | quote }}
@@ -90,6 +138,20 @@ spec:
               value: "true"
             - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
               value: {{ $c.availabilityTimeout | quote }}
+            {{- with $c.automationClient }}
+            # The automation client (client credentials on the master realm), never a password.
+            - name: KEYCLOAK_LOGINREALM
+              value: master
+            - name: KEYCLOAK_GRANTTYPE
+              value: client_credentials
+            - name: KEYCLOAK_CLIENTID
+              value: {{ .clientId | quote }}
+            - name: KEYCLOAK_CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: {{ .secretKey }}
+            {{- else }}
             - name: KEYCLOAK_USER
               valueFrom:
                 secretKeyRef:
@@ -100,6 +162,7 @@ spec:
                 secretKeyRef:
                   name: procure-keycloak
                   key: admin-password
+            {{- end }}
             - name: IMPORT_FILES_LOCATIONS
               value: {{ ternary "file:/config/procure-realm.json,file:/config/ops-realm.json,file:/master/master-realm.json" "file:/config/procure-realm.json,file:/config/ops-realm.json" $c.masterRealm.enabled }}
             # Apply the file on every run, not only when it changed: the cache would skip an unchanged file and keep a hand change.
@@ -153,11 +216,11 @@ spec:
               readOnly: true
             {{- end }}
         {{- with $c.operatorUser }}
-        # Dale's own admin in the master realm (plan 08b Task 4), apart from the bootstrap admin the automation signs in as: password and a
+        # Dale's own admin in the master realm (plan 08b Task 4), apart from the account the automation signs in as: password and a
         # pre-set authenticator (TOTP) secret from Secret procure-keycloak, so Claude can compute the code from DEMO PASSWORDS.txt. Created
-        # when missing; recreated when the TOTP secret changed (its SHA-256 is kept in a user attribute; Keycloak has no API that replaces
-        # an OTP credential); otherwise only the password is set again and the admin role ensured. Secrets go into files in a memory
-        # volume, never argv. Skipped when either key is missing.
+        # when missing; recreated when the TOTP secret changed (a fingerprint of it is the OTP credential's label, ruling R2; Keycloak has
+        # no API that replaces an OTP credential); otherwise only the password is set again and the admin role ensured. Secrets go into
+        # files in a memory volume, never argv. Skipped when either key is missing.
         - name: operator-user
           image: {{ include "procure-platform.ownImage" (dict "root" $ "image" $.Values.keycloak.image) | quote }}
           imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
@@ -167,6 +230,16 @@ spec:
           env:
             - name: OPERATOR_USERNAME
               value: {{ .username | quote }}
+            {{- with $c.automationClient }}
+            # Signs in as the automation client (the init container made sure it works).
+            - name: CLIENT_ID
+              value: {{ .clientId | quote }}
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: procure-keycloak
+                  key: {{ .secretKey }}
+            {{- end }}
             - name: ADMIN_USER
               valueFrom:
                 secretKeyRef:
@@ -209,6 +282,12 @@ spec:
         {{- end }}
         {{- if $c.operatorUser }}
         - name: kcadm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- end }}
+        {{- if $c.automationClient }}
+        - name: kcadm-automation
           emptyDir:
             medium: Memory
             sizeLimit: 1Mi

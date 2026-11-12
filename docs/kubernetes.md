@@ -127,9 +127,12 @@ applies the file to the running Keycloak. A change made by hand in the admin con
   required actions, components) are not touched. Users who registered themselves are not in the file and stay, and organizations run in
   `no-delete` mode, so the members Access added to `demo` stay too (the default would remove every member the file does not list). Removing
   something from the file therefore removes it from Keycloak only once the Job has imported it at least once.
-- **Access**: the bootstrap admin of the master realm (Secret `procure-keycloak`, `admin-username` / `admin-password`) on the Service. It is
-  the only account that can change the realm on an existing cluster: a client in the `procure` realm for the Job would first have to be
-  created by this very Job.
+- **Access**: on the Service, as the master realm's confidential client `procure-automation` (client credentials; Secret
+  `procure-keycloak` key `automation-client-secret`) where `keycloakConfig.automationClient` is set (both clusters, plan 08b Task 4 fix
+  round 1): the Job's init container keeps that client, signing in with the bootstrap admin's password only while the client does not
+  work yet (fresh install), and then disables the bootstrap admin ([hosting.md](hosting.md), "Keycloak's automation client and the
+  bootstrap admin"). Without it, the bootstrap admin (`admin-username` / `admin-password`). A client in the `procure` realm could not do
+  it: it would first have to be created by this very Job.
 - **Under the AppHost** there is no keycloak-config-cli: `start-dev` imports the realm into a fresh container at every start.
 
 ### Database roles (plan 08 ruling 6)

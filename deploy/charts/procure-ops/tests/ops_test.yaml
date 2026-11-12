@@ -189,8 +189,9 @@ tests:
     set:
       networkPolicies.enabled: false
     asserts:
+      # The three middlewares only (deny for foreign origins, rate limit, headers).
       - hasDocuments:
-          count: 2
+          count: 3
 
   - it: a tool without a host fails the render
     template: pgadmin.yaml
@@ -199,3 +200,27 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: hosts for pgadmin is required
+
+  # Fix round 1 (review M5): a cross-site request (foreign Origin) never reaches a tool; its own pages and requests without an Origin do.
+  - it: every tool host refuses requests with a foreign Origin (403 by a deny-all middleware, above the Ingress's router)
+    templates: [pgadmin.yaml, mongo-ui.yaml, redis-insight.yaml]
+    documentSelector: { path: kind, value: IngressRoute, matchMany: true }
+    asserts:
+      - matchRegex:
+          path: spec.routes[0].match
+          pattern: '^Host\(`(pgadmin|mongo|redis)\.procure\.localtest\.me`\) && HeaderRegexp\(`Origin`, `\.\+`\) && !Header\(`Origin`, `https://(pgadmin|mongo|redis)\.procure\.localtest\.me`\)$'
+      - equal:
+          path: spec.routes[0].priority
+          value: 100000
+      - equal:
+          path: spec.routes[0].middlewares
+          value: [{ name: operator-foreign-origin }]
+      - equal:
+          path: spec.routes[0].services
+          value: [{ name: noop@internal, kind: TraefikService }]
+
+  - it: the deny middleware admits no visitor
+    template: common.yaml
+    documentSelector: { path: metadata.name, value: operator-foreign-origin }
+    asserts:
+      - equal: { path: spec.ipAllowList.sourceRange, value: [127.0.0.1/32] }

@@ -2,8 +2,16 @@
 {{- $labels := dict "root" $ "name" "pgadmin" }}
 {{- $pg := .Values.stores.postgres }}
 {{- $pgHost := printf "%s.%s.svc.cluster.local" $pg.service .Values.stores.namespace }}
+{{- $servers := dict
+      "1" (dict "Name" "procure (read-only)" "Group" "procure" "Host" $pgHost "Port" (int $pg.port) "MaintenanceDB" "postgres"
+                "Username" "operator_reader" "SSLMode" "prefer" "PasswordExecCommand" "operator-reader"
+                "Comment" "operator_reader: reads every database, cannot write. Password from the cluster Secret.")
+      "2" (dict "Name" "procure (superuser, emergency)" "Group" "procure" "Host" $pgHost "Port" (int $pg.port) "MaintenanceDB" "postgres"
+                "Username" "postgres" "SSLMode" "prefer"
+                "Comment" "Can change anything. Password: DEMO PASSWORDS.txt, procure-ai hosted secrets, postgres-password. Not stored.") }}
+{{- $serversJson := dict "Servers" $servers | toPrettyJson }}
 # pgAdmin 4 at https://<hosts.pgadmin> (plan 08b Task 4): its own sign-in (e-mail, password, authenticator code), all databases of the
-# Postgres server. Two servers are listed: "read-only" (operator_reader: pg_read_all_data, every database, default_transaction_read_only;
+# Postgres server. Two servers are listed: "read-only" (operator_reader: SELECT on the service databases, default_transaction_read_only;
 # the password comes from the mounted Secret and is never stored) and "superuser (emergency)" (postgres; pgAdmin asks for the password,
 # DEMO PASSWORDS.txt, and does not keep it). Everything pgAdmin keeps is in an emptyDir: every start begins from this configuration.
 apiVersion: v1
@@ -18,14 +26,7 @@ data:
   seed-mfa.py: |-
     {{- .Files.Get "files/pgadmin/seed-mfa.py" | nindent 4 }}
   servers.json: |-
-    {{- $servers := dict
-          "1" (dict "Name" "procure (read-only)" "Group" "procure" "Host" $pgHost "Port" (int $pg.port) "MaintenanceDB" "postgres"
-                    "Username" "operator_reader" "SSLMode" "prefer" "PasswordExecCommand" "operator-reader"
-                    "Comment" "operator_reader: reads every database, cannot write. Password from the cluster Secret.")
-          "2" (dict "Name" "procure (superuser, emergency)" "Group" "procure" "Host" $pgHost "Port" (int $pg.port) "MaintenanceDB" "postgres"
-                    "Username" "postgres" "SSLMode" "prefer"
-                    "Comment" "Can change anything. Password: DEMO PASSWORDS.txt, procure-ai hosted secrets, postgres-password. Not stored.") }}
-    {{- dict "Servers" $servers | toPrettyJson | nindent 4 }}
+    {{- $serversJson | nindent 4 }}
 ---
 {{ include "procure-ops.service" $labels }}
 ---
@@ -48,7 +49,10 @@ spec:
       labels:
         {{- include "procure-ops.labels" $labels | nindent 8 }}
       annotations:
-        checksum/config: {{ print (.Files.Get "files/pgadmin/config_system.py") (.Files.Get "files/pgadmin/seed-mfa.py") $pgHost | sha256sum }}
+        # Every change of the ConfigMap restarts pgAdmin (its servers are loaded at start). A rotated Secret operator-pgadmin (password,
+        # authenticator secret, reader password) does not: Argo CD cannot read Secrets at render time; `kubectl -n operator rollout restart
+        # deploy/pgadmin` after bootstrap/new-secrets.ps1 (procure-ai docs/hosting.md runbook).
+        checksum/config: {{ print (.Files.Get "files/pgadmin/config_system.py") (.Files.Get "files/pgadmin/seed-mfa.py") $serversJson | sha256sum }}
     spec:
       {{- include "procure-ops.podSecurity" (dict "uid" $p.uid "gid" $p.gid) | nindent 6 }}
       containers:

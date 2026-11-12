@@ -3,8 +3,8 @@
 {{- $s := .Values.stores.redis }}
 # Redis Insight at https://<hosts.redis> (plan 08b Task 4). It has no login of its own, so Traefik asks for one first (basicAuth middleware,
 # Secret operator-redis-insight-basic-auth). One connection is defined here: operator_reader, the Redis ACL user that may read keys and
-# ask about the server, nothing else (procure-platform operatorReaders.redis). Redis holds the gateway's session tickets (visitors'
-# tokens): whoever passes this login can read them; only Dale and Claude have it. Its own data (settings, the connection) is an emptyDir:
+# ask about the server, nothing else, and only the key families of procure-platform operatorReaders.redis.keys: never the gateway's
+# procure:bff:* key ring and session tickets (fix round 1 I1). Its own data (settings, the connection) is an emptyDir:
 # every start begins from this configuration.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

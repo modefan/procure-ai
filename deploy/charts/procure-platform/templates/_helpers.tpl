@@ -84,3 +84,20 @@ argocd.argoproj.io/sync-wave: "1"
 {{- define "procure-platform.bootstrapJobName" -}}
 {{- printf "%s-%d" .base (int .root.Release.Revision) -}}
 {{- end }}
+
+{{/* The key patterns of the operator's read-only Redis user (operatorReaders.redis.keys) as ACL rules "~a ~b". Fails on an empty list, a
+     pattern with a blank, or one that would match the gateway's data-protection key ring or session tickets (procure:bff:*): with those a
+     reader could forge a session for any signed-in user (plan 08b Task 4 fix round 1 I1). */}}
+{{- define "procure-platform.redisKeyPatterns" -}}
+{{- if not . }}{{ fail "operatorReaders.redis.keys must list at least one key pattern" }}{{ end }}
+{{- $rules := list }}
+{{- range . }}
+{{- if regexMatch `\s` . }}{{ fail (printf "operatorReaders.redis.keys: %q holds a blank" .) }}{{ end }}
+{{- $re := printf "^%s$" (replace "?" "." (replace "*" ".*" (replace "." `\.` .))) }}
+{{- range list "procure:bff:data-protection-keys" "procure:bff:session:x" "procure:bff:user:x" "procure:bff:switch-ticket:x" }}
+{{- if regexMatch $re . }}{{ fail (printf "operatorReaders.redis.keys: a pattern matches the gateway's secret key %s" .) }}{{ end }}
+{{- end }}
+{{- $rules = append $rules (printf "~%s" .) }}
+{{- end }}
+{{- join " " $rules }}
+{{- end }}

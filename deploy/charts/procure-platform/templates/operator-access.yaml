@@ -62,6 +62,40 @@ spec:
                 name: rabbitmq
                 port:
                   name: management
+---
+# Cross-site requests are refused (plan 08b Task 4 fix round 1, review M5): the management API accepts a "simple" cross-site POST with a
+# text/plain body (no CORS preflight) and the browser sends the cached basic-auth login with it; checked on the cluster: another site could
+# publish a message to any exchange as Dale. Every request whose Origin is not this host's own goes to this router (above the Ingress's)
+# and gets 403 from the deny-all middleware; the UI's own requests and those without an Origin are not affected (as procure-ops'
+# originGuard).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: operator-foreign-origin
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  ipAllowList:
+    sourceRange: ["127.0.0.1/32"]
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rabbitmq-management-foreign-origin
+  labels:
+    {{- include "procure-platform.labels" $labels | nindent 4 }}
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: {{ printf "Host(`%s`) && HeaderRegexp(`Origin`, `.+`) && !Header(`Origin`, `https://%s`)" .Values.hosts.rabbitmq .Values.hosts.rabbitmq | quote }}
+      priority: 100000
+      middlewares:
+        - name: operator-foreign-origin
+      services:
+        - name: noop@internal
+          kind: TraefikService
+  tls: {}
 {{- if .Values.networkPolicies.enabled }}
 ---
 # Traefik to RabbitMQ's management port only (not AMQP); the namespace's default-deny keeps the rest closed.

@@ -15,10 +15,13 @@ hosts:
 ingressClassName: traefik
 
 # The break-glass dashboard (templates/dashboard-direct.yaml, plan 08b Task 4): a second dashboard with its own login (Traefik basic auth), not
-# Keycloak, for when Keycloak or the gateway is down. Same settings as `dashboard` below; the collector exports to both (exporter
-# otlp/direct, so keep it on: off, the collector would retry an address that does not exist).
+# Keycloak, for when Keycloak or the gateway is down. Same settings as `dashboard` below. Off by default (fix round 1 M4, like every other
+# operator switch); an environment that switches it on also adds the collector's exporter otlp/direct to the three pipelines
+# (opentelemetry-collector.alternateConfig.service.pipelines.<logs|metrics|traces>.exporters: [otlp, otlp/direct] in envs/<env>/observability.yaml):
+# a subchart's values cannot follow this switch, and an exporter in a pipeline without its dashboard would retry an address that does not
+# exist.
 dashboardDirect:
-  enabled: true
+  enabled: false
   # kubernetes.io/basic-auth Secret (username operator, password = DEMO PASSWORDS.txt operator-dashboard-token, 32 letters and digits) that
   # Traefik's basicAuth middleware reads; bootstrap/new-secrets.ps1 in the GitOps repo makes it.
   basicAuthSecretName: aspire-dashboard-direct-basic-auth
@@ -316,7 +319,8 @@ opentelemetry-collector:
         tls:
           insecure: true
       # The break-glass dashboard (templates/dashboard-direct.yaml, plan 08b Task 4): the same telemetry, so it shows everything while
-      # Keycloak is down. Its own queue: one dashboard being down does not hold up the other.
+      # Keycloak is down. Its own queue: one dashboard being down does not hold up the other. Defined here, used only where an environment
+      # adds it to the pipelines with dashboardDirect.enabled (an exporter no pipeline names is never started).
       otlp/direct:
         endpoint: aspire-dashboard-direct.observability:18889
         tls:
@@ -330,14 +334,14 @@ opentelemetry-collector:
         logs:
           receivers: [otlp, filelog]
           processors: [memory_limiter, filter/platform-noise, k8sattributes, transform/redact, transform/client-address, batch]
-          exporters: [otlp, otlp/direct]
+          exporters: [otlp]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [otlp, otlp/direct]
+          exporters: [otlp]
         traces:
           receivers: [otlp]
           # k8sattributes before tail_sampling: it finds the pod by the connection's address, which tail_sampling's regrouped batches no
           # longer carry.
           processors: [memory_limiter, k8sattributes, tail_sampling, transform/client-address, batch]
-          exporters: [otlp, otlp/direct]
+          exporters: [otlp]

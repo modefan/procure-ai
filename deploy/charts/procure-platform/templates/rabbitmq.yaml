@@ -136,8 +136,20 @@ spec:
               set -eu
               # A quoted curl config string: escape \ and " so any user name and password survive (as in redis.yaml).
               esc() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
-              printf 'user = "%s:%s"\n' "$(esc "$RABBITMQ_USER")" "$(esc "$RABBITMQ_PASSWORD")" | curl --config - --silent --show-error --fail-with-body \
-                --retry 60 --retry-delay 5 --retry-all-errors --max-time 10 \
+              # The management listener first (its start page needs no login).
+              curl --silent --show-error --fail --retry 60 --retry-delay 5 --retry-all-errors --max-time 10 -o /dev/null 'http://rabbitmq:15672/'
+              # Who calls the management API: Dale's own management user (values: rabbitmq) once it exists and signs in (the apps'
+              # user then has no tags and can no longer); before that (a fresh install) the apps' user, which the server made an
+              # administrator on its first start (RABBITMQ_DEFAULT_USER).
+              ADMIN_USER="$RABBITMQ_USER"; ADMIN_PASSWORD="$RABBITMQ_PASSWORD"
+              signs_in() { printf 'user = "%s:%s"\n' "$(esc "$1")" "$(esc "$2")" | curl --config - --silent --fail --max-time 10 -o /dev/null 'http://rabbitmq:15672/api/whoami'; }
+              {{- with .Values.rabbitmq.operator }}
+              if [ -n "${OPERATOR_PASSWORD:-}" ] && signs_in '{{ .user }}' "$OPERATOR_PASSWORD"; then ADMIN_USER='{{ .user }}'; ADMIN_PASSWORD="$OPERATOR_PASSWORD"; fi
+              {{- end }}
+              echo "management API as $ADMIN_USER"
+              admin() { printf 'user = "%s:%s"\n' "$(esc "$ADMIN_USER")" "$(esc "$ADMIN_PASSWORD")"; }
+              admin | curl --config - --silent --show-error --fail-with-body \
+                --retry 12 --retry-delay 5 --retry-all-errors --max-time 10 \
                 -X PUT -H 'content-type: application/json' \
                 --data '{"type":"topic","durable":true,"auto_delete":false,"internal":false}' \
                 'http://rabbitmq:15672/api/exchanges/%2F/{{ .Values.rabbitmq.cdcExchange }}'
@@ -146,15 +158,24 @@ spec:
               # The operator's own management login (plan 08b Task 4): the user Dale signs in to the management UI with, apart from the
               # apps' user. Created or updated (password, tags) on every sync when its Secret key exists; user and body on stdin too.
               if [ -n "${OPERATOR_PASSWORD:-}" ]; then
-                printf 'user = "%s:%s"\ndata = "{\\"password\\":\\"%s\\",\\"tags\\":\\"{{ .tags }}\\"}"\n' \
-                  "$(esc "$RABBITMQ_USER")" "$(esc "$RABBITMQ_PASSWORD")" "$(esc "$(esc "$OPERATOR_PASSWORD")")" \
+                { admin; printf 'data = "{\\"password\\":\\"%s\\",\\"tags\\":\\"{{ .tags }}\\"}"\n' "$(esc "$(esc "$OPERATOR_PASSWORD")")"; } \
                   | curl --config - --silent --show-error --fail-with-body --max-time 10 -o /dev/null \
                     -X PUT -H 'content-type: application/json' 'http://rabbitmq:15672/api/users/{{ .user }}'
-                printf 'user = "%s:%s"\n' "$(esc "$RABBITMQ_USER")" "$(esc "$RABBITMQ_PASSWORD")" \
-                  | curl --config - --silent --show-error --fail-with-body --max-time 10 -o /dev/null \
+                admin | curl --config - --silent --show-error --fail-with-body --max-time 10 -o /dev/null \
                     -X PUT -H 'content-type: application/json' --data '{"configure":".*","write":".*","read":".*"}' \
                     'http://rabbitmq:15672/api/permissions/%2F/{{ .user }}'
                 echo 'management user {{ .user }} set (tags {{ .tags }})'
+                # The apps' user keeps its password and its permissions on / (AMQP for the services and Debezium) but loses every tag,
+                # so it cannot sign in to the management UI or API on the public host (plan 08b Task 4 fix round 1 I2: the shared app
+                # credential is no internet admin login). Only once the operator's user is known to sign in, so the Job never locks
+                # itself out; idempotent (the same password and no tags on every sync).
+                if [ "$RABBITMQ_USER" != '{{ .user }}' ]; then
+                  if ! signs_in '{{ .user }}' "$OPERATOR_PASSWORD"; then echo 'management user {{ .user }} does not sign in; the apps user keeps its tags' >&2; exit 1; fi
+                  { admin; printf 'data = "{\\"password\\":\\"%s\\",\\"tags\\":\\"\\"}"\n' "$(esc "$(esc "$RABBITMQ_PASSWORD")")"; } \
+                    | curl --config - --silent --show-error --fail-with-body --max-time 10 -o /dev/null \
+                      -X PUT -H 'content-type: application/json' "http://rabbitmq:15672/api/users/$RABBITMQ_USER"
+                  echo "apps user $RABBITMQ_USER: no management tags (AMQP only)"
+                fi
               fi
               {{- end }}
           env:

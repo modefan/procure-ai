@@ -38,18 +38,18 @@ tests:
           path: data.relay
           pattern: '/var/log/pods/(?:argocd|kube-system|observability)_'
 
-  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to both dashboards, the main one and the break-glass one (logs also through filter/platform-noise and transform/redact, traces through tail_sampling)
+  - it: collector pipelines are otlp and filelog through memory_limiter, k8sattributes and batch to the dashboard (logs also through filter/platform-noise and transform/redact, traces through tail_sampling)
     template: charts/opentelemetry-collector/templates/configmap-agent.yaml
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/platform-noise\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/platform-noise\s*\n\s*- k8s_?attributes\s*\n\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n\s*- file_?log\s*\n'
       - matchRegex:
           path: data.relay
-          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- tail_sampling\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- tail_sampling\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
       - matchRegex:
           path: data.relay
-          pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
+          pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- k8s_?attributes\s*\n\s*- batch\s*\n\s*receivers:\s*\n\s*- otlp\s*\n'
       - matchRegex:
           path: data.relay
           pattern: 'endpoint: aspire-dashboard\.observability:18889'
@@ -62,6 +62,28 @@ tests:
           path: data.relay
           pattern: '- debug'
 
+  # The break-glass dashboard (plan 08b Task 4): an environment with dashboardDirect.enabled adds otlp/direct to every pipeline (as
+  # envs/<env>/observability.yaml do); the exporter itself is defined in the chart's values.
+  - it: with the environment's pipelines the collector exports to both dashboards
+    template: charts/opentelemetry-collector/templates/configmap-agent.yaml
+    set:
+      opentelemetry-collector.alternateConfig.service.pipelines.logs.exporters: [otlp, otlp/direct]
+      opentelemetry-collector.alternateConfig.service.pipelines.metrics.exporters: [otlp, otlp/direct]
+      opentelemetry-collector.alternateConfig.service.pipelines.traces.exporters: [otlp, otlp/direct]
+    asserts:
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)otlp(_grpc)?/direct:\s*\n\s*endpoint: aspire-dashboard-direct\.observability:18889'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n\s*processors:\s*\n\s*- memory_limiter\s*\n\s*- filter/platform-noise'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)traces:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n'
+      - matchRegex:
+          path: data.relay
+          pattern: '(?s)metrics:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n'
+
   # Personal data (usernames, e-mail and IP addresses) in the platform's own logs is masked before the dashboard sees it (CLAUDE.md
   # "Observability": logs carry trace ID, tenant and user ID, never personal data). The behaviour is tested against the real collector
   # image in tests/collector/Test-CollectorRedaction.ps1; this test only pins the wiring.
@@ -70,14 +92,14 @@ tests:
     asserts:
       - matchRegex:
           path: data.relay
-          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n'
+          pattern: '(?s)logs:\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact\s*\n\s*- transform/client-address\s*\n\s*- batch\s*\n'
       - matchRegex:
           path: data.relay
           pattern: '(?s)transform/redact:.*?log_statements:'
       # The traces and metrics pipelines have no use for it.
       - notMatchRegex:
           path: data.relay
-          pattern: '(?s)(traces|metrics):\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*- otlp(_grpc)?/direct\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact'
+          pattern: '(?s)(traces|metrics):\s*\n\s*exporters:\s*\n\s*- otlp(_grpc)?\s*\n\s*processors:\s*\n(\s*- \S+\n)*?\s*- transform/redact'
 
   # Plan 08b finding 3 (replaces plan 07's span filter filter/background-db, which dropped only the root span and left its children as
   # traces of their own): whole background traces are dropped (a database or cache root, Wolverine's node-assignment poll, the

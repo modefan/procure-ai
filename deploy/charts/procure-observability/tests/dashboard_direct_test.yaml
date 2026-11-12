@@ -6,6 +6,9 @@ templates:
 release:
   name: observability
   namespace: observability
+# Off by default (fix round 1 M4); envs/<env>/observability.yaml switch it on.
+set:
+  dashboardDirect.enabled: true
 tests:
   - it: runs without Keycloak and without the dashboard's own token sign-in (Traefik's login is in front)
     documentSelector: { path: kind, value: Deployment }

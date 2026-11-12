@@ -1,4 +1,16 @@
 {{- $labels := dict "root" $ "name" "operator" }}
+# Answers every request it gets with 403 (an ipAllowList no visitor matches): the routers of helpers procure-ops.originGuard send
+# cross-site requests (a foreign Origin) here, never to the tool (plan 08b Task 4 fix round 1, review M5).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: operator-foreign-origin
+  labels:
+    {{- include "procure-ops.labels" $labels | nindent 4 }}
+spec:
+  ipAllowList:
+    sourceRange: ["127.0.0.1/32"]
+---
 # Traefik middlewares of every host (helpers procure-ops.middlewares): a rate limit per client address and security headers.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

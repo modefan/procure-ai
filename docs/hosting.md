@@ -328,7 +328,7 @@ Argo CD is not one of them: it stays behind the SSH tunnel (Dale's call; see "Ar
 | pgAdmin 9.19 (all Postgres databases) | `https://pgadmin.daleabels.com` | `operator@daleabels.com` | `operator-pgadmin-password` | authenticator code (`operator-pgadmin-totp-base32`) | server *procure (read-only)*: `operator_reader`; server *procure (superuser, emergency)*: `postgres`, password typed each time (`postgres-password`) |
 | DbGate 7.3 (MongoDB) | `https://mongo.daleabels.com` | `operator` | `operator-mongo-ui-password` | none (DbGate has none) | *procure MongoDB (read-only)*: `operator_reader`; *root (emergency)*: `admin`, password asked each time (`mongo-password`) |
 | Redis Insight 3.8 | `https://redis.daleabels.com` | `operator` (Traefik's login in front; Redis Insight has none) | `operator-redis-insight-password` | none | ACL user `operator_reader` (reads only); add a connection as `default` (`redis-password`) for an emergency write |
-| RabbitMQ management | `https://rabbitmq.daleabels.com` | `operator` (administrator tag) | `operator-rabbitmq-password` | none (RabbitMQ has none) | itself |
+| RabbitMQ management | `https://rabbitmq.daleabels.com` | `operator` (administrator tag; the only management login: the apps' user `procure` has no tags, AMQP only) | `operator-rabbitmq-password` | none (RabbitMQ has none) | itself |
 | Keycloak admin console (master realm) | `https://auth.daleabels.com/admin/master/console/` | `operator` (realm role admin) | `operator-keycloak-password` | authenticator code, always (`operator-keycloak-totp-base32`) | itself |
 | Aspire dashboard, break-glass copy | `https://dashboard-direct.daleabels.com` | `operator` (Traefik's login in front) | `operator-dashboard-token` | none | the same telemetry as the main dashboard (the collector sends to both) |
 
@@ -338,26 +338,116 @@ and user name, copies the password to the clipboard (never prints it) and, for p
 computed from the TOTP secret with the server's clock. To use an authenticator app instead, add the Base32 secret from the same entry to it
 as a manual key (SHA-1, 6 digits, 30 s). Claude computes the codes the same way, so it can sign in too.
 
-**Read-only by default.** Each data tool's default connection is a user that cannot change data: Postgres `operator_reader`
-(`pg_read_all_data`, `default_transaction_read_only`; every database but `keycloakdb`, whose password hashes, OTP seeds, client secrets and
-realm keys it cannot open at all: Keycloak's data is looked at in its admin console), MongoDB `operator_reader` (`read` on every app database), Redis `operator_reader` (`+@read` minus `KEYS`; no write, `CONFIG`,
-`FLUSH*`, `EVAL`, `ACL` or pub/sub). The superuser / root logins are for emergencies and are typed each time, never stored by the tool.
-What reading means: Redis holds the gateway's session tickets (visitors' tokens) and Postgres the app data; whoever passes one of these
-logins can read them. Only Dale and Claude have them.
+**Read-only by default.** Each data tool's default connection is a user that cannot change data:
+
+- Postgres `operator_reader` (`infra/postgres/roles.sql`): `default_transaction_read_only`; in each of the eight service databases
+  `USAGE` on its schemas and `SELECT` on its tables, views and sequences, and by default on what the service's role creates later. Not
+  `pg_read_all_data` (fix round 1): that role also reads the system catalogs, among them `pg_authid` with every role's password verifier.
+  It cannot open `keycloakdb` at all (password hashes, OTP seeds, client secrets, realm keys: Keycloak's data is looked at in its admin
+  console). It reads Audit's pgaudit log tables in `auditdb` (the server log as CSV; passwords in it are `<REDACTED>`).
+- MongoDB `operator_reader`: `read` on every app database.
+- Redis `operator_reader`: `+@read` minus `KEYS` (no write, `CONFIG`, `FLUSH*`, `EVAL`, `ACL` or pub/sub), and only on an allow-list of
+  key families (`operatorReaders.redis.keys` in the platform chart: FusionCache `v2:*`, locks `ProcureAi.*`, `email:*`, `bell:*`,
+  `presence:*`, `assistant:*`, `procure:status:*`, `procure:stats:*`, `procure:maintenance`). **Never `procure:bff:*`**: the gateway's
+  Data Protection key ring (`procure:bff:data-protection-keys`, the keys that encrypt every session cookie) and the session, user and
+  tenant-switch tickets (visitors' access and refresh tokens). With the key ring a reader could decrypt the tickets and forge a session
+  and anti-forgery cookie for any signed-in user, app admins included (review I1); the chart fails on a pattern that matches them, and
+  Test-OperatorTools proves `LRANGE`/`GET` on them is refused. `SCAN` still lists every key name (an ACL cannot filter it); the names hold
+  no secret. A new key family is added to the list on purpose.
+
+The superuser / root logins are for emergencies and are typed each time, never stored by the tool. Whoever passes one of the read-only
+logins can read the app data (orders, invoices, users' names); only Dale and Claude have them.
 
 **What protects them.** Traefik in front of every host: TLS (the one Let's Encrypt certificate lists every host), a rate limit per client
 address (300 requests a minute, bursts of 100; over it 429), security headers (`X-Frame-Options: SAMEORIGIN`, `nosniff`, no referrer,
 `noindex`). The raw ports (5432, 27017, 6379, 5672, 15672) never get an Ingress or a host port, and Contabo's firewall lets in only 22,
 80 and 443. NetworkPolicies: each tool (namespace `operator`) reaches only DNS and its own store's port; nothing but Traefik reaches the
 tools; Traefik reaches RabbitMQ's management port, not AMQP. Pods run non-root with a read-only root filesystem, no capabilities and
-memory/CPU limits; images are pinned to the current releases (pgAdmin 9.19.0, DbGate 7.3.6, Redis Insight 3.8.0). Keycloak's master realm
-locks a user out for a while after 5 wrong passwords (at most 15 minutes, never for good) and its browser sign-in always asks for the
-one-time code; pgAdmin's own lockout is off (it would lock its single admin out for good) and the rate limit slows guessing instead.
-One exception (plan 08b Task 4 ruling R3): the bootstrap admin `keycloak-admin` (Secret `procure-keycloak`, the account the
-keycloak-config Job and Claude's kcadm use) has no one-time code, because keycloak-config-cli signs in with a password grant that cannot
-carry one; with the master realm public, its password alone gets an admin token from `https://auth.daleabels.com/realms/master/`. It is
-a 32-character generated value behind the same lockout and rate limit; treat it like a root password (rotate it if it ever leaks).
+memory/CPU limits; images are pinned to the current releases (pgAdmin 9.19.0, DbGate 7.3.6, Redis Insight 3.8.0; by tag, like the
+platform's other public images). **Cross-site requests are refused** (fix round 1, review M5): a browser sends a cached basic-auth login
+(and cookies) with requests other sites make, and a `text/plain` POST needs no CORS preflight; before this guard another site could make
+Dale's browser publish a message to any RabbitMQ exchange that way (checked on the cluster). On the pgAdmin, DbGate, Redis Insight and
+RabbitMQ hosts a Traefik router above the Ingress's takes every request whose `Origin` header is not the host's own and answers 403
+(IngressRoute `<tool>-foreign-origin`, a deny-all `ipAllowList` middleware); the tools' own pages and requests without an Origin pass.
+The break-glass dashboard keeps its own Origin check on its WebSocket; Keycloak's admin API takes bearer tokens only.
+
+Keycloak's master realm locks a user out for a while after 5 wrong passwords (at most 15 minutes, never for good) and asks for the
+one-time code at **every** password sign-in: the admin console's browser flow (`operator browser`) and password grants (`operator direct
+grant`, e.g. kcadm `--user` or `admin-cli`), so no master-realm account gets in with a password alone. A stranger who knows the name
+`operator` can keep Dale's account locked with wrong passwords (15 minutes, repeating; review M6, accepted). The fallback is the same as
+for Argo CD: kcadm in the Keycloak pod through the SSH tunnel, as the automation client (next section), which no user lockout concerns.
+pgAdmin's own lockout is off (it would lock its single admin out for good) and the rate limit slows guessing instead.
+
+The certificate names every host, and certificates are published in Certificate Transparency logs when they are issued, so expect the
+pgadmin, mongo, redis and rabbitmq hosts to be scanned within minutes of the first issue (review M7): the logins are long generated
+values, the rate limits and the master realm's lockout slow guessing, and nothing is reachable without a login.
 Dale accepted that these logins face the internet (2026-11-08): debugging from any browser matters more on this demo.
+
+### Keycloak's automation client and the bootstrap admin (plan 08b Task 4 fix round 1)
+
+Before the master realm was public, the keycloak-config Job and kcadm signed in as the bootstrap admin `keycloak-admin` with its password
+(ruling R3 of the first version). On the public host that meant one password, with a guessable user name and no second factor, gave full
+Keycloak control from anywhere, and anyone could keep that account locked (5 wrong passwords a minute) and so stop every sync of the
+platform (review I3). Now:
+
+- **`procure-automation`**, a confidential client in the master realm (service account only: no browser sign-in, no password grant;
+  master realm role `admin`), is what the automation signs in as, with client credentials: keycloak-config-cli
+  (`KEYCLOAK_GRANTTYPE=client_credentials`), the Job's operator-user container, and the GitOps repo's in-pod kcadm scripts
+  (`add-argocd-admin.ps1`, `tests/Test-AddArgocdAdmin.ps1`, `tests/Test-Smoke.ps1`; the secret goes to the pod on stdin). No user, so no
+  lockout can stop a sync. Its secret is Secret `procure-keycloak` key `automation-client-secret` (DEMO PASSWORDS.txt
+  `keycloak-automation-client-secret`, generated by `bootstrap/new-secrets.ps1`; a fresh value that was never in a log). Residual risk:
+  the secret alone still gets an admin token from the public token endpoint (Keycloak has no network condition for a client); it is 32
+  generated characters, not guessable by name and not lockable.
+- The keycloak-config Job's init container `automation-client` (`files/keycloak-automation-client.sh`) keeps the client on every sync. It
+  signs in as the client; only when that fails (a fresh install, the first sync after this change) does it use the bootstrap admin's
+  password, creates or repairs the client, **proves the client signs in, and only then disables `keycloak-admin`**, so the Job never
+  switches off the account it still needs. A fresh cluster: Keycloak creates `keycloak-admin` at its first start
+  (`KC_BOOTSTRAP_ADMIN_*`), the first Job run creates the client and disables the user.
+- **`keycloak-admin` is break-glass only**: disabled, password kept (DEMO PASSWORDS.txt `keycloak-admin-password`). Re-enable it through
+  the SSH tunnel, as the client, in the Keycloak pod:
+
+  ```powershell
+  cd procure-ai-gitops; . ./bootstrap/common.ps1; Select-ProcureCluster hosted
+  $sh = $KeycloakKcadmSignIn + "`n" + 'c=/tmp/kc.config; kc_sign_in $c; K=/opt/keycloak/bin/kcadm.sh; id=$($K get users -r master -q exact=true -q username=keycloak-admin --fields id --format csv --noquotes --config $c); $K update users/$id -r master -s enabled=true --config $c; rm -f $c'
+  (Get-KeycloakKcadmSecretLine) | kubectl @KubectlArgs -n procure exec -i deploy/keycloak -c keycloak -- bash -c ($sh -replace "`r", '')
+  ```
+
+  It then still needs a one-time code (no master-realm password sign-in works without one): in the admin console it is asked to set up an
+  authenticator first. The next sync disables it again. If the client's secret itself no longer works (rotated in the Secret but not in
+  Keycloak, client deleted by hand), Keycloak's own recovery is `kc.sh bootstrap-admin service` (or `user`) run in the Keycloak pod with
+  the same database settings, which adds a temporary admin; see Keycloak's "Admin bootstrap and recovery" guide. Then fix the client
+  (the Job repairs it on the next sync once it can sign in) and delete the temporary admin.
+
+### Secrets that are admin logins from the internet (for Dale's decision; review I4)
+
+With the admin console, the master realm and RabbitMQ's management UI public, these existing values are admin credentials usable from any
+browser. Run 2 of this task printed the base64 data of the procure Secrets (Secret `procure-keycloak` included) into a session log on
+2026-11-10. Nothing was rotated (Dale's rule: Claude never rotates on its own); Dale decides before the push whether to rotate them or to
+accept and record it.
+
+| Secret (DEMO PASSWORDS.txt entry) | What it opens from the internet now | Exposure | How to rotate (hosted) |
+|---|---|---|---|
+| `keycloak-admin-password` (Secret `procure-keycloak` `admin-password`) | nothing while `keycloak-admin` is disabled (the Job disables it; every master-realm password sign-in also needs a code it does not have); full Keycloak control if someone re-enables it | in the run-2 log | `dotnet user-secrets remove --id procure-ai-hosted Parameters:keycloak-admin-password`, `bootstrap/new-secrets.ps1 -Environment hosted`, then set it in Keycloak (it does not read the variable again after the first start): kcadm as the client, `set-password -r master --username keycloak-admin --new-password` (from stdin), then `backup-hosted.ps1` |
+| `keycloak-access-admin-secret` (`access-admin-secret`, client `procure-access-admin` in realm `procure`) | a token from the public `procure` realm with `manage-users` and `manage-realm` on realm `procure`; the admin REST API (`/admin/realms/procure/...`) is now routed publicly: create or change demo users, change the realm | in the run-2 log | remove the user secret, `new-secrets.ps1 -Environment hosted`, sync the platform (the keycloak-config Job writes the client secret from the Secret), restart `access-api`, `backup-hosted.ps1` |
+| `rabbitmq-password` (Secret `procure-rabbitmq` `password`, user `procure`) | nothing on the management host any more (no tags since fix round 1: 401); AMQP (5672) is not reachable from outside | in the run-2 log | remove the user secret, `new-secrets.ps1 -Environment hosted` (it rewrites `procure-connection-strings` too), set it in RabbitMQ (`rabbitmqctl change_password procure` with the value on stdin, or the management API as `operator`), restart Debezium and every service, `backup-hosted.ps1` |
+| `keycloak-gateway-secret`, `keycloak-internal-secret`, `keycloak-dashboard-secret`, `keycloak-demo-login-secret` | client tokens of their clients in realm `procure` (not admin rights; reachable before this task too) | in the run-2 log | as `access-admin-secret`, restarting the services that use each (gateway; every service; the dashboard; the gateway) |
+| `operator-*` values (this task) | each tool's own login | not in a log (generated 2026-11-08, never printed) | remove the user secret, `new-secrets.ps1 -Environment hosted`, then the restart in the runbook below, `backup-hosted.ps1` |
+
+The Postgres, MongoDB and Redis admin passwords open nothing from the internet by themselves (the raw ports are closed); they work only
+typed into pgAdmin, DbGate or Redis Insight after that tool's own login.
+
+### Runbook: after changing an operator login
+
+`bootstrap/new-secrets.ps1 -Environment hosted` writes the Secrets; pods read them at start, so restart what uses a changed value (review
+M3: Argo CD cannot see a Secret's content when it renders, so a Secret change alone restarts nothing):
+
+- pgAdmin password, its authenticator secret, or the reader's password: `kubectl -n operator rollout restart deploy/pgadmin` (a change of
+  pgAdmin's ConfigMap, e.g. servers.json, restarts it by itself: checksum annotation).
+- DbGate / Redis Insight logins or reader passwords: `kubectl -n operator rollout restart deploy/mongo-ui` / `deploy/redis-insight`.
+- The read-only database users and the RabbitMQ / Keycloak operator users: the next platform sync (db-roles, rabbitmq-cdc-exchange and
+  keycloak-config Jobs) sets them; the Redis reader at Redis's next start (`kubectl -n procure rollout restart deploy/redis`; signs every
+  visitor out once).
+- The break-glass dashboard's login: Traefik reads the basic-auth Secret itself, no restart.
 
 **Last resort.** Every tool still goes through Traefik on the VM. If Traefik or the VM is down, use the SSH tunnel (`open-tunnel.ps1`,
 then kubectl) or the Contabo panel's VNC console ("The live site is down", step 8).
@@ -455,7 +545,8 @@ cd procure-ai-gitops
    knew your user name could keep it locked this way; break-glass `admin` and Claude's token still work then, and a new private user
    name fixes it.
 6. **Lost phone (recovery):** break-glass `admin` still works. Delete the old authenticator and require a new one, through the tunnel
-   with kcadm in the Keycloak pod, as the bootstrap admin (the same sign-in `add-argocd-admin.ps1` uses):
+   with kcadm in the Keycloak pod, as the automation client `procure-automation` (the same sign-in `add-argocd-admin.ps1` uses: common.ps1
+   `$KeycloakKcadmSignIn`, as in "Keycloak's automation client and the bootstrap admin"):
    `kcadm.sh get users/<id>/credentials -r ops` (note the `otp` entry's id), `kcadm.sh delete users/<id>/credentials/<otp id> -r ops`,
    then `kcadm.sh update users/<id> -r ops -s 'requiredActions=["CONFIGURE_TOTP"]'`. Running `./bootstrap/add-argocd-admin.ps1
    -UserName <your name>` again also re-adds Configure OTP to a user without an authenticator (appended to any other pending

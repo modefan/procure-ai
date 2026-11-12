@@ -74,7 +74,13 @@ tests:
       # Inside a quoted curl config string \ and " are special; both are escaped before the user line is written (no argv secrets).
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: 'printf ''user = "%s:%s"\\n'' "\$\(esc "\$RABBITMQ_USER"\)" "\$\(esc "\$RABBITMQ_PASSWORD"\)" \| curl --config -'
+          pattern: 'admin\(\) \{ printf ''user = "%s:%s"\\n'' "\$\(esc "\$ADMIN_USER"\)" "\$\(esc "\$ADMIN_PASSWORD"\)"; \}'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'signs_in\(\) \{ printf ''user = "%s:%s"\\n'' "\$\(esc "\$1"\)" "\$\(esc "\$2"\)" \| curl --config -'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'admin \| curl --config -'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: 'esc\(\) \{ printf ''%s'' "\$1" \| sed ''s/\[\\\\"\]/\\\\&/g''; \}'

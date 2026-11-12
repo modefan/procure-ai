@@ -39,7 +39,20 @@ tests:
       operatorAccess.rabbitmq.enabled: true
     asserts:
       - hasDocuments:
-          count: 4
+          count: 6
+      # Fix round 1 (review M5): a cross-site request (foreign Origin) gets 403 and never reaches the management API.
+      - equal:
+          path: spec.routes[0].match
+          value: "Host(`rabbitmq.example.test`) && HeaderRegexp(`Origin`, `.+`) && !Header(`Origin`, `https://rabbitmq.example.test`)"
+        documentSelector: { path: kind, value: IngressRoute }
+      - equal:
+          path: spec.routes[0].middlewares
+          value: [{ name: operator-foreign-origin }]
+        documentSelector: { path: kind, value: IngressRoute }
+      - equal:
+          path: spec.ipAllowList.sourceRange
+          value: [127.0.0.1/32]
+        documentSelector: { path: metadata.name, value: operator-foreign-origin }
       - equal:
           path: spec.rules[0]
           value:
@@ -108,10 +121,31 @@ tests:
             valueFrom: { secretKeyRef: { name: procure-redis, key: operator-reader-password } }
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: "user operator_reader reset on #%s ~\\* resetchannels -@all \\+@read -keys "
+          pattern: 'user operator_reader reset on #%s ~v2:\* ~ProcureAi\.\* ~email:\* ~bell:\* ~presence:\* ~assistant:\* ~procure:status:\* ~procure:stats:\* ~procure:maintenance resetchannels -@all \+@read -keys '
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '~\*|~procure:\*|~procure:bff'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: 'sha256sum'
+
+  - it: the read-only Redis user never gets the gateway's key ring or session tickets (fix round 1 I1)
+    template: redis.yaml
+    set:
+      operatorReaders.redis.key: operator-reader-password
+      operatorReaders.redis.keys: ["v2:*", "procure:*"]
+    asserts:
+      - failedTemplate:
+          errorPattern: "a pattern matches the gateway's secret key procure:bff:data-protection-keys"
+
+  - it: the read-only Redis user needs at least one key pattern
+    template: redis.yaml
+    set:
+      operatorReaders.redis.key: operator-reader-password
+      operatorReaders.redis.keys: []
+    asserts:
+      - failedTemplate:
+          errorPattern: operatorReaders.redis.keys must list at least one key pattern
 
   - it: the broker job keeps the operator's own management user when it is configured
     template: rabbitmq.yaml
@@ -130,6 +164,22 @@ tests:
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: "tags.*administrator"
+      # Fix round 1 I2: the apps' user loses its tags (no management login), only after the operator's user signs in, and the Job then
+      # calls the API as the operator.
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "signs_in 'operator' \"\\$OPERATOR_PASSWORD\"; then ADMIN_USER='operator'"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "(?s)does not sign in.*tags.*api/users/\\$RABBITMQ_USER"
+
+  - it: without the operator's user the apps' user keeps its tags (it is the only management login)
+    template: rabbitmq.yaml
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'api/users/'
 
   - it: the admin console and the master realm reach the public host only with adminConsole
     template: keycloak.yaml
@@ -165,6 +215,7 @@ tests:
     template: keycloak-config-job.yaml
     set:
       keycloakConfig.masterRealm.enabled: true
+      keycloakConfig.automationClient: { clientId: procure-automation, secretKey: automation-client-secret, disableBootstrapAdmin: true }
       keycloakConfig.operatorUser: { username: operator, passwordKey: operator-password, totpKey: operator-totp-base32 }
     asserts:
       - hasDocuments:
@@ -172,6 +223,15 @@ tests:
       - matchRegex:
           path: data["master-realm.json"]
           pattern: '"browserFlow": "operator browser"'
+        documentSelector: { path: kind, value: ConfigMap }
+      # Fix round 1 (review R3): a password grant needs the one-time code too, for every master-realm user.
+      - matchRegex:
+          path: data["master-realm.json"]
+          pattern: '"directGrantFlow": "operator direct grant"'
+        documentSelector: { path: kind, value: ConfigMap }
+      - matchRegex:
+          path: data["master-realm.json"]
+          pattern: '"authenticator": "direct-grant-validate-otp",\s*"authenticatorFlow": false,\s*"requirement": "REQUIRED"'
         documentSelector: { path: kind, value: ConfigMap }
       - matchRegex:
           path: data["master-realm.json"]
@@ -195,6 +255,53 @@ tests:
             name: OPERATOR_TOTP_BASE32
             valueFrom: { secretKeyRef: { name: procure-keycloak, key: operator-totp-base32 } }
         documentSelector: { path: kind, value: Job }
+      - contains:
+          path: spec.template.spec.containers[1].env
+          content: { name: CLIENT_ID, value: procure-automation }
+        documentSelector: { path: kind, value: Job }
+
+  - it: the master realm's one-time code for password grants needs the automation client (the Job could not sign in otherwise)
+    template: keycloak-config-job.yaml
+    set:
+      keycloakConfig.masterRealm.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: keycloakConfig.masterRealm.enabled needs keycloakConfig.automationClient
+
+  - it: with the automation client the Job signs in with client credentials, never the bootstrap admin's password (review I3)
+    template: keycloak-config-job.yaml
+    set:
+      keycloakConfig.automationClient: { clientId: procure-automation, secretKey: automation-client-secret, disableBootstrapAdmin: true }
+    documentSelector: { path: kind, value: Job }
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: automation-client
+      - contains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: CLIENT_SECRET
+            valueFrom: { secretKeyRef: { name: procure-keycloak, key: automation-client-secret } }
+      - contains:
+          path: spec.template.spec.initContainers[1].env
+          content: { name: DISABLE_BOOTSTRAP_ADMIN, value: "true" }
+      # The bootstrap admin is disabled only after the client is proven to sign in.
+      - matchRegex:
+          path: spec.template.spec.initContainers[1].args[0]
+          pattern: '(?s)signs in".*DISABLE_BOOTSTRAP_ADMIN.*enabled=false'
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: KEYCLOAK_GRANTTYPE, value: client_credentials }
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_CLIENTSECRET
+            valueFrom: { secretKeyRef: { name: procure-keycloak, key: automation-client-secret } }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_PASSWORD
+            valueFrom: { secretKeyRef: { name: procure-keycloak, key: admin-password } }
 
   - it: the db-roles job creates the read-only database users only when their keys are named
     template: db-roles-job.yaml

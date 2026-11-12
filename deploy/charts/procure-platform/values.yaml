@@ -153,12 +153,21 @@ keycloakConfig:
     KC_ACCESS_ADMIN_SECRET: access-admin-secret
     KC_DEMO_LOGIN_SECRET: demo-login-secret
     KC_DASHBOARD_SECRET: dashboard-secret
-  # Also apply files/keycloak-master-realm.json to the master realm (plan 08b Task 4): the admin console's sign-in asks for a one-time code
-  # (OTP Form REQUIRED, as in realm ops), password guessers are locked out for a while (temporary only, at most 15 minutes, so a stranger
-  # cannot keep anyone out for long), no self-registration or password reset. The direct-grant flow stays Keycloak's own (password only):
-  # this Job and Claude's kcadm sign in as the bootstrap admin that way.
+  # Also apply files/keycloak-master-realm.json to the master realm (plan 08b Task 4): every password sign-in asks for a one-time code, in the
+  # admin console (OTP Form REQUIRED, as in realm ops) and in a password grant (direct grant flow "operator direct grant", fix round 1), so no
+  # master-realm account gets in with a password alone; password guessers are locked out for a while (temporary only, at most 15 minutes,
+  # so a stranger cannot keep anyone out for long); no self-registration or password reset. Needs automationClient: the Job itself then
+  # signs in as a client, which no user lockout or one-time code concerns.
   masterRealm:
     enabled: false
+  # The automation's own confidential master-realm client (plan 08b Task 4 fix round 1, review I3/R3; files/keycloak-automation-client.sh):
+  # keycloak-config-cli and the operator-user container sign in with client credentials (secret: Secret procure-keycloak key `secretKey`,
+  # bootstrap/new-secrets.ps1), never with a password, so no brute-force lockout of a user can stop a sync. The Job's init container keeps
+  # the client (service account only, master realm role admin), signing in as the bootstrap admin only while the client does not work yet
+  # (fresh install, first sync after the change), and with disableBootstrapAdmin then disables the bootstrap admin (kept as break-glass:
+  # procure-ai docs/hosting.md "Keycloak's automation client and the bootstrap admin"). null: the bootstrap admin's password, as before.
+  # { clientId: procure-automation, secretKey: automation-client-secret, disableBootstrapAdmin: true } in envs/<env>/platform.yaml.
+  automationClient: null
   # Dale's own master-realm admin (the Job's operator-user container, files/keycloak-operator-user.sh): Secret procure-keycloak keys; a
   # missing key skips it (the AppHost and older Secrets). null switches the container off.
   # { username: operator, passwordKey: operator-password, totpKey: operator-totp-base32 } in envs/<env>/platform.yaml.
@@ -213,7 +222,8 @@ dbRoles:
 # a key here to switch that user off entirely. Off by default (no key, no user; a Secret key is never optional): the GitOps repo's
 # envs/<env>/platform.yaml switches them on once bootstrap/new-secrets.ps1 created the keys.
 operatorReaders:
-  # Postgres role operator_reader (infra/postgres/roles.sql): pg_read_all_data, CONNECT on every database; Secret procure-db-roles key
+  # Postgres role operator_reader (infra/postgres/roles.sql): SELECT on the service databases' tables (not pg_read_all_data, which reads
+  # pg_authid too), CONNECT on every database but keycloakdb; Secret procure-db-roles key
   # (operator-reader-postgres-password).
   postgresKey: ""
   # MongoDB user operator_reader (infra/mongo/users.js): read on every app database; Secret procure-db-roles key
@@ -222,9 +232,19 @@ operatorReaders:
   # Redis ACL user (templates/redis.yaml); Secret procure-redis key. `commands` follows `-@all`: every read command but KEYS (it blocks the
   # server), and what Redis Insight asks about the connection and the server. Nothing that writes, deletes or changes the server.
   # key: in Secret procure-redis (operator-reader-password); empty: no such user.
+  # keys: the key families it may read (ACL key patterns), an allow-list on purpose (plan 08b Task 4 fix round 1 I1): never procure:bff:*,
+  # the gateway's Data Protection key ring and the session and tenant-switch tickets (with the key ring anyone could forge a session for
+  # any signed-in user; the chart fails on a pattern that matches them). A new key family is added here on purpose. SCAN still lists every
+  # key NAME (an ACL cannot filter it); the names of the gateway's keys hold no secret (a session cookie is encrypted with the key ring).
+  #   v2:*            FusionCache (every service's 1 s GET cache, idempotency records, access lookups)
+  #   ProcureAi.*     DistributedLock's locks (<service>:lock:...)
+  #   email:* bell:*  Notifications (sent e-mails, the bell inbox); presence:* SignalR presence
+  #   assistant:*     the Assistant's answer locks, question quotas and token budgets
+  #   procure:status:* procure:stats:* procure:maintenance  the system status page, daily stats, the maintenance window
   redis:
     key: ""
     user: operator_reader
+    keys: ["v2:*", "ProcureAi.*", "email:*", "bell:*", "presence:*", "assistant:*", "procure:status:*", "procure:stats:*", "procure:maintenance"]
     commands: "+@read -keys +info +ping +select +hello +command +client|setname +client|getname +client|id +client|info +client|no-touch"
 
 # The operator's direct access (templates/operator-access.yaml, plan 08b Task 4): each component on its own address with its own login,

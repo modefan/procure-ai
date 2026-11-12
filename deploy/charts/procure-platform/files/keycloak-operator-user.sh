@@ -1,6 +1,6 @@
 # Dale's own admin in Keycloak's master realm (plan 08b Task 4), run by the keycloak-config Job's operator-user container (our Keycloak
-# image: kcadm.sh) on every sync, as the bootstrap admin through the Service. Environment: OPERATOR_USERNAME, ADMIN_USER, ADMIN_PASSWORD,
-# OPERATOR_PASSWORD and OPERATOR_TOTP_BASE32 (Secret procure-keycloak; the last two optional: without them nothing happens), HOME (a
+# image: kcadm.sh) on every sync through the Service, as the automation client (CLIENT_ID, CLIENT_SECRET) when set, else as the bootstrap
+# admin (ADMIN_USER, ADMIN_PASSWORD). Environment: OPERATOR_USERNAME, OPERATOR_PASSWORD and OPERATOR_TOTP_BASE32 (Secret procure-keycloak; the last two optional: without them nothing happens), HOME (a
 # memory volume for kcadm's config and the request files). Nothing secret reaches argv or the log.
 #   missing user                     created with the password and an OTP credential holding the TOTP secret, labelled
 #                                    "procure <first 16 hex digits of the SHA-256 of the Base32 secret>"
@@ -17,12 +17,20 @@ fi
 umask 077
 kc=/opt/keycloak/bin/kcadm.sh
 cfg="$HOME/kcadm.config"
-for attempt in $(seq 1 60); do
-  if KC_CLI_PASSWORD="$ADMIN_PASSWORD" "$kc" config credentials --config "$cfg" --server http://keycloak:8080 --realm master \
-      --user "$ADMIN_USER" >/dev/null 2>&1; then
-    break
+sign_in() {
+  # The automation client when CLIENT_ID is set (keycloakConfig.automationClient, plan 08b Task 4 fix round 1: client credentials, no
+  # password), else the bootstrap admin.
+  if [ -n "${CLIENT_ID:-}" ]; then
+    KC_CLI_CLIENT_SECRET="$CLIENT_SECRET" "$kc" config credentials --config "$cfg" --server http://keycloak:8080 --realm master \
+      --client "$CLIENT_ID" >/dev/null 2>&1
+  else
+    KC_CLI_PASSWORD="$ADMIN_PASSWORD" "$kc" config credentials --config "$cfg" --server http://keycloak:8080 --realm master \
+      --user "$ADMIN_USER" >/dev/null 2>&1
   fi
-  if [ "$attempt" -eq 60 ]; then echo 'operator user: could not sign in to Keycloak as the bootstrap admin' >&2; exit 1; fi
+}
+for attempt in $(seq 1 60); do
+  if sign_in; then break; fi
+  if [ "$attempt" -eq 60 ]; then echo "operator user: could not sign in to Keycloak as ${CLIENT_ID:-the bootstrap admin}" >&2; exit 1; fi
   sleep 5
 done
 

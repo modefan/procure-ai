@@ -34,6 +34,33 @@ SET client_min_messages = warning;
 -- (the error itself is still logged). Every \connect starts a new session, so roles-database.sql sets it again after each one.
 SET log_min_error_statement = panic;
 
+-- The operator's read-only role (plan 08b Task 4): what pgAdmin on the public operator host connects as by default, so looking at the data
+-- cannot change it. Only where DB_OPERATOR_READER_PASSWORD is set (the clusters: Secret procure-db-roles, key operator-reader-postgres-password);
+-- the AppHost and the tests do not set it, and a role left from an earlier run then loses its login (end of this file). Made here, before
+-- the service databases, so roles-database.sql can grant it read access in each one (operator_enabled); its CONNECT grants are at the end.
+--   operator_reader  LOGIN, default_transaction_read_only. In each service database (roles-database.sql): USAGE on its schemas, SELECT on
+--                    its tables, views and sequences, and the same by default for what the service's own role creates later (migrations,
+--                    Wolverine's and Marten's runtime tables). Not pg_read_all_data (fix round 1 M1): that role also reads the system
+--                    catalogs, among them pg_authid with every role's password verifier. No write of any kind, no DDL, no replication;
+--                    it owns nothing.
+\unset operator_password
+\getenv operator_password DB_OPERATOR_READER_PASSWORD
+\if :{?operator_password}
+SELECT :'operator_password' <> '' AS operator_enabled \gset
+\else
+\set operator_enabled false
+\endif
+\if :operator_enabled
+SELECT 'CREATE ROLE operator_reader' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'operator_reader') \gexec
+ALTER ROLE operator_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT PASSWORD :'operator_password';
+-- Read-only for good: no default transaction that could write, even if a grant ever slipped through.
+ALTER ROLE operator_reader SET default_transaction_read_only = on;
+-- An earlier revision made it a member of pg_read_all_data (pg_authid included); taken back.
+SELECT 'REVOKE pg_read_all_data FROM operator_reader' WHERE EXISTS (
+    SELECT FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
+    WHERE g.rolname = 'pg_read_all_data' AND u.rolname = 'operator_reader') \gexec
+\endif
+
 \set service access
 \set database accessdb
 \set capture true
@@ -109,12 +136,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 \getenv cdc_password DB_REQUESTS_CDC_PASSWORD
 \ir roles-database.sql
 
--- The operator's read-only role (plan 08b Task 4): what pgAdmin on the public operator host connects as by default, so looking at the data
--- cannot change it. Only where DB_OPERATOR_READER_PASSWORD is set (the clusters: Secret procure-db-roles, key operator-reader-postgres-password);
--- the AppHost and the tests do not set it, and a role left from an earlier run then loses its login.
---   operator_reader  LOGIN, member of pg_read_all_data (SELECT on every table, view and sequence of every database, USAGE on every schema,
---                    tables added later included), CONNECT on every database that allows connections except keycloakdb. No write of
---                    any kind, no DDL, no replication; it owns nothing.
+-- The operator's read-only role (made at the top of this file): CONNECT on every database that allows connections except keycloakdb (it
+-- reads only the service databases, where roles-database.sql granted it SELECT).
 -- keycloakdb is left out (plan 08b Task 4 ruling R1): it holds password hashes, one-time-code seeds, client secrets and the realms' signing
 -- keys in many tables, and Keycloak's own schema is not ours to change (no row-level security on its tables). Its CONNECT is revoked
 -- should an earlier run have granted it (PUBLIC has no CONNECT on any database here). Keycloak's data is looked at in its admin console,
@@ -122,19 +145,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 \connect postgres
 SET client_min_messages = warning;
 SET log_min_error_statement = panic;
-\unset operator_password
-\getenv operator_password DB_OPERATOR_READER_PASSWORD
-\if :{?operator_password}
-SELECT :'operator_password' <> '' AS operator_enabled \gset
-\else
-\set operator_enabled false
-\endif
 \if :operator_enabled
-SELECT 'CREATE ROLE operator_reader' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'operator_reader') \gexec
-ALTER ROLE operator_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT PASSWORD :'operator_password';
--- Read-only for good: no default transaction that could write, even if a grant ever slipped through.
-ALTER ROLE operator_reader SET default_transaction_read_only = on;
-GRANT pg_read_all_data TO operator_reader;
 SELECT format('GRANT CONNECT ON DATABASE %I TO operator_reader', datname) FROM pg_database
 WHERE datallowconn AND NOT datistemplate AND datname <> 'keycloakdb' \gexec
 SELECT 'REVOKE CONNECT ON DATABASE keycloakdb FROM operator_reader' WHERE EXISTS (SELECT FROM pg_database WHERE datname = 'keycloakdb') \gexec

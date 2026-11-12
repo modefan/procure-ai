@@ -3,7 +3,8 @@ The break-glass dashboard (plan 08b Task 4, Dale 2026-11-08): a second Aspire da
 NOT Keycloak, so Dale can read the logs and traces while Keycloak (or the gateway) is down. Traefik asks for it (basicAuth middleware,
 kubernetes.io/basic-auth Secret dashboardDirect.basicAuthSecretName from bootstrap/new-secrets.ps1; bootstrap/hosted/Get-OperatorLogin.ps1
 -Tool dashboard); the dashboard itself runs without a sign-in (templates/_dashboard.tpl says why) and only Traefik reaches it. The collector
-sends everything to both dashboards (exporter otlp/direct in values.yaml); each keeps its own copy in memory. Same image, limits, proxy and
+sends everything to both dashboards (exporter otlp/direct in values.yaml, which the environment adds to the pipelines together with
+dashboardDirect.enabled); each keeps its own copy in memory. Same image, limits, proxy and
 caps as the main one; its Ingress also has a per-client-address rate limit (password guessing) and the security headers.
 */}}
 {{- $dd := .Values.dashboardDirect }}

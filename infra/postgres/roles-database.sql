@@ -140,3 +140,16 @@ $cdc$;
 
 -- The old shared role's grants in this database (DROP OWNED also revokes its privileges); it owns nothing.
 SELECT 'DROP OWNED BY debezium' WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'debezium') \gexec
+
+-- The operator's read-only role (roles.sql, plan 08b Task 4 fix round 1 M1), when it is on: USAGE on this database's schemas (the system
+-- ones aside), SELECT on its tables, views and sequences, and by default on what the service's role creates later (migrations, Wolverine's
+-- and Marten's runtime schemas and tables). Granted, not inherited from pg_read_all_data, so the system catalogs' secrets (pg_authid)
+-- stay closed. GRANT and ALTER DEFAULT PRIVILEGES are idempotent.
+\if :operator_enabled
+SELECT format('GRANT USAGE ON SCHEMA %I TO operator_reader', nspname), format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO operator_reader', nspname),
+       format('GRANT SELECT ON ALL SEQUENCES IN SCHEMA %I TO operator_reader', nspname)
+FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema' \gexec
+ALTER DEFAULT PRIVILEGES FOR ROLE :"app_role" GRANT USAGE ON SCHEMAS TO operator_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE :"app_role" GRANT SELECT ON TABLES TO operator_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE :"app_role" GRANT SELECT ON SEQUENCES TO operator_reader;
+\endif
