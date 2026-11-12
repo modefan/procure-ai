@@ -456,7 +456,8 @@ Remove-Variable old, new
 ```
 
 `update` merges the body into the client, so only the secret changes (checked 2026-11-12 on a throwaway client: the new secret signs in,
-the old one is refused). Then `tests/Test-AddArgocdAdmin.ps1 -Environment hosted` (it signs in as the client with the Secret's value),
+the old one is refused). Then `tests/Test-AddArgocdAdmin.ps1 -Environment hosted` (it signs in as the client with the Secret's value, prints `kcadm: signed in as client procure-automation`,
+and fails if the bootstrap admin was used instead),
 sync the platform (the Job's init container signs in with the new value), and run `bootstrap/hosted/backup-hosted.ps1`. If the kcadm
 step failed after `new-secrets.ps1`, kcadm's own sign-in falls back to the bootstrap admin only while that is enabled; otherwise use the
 `kc.sh bootstrap-admin` recovery above.

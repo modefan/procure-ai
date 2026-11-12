@@ -220,7 +220,10 @@ public sealed class RolesScriptTests(PostgresFixture postgres) : IClassFixture<P
             (await Should.ThrowAsync<PostgresException>(() => ListAsync(reader, "SELECT rolname FROM pg_authid")))
                 .SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege);
             await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(reader, "INSERT INTO m5_later VALUES (2, 'no')"));
-            await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(reader, "SET default_transaction_read_only = off; INSERT INTO m5_later VALUES (2, 'no')"));
+            // With read-only switched off the INSERT reaches the privilege check (the line above may stop at 25006, read-only transaction).
+            // Two commands on one connection: in one multi-statement string the SET would not reach the transaction already running.
+            (await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(reader, "SET default_transaction_read_only = off", "INSERT INTO m5_later VALUES (2, 'no')")))
+                .SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege);
         }
         finally
         {
