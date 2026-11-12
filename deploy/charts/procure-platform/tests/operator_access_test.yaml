@@ -168,7 +168,7 @@ tests:
       # calls the API as the operator.
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: "signs_in 'operator' \"\\$OPERATOR_PASSWORD\"; then ADMIN_USER='operator'"
+          pattern: "OP_STATUS=\\$\\(whoami_status 'operator' \"\\$OPERATOR_PASSWORD\"\\)\\n\\s*if \\[ \"\\$OP_STATUS\" = 200 \\]; then ADMIN_USER='operator'"
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: "(?s)does not sign in.*tags.*api/users/\\$RABBITMQ_USER"

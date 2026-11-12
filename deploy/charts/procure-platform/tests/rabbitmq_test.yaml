@@ -113,7 +113,7 @@ tests:
           value: declare-exchange
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: 'if \[ "\$\(whoami_status "\$ADMIN_USER" "\$ADMIN_PASSWORD"\)" = 401 \]; then'
+          pattern: 'if \[ "\$ADMIN_STATUS" = 401 \] && \{ \[ "\$OP_STATUS" = none \] \|\| \[ "\$OP_STATUS" = 401 \]; \}; then'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: "neither 'operator' \\(Secret procure-rabbitmq key operator-password\\) nor the apps' user \\$RABBITMQ_USER signs in \\(401\\)"
@@ -122,7 +122,25 @@ tests:
           pattern: 'kubectl -n procure exec -i rabbitmq-0 -- rabbitmqctl change_password operator   \(the new value on stdin\), then sync again'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: '(?s)= 401 \]; then.*exit 3\n\s*fi\n\s*echo "management API as \$ADMIN_USER"'
+          pattern: '(?s)= 401 \]; \}; then.*exit 3\n\s*fi\n\s*if \[ "\$ADMIN_STATUS" != 200 \]; then\n[^\n]*\n\s*exit 1\n\s*fi\n\s*echo "management API as \$ADMIN_USER"'
+  # Fix round 3 (review m8): a timeout (000) or 5xx from the operator's whoami is not a refused login: the operator status is kept,
+  # the operator is chosen only on 200, and any non-200 that is not a double 401 exits 1 (retried), never 3.
+  - it: the cdc exchange job retries a transient whoami failure instead of failing at once
+    set:
+      rabbitmq.operator: { key: operator-password, user: operator, tags: administrator }
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'OP_STATUS=\$\(whoami_status ''operator'' "\$OPERATOR_PASSWORD"\)\n\s*if \[ "\$OP_STATUS" = 200 \]; then ADMIN_USER=''operator''; ADMIN_PASSWORD="\$OPERATOR_PASSWORD"; fi'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'if \[ "\$OP_STATUS" = 200 \]; then ADMIN_STATUS=200; else ADMIN_STATUS=\$\(whoami_status "\$ADMIN_USER" "\$ADMIN_PASSWORD"\); fi'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'answered \$ADMIN_STATUS as \$ADMIN_USER \(Dale''s management user: \$OP_STATUS\); not a refused login, retried with a new pod\." >&2\n\s*exit 1'
   - it: without an operator user the early exit names the apps' user only
     documentSelector:
       path: kind

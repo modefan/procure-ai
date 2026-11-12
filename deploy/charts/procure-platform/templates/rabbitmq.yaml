@@ -155,12 +155,19 @@ spec:
               # The HTTP status of the management API's whoami for a user and password (000: no answer).
               whoami_status() { printf 'user = "%s:%s"\n' "$(esc "$1")" "$(esc "$2")" | curl --config - --silent --max-time 10 -o /dev/null -w '%{http_code}' 'http://rabbitmq:15672/api/whoami' || true; }
               signs_in() { [ "$(whoami_status "$1" "$2")" = 200 ]; }
+              # OP_STATUS: the whoami status of Dale's management user (values: rabbitmq), none when it has no password here.
+              OP_STATUS=none
               {{- with .Values.rabbitmq.operator }}
-              if [ -n "${OPERATOR_PASSWORD:-}" ] && signs_in '{{ .user }}' "$OPERATOR_PASSWORD"; then ADMIN_USER='{{ .user }}'; ADMIN_PASSWORD="$OPERATOR_PASSWORD"; fi
+              if [ -n "${OPERATOR_PASSWORD:-}" ]; then
+                OP_STATUS=$(whoami_status '{{ .user }}' "$OPERATOR_PASSWORD")
+                if [ "$OP_STATUS" = 200 ]; then ADMIN_USER='{{ .user }}'; ADMIN_PASSWORD="$OPERATOR_PASSWORD"; fi
+              fi
               {{- end }}
+              if [ "$OP_STATUS" = 200 ]; then ADMIN_STATUS=200; else ADMIN_STATUS=$(whoami_status "$ADMIN_USER" "$ADMIN_PASSWORD"); fi
               # Fix round 2 (review I5): a refused login is not retried (12 retries of a 401 only hide the cause). Exit 3, which the Job's
-              # podFailurePolicy turns into a failed Job at once, with the recovery step in the log.
-              if [ "$(whoami_status "$ADMIN_USER" "$ADMIN_PASSWORD")" = 401 ]; then
+              # podFailurePolicy turns into a failed Job at once, with the recovery step in the log. Fix round 3 (review m8): only when the
+              # chosen user got 401 and the management user from values (if it has a password) got 401 too; a timeout (000) or a 5xx is exit 1, retried with a new pod.
+              if [ "$ADMIN_STATUS" = 401 ] && { [ "$OP_STATUS" = none ] || [ "$OP_STATUS" = 401 ]; }; then
                 {{- with .Values.rabbitmq.operator }}
                 echo "rabbitmq-cdc-exchange: no user can call the management API: neither '{{ .user }}' (Secret procure-rabbitmq key {{ .key }}) nor the apps' user $RABBITMQ_USER signs in (401)." >&2
                 echo "The apps' user has no management tags (plan 08b Task 4), so a new {{ .key }} must reach RabbitMQ before the sync:" >&2
@@ -171,6 +178,10 @@ spec:
                 echo "If an earlier sync removed its tags (values rabbitmq: a separate management user), give them back first: kubectl -n procure exec rabbitmq-0 -- rabbitmqctl set_user_tags $RABBITMQ_USER administrator, then sync again." >&2
                 {{- end }}
                 exit 3
+              fi
+              if [ "$ADMIN_STATUS" != 200 ]; then
+                echo "rabbitmq-cdc-exchange: management API whoami answered $ADMIN_STATUS as $ADMIN_USER (Dale's management user: $OP_STATUS); not a refused login, retried with a new pod." >&2
+                exit 1
               fi
               echo "management API as $ADMIN_USER"
               admin() { printf 'user = "%s:%s"\n' "$(esc "$ADMIN_USER")" "$(esc "$ADMIN_PASSWORD")"; }
