@@ -348,7 +348,7 @@ as a manual key (SHA-1, 6 digits, 30 s). Claude computes the codes the same way,
 - MongoDB `operator_reader`: `read` on every app database.
 - Redis `operator_reader`: `+@read` minus `KEYS` (no write, `CONFIG`, `FLUSH*`, `EVAL`, `ACL` or pub/sub), and only on an allow-list of
   key families (`operatorReaders.redis.keys` in the platform chart: FusionCache `v2:*`, locks `ProcureAi.*`, `email:*`, `bell:*`,
-  `presence:*`, `assistant:*`, `procure:status:*`, `procure:stats:*`, `procure:maintenance`). **Never `procure:bff:*`**: the gateway's
+  `presence:*`, the presence sweeper's lock `notifications:presence-sweep`, `assistant:*`, `procure:status:*`, `procure:stats:*`, `procure:maintenance`). **Never `procure:bff:*`**: the gateway's
   Data Protection key ring (`procure:bff:data-protection-keys`, the keys that encrypt every session cookie) and the session, user and
   tenant-switch tickets (visitors' access and refresh tokens). With the key ring a reader could decrypt the tickets and forge a session
   and anti-forgery cookie for any signed-in user, app admins included (review I1); the chart fails on a pattern that matches them, and
@@ -417,21 +417,49 @@ platform (review I3). Now:
   Keycloak, client deleted by hand), Keycloak's own recovery is `kc.sh bootstrap-admin service` (or `user`) run in the Keycloak pod with
   the same database settings, which adds a temporary admin; see Keycloak's "Admin bootstrap and recovery" guide. Then fix the client
   (the Job repairs it on the next sync once it can sign in) and delete the temporary admin.
+- **Turning `automationClient` off** (values `keycloakConfig.automationClient`, or reverting the GitOps commit that turned it on; fix
+  round 2, review m2): the Job then signs in as `keycloak-admin` with its password, which fails while that user is disabled and the master
+  realm's password grant needs a code. So first, with kcadm as the client (the command above): re-enable `keycloak-admin`
+  (`update users/<id> -r master -s enabled=true`) and bind the stock flow again (`update realms/master -s directGrantFlow="direct grant"`);
+  then push the change and sync. (`masterRealm` needs `automationClient`, so the chart refuses to keep one without the other.)
 
-### Secrets that are admin logins from the internet (for Dale's decision; review I4)
+### Secrets that are admin logins from the internet (review I4)
 
 With the admin console, the master realm and RabbitMQ's management UI public, these existing values are admin credentials usable from any
 browser. Run 2 of this task printed the base64 data of the procure Secrets (Secret `procure-keycloak` included) into a session log on
-2026-11-10. Nothing was rotated (Dale's rule: Claude never rotates on its own); Dale decides before the push whether to rotate them or to
-accept and record it.
+2026-11-10. Dale accepted this on 2026-11-12 (no rotation); the table says how to rotate each one should that change.
 
 | Secret (DEMO PASSWORDS.txt entry) | What it opens from the internet now | Exposure | How to rotate (hosted) |
 |---|---|---|---|
-| `keycloak-admin-password` (Secret `procure-keycloak` `admin-password`) | nothing while `keycloak-admin` is disabled (the Job disables it; every master-realm password sign-in also needs a code it does not have); full Keycloak control if someone re-enables it | in the run-2 log | `dotnet user-secrets remove --id procure-ai-hosted Parameters:keycloak-admin-password`, `bootstrap/new-secrets.ps1 -Environment hosted`, then set it in Keycloak (it does not read the variable again after the first start): kcadm as the client, `set-password -r master --username keycloak-admin --new-password` (from stdin), then `backup-hosted.ps1` |
+| `keycloak-admin-password` (Secret `procure-keycloak` `admin-password`) | nothing while `keycloak-admin` is disabled (the Job disables it; every master-realm password sign-in also needs a code it does not have); full Keycloak control if someone re-enables it | in the run-2 log | `dotnet user-secrets remove --id procure-ai-hosted Parameters:keycloak-admin-password`, `bootstrap/new-secrets.ps1 -Environment hosted`, then set it in Keycloak (it does not read the variable again after the first start): kcadm as the client, `update users/<id>/reset-password -r master -f - -n` with `{"type":"password","value":"<new>","temporary":false}` on stdin (`kcadm set-password` does not read stdin: without `--new-password` on its command line it stops with "Console is not active", checked 2026-11-12), then `backup-hosted.ps1` |
+| `keycloak-automation-client-secret` (Secret `procure-keycloak` `automation-client-secret`, client `procure-automation` in the master realm) | an admin token from the public master-realm token endpoint (client credentials) | not in a log (generated 2026-11-12, never printed) | below the table: Keycloak first, then the Secret |
 | `keycloak-access-admin-secret` (`access-admin-secret`, client `procure-access-admin` in realm `procure`) | a token from the public `procure` realm with `manage-users` and `manage-realm` on realm `procure`; the admin REST API (`/admin/realms/procure/...`) is now routed publicly: create or change demo users, change the realm | in the run-2 log | remove the user secret, `new-secrets.ps1 -Environment hosted`, sync the platform (the keycloak-config Job writes the client secret from the Secret), restart `access-api`, `backup-hosted.ps1` |
 | `rabbitmq-password` (Secret `procure-rabbitmq` `password`, user `procure`) | nothing on the management host any more (no tags since fix round 1: 401); AMQP (5672) is not reachable from outside | in the run-2 log | remove the user secret, `new-secrets.ps1 -Environment hosted` (it rewrites `procure-connection-strings` too), set it in RabbitMQ (`rabbitmqctl change_password procure` with the value on stdin, or the management API as `operator`), restart Debezium and every service, `backup-hosted.ps1` |
 | `keycloak-gateway-secret`, `keycloak-internal-secret`, `keycloak-dashboard-secret`, `keycloak-demo-login-secret` | client tokens of their clients in realm `procure` (not admin rights; reachable before this task too) | in the run-2 log | as `access-admin-secret`, restarting the services that use each (gateway; every service; the dashboard; the gateway) |
 | `operator-*` values (this task) | each tool's own login | not in a log (generated 2026-11-08, never printed) | remove the user secret, `new-secrets.ps1 -Environment hosted`, then the restart in the runbook below, `backup-hosted.ps1` |
+
+**Rotating the automation client's secret** (fix round 2, review m3). Keycloak first, then the Secret: a new value only in the Secret
+breaks the keycloak-config Job (the client no longer signs in, and the bootstrap admin it would fall back to is disabled). Run it with no
+platform sync in between (a sync only starts on a Git change; pause auto-sync of `platform` if one may come). From the GitOps repo,
+through the SSH tunnel:
+
+```powershell
+cd procure-ai-gitops; . ./bootstrap/common.ps1; Select-ProcureCluster hosted
+$old = Get-KeycloakKcadmSecretLine     # the value Keycloak still has (from the Secret; in memory only, never printed)
+dotnet user-secrets remove --id procure-ai-hosted Parameters:keycloak-automation-client-secret
+./bootstrap/new-secrets.ps1 -Environment hosted     # a new value in the hosted store, DEMO PASSWORDS.txt and Secret procure-keycloak
+$new = Get-KeycloakKcadmSecretLine
+# kcadm signs in with the OLD secret (first stdin line), then reads the JSON body (the rest of stdin) and sets the NEW one on the client.
+$sh = $KeycloakKcadmSignIn + "`n" + 'c=/tmp/kc.config; kc_sign_in $c; K=/opt/keycloak/bin/kcadm.sh; id=$($K get clients -r master -q clientId=procure-automation --fields id --format csv --noquotes --config $c); $K update clients/$id -r master -f - --config $c; rm -f $c'
+($old + "`n" + '{"secret":"' + $new + '"}') | kubectl @KubectlArgs -n procure exec -i deploy/keycloak -c keycloak -- bash -c ($sh -replace "`r", '')
+Remove-Variable old, new
+```
+
+`update` merges the body into the client, so only the secret changes (checked 2026-11-12 on a throwaway client: the new secret signs in,
+the old one is refused). Then `tests/Test-AddArgocdAdmin.ps1 -Environment hosted` (it signs in as the client with the Secret's value),
+sync the platform (the Job's init container signs in with the new value), and run `bootstrap/hosted/backup-hosted.ps1`. If the kcadm
+step failed after `new-secrets.ps1`, kcadm's own sign-in falls back to the bootstrap admin only while that is enabled; otherwise use the
+`kc.sh bootstrap-admin` recovery above.
 
 The Postgres, MongoDB and Redis admin passwords open nothing from the internet by themselves (the raw ports are closed); they work only
 typed into pgAdmin, DbGate or Redis Insight after that tool's own login.
@@ -444,9 +472,22 @@ M3: Argo CD cannot see a Secret's content when it renders, so a Secret change al
 - pgAdmin password, its authenticator secret, or the reader's password: `kubectl -n operator rollout restart deploy/pgadmin` (a change of
   pgAdmin's ConfigMap, e.g. servers.json, restarts it by itself: checksum annotation).
 - DbGate / Redis Insight logins or reader passwords: `kubectl -n operator rollout restart deploy/mongo-ui` / `deploy/redis-insight`.
-- The read-only database users and the RabbitMQ / Keycloak operator users: the next platform sync (db-roles, rabbitmq-cdc-exchange and
-  keycloak-config Jobs) sets them; the Redis reader at Redis's next start (`kubectl -n procure rollout restart deploy/redis`; signs every
-  visitor out once).
+- The read-only database users and the Keycloak operator user: the next platform sync (db-roles and keycloak-config Jobs) sets them; the
+  Redis reader at Redis's next start (`kubectl -n procure rollout restart deploy/redis`; signs every visitor out once).
+- **The RabbitMQ `operator` password: set it in RabbitMQ first, then sync** (fix round 2, review I5). The rabbitmq-cdc-exchange Job
+  calls the management API as `operator` with the Secret's value, and the apps' user `procure` has no management tags to fall back on,
+  so a new value only in the Secret leaves no user that can sign in: the Job then stops at once (exit 3, a failed Job, the platform sync
+  fails) and its log names this step. Right after `new-secrets.ps1` wrote the new value, from the GitOps repo through the tunnel:
+
+  ```powershell
+  cd procure-ai-gitops; . ./bootstrap/common.ps1; Select-ProcureCluster hosted
+  $pw = & kubectl @KubectlArgs -n procure get secret procure-rabbitmq -o 'jsonpath={.data.operator-password}'
+  [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($pw)) | kubectl @KubectlArgs -n procure exec -i rabbitmq-0 -- rabbitmqctl change_password operator
+  Remove-Variable pw
+  ```
+
+  `rabbitmqctl change_password <user>` without the password argument reads it from stdin (checked 2026-11-12 on a throwaway user), so
+  the value never reaches a command line. Then sync the platform; the Job signs in as `operator` again and sets the same value.
 - The break-glass dashboard's login: Traefik reads the basic-auth Secret itself, no restart.
 
 **Last resort.** Every tool still goes through Traefik on the VM. If Traefik or the VM is down, use the SSH tunnel (`open-tunnel.ps1`,

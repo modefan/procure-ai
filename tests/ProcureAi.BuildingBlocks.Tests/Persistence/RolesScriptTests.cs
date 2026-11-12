@@ -182,6 +182,56 @@ public sealed class RolesScriptTests(PostgresFixture postgres) : IClassFixture<P
         await postgres.CreateDatabaseAsync("purchasingdb");
     }
 
+    /// <summary>
+    /// The operator's read-only role (plan 08b Task 4 fix round 1 M1, test from fix round 2 m5): with DB_OPERATOR_READER_PASSWORD set,
+    /// <c>operator_reader</c> reads every service table, including one the service's role creates after roles.sql ran (in a new schema
+    /// too: default privileges), but not the password verifiers in <c>pg_authid</c> (no <c>pg_read_all_data</c>, and an old grant of it
+    /// is revoked), and writes nothing. Without the variable the role can no longer log in.
+    /// </summary>
+    [Fact]
+    public async Task The_operator_reader_reads_the_service_tables_but_not_the_password_verifiers()
+    {
+        var environment = PostgresFixture.RolesScriptEnvironment();
+        environment["DB_OPERATOR_READER_PASSWORD"] = PostgresFixture.TestPassword("operator_reader");
+        var admin = new NpgsqlConnectionStringBuilder(postgres.ConnectionString("postgres")) { Pooling = false }.ConnectionString;
+        var app = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringAs("requests_app", "requestsdb")) { Pooling = false }.ConnectionString;
+        var reader = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringAs("operator_reader", "requestsdb")) { Pooling = false }.ConnectionString;
+        var readerOnPostgres = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringAs("operator_reader", "postgres")) { Pooling = false }.ConnectionString;
+        try
+        {
+            await postgres.RunRolesScriptAsync(environment);
+            // A cluster where fix round 1 had not run yet: the reader held pg_read_all_data. The next run takes it away.
+            await ExecuteAsync(admin, "GRANT pg_read_all_data TO operator_reader");
+            await postgres.RunRolesScriptAsync(environment);
+
+            // What the service's role makes after roles.sql ran (a migration, Marten or Wolverine at run time), in public and in a new schema.
+            await ExecuteAsync(app,
+                "CREATE TABLE m5_later (id int PRIMARY KEY, title text)", "INSERT INTO m5_later VALUES (1, 'later')",
+                "CREATE SCHEMA m5_later_schema", "CREATE TABLE m5_later_schema.items (id int PRIMARY KEY)", "INSERT INTO m5_later_schema.items VALUES (7)");
+
+            (await ListAsync(admin, """
+                SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
+                WHERE u.rolname = 'operator_reader'
+                """)).ShouldBeEmpty("the reader is a member of no role (pg_read_all_data revoked)");
+            (await ListAsync(reader, "SELECT title FROM m5_later")).ShouldBe(["later"]);
+            (await ListAsync(reader, "SELECT id::text FROM m5_later_schema.items")).ShouldBe(["7"]);
+            (await Should.ThrowAsync<PostgresException>(() => ListAsync(readerOnPostgres, "SELECT rolname FROM pg_authid")))
+                .SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege);
+            (await Should.ThrowAsync<PostgresException>(() => ListAsync(reader, "SELECT rolname FROM pg_authid")))
+                .SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege);
+            await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(reader, "INSERT INTO m5_later VALUES (2, 'no')"));
+            await Should.ThrowAsync<PostgresException>(() => ExecuteAsync(reader, "SET default_transaction_read_only = off; INSERT INTO m5_later VALUES (2, 'no')"));
+        }
+        finally
+        {
+            await ExecuteAsync(app, "DROP TABLE IF EXISTS m5_later", "DROP SCHEMA IF EXISTS m5_later_schema CASCADE");
+            await postgres.RunRolesScriptAsync();
+        }
+
+        (await Should.ThrowAsync<PostgresException>(() => ListAsync(reader, "SELECT 1::text")))
+            .SqlState.ShouldBe(PostgresErrorCodes.InvalidAuthorizationSpecification, "without the variable the role cannot log in");
+    }
+
     /// <summary>Roles, their attributes, the service databases' owners and access lists, and every role's table grants in them.</summary>
     private async Task<List<string>> SnapshotAsync()
     {

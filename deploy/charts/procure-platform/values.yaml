@@ -239,12 +239,13 @@ operatorReaders:
   #   v2:*            FusionCache (every service's 1 s GET cache, idempotency records, access lookups)
   #   ProcureAi.*     DistributedLock's locks (<service>:lock:...)
   #   email:* bell:*  Notifications (sent e-mails, the bell inbox); presence:* SignalR presence
+  #   notifications:presence-sweep  the presence sweeper's DistributedLock (holds a random token; the one lock outside ProcureAi.*)
   #   assistant:*     the Assistant's answer locks, question quotas and token budgets
   #   procure:status:* procure:stats:* procure:maintenance  the system status page, daily stats, the maintenance window
   redis:
     key: ""
     user: operator_reader
-    keys: ["v2:*", "ProcureAi.*", "email:*", "bell:*", "presence:*", "assistant:*", "procure:status:*", "procure:stats:*", "procure:maintenance"]
+    keys: ["v2:*", "ProcureAi.*", "email:*", "bell:*", "presence:*", "notifications:presence-sweep", "assistant:*", "procure:status:*", "procure:stats:*", "procure:maintenance"]
     commands: "+@read -keys +info +ping +select +hello +command +client|setname +client|getname +client|id +client|info +client|no-touch"
 
 # The operator's direct access (templates/operator-access.yaml, plan 08b Task 4): each component on its own address with its own login,

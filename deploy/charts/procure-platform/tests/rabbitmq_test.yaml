@@ -77,10 +77,60 @@ tests:
           pattern: 'admin\(\) \{ printf ''user = "%s:%s"\\n'' "\$\(esc "\$ADMIN_USER"\)" "\$\(esc "\$ADMIN_PASSWORD"\)"; \}'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: 'signs_in\(\) \{ printf ''user = "%s:%s"\\n'' "\$\(esc "\$1"\)" "\$\(esc "\$2"\)" \| curl --config -'
+          pattern: 'whoami_status\(\) \{ printf ''user = "%s:%s"\\n'' "\$\(esc "\$1"\)" "\$\(esc "\$2"\)" \| curl --config -'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: 'admin \| curl --config -'
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: 'esc\(\) \{ printf ''%s'' "\$1" \| sed ''s/\[\\\\"\]/\\\\&/g''; \}'
+
+  # Fix round 2 (review I5): when no user signs in to the management API (a new operator password not yet in RabbitMQ, while the apps'
+  # user has no tags), the Job stops at once with the recovery step instead of retrying a 401; other failures are still retried.
+  - it: the cdc exchange job fails at once with the recovery step when no user signs in
+    set:
+      rabbitmq.operator: { key: operator-password, user: operator, tags: administrator }
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - equal:
+          path: spec.template.spec.restartPolicy
+          value: Never
+      - equal:
+          path: spec.backoffLimit
+          value: 6
+      - equal:
+          path: spec.podFailurePolicy.rules[0]
+          value:
+            action: FailJob
+            onExitCodes:
+              containerName: declare-exchange
+              operator: In
+              values: [3]
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: declare-exchange
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'if \[ "\$\(whoami_status "\$ADMIN_USER" "\$ADMIN_PASSWORD"\)" = 401 \]; then'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "neither 'operator' \\(Secret procure-rabbitmq key operator-password\\) nor the apps' user \\$RABBITMQ_USER signs in \\(401\\)"
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: 'kubectl -n procure exec -i rabbitmq-0 -- rabbitmqctl change_password operator   \(the new value on stdin\), then sync again'
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '(?s)= 401 \]; then.*exit 3\n\s*fi\n\s*echo "management API as \$ADMIN_USER"'
+  - it: without an operator user the early exit names the apps' user only
+    documentSelector:
+      path: kind
+      value: Job
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "the apps' user \\$RABBITMQ_USER cannot call the management API \\(401"
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: change_password

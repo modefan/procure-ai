@@ -121,7 +121,7 @@ tests:
             valueFrom: { secretKeyRef: { name: procure-redis, key: operator-reader-password } }
       - matchRegex:
           path: spec.template.spec.containers[0].args[0]
-          pattern: 'user operator_reader reset on #%s ~v2:\* ~ProcureAi\.\* ~email:\* ~bell:\* ~presence:\* ~assistant:\* ~procure:status:\* ~procure:stats:\* ~procure:maintenance resetchannels -@all \+@read -keys '
+          pattern: 'user operator_reader reset on #%s ~v2:\* ~ProcureAi\.\* ~email:\* ~bell:\* ~presence:\* ~notifications:presence-sweep ~assistant:\* ~procure:status:\* ~procure:stats:\* ~procure:maintenance resetchannels -@all \+@read -keys '
       - notMatchRegex:
           path: spec.template.spec.containers[0].args[0]
           pattern: '~\*|~procure:\*|~procure:bff'

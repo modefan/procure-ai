@@ -118,12 +118,22 @@ metadata:
 spec:
   backoffLimit: 6
   activeDeadlineSeconds: 900
+  # Exit 3 is a refused management login (no user signs in, fix round 2, review I5): the Job fails at once instead of 6 more pods that
+  # would get the same 401. Any other failure (RabbitMQ not up yet, a 406 on the exchange) is retried as before.
+  podFailurePolicy:
+    rules:
+      - action: FailJob
+        onExitCodes:
+          containerName: declare-exchange
+          operator: In
+          values: [3]
   template:
     metadata:
       labels:
         {{- include "procure-platform.labels" (dict "root" $ "name" "rabbitmq-cdc-exchange") | nindent 8 }}
     spec:
-      restartPolicy: OnFailure
+      # Never: a podFailurePolicy needs it (a failed try is a new pod, up to backoffLimit).
+      restartPolicy: Never
       # uid 100 is the image's curl_user.
       {{- include "procure-platform.podSecurity" (dict "root" $ "uid" 100 "gid" 101) | nindent 6 }}
       containers:
@@ -142,10 +152,26 @@ spec:
               # user then has no tags and can no longer); before that (a fresh install) the apps' user, which the server made an
               # administrator on its first start (RABBITMQ_DEFAULT_USER).
               ADMIN_USER="$RABBITMQ_USER"; ADMIN_PASSWORD="$RABBITMQ_PASSWORD"
-              signs_in() { printf 'user = "%s:%s"\n' "$(esc "$1")" "$(esc "$2")" | curl --config - --silent --fail --max-time 10 -o /dev/null 'http://rabbitmq:15672/api/whoami'; }
+              # The HTTP status of the management API's whoami for a user and password (000: no answer).
+              whoami_status() { printf 'user = "%s:%s"\n' "$(esc "$1")" "$(esc "$2")" | curl --config - --silent --max-time 10 -o /dev/null -w '%{http_code}' 'http://rabbitmq:15672/api/whoami' || true; }
+              signs_in() { [ "$(whoami_status "$1" "$2")" = 200 ]; }
               {{- with .Values.rabbitmq.operator }}
               if [ -n "${OPERATOR_PASSWORD:-}" ] && signs_in '{{ .user }}' "$OPERATOR_PASSWORD"; then ADMIN_USER='{{ .user }}'; ADMIN_PASSWORD="$OPERATOR_PASSWORD"; fi
               {{- end }}
+              # Fix round 2 (review I5): a refused login is not retried (12 retries of a 401 only hide the cause). Exit 3, which the Job's
+              # podFailurePolicy turns into a failed Job at once, with the recovery step in the log.
+              if [ "$(whoami_status "$ADMIN_USER" "$ADMIN_PASSWORD")" = 401 ]; then
+                {{- with .Values.rabbitmq.operator }}
+                echo "rabbitmq-cdc-exchange: no user can call the management API: neither '{{ .user }}' (Secret procure-rabbitmq key {{ .key }}) nor the apps' user $RABBITMQ_USER signs in (401)." >&2
+                echo "The apps' user has no management tags (plan 08b Task 4), so a new {{ .key }} must reach RabbitMQ before the sync:" >&2
+                echo "  kubectl -n procure exec -i rabbitmq-0 -- rabbitmqctl change_password {{ .user }}   (the new value on stdin), then sync again." >&2
+                echo "procure-ai docs/hosting.md, 'Runbook: after changing an operator login'. Not retried." >&2
+                {{- else }}
+                echo "rabbitmq-cdc-exchange: the apps' user $RABBITMQ_USER cannot call the management API (401: wrong password or no management tags). Not retried." >&2
+                echo "If an earlier sync removed its tags (values rabbitmq: a separate management user), give them back first: kubectl -n procure exec rabbitmq-0 -- rabbitmqctl set_user_tags $RABBITMQ_USER administrator, then sync again." >&2
+                {{- end }}
+                exit 3
+              fi
               echo "management API as $ADMIN_USER"
               admin() { printf 'user = "%s:%s"\n' "$(esc "$ADMIN_USER")" "$(esc "$ADMIN_PASSWORD")"; }
               admin | curl --config - --silent --show-error --fail-with-body \
