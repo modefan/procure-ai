@@ -4,6 +4,7 @@ import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { ApprovalsStore } from '../../features/approvals/approvals.store';
 import { AuthStore } from '../auth/auth.store';
+import { AppConfigService } from '../config/app-config';
 import { DevPanel } from '../dev-panel/dev-panel';
 import { DevPanelStore } from '../dev-panel/dev-panel.store';
 import { LiveConnection } from '../live/live-connection';
@@ -71,9 +72,18 @@ const SIDEBAR_MIN_WIDTH = 1024;
           </div>
         }
 
-        <main id="main" tabindex="-1" class="flex-1 outline-none" [class]="mainPadding()">
+        <main id="main" tabindex="-1" class="flex-1 outline-none">
           <router-outlet />
         </main>
+
+        <footer data-testid="version-footer" class="border-t border-slate-200 px-6 py-3 text-xs text-slate-500" [class]="mainPadding()">
+          © {{ year }} Dale Abels ·
+          @if (commitUrl(); as url) {
+            Version <a class="font-mono underline hover:text-slate-700" [href]="url" target="_blank" rel="noopener">{{ shortVersion() }}</a>
+          } @else {
+            Version {{ shortVersion() }}
+          }
+        </footer>
       </div>
     </div>
 
@@ -103,11 +113,24 @@ const SIDEBAR_MIN_WIDTH = 1024;
 })
 export class Frame {
   protected readonly auth = inject(AuthStore);
+  private readonly appConfig = inject(AppConfigService);
   protected readonly caches = inject(CacheRegistry);
   protected readonly live = inject(LiveConnection);
   private readonly devPanel = inject(DevPanelStore);
   private readonly notifications = inject(NotificationsStore);
   private readonly approvals = inject(ApprovalsStore);
+
+  /** The footer's year and deployed version (config.json `version`: the commit SHA on a cluster, empty when run locally). */
+  protected readonly year = new Date().getFullYear();
+  private readonly version = computed(() => this.appConfig.config().version ?? '');
+  protected readonly shortVersion = computed(() => {
+    const v = this.version();
+    return /^[0-9a-f]{40}$/.test(v) ? v.slice(0, 7) : v || 'development';
+  });
+  /** A full commit SHA links to that commit on GitHub; anything else (local-<sha7>, empty) is plain text. */
+  protected readonly commitUrl = computed(() =>
+    /^[0-9a-f]{40}$/.test(this.version()) ? `https://github.com/modefan/procure-ai/commit/${this.version()}` : null,
+  );
 
   /** The phone drawer is open. */
   protected readonly drawerOpen = signal(false);

@@ -11,11 +11,16 @@ name: publish
 # Environment `gitops` (deployment branch: main only; created by the GitOps repo's bootstrap/install-argocd.ps1). Third-party actions are
 # pinned by commit SHA.
 
+# Dale 2026-11-13: build and deploy in under 10 minutes, so this no longer waits for CI: it starts on every push to main (docs-only
+# pushes skipped, like CI). CI runs alongside it and still reports, but a red CI no longer stops a deploy.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,19 +28,14 @@ permissions:
 env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
-  # The commit CI tested. Not github.sha: for workflow_run that is the newest commit on main when this run starts, which may be a later,
-  # untested one.
-  REVISION: ${{ github.event.workflow_run.head_sha }}
+  # The pushed commit.
+  REVISION: ${{ github.sha }}
 
 jobs:
   images:
     name: Build and push the images
     # Only a green CI run of a push to main of this repository (never a pull request or a fork's branch that happens to be called main).
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    if: github.ref == 'refs/heads/main' && github.repository == 'modefan/procure-ai'
     # At job level, so a skipped run (a failed or cancelled CI) never cancels the publish of a tested commit. A newer tested commit
     # cancels an older one's image build: its images would be replaced at once.
     concurrency:
@@ -51,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
@@ -102,7 +102,7 @@ jobs:
       # This repository's history, for the never-move-backwards check. No build code runs in this job.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
           path: app

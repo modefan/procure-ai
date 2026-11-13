@@ -116,6 +116,8 @@ export interface AppConfig {
   registration: RegistrationConfig;
   maintenance: MaintenanceConfig;
   portfolio: PortfolioConfig;
+  /** The deployed version: the commit SHA (set by the Helm chart from global.imageTag); empty when running locally. */
+  version?: string;
 }
 
 /**
@@ -163,6 +165,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
+    version: typeof source['version'] === 'string' ? source['version'].trim() : (defaults.version ?? ''),
     logger: {
       consoleLevel: level(logger['consoleLevel'], d.consoleLevel),
       serverLevel: level(logger['serverLevel'], d.serverLevel),
