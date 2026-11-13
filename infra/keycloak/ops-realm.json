@@ -170,14 +170,17 @@
       "baseUrl": "/applications",
       "redirectUris": [
         "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/auth/callback",
-        "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/pkce/verify"
+        "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/pkce/verify",
+        "${KC_ARGOCD_TUNNEL_URL:http://127.0.0.1:8080}/auth/callback",
+        "${KC_ARGOCD_TUNNEL_URL:http://127.0.0.1:8080}/pkce/verify"
       ],
       "webOrigins": [
-        "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}"
+        "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}",
+        "${KC_ARGOCD_TUNNEL_URL:http://127.0.0.1:8080}"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/applications",
+        "post.logout.redirect.uris": "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/applications##${KC_ARGOCD_TUNNEL_URL:http://127.0.0.1:8080}/applications",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false"
       },
@@ -248,6 +251,84 @@
       "optionalClientScopes": [
         "profile"
       ]
+    },
+    {
+      "clientId": "argocd-gate",
+      "name": "Argo CD gate (oauth2-proxy in front of the public Argo CD host; lets in members of group argocd-admins only)",
+      "description": "Traefik forwardAuth on the public Argo CD host (GitOps repo envs/hosted/argocd.yaml). Public client with PKCE like argocd: the gate's protection is the user's password, one-time code and group, not a client secret",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "rootUrl": "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}",
+      "redirectUris": [
+        "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/oauth2/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}/",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "config": {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "preferred_username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
     }
   ]
 }

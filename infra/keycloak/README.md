@@ -44,8 +44,16 @@
   user). Either way the gateway checks the token is for the same user and that tenant, and replaces the session with a new key.
 - The password-grant test client `test-direct` exists only in the tests, never in this file.
 - `argocd` is Argo CD's sign-in client (plan 08 Task 12c): public, code flow + PKCE (Argo CD's documented Keycloak setup; no secret),
-  redirect URIs `${KC_ARGOCD_BASE_URL}/auth/callback` and `/pkce/verify` (the platform chart's `keycloak.argocdUrl`: the hosted
-  port-forward `http://127.0.0.1:8080` by default, `https://argocd.procure.localtest.me` locally). Its own mappers put `sub`,
+  redirect URIs `${KC_ARGOCD_BASE_URL}/auth/callback` and `/pkce/verify` (the platform chart's `keycloak.argocdUrl`:
+  `https://argocd.daleabels.com` hosted, `https://argocd.procure.localtest.me` locally, `http://127.0.0.1:8080` by default), and the same
+  two under `${KC_ARGOCD_TUNNEL_URL}` (`keycloak.argocdTunnelUrl`, the tunnel's port-forward `http://127.0.0.1:8080`; plan 08c ruling R3:
+  Argo CD's `additionalUrls`, so a tunnel session still finishes the sign-in). Its own mappers put `sub`,
   `preferred_username`, `name`, `email` and `groups` (plain group names) into the ID token. Only members of the group `argocd-admins`
   get Argo CD's admin role (GitOps repo `argocd/values.yaml`); every other user who signs in gets no rights. No demo user is in the
   group; Dale adds his own user (docs/hosting.md, "Your own Keycloak user for Argo CD").
+- `argocd-gate` is the Keycloak gate in front of the public Argo CD host (plan 08c ruling R9): oauth2-proxy, called by Traefik's
+  forwardAuth for every request to `argocd.daleabels.com` (GitOps repo `envs/hosted/argocd.yaml`), lets in members of `argocd-admins`
+  only; anyone else gets Keycloak's sign-in or 403 and never an Argo CD page. Public client with PKCE like `argocd` (Keycloak does not
+  check a client secret for a public client; the protection is the user's password, one-time code and group), one redirect URI
+  `${KC_ARGOCD_BASE_URL}/oauth2/callback`, mappers `sub`, `preferred_username`, `email` and `groups`. Argo CD's own sign-in behind the
+  gate is silent (the same Keycloak session).

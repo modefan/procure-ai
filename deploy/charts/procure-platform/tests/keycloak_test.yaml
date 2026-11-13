@@ -67,6 +67,11 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
+            name: KC_ARGOCD_TUNNEL_URL
+            value: http://127.0.0.1:8080
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
             name: KC_DASHBOARD_SECRET
             valueFrom:
               secretKeyRef:
@@ -163,9 +168,10 @@ tests:
       - failedTemplate:
           errorPattern: keycloak.ingress.publicRealms must name at least one realm
 
-  - it: the argocd client's redirect base follows keycloak.argocdUrl (plan 08 Task 12c)
+  - it: the argocd client's redirect bases follow keycloak.argocdUrl and keycloak.argocdTunnelUrl (plan 08 Task 12c, plan 08c R3)
     set:
       keycloak.argocdUrl: https://argocd.procure.localtest.me
+      keycloak.argocdTunnelUrl: http://127.0.0.1:18080
     documentSelector:
       path: kind
       value: Deployment
@@ -175,3 +181,8 @@ tests:
           content:
             name: KC_ARGOCD_BASE_URL
             value: https://argocd.procure.localtest.me
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_ARGOCD_TUNNEL_URL
+            value: http://127.0.0.1:18080

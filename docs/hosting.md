@@ -118,7 +118,7 @@ cd procure-ai-gitops
 ./bootstrap/hosted/new-hosted-cluster.ps1 -Reinstall  # first time only: adopts and REINSTALLS the VPS, cloud-init, kubeconfig, tunnel, namespaces
 ./bootstrap/hosted/new-hosted-cluster.ps1             # any later time: applies firewall/DNS changes, re-checks SSH, cloud-init, the cluster
 ./bootstrap/new-secrets.ps1 -Environment hosted       # Secrets from the procure-ai-hosted user secrets (generated on the first run)
-./bootstrap/install-argocd.ps1 -Environment hosted    # Argo CD (Keycloak sign-in, admin as break-glass, no ingress), root Application
+./bootstrap/install-argocd.ps1 -Environment hosted    # Argo CD (Keycloak sign-in, public host behind the Keycloak gate, admin as break-glass), root Application
 ./bootstrap/new-argocd-token.ps1 -Environment hosted  # Claude's API token (account claude) -> user env var ARGOCD_AUTH_TOKEN_HOSTED
 ./bootstrap/hosted/Test-HostBaseline.ps1              # the checks above, from the PC
 ./bootstrap/hosted/open-tunnel.ps1 -Close             # close the tunnel when done
@@ -146,7 +146,8 @@ After a reinstall, check once by hand the things the baseline cannot see from ou
 - one deliberate reboot brings k3s back;
 - a second `-PlanOnly` shows no changes.
 
-The Argo CD UI has no public address: `./bootstrap/hosted/open-argocd.ps1` opens it (see "Argo CD on the VM" below).
+The Argo CD UI is at `https://argocd.daleabels.com`, behind a Keycloak gate: `./bootstrap/hosted/open-argocd.ps1` opens it (see "Argo CD
+on the VM" below).
 
 ### Changing the hosted values
 
@@ -221,7 +222,7 @@ cd procure-ai-gitops
 
 What `envs/hosted/` sets: the public hosts; Keycloak's ingress serves only `/realms/procure/`, `/realms/ops/`, `/resources/` and (plan 08b
 Task 4, `keycloak.ingress.adminConsole`) the admin console with the master realm's sign-in, which always asks for a one-time code (no
-welcome page; `publicRealms` in the platform chart); the operator's own hosts ("Every component on its own address"); no Mailpit ingress; Argo CD without ingress (Keycloak sign-in; the admin login only as break-glass, through the tunnel);
+welcome page; `publicRealms` in the platform chart); the operator's own hosts ("Every component on its own address"); no Mailpit ingress; Argo CD at `https://argocd.daleabels.com` behind a Keycloak gate (realm `ops`, group `argocd-admins` only; the admin login only as break-glass, through the tunnel);
 the demo switches on (seed, nightly reset at 02:00 Africa/Johannesburg, one-click demo login, the "behind the scenes" panel); the
 Assistant on Azure Foundry (`AI__Provider=AzureFoundry`, deployments `chat` and `embeddings`, no reasoning, no temperature, at least 256
 output tokens per call, a daily token cap of 150 000 per organisation, sized below); `config.json` links the dashboard at `https://dashboard.daleabels.com`;
@@ -246,7 +247,7 @@ where 80/443 do not answer.
 
 | Script (procure-ai-gitops) | What it proves |
 |---|---|
-| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's welcome page, `/metrics`, `/health` and `/js` answer 404, also through path tricks (`..` sent as is, `%2e%2e`, `//`); the procure realm's, realm ops' and (plan 08b Task 4) the master realm's discovery 200, the admin console 200 and its REST API 401 without a token; Argo CD and Mailpit host names and the bare address answer 404; the dashboard sends visitors to Keycloak's sign-in and its API answers 404; every host sends HSTS and no Server header names a version; an echo pod behind a throwaway Ingress sees this PC's public address in `X-Forwarded-For` (Review Focus 5; prints "matches", never the address) |
+| `tests/Test-PublicSurface.ps1` | Review Focus 2: A records only to the VM, no AAAA; a TCP connect scan of 3,846 ports (1-1024, the database, broker, Kubernetes, OTLP and dashboard ports, all NodePorts) finds only 22, 80 and 443; SSH offers only public keys; `http://` redirects to `https://`; each host's certificate is Let's Encrypt's and verifies for its name (openssl, not .NET: ESET re-signs TLS from pwsh on Dale's PC); Keycloak's welcome page, `/metrics`, `/health` and `/js` answer 404, also through path tricks (`..` sent as is, `%2e%2e`, `//`); the procure realm's, realm ops' and (plan 08b Task 4) the master realm's discovery 200, the admin console 200 and its REST API 401 without a token; Mailpit host names, Argo CD's local name and the bare address answer 404; `argocd.daleabels.com` answers only the Keycloak gate (realm ops' sign-in, 401 or 403, never Argo CD content) and 403 to the username/password login (plan 08c Task 1); the dashboard sends visitors to Keycloak's sign-in and its API answers 404; every host sends HSTS and no Server header names a version; an echo pod behind a throwaway Ingress sees this PC's public address in `X-Forwarded-For` (Review Focus 5; prints "matches", never the address) |
 | `tests/Test-Dashboard.ps1 -Environment hosted` | The Aspire dashboard works for Dale (plan 08b): Microsoft Edge signs in at `https://dashboard.daleabels.com` as the demo admin, Structured logs and Traces show rows on every full page load, and requests-api and the gateway have rows from the last 10 minutes; Blazor's WebSocket accepts the dashboard's own Origin and refuses a foreign one. **After every push or deploy** (also part of `Test-FreshCluster.ps1 -Environment hosted -WatchOnly`); procure-ai `docs/kubernetes.md` "The Aspire dashboard: what makes it work" |
 | `tests/Test-OperatorTools.ps1 -Environment hosted` | Plan 08b Task 4: every operator host (pgAdmin, DbGate, Redis Insight, RabbitMQ management, Keycloak's admin console, the break-glass dashboard) answers over TLS with its own login and refuses anonymous requests, the demo users' credentials and well-known defaults; the right logins (DEMO PASSWORDS.txt) get in, pgAdmin and Keycloak only with the current one-time code; each read-only connection really connects and cannot write; the raw store ports do not answer; a burst gets 429 on every host. `-ResolveTo <VM address> -SkipCertificateCheck` before the DNS records and the certificate exist; `-SkipRateLimit` leaves the burst out (it uses up this PC's bucket for a minute). `tests/Test-Dashboard.ps1 -Environment hosted -Direct` checks the break-glass dashboard in a real browser |
 | `tests/Test-Smoke.ps1 -Environment hosted` | The local smoke checks against the public hosts (gateway, Keycloak, demo login, seeded data with the hosted admin key `DEMO_ADMIN_API_KEY_HOSTED`, dashboard sign-in by role, no pod but Traefik reaching the gateway or Keycloak with a spoofed `X-Forwarded-For`, pgaudit roles, realm drift) |
@@ -281,7 +282,8 @@ shutdown"); their Deployments and StatefulSets replace them. They hold no resour
 
 ## Operate from the browser (plan 08b)
 
-Dale watches and runs the live system from any browser on his PC, without SSH or kubectl. Argo CD (below) stays behind the tunnel.
+Dale watches and runs the live system from any browser on his PC, without SSH or kubectl. Argo CD (below) is at
+`https://argocd.daleabels.com` behind a Keycloak gate (plan 08c Task 1).
 
 | What | Where | Sign-in |
 |---|---|---|
@@ -321,7 +323,8 @@ Dale's rule (2026-11-08): each part of the system can be reached from any browse
 demo realm, not the gateway), so he can debug while parts of the site are down. Only Dale and Claude have these logins: every one is a
 long generated value (no default credentials anywhere), kept only in the cluster's Secrets and in DEMO PASSWORDS.txt, section
 "procure-ai hosted (Contabo) secrets" (entry names below; `bootstrap/new-secrets.ps1 -Environment hosted` in the GitOps repo makes them).
-Argo CD is not one of them: it stays behind the SSH tunnel (Dale's call; see "Argo CD on the VM").
+Argo CD is not one of them: it signs in with Keycloak (realm `ops`) behind a Keycloak gate (Dale 2026-11-13: "only me and you"; see
+"Argo CD on the VM").
 
 | Tool | Address | User name | Password entry | Second factor | Connects as |
 |---|---|---|---|---|---|
@@ -497,32 +500,46 @@ then kubectl) or the Contabo panel's VNC console ("The live site is down", step 
 `tests/Test-OperatorTools.ps1 -Environment hosted` (GitOps repo) checks all of this from Dale's PC (table "Checks against the public
 demo"); `tests/Test-Dashboard.ps1 -Environment hosted -Direct` checks the break-glass dashboard in a real browser.
 
-## Argo CD on the VM (plan 08 Task 12c)
+## Argo CD on the VM (plan 08 Task 12c, public host plan 08c Task 1)
 
-Argo CD is the one GUI for the live site (no Rancher, Headlamp or Grafana). It has no public address: it is reached through the SSH
-tunnel and a `kubectl port-forward` on Dale's PC, at `http://127.0.0.1:8080`.
+Argo CD is the one GUI for the live site (no Rancher, Headlamp or Grafana). Since plan 08c (Dale 2026-11-13: "hide it behind keycloak so
+that only me and you can get in") it is at **`https://argocd.daleabels.com`**, behind a Keycloak gate; the SSH tunnel and a
+`kubectl port-forward` to `http://127.0.0.1:8080` stay as the break-glass path.
 
 ```powershell
 cd procure-ai-gitops
-./bootstrap/hosted/open-argocd.ps1          # tunnel (reused if open) + port-forward to 127.0.0.1:8080 + browser; prints where the passwords are
-./bootstrap/hosted/open-argocd.ps1 -Close   # stops the port-forward, and the tunnel only if this script opened it
+./bootstrap/hosted/open-argocd.ps1                 # opens https://argocd.daleabels.com in the browser; prints how to sign in
+./bootstrap/hosted/open-argocd.ps1 -Tunnel         # break-glass: tunnel (reused if open) + port-forward to 127.0.0.1:8080 + browser
+./bootstrap/hosted/open-argocd.ps1 -Close          # stops the port-forward, and the tunnel only if this script opened it
 ```
+
+**The Keycloak gate.** Every request to `argocd.daleabels.com` first goes, inside Traefik, to a small oauth2-proxy (`argocd-gate` in
+namespace `argocd`, Traefik forwardAuth; GitOps repo `envs/hosted/argocd.yaml`). Without a gate session the browser is sent to realm
+`ops`' sign-in (client `argocd-gate`): your user name, password and the authenticator app's code. Only members of the group
+`argocd-admins` get a gate session (a cookie for 8 hours); anyone else who signs in gets **403** and never sees an Argo CD page or API
+answer; an API call without a session gets 401. Behind the gate, Argo CD's own "Log in via Keycloak" needs no second password (the same
+Keycloak session). On the public host the username/password login (`POST /api/v1/session`, also its gRPC-web form) always answers 403,
+even with a gate session, so `admin` signs in only through the tunnel; cross-site requests answer 403 too. The edge has the same rate
+limit (per client address), security headers and HSTS as the other hosts.
 
 Who can sign in, and with what rights:
 
 | Who | How | Rights |
 |---|---|---|
-| Dale (and anyone else in the group `argocd-admins` of realm `ops`) | "Log in via Keycloak": realm `ops`, client `argocd` (public, code flow + PKCE, no secret), password and then the authenticator app's 6-digit code, like Argo CD signing in with AD at work | `role:admin` |
-| Any other user of realm `ops` (none exists unless someone makes one) | can sign in | nothing: no Application, project, log or action (`policy.default` is empty) |
-| The public demo users (realm `procure`) | cannot sign in to Argo CD at all (another realm) | - |
-| `admin` | break-glass, for when Keycloak is down: user `admin`, password in DEMO PASSWORDS.txt ("=== Argo CD ===") and Secret `argocd/argocd-initial-admin-secret` | `role:admin` |
-| `claude` | API token only (no UI login): `Authorization: Bearer $env:ARGOCD_AUTH_TOKEN_HOSTED` on Argo CD's REST API; a new token from `./bootstrap/new-argocd-token.ps1 -Environment hosted` | `role:admin` |
+| Dale (and anyone else in the group `argocd-admins` of realm `ops`) | `https://argocd.daleabels.com`: the gate's Keycloak sign-in (realm `ops`, password and then the authenticator app's 6-digit code), then "Log in via Keycloak" on Argo CD's page (client `argocd`, public, code flow + PKCE, no secret; no second sign-in), like Argo CD signing in with AD at work | `role:admin` |
+| Any other user of realm `ops` (none exists unless someone makes one) | stopped at the gate with 403 (and through the tunnel, Argo CD would give it no rights) | nothing: no Application, project, log or action (`policy.default` is empty) |
+| The public demo users (realm `procure`) | cannot sign in at the gate or to Argo CD at all (another realm) | - |
+| `admin` | break-glass, for when Keycloak is down: **through the tunnel only** (`open-argocd.ps1 -Tunnel`; the public host refuses it): user `admin`, password in DEMO PASSWORDS.txt ("=== Argo CD ===") and Secret `argocd/argocd-initial-admin-secret` | `role:admin` |
+| `claude` | API token only (no UI login): `Authorization: Bearer $env:ARGOCD_AUTH_TOKEN_HOSTED` on Argo CD's REST API, through the tunnel (port-forward); a new token from `./bootstrap/new-argocd-token.ps1 -Environment hosted` | `role:admin` |
 
-Without the tunnel nothing of this is reachable. Claude also keeps `kubectl` (and `argocd --core`, which uses the kubeconfig) through the
-tunnel, so no Argo CD admin function depends on Keycloak. The Keycloak sign-in is for the UI only: `argocd login --sso` would need the
-CLI's callback `http://localhost:8085/auth/callback`, which the client deliberately does not allow (Claude uses its API token). Inside the
-cluster argocd-server accepts no connection at all (a NetworkPolicy in `envs/hosted/argocd.yaml`: no pod can try the admin password; the
-port-forward does not go through the pod network).
+Claude has no Keycloak user (realm `ops` requires an authenticator app, which a script cannot hold safely; ruling R10): it uses its API
+token and `kubectl` (and `argocd --core`, which uses the kubeconfig) through the tunnel, so no Argo CD admin function depends on Keycloak.
+The Keycloak sign-in is for the UI only: `argocd login --sso` would need the CLI's callback `http://localhost:8085/auth/callback`, which the
+client deliberately does not allow, and the `argocd` CLI keeps using the tunnel (`--grpc-web` over the public host is not promised).
+Inside the cluster argocd-server accepts connections from Traefik's pods only (a NetworkPolicy in `envs/hosted/argocd.yaml`: no other pod
+can try the admin password; the port-forward does not go through the pod network), and the gate only from Traefik too.
+Through the tunnel "Log in via Keycloak" still works: Argo CD's `additionalUrls` and the `argocd` client's redirect URIs include
+`http://127.0.0.1:8080` (keep port 8080 for that).
 
 **Realm `ops`: Argo CD's own directory** (plan 08 fix wave ruling R6c). Argo CD signs people in from realm `ops`, not from the public
 demo realm `procure`:
@@ -530,7 +547,8 @@ demo realm `procure`:
 - The demo realm has shared users whose names are public, and no per-user lockout (it would let anyone keep them locked, ruling R6b).
   Access's service account `procure-access-admin` (`manage-users`, `manage-realm`) can change users there. None of that reaches realm
   `ops`: Access's roles are on realm `procure` only, so a compromise of the Access service no longer reaches Argo CD and the cluster.
-- Realm `ops` holds only the client `argocd`, the group `argocd-admins` and the users someone makes with `add-argocd-admin.ps1` (none in
+- Realm `ops` holds only the clients `argocd` and `argocd-gate` (the gate above; public with PKCE, callback
+  `https://argocd.daleabels.com/oauth2/callback`), the group `argocd-admins` and the users someone makes with `add-argocd-admin.ps1` (none in
   the file). Its sign-in page is public at `https://auth.daleabels.com/realms/ops/` (the browser must reach it), so it has its own
   protection: a **temporary lockout after 5 wrong passwords** (1 minute, 1 minute more per further 5, at most 15 minutes, never
   permanent; two failures within a second lock for a minute too), and an **authenticator app for every user**. The realm binds its own
@@ -553,11 +571,16 @@ demo realm `procure`:
   - break-glass `admin` and the `claude` token still saw all 5 Applications;
   - the throwaway user was deleted.
 
-The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC), `envs/hosted/argocd.yaml` (url, OIDC issuer
-`https://auth.daleabels.com/realms/ops`) and `envs/hosted/apps.yaml` (admin login on, no ingress). Keycloak's side (realm, client
-`argocd`, group `argocd-admins`, the `groups` claim, lockout, OTP) is in `infra/keycloak/ops-realm.json`. The keycloak-config Job applies
-it next to `procure-realm.json` on every sync. Its redirect URIs follow the platform chart's `keycloak.argocdUrl` (`http://127.0.0.1:8080`
-on hosted, so the port-forward must use port 8080 for the Keycloak sign-in).
+The settings are in the GitOps repo: `argocd/values.yaml` (accounts, RBAC), `envs/hosted/argocd.yaml` (url `https://argocd.daleabels.com`,
+`additionalUrls`, OIDC issuer `https://auth.daleabels.com/realms/ops`, the Ingress, the edge routes, the gate and the NetworkPolicies) and
+`envs/hosted/apps.yaml` (admin login on, ingress on). Keycloak's side (realm, clients `argocd` and `argocd-gate`, group `argocd-admins`,
+the `groups` claim, lockout, OTP) is in `infra/keycloak/ops-realm.json`. The keycloak-config Job applies it next to `procure-realm.json` on
+every sync. The redirect URIs follow the platform chart's `keycloak.argocdUrl` (`https://argocd.daleabels.com` on hosted,
+`envs/hosted/platform.yaml`) and `keycloak.argocdTunnelUrl` (`http://127.0.0.1:8080`, the port-forward). The gate's cookie key is Secret
+`argocd/argocd-gate` (`cookie-secret`, entry `argocd-gate-cookie-secret` in DEMO PASSWORDS.txt), from `new-secrets.ps1 -Environment hosted`.
+`tests/Test-PublicSurface.ps1` checks the gate from outside (no Argo CD content without a session, 403 for the password login),
+`tests/Test-ArgocdNetworkPolicy.ps1` the NetworkPolicies, `tests/Test-AddArgocdAdmin.ps1` who gets through (a member with password and
+code sees the Applications; a realm `ops` user outside the group gets 403; a demo user cannot sign in to realm `ops`).
 
 ### Your own Keycloak user for Argo CD
 
@@ -570,7 +593,7 @@ Aegis, 1Password, ...):
 ```powershell
 cd procure-ai-gitops
 ./bootstrap/add-argocd-admin.ps1 -UserName <private name> -Email you@example.com -FirstName Dale -LastName Abels   # asks for the password twice
-./bootstrap/hosted/open-argocd.ps1                                                           # then "Log in via Keycloak"
+./bootstrap/hosted/open-argocd.ps1                                                           # https://argocd.daleabels.com
 ```
 
 1. Pick a **user name that is published nowhere** (not an e-mail address, not your git or GitHub name): realm `ops` signs in by user
@@ -578,11 +601,12 @@ cd procure-ai-gitops
    address of yours (the profile needs one; it is not a sign-in name). It creates your user in realm `ops` and adds it to the group
    `argocd-admins`. **Sign in right after running it** (step 2): until the authenticator is set up, whoever knows the password could
    enrol theirs.
-2. Open Argo CD with the second line and choose "Log in via Keycloak". The page says "Procure AI operations" (realm `ops`). Sign in with
-   your user name and password.
+2. Open Argo CD with the second line (`https://argocd.daleabels.com`). The gate sends you to Keycloak's sign-in page; it says "Procure AI
+   operations" (realm `ops`). Sign in with your user name and password.
 3. The first time, Keycloak shows a QR code ("Mobile Authenticator Setup"). Scan it with the authenticator app, type the 6-digit code it
-   shows, give the device a name, and submit. Argo CD then opens with admin rights.
-4. From then on every sign-in asks for the password and then the app's current code.
+   shows, give the device a name, and submit. The gate lets you through to Argo CD's page; choose "Log in via Keycloak" there (no
+   second sign-in). Argo CD then opens with admin rights.
+4. From then on every sign-in asks for the password and then the app's current code (the gate keeps you signed in for 8 hours).
 5. Five wrong passwords in a row lock the user for a minute (longer if it goes on, at most 15 minutes). Wait and try again. Someone who
    knew your user name could keep it locked this way; break-glass `admin` and Claude's token still work then, and a new private user
    name fixes it.
@@ -612,8 +636,9 @@ cd procure-ai-gitops
 
 1. **Is it the demo switch?** `https://procure.daleabels.com/` shows the maintenance page when the demo is switched off on purpose
    (`docs/demo.md`). Nothing is broken then.
-2. **Open Argo CD:** `./bootstrap/hosted/open-argocd.ps1`, "Log in via Keycloak" (password, then the authenticator app's code). If Keycloak itself is down (the sign-in page does not
-   load), sign in as `admin` (break-glass, above).
+2. **Open Argo CD:** `./bootstrap/hosted/open-argocd.ps1` (`https://argocd.daleabels.com`: the gate's sign-in with password and the
+   authenticator app's code, then "Log in via Keycloak"). If Keycloak itself or the public host is down (the sign-in page does not load),
+   use `./bootstrap/hosted/open-argocd.ps1 -Tunnel` and sign in as `admin` (break-glass, above).
 3. **Find the broken part.** The *Applications* page: `root`, `argocd`, `platform`, `observability`, `procure-ai`. A red heart
    (*Degraded*) or a yellow circle (*Progressing* for minutes) is where to look. Open that Application; the tree shows each Deployment,
    StatefulSet and pod with its health. A failed sync (e.g. a migration hook) shows at the top (*Last sync*), with the message.
@@ -637,7 +662,7 @@ cd procure-ai-gitops
 8. **The VM itself** (Argo CD does not load at all, or every pod is pending): `./bootstrap/hosted/Test-HostBaseline.ps1` (SSH, k3s,
    firewall, listeners), then `kubectl top node` through the tunnel for memory. The Contabo panel has a VNC console and a reboot as the
    last resort; k3s and every app come back by themselves after a reboot.
-9. Afterwards: `./bootstrap/hosted/open-argocd.ps1 -Close`.
+9. Afterwards (after `-Tunnel`): `./bootstrap/hosted/open-argocd.ps1 -Close`.
 
 **Holding the public demo during an incident** (plan 08 fix wave ruling R5). Every green push to procure-ai main bumps
 `envs/hosted/release.yaml` and Argo CD deploys it, and a revision pinned by hand there holds only until the next publish. To freeze what

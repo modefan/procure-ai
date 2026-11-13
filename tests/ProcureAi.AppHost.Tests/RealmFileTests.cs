@@ -12,6 +12,7 @@ public sealed class RealmFileTests
     private const string AppBaseUrl = "${KC_APP_BASE_URL:https://localhost}";
     private const string DashboardBaseUrl = "${KC_DASHBOARD_BASE_URL:https://localhost}";
     private const string ArgoCdBaseUrl = "${KC_ARGOCD_BASE_URL:http://127.0.0.1:8080}";
+    private const string ArgoCdTunnelUrl = "${KC_ARGOCD_TUNNEL_URL:http://127.0.0.1:8080}";
 
     private static readonly JsonElement Realm = JsonDocument.Parse(File.ReadAllText("procure-realm.json")).RootElement;
     private static readonly JsonElement OpsRealm = JsonDocument.Parse(File.ReadAllText("ops-realm.json")).RootElement;
@@ -118,9 +119,11 @@ public sealed class RealmFileTests
         argocd.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse();
         argocd.GetProperty("serviceAccountsEnabled").GetBoolean().ShouldBeFalse();
         argocd.GetProperty("attributes").GetProperty("pkce.code.challenge.method").GetString().ShouldBe("S256");
-        // Exactly Argo CD's two callbacks (server: /auth/callback, UI with PKCE: /pkce/verify) under the environment's base; no wildcard.
-        Strings(argocd, "redirectUris").ShouldBe([$"{ArgoCdBaseUrl}/auth/callback", $"{ArgoCdBaseUrl}/pkce/verify"]);
-        Strings(argocd, "webOrigins").ShouldBe([ArgoCdBaseUrl]);
+        // Exactly Argo CD's two callbacks (server: /auth/callback, UI with PKCE: /pkce/verify) under the environment's base and under the
+        // tunnel's port-forward (plan 08c ruling R3: Argo CD's additionalUrls, so SSO still finishes through the tunnel); no wildcard.
+        Strings(argocd, "redirectUris").ShouldBe([$"{ArgoCdBaseUrl}/auth/callback", $"{ArgoCdBaseUrl}/pkce/verify",
+            $"{ArgoCdTunnelUrl}/auth/callback", $"{ArgoCdTunnelUrl}/pkce/verify"]);
+        Strings(argocd, "webOrigins").ShouldBe([ArgoCdBaseUrl, ArgoCdTunnelUrl]);
         // Argo CD asks for "openid profile" only (no email or groups scope in this realm); the claims come from the client's own mappers.
         Strings(argocd, "defaultClientScopes").ShouldBeEmpty();
         Strings(argocd, "optionalClientScopes").ShouldBe(["profile"]);
@@ -131,6 +134,36 @@ public sealed class RealmFileTests
         // Plain names ("argocd-admins", not "/argocd-admins"): the RBAC g-line matches the claim exactly.
         groups.GetProperty("config").GetProperty("full.path").GetString().ShouldBe("false");
         groups.GetProperty("config").GetProperty("id.token.claim").GetString().ShouldBe("true");
+    }
+
+    [Fact]
+    public void Ops_realm_has_the_argocd_gate_client_for_the_public_host()
+    {
+        // Plan 08c ruling R9: oauth2-proxy (Traefik forwardAuth) in front of the public Argo CD host lets in members of argocd-admins only.
+        // A public client with PKCE like argocd (Keycloak skips client authentication for a public client; the gate's protection is the
+        // user's password, one-time code and group), code flow only, one callback under the Argo CD base; the groups claim the gate checks.
+        var gate = OpsRealm.GetProperty("clients").EnumerateArray().Single(c => c.GetProperty("clientId").GetString() == "argocd-gate");
+        gate.GetProperty("publicClient").GetBoolean().ShouldBeTrue();
+        gate.TryGetProperty("secret", out _).ShouldBeFalse();
+        gate.GetProperty("standardFlowEnabled").GetBoolean().ShouldBeTrue();
+        gate.GetProperty("directAccessGrantsEnabled").GetBoolean().ShouldBeFalse();
+        gate.GetProperty("implicitFlowEnabled").GetBoolean().ShouldBeFalse();
+        gate.GetProperty("serviceAccountsEnabled").GetBoolean().ShouldBeFalse();
+        gate.GetProperty("attributes").GetProperty("pkce.code.challenge.method").GetString().ShouldBe("S256");
+        Strings(gate, "redirectUris").ShouldBe([$"{ArgoCdBaseUrl}/oauth2/callback"]);
+        Strings(gate, "webOrigins").ShouldBeEmpty();
+        Strings(gate, "defaultClientScopes").ShouldBeEmpty();
+        Strings(gate, "optionalClientScopes").ShouldBeEmpty();
+        gate.GetProperty("description").GetString()!.Length.ShouldBeLessThanOrEqualTo(255);
+
+        var groups = gate.GetProperty("protocolMappers").EnumerateArray()
+            .Single(m => m.GetProperty("protocolMapper").GetString() == "oidc-group-membership-mapper");
+        groups.GetProperty("config").GetProperty("claim.name").GetString().ShouldBe("groups");
+        groups.GetProperty("config").GetProperty("full.path").GetString().ShouldBe("false");
+        groups.GetProperty("config").GetProperty("id.token.claim").GetString().ShouldBe("true");
+        // oauth2-proxy names the session by the e-mail claim of the ID token.
+        gate.GetProperty("protocolMappers").EnumerateArray()
+            .Single(m => m.GetProperty("name").GetString() == "email").GetProperty("config").GetProperty("id.token.claim").GetString().ShouldBe("true");
     }
 
     [Fact]
@@ -161,7 +194,7 @@ public sealed class RealmFileTests
         OpsRealm.GetProperty("otpPolicyPeriod").GetInt32().ShouldBe(30);
         OpsRealm.GetProperty("registrationAllowed").GetBoolean().ShouldBeFalse();
         OpsRealm.GetProperty("resetPasswordAllowed").GetBoolean().ShouldBeFalse();
-        OpsRealm.GetProperty("clients").EnumerateArray().Select(c => c.GetProperty("clientId").GetString()).ShouldBe(["argocd"]);
+        OpsRealm.GetProperty("clients").EnumerateArray().Select(c => c.GetProperty("clientId").GetString()).ShouldBe(["argocd", "argocd-gate"]);
     }
 
     [Fact]

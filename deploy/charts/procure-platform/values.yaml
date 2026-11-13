@@ -119,9 +119,14 @@ keycloak:
       # spelling of the path falls back to the stricter `all` bucket.
       token: { average: 600, period: 1m, burst: 120 }
   # Argo CD's address as the browser opens it (the argocd client's redirect URIs <url>/auth/callback and <url>/pkce/verify, web origin
-  # and logout: KC_ARGOCD_BASE_URL, plan 08 Task 12c). Equal to configs.cm.url in the GitOps repo's envs/<env>/argocd.yaml. The default
-  # is the hosted VM's (no ingress: the port-forward of bootstrap/hosted/open-argocd.ps1); local sets https://argocd.procure.localtest.me.
+  # and logout: KC_ARGOCD_BASE_URL, plan 08 Task 12c; also the argocd-gate client's <url>/oauth2/callback, plan 08c Task 1). Equal to
+  # configs.cm.url in the GitOps repo's envs/<env>/argocd.yaml. Hosted sets https://argocd.daleabels.com (the public host behind the
+  # Keycloak gate), local https://argocd.procure.localtest.me; the default is the port-forward of bootstrap/hosted/open-argocd.ps1.
   argocdUrl: http://127.0.0.1:8080
+  # The second address the argocd client accepts (KC_ARGOCD_TUNNEL_URL, plan 08c ruling R3): the port-forward through the SSH tunnel
+  # (open-argocd.ps1 -Tunnel), so a tunnel session can still finish Keycloak sign-in when argocdUrl is the public host. Equal to
+  # configs.cm.additionalUrls in the GitOps repo's envs/hosted/argocd.yaml.
+  argocdTunnelUrl: http://127.0.0.1:8080
 
 # The keycloak-config Job (templates/keycloak-config-job.yaml, plan 08 ruling 7): keycloak-config-cli applies the realm file to the running
 # Keycloak on every sync. Not under the AppHost (start-dev imports the realm at every start of its fresh container).
