@@ -1,7 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@angular/aria/menu';
 import { Router } from '@angular/router';
-import { NotificationsStore } from '../../core/live/notifications.store';
+import { NotificationsStore } from '../live/notifications.store';
 
 /** The bell in the header: unread count (9+ at most), and a menu with the latest notifications. */
 @Component({
@@ -31,7 +31,7 @@ import { NotificationsStore } from '../../core/live/notifications.store';
         #bellMenu="ngMenu"
         (itemSelected)="onSelect($event)"
         [class.hidden]="!trigger.expanded()"
-        class="z-40 mt-1 rounded-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-36 sm:absolute sm:right-0 sm:w-80 border border-slate-200 bg-white py-1 shadow-lg"
+        class="z-40 mt-1 rounded-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-16 sm:absolute sm:right-0 sm:w-80 border border-slate-200 bg-white py-1 shadow-lg"
         aria-label="Notifications"
       >
         <ng-template ngMenuContent>

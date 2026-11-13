@@ -5,7 +5,7 @@ using Shouldly;
 namespace ProcureAi.EndToEndTests;
 
 /// <summary>
-/// What each demo role sees in the header (spec 8): the links come from the user's permissions (the default matrix of spec 4.2), never
+/// What each demo role sees in the left menu (spec 8, plan 09): the links come from the user's permissions (the default matrix of spec 4.2), never
 /// from role names, and a page without the permission is the 403 page naming the permission it needs. Signed in with the demo buttons.
 /// </summary>
 [Collection(EndToEndCollection.Name)]
@@ -35,36 +35,29 @@ public sealed class RoleMenuTests(AppFixture fixture)
         var page = await context.NewPageAsync();
         await fixture.DemoLogInAsync(page, role);
 
+        // The left menu (plan 09): Welcome, the demo with "How it is built" and the pages this user may open (then the Admin group's
+        // pages), and "Under the hood" last. The app pages are the links between "How it is built" and "API (Swagger)".
         var nav = page.GetByRole(AriaRole.Navigation, new() { Name = "Main" });
-        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "Dashboard" })).ToBeVisibleAsync();
+        var expected = links.Concat(adminLinks).ToArray();
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "API (Swagger)" })).ToBeVisibleAsync();
         // The links appear with the permissions; wait for the last one before reading them all.
-        await Assertions.Expect(nav.GetByRole(AriaRole.Link)).ToHaveCountAsync(links.Length, new() { Timeout = Pages.Timeout });
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = expected[^1], Exact = true })).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
         var shown = (await nav.GetByRole(AriaRole.Link).AllInnerTextsAsync())
             .Select(text => Regex.Replace(text, @"\s*\d+\s*$", "").Trim()) // the Approvals link carries its count
-            .ToArray();
-        shown.ShouldBe(links, $"{role}'s menu");
+            .ToList();
+        shown.Take(3).ShouldBe(["Welcome", "ProcureAI", "How it is built"], $"{role}'s menu starts with the portfolio");
+        var swagger = shown.IndexOf("API (Swagger)");
+        shown.Skip(3).Take(swagger - 3).ToArray().ShouldBe(expected, $"{role}'s menu");
 
-        // On a desktop the header is one row: the user menu sits beside the links, not wrapped below them (the Department head's
-        // longer role once pushed it onto a second row at 1440 px).
+        // The Admin group heading is there only with admin pages under it.
+        await Assertions.Expect(nav.GetByText("Admin", new() { Exact = true })).ToHaveCountAsync(adminLinks.Length == 0 ? 0 : 1);
+        // The user menu sits in the top bar beside the menu at desktop widths.
         foreach (var width in new[] { 1440, 1280 })
         {
             await page.SetViewportSizeAsync(width, 800);
-            var navBox = (await nav.BoundingBoxAsync())!;
-            var userBox = (await page.GetByTestId("user-menu").BoundingBoxAsync())!;
-            userBox.Y.ShouldBeLessThan(navBox.Y + navBox.Height, $"{role}'s header is one row at {width} px");
+            await Assertions.Expect(nav).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByTestId("user-menu")).ToBeVisibleAsync();
         }
-        await page.SetViewportSizeAsync(1280, 800);
-
-        var admin = page.GetByTestId("admin-menu");
-        if (adminLinks.Length == 0)
-        {
-            await Assertions.Expect(admin).ToHaveCountAsync(0);
-            return;
-        }
-        await admin.ClickAsync();
-        var menu = page.GetByTestId("admin-links");
-        await Assertions.Expect(menu.GetByRole(AriaRole.Link)).ToHaveCountAsync(adminLinks.Length);
-        (await menu.GetByRole(AriaRole.Link).AllInnerTextsAsync()).Select(t => t.Trim()).ToArray().ShouldBe(adminLinks, $"{role}'s admin menu");
     }
 
     [Fact]

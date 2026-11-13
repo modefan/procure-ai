@@ -66,6 +66,27 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
     }
 
     [Fact]
+    public async Task Deep_link_signed_out_keeps_return_url()
+    {
+        fixture.RequireReady();
+        await using var context = await fixture.NewContextAsync();
+        var page = await context.NewPageAsync();
+        // The public menu, signed out: Welcome and the demo, none of the signed-in pages.
+        await page.GotoAsync(new Uri(fixture.GatewayUrl, "/").ToString());
+        var nav = page.GetByRole(AriaRole.Navigation, new() { Name = "Main" });
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "Welcome", Exact = true })).ToBeVisibleAsync();
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "ProcureAI", Exact = true })).ToBeVisibleAsync();
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "Requests", Exact = true })).ToHaveCountAsync(0);
+
+        // Signed out, the deep link goes to Keycloak and, after the sign-in, back to the same address (the BFF's return url).
+        await LogInAsync(page, "/app/requests");
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Purchase requests" })).ToBeVisibleAsync();
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "Requests", Exact = true })).ToHaveAttributeAsync("aria-current", "page");
+        await Assertions.Expect(nav.GetByRole(AriaRole.Link, new() { Name = "Welcome", Exact = true })).ToBeVisibleAsync();
+    }
+
+    [Fact]
     public async Task Tom_logs_in_and_sees_requests_list()
     {
         fixture.RequireReady();

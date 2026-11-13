@@ -73,6 +73,37 @@ export interface MaintenanceConfig {
   checkTimeoutMs: number;
 }
 
+/** One demo in the portfolio menu (and, later, a card on the Welcome page). */
+export interface PortfolioDemo {
+  /** Stable id; `procurement` is this app, whose menu entry also holds its signed-in pages. */
+  key: string;
+  name: string;
+  /** One line on what it is. */
+  pitch: string;
+  /** Where "try it" goes: an app path (`/demos/...`) or, for a demo hosted elsewhere, an https address. */
+  startUrl: string;
+  /** Its "How it is built" page; empty = none. */
+  infoUrl: string;
+  /** Hosted elsewhere: a full page load, and no sub-items in the menu. */
+  external: boolean;
+}
+
+/** A profile link (LinkedIn, GitHub). */
+export interface PortfolioLink {
+  label: string;
+  url: string;
+}
+
+/** The portfolio around the demos: the left menu's demos, the profile links and the "Under the hood" tools. */
+export interface PortfolioConfig {
+  demos: PortfolioDemo[];
+  links: PortfolioLink[];
+  /** The source repositories are public (until then the pages say "private for now, available on request"). */
+  reposPublic: boolean;
+  /** The gateway's Swagger UI (a full page load, not an app route); empty = no menu item. */
+  swaggerUrl: string;
+}
+
 export interface AppConfig {
   /** Absolute origin of the gateway when the app is not served by it (development only); empty = same origin. */
   apiBaseUrl: string;
@@ -84,6 +115,7 @@ export interface AppConfig {
   devPanel: DevPanelConfig;
   registration: RegistrationConfig;
   maintenance: MaintenanceConfig;
+  portfolio: PortfolioConfig;
 }
 
 /**
@@ -127,6 +159,7 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   const devPanel = (isRecord(source['devPanel']) ? source['devPanel'] : {}) as Record<string, unknown>;
   const registration = (isRecord(source['registration']) ? source['registration'] : {}) as Record<string, unknown>;
   const maintenance = (isRecord(source['maintenance']) ? source['maintenance'] : {}) as Record<string, unknown>;
+  const portfolio = (isRecord(source['portfolio']) ? source['portfolio'] : {}) as Record<string, unknown>;
   const d = defaults.logger;
   return {
     apiBaseUrl: typeof source['apiBaseUrl'] === 'string' ? source['apiBaseUrl'] : defaults.apiBaseUrl,
@@ -160,8 +193,41 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
       contactLabel: typeof maintenance['contactLabel'] === 'string' ? maintenance['contactLabel'].trim() : defaults.maintenance.contactLabel,
       checkTimeoutMs: positive(maintenance['checkTimeoutMs'], defaults.maintenance.checkTimeoutMs),
     },
+    portfolio: {
+      demos: Array.isArray(portfolio['demos']) ? portfolio['demos'].filter(isDemo) : defaults.portfolio.demos,
+      links: Array.isArray(portfolio['links']) ? portfolio['links'].filter(isLink) : defaults.portfolio.links,
+      reposPublic: typeof portfolio['reposPublic'] === 'boolean' ? portfolio['reposPublic'] : defaults.portfolio.reposPublic,
+      swaggerUrl:
+        portfolio['swaggerUrl'] === '' || isPageUrl(portfolio['swaggerUrl']) ? (portfolio['swaggerUrl'] as string) : defaults.portfolio.swaggerUrl,
+    },
   };
 }
+
+/** An address the menu may link to: a path of this site (`/x`, not `//host`) or an https/http address. Never javascript: and the like. */
+export const isPageUrl = (value: unknown): value is string =>
+  typeof value === 'string' && (/^\/(?!\/)\S*$/.test(value) || /^https?:\/\/\S+$/i.test(value));
+
+const isText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
+
+/** A demo entry with every field of the right type and safe addresses; others are dropped. */
+const isDemo = (value: unknown): value is PortfolioDemo => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const d = value as Record<string, unknown>;
+  return (
+    isText(d['key']) &&
+    isText(d['name']) &&
+    typeof d['pitch'] === 'string' &&
+    isPageUrl(d['startUrl']) &&
+    (d['infoUrl'] === '' || isPageUrl(d['infoUrl'])) &&
+    typeof d['external'] === 'boolean'
+  );
+};
+
+/** A profile link: a label and an https address. */
+const isLink = (value: unknown): value is PortfolioLink =>
+  isRecord(value) && isText((value as Record<string, unknown>)['label']) && /^https:\/\/\S+$/i.test(String((value as Record<string, unknown>)['url']));
 
 const isRecord = (value: unknown): value is object => typeof value === 'object' && value !== null && !Array.isArray(value);
 const level = (value: unknown, fallback: LogLevel): LogLevel =>

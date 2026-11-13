@@ -373,6 +373,21 @@ web:
     devPanel: { enabled: false }
     # The maintenance page's "request access" link while the demo is switched off (empty: no link); the GitOps env values set it.
     maintenance: { contactUrl: "", contactLabel: "", checkTimeoutMs: 4000 }
+    # The portfolio around the demos (left menu, Welcome; plan 09). The menu's Dashboard item reuses observability.dashboardUrl.
+    # Helm replaces lists whole: an environment that sets demos or links gives the full list.
+    portfolio:
+      demos:
+        - key: procurement
+          name: ProcureAI
+          pitch: Procurement in Rand with an AI policy assistant
+          startUrl: /demos/procurement
+          infoUrl: /demos/procurement/about
+          external: false
+      links:
+        - { label: LinkedIn, url: "https://www.linkedin.com/in/dale-abels-95918154/" }
+        - { label: GitHub, url: "https://github.com/modefan" }
+      reposPublic: false
+      swaggerUrl: /swagger
 
 # --- The demo data (templates/demo-data.yaml, plan 07 ruling 13): ProcureAi.DemoData through the gateway with the admin key. ---
 # demo-seed runs when global.demo.seed is on, demo-reset when global.demo.reset is on.

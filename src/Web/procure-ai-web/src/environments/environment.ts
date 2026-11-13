@@ -35,4 +35,23 @@ export const environment: AppConfig = {
   registration: { enabled: false },
   // The maintenance page's "request access" link. Empty: no link (deployments set their own in config.json).
   maintenance: { contactUrl: '', contactLabel: '', checkTimeoutMs: 4000 },
+  // The portfolio around the demos (left menu, Welcome). The Dashboard menu item reuses observability.dashboardUrl.
+  portfolio: {
+    demos: [
+      {
+        key: 'procurement',
+        name: 'ProcureAI',
+        pitch: 'Procurement in Rand with an AI policy assistant',
+        startUrl: '/demos/procurement',
+        infoUrl: '/demos/procurement/about',
+        external: false,
+      },
+    ],
+    links: [
+      { label: 'LinkedIn', url: 'https://www.linkedin.com/in/dale-abels-95918154/' },
+      { label: 'GitHub', url: 'https://github.com/modefan' },
+    ],
+    reposPublic: false,
+    swaggerUrl: '/swagger',
+  },
 };

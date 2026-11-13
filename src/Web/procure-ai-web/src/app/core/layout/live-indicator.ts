@@ -1,5 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
-import { LiveConnection } from '../../core/live/live-connection';
+import { LiveConnection } from '../live/live-connection';
 
 /** The dot and word in the header: Live (green), Reconnecting… (orange), Offline (grey). */
 @Component({

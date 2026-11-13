@@ -1,5 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
-import { PresenceStore } from '../../core/live/presence.store';
+import { PresenceStore } from '../live/presence.store';
 
 const SHOWN = 3;
 
@@ -11,7 +11,7 @@ const SHOWN = 3;
       <span
         data-testid="online-users"
         role="img"
-        class="hidden items-center sm:inline-flex lg:hidden xl:inline-flex"
+        class="hidden items-center sm:inline-flex"
         [attr.aria-label]="label()"
         [attr.title]="label()"
       >

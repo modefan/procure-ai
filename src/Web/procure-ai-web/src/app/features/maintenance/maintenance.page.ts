@@ -9,14 +9,14 @@ export const DEFAULT_MAINTENANCE_TEXT =
   'The demo is paused to save hosting costs. It is switched on again on request.';
 
 /**
- * Shown instead of the whole app while the demo is switched off (the shell, the session check and the live connection stay off, so the page
- * makes no calls of its own). "Try again" asks the switch again and opens the welcome page once the demo is back on. The contact link comes
+ * Shown while the demo is switched off, inside the frame with only its public menu (the session check and the live connection stay off,
+ * so the page makes no calls of its own). "Try again" asks the switch again and opens the welcome page once the demo is back on. The contact link comes
  * from config.json (`maintenance.contactUrl`); without one, none is shown.
  */
 @Component({
   selector: 'app-maintenance-page',
   template: `
-    <main id="main" class="flex min-h-dvh items-center justify-center bg-slate-50 px-4 py-12">
+    <div class="flex justify-center px-4 py-12 sm:py-20">
       <section class="card w-full max-w-xl text-center" aria-labelledby="maintenance-title">
         <p class="text-lg font-bold tracking-tight text-slate-900" aria-hidden="true">
           <span class="text-indigo-700">&#9670;</span> Procure<span class="text-indigo-700">AI</span>
@@ -44,7 +44,7 @@ export const DEFAULT_MAINTENANCE_TEXT =
           <p role="status" class="mt-4 text-sm text-slate-600">The demo is still switched off.</p>
         }
       </section>
-    </main>
+    </div>
   `,
 })
 export class MaintenancePage {

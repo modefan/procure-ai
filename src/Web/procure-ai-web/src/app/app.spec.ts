@@ -6,7 +6,7 @@ import { SystemAvailability } from './core/system/system-availability';
 describe('App while the demo is switched off', () => {
   beforeEach(() => TestBed.configureTestingModule({ providers: [provideRouter([])] }));
 
-  it('shows no shell but keeps the confirm dialog, so a question being asked (unsaved changes) is never lost', async () => {
+  it('keeps the frame with its public menu, drops the session dialogs, and keeps the confirm dialog (a question being asked is never lost)', async () => {
     TestBed.inject(SystemAvailability).markDisabled(null);
 
     const fixture = TestBed.createComponent(App);
@@ -14,7 +14,11 @@ describe('App while the demo is switched off', () => {
     await fixture.whenStable();
 
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('app-shell')).toBeNull();
+    expect(el.querySelector('app-frame')).not.toBeNull();
+    expect(el.querySelector('nav[aria-label=Main]')?.textContent).toContain('Welcome');
+    expect(el.querySelector('[data-testid=user-menu]')).toBeNull();
+    expect(el.querySelector('app-session-expired-dialog')).toBeNull();
+    expect(el.querySelector('app-conflict-dialog')).toBeNull();
     expect(el.querySelector('app-confirm-dialog')).not.toBeNull();
   });
 });
