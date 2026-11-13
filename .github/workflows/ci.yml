@@ -506,12 +506,22 @@ jobs:
       # KNOWN OPEN (plan 08 Task 14): on the private-repo runner (8 GB RAM: mongod saw 7 932 MB) the runner was killed a few minutes into
       # the system tests twice ("The runner has received a shutdown signal"), while the whole AppHost was starting; a 12 GB swap file
       # filled the disk instead. Memory or disk exhaustion; the log below records both. Public repos get the 4-CPU, 16 GB runner, where the
-      # job is back on since go-public (plan 08c Task 2).
+      # job is back on since go-public (plan 08c Task 2). There the stack still peaked at ~14.8 GB used with the runner's 4 GB swap ~3 GB
+      # full, and the runner was killed the same way in 2 of 4 runs; hence the extra swap file (the public runner has ~76 GB of free disk),
+      # the build servers stopped after the build, and the biggest processes in the log.
+      - name: Add an 8 GB swap file
+        run: |
+          sudo fallocate -l 8G /swapfile-ci
+          sudo chmod 600 /swapfile-ci
+          sudo mkswap /swapfile-ci
+          sudo swapon /swapfile-ci
+          free -m
       - name: Log memory and disk every 30 s (printed at the end)
         run: |
           cat > "$RUNNER_TEMP/memlog.sh" <<'SCRIPT'
           while :; do
             echo "$(date -u +%T) $(free -m | awk '/Mem:/ {print "mem used", $3, "avail", $7} /Swap:/ {print "swap used", $3}' | xargs) disk free $(df -m --output=avail / | tail -1) MB"
+            echo "  top RSS MB: $(ps -eo rss=,comm= --sort=-rss | head -6 | awk '{printf "%s %d; ", $2, $1/1024}')"
             sleep 30
           done
           SCRIPT
@@ -523,6 +533,8 @@ jobs:
         run: |
           dotnet build tests/ProcureAi.EndToEndTests -c Release -warnaserror -m:4
           dotnet build tests/ProcureAi.SystemTests -c Release -warnaserror -m:4
+          # The MSBuild nodes and the compiler server stay alive after a build and hold memory the AppHost stack needs.
+          dotnet build-server shutdown
 
       - name: Install Playwright browser and OS dependencies
         shell: pwsh
