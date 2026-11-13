@@ -54,8 +54,8 @@ permissions:
 env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
-  # "true": run the long suites too (every push, weekly and by hand); "false" only for a hand-started `profile: push`.
-  FULL: ${{ inputs.profile != 'push' }}
+  # "true": run the long suites too (weekly and by hand); never on a push (Dale 2026-11-13: a push must not wait ~35 min for them).
+  FULL: ${{ github.event_name != 'push' && inputs.profile != 'push' }}
 
 jobs:
   weekly-gate:
@@ -435,7 +435,7 @@ jobs:
     # A long suite (FULL): publish.yml also builds the same images after every green push run, and pushes them.
     name: Container images (build and test, no push)
     needs: [weekly-gate]
-    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' }}
+    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # Builds every image of deploy/scripts/build-images.ps1 to prove they build; nothing is pushed and no secret is needed
