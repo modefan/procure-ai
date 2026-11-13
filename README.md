@@ -158,10 +158,10 @@ end-to-end tests (the full flow above, live updates, presence, conflicts, forbid
 admin screens). CI builds with warnings as errors and fails when an OpenAPI document or a generated Angular client drifts from
 what is committed.
 
-Every push to `main` that changes more than docs runs all of it in GitHub Actions (docs-only pushes skip CI): the build, the
+Every push to `main` that changes more than docs runs it in GitHub Actions (docs-only pushes skip CI): the build, the
 drift checks, the unit, architecture and Vitest suites, the chart checks, the container image builds, the Testcontainers
-integration tests, the AppHost tests and the system and Playwright end-to-end tests; a green run publishes the images and deploys
-through GitOps. Details: [docs/testing.md](docs/testing.md).
+integration tests and the AppHost tests; a green run publishes the images and deploys through GitOps. The system and Playwright
+end-to-end tests run weekly and on demand for now (the whole system is a tight fit on GitHub's 16 GB runner). Details: [docs/testing.md](docs/testing.md).
 
 ## More documentation
 

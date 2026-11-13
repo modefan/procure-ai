@@ -7,6 +7,9 @@ name: CI
 # (unit and architecture tests, the Angular specs, the chart checks), and the long suites (the container image builds and image tests,
 # the Testcontainers integration tests, the AppHost tests, and the system and Playwright end-to-end tests). A hand-started run can be
 # narrowed with the `only` input, or run only the fast suites with `profile: push`.
+# E2E-PUSH-OFF (plan 08c Task 2 ruling): the system and end-to-end job runs weekly and by hand only, not on push, until the whole AppHost
+# stack fits the 16 GB runner: it was killed ("The runner has received a shutdown signal") in 2 of 4 push runs, and hung with an extra
+# swap file. Its memory log names the biggest processes for that fix.
 # Until go-public the long suites and the end-to-end job were weekly or off (plan 08 ruling 14, Dale's minutes decision 2026-11-06,
 # E2E-OFF); measured minutes and the arithmetic: docs/testing.md and the plan 08 Task 14 report.
 # publish.yml only follows a green CI run of a *push* to main, so a weekly or hand-started run never publishes or deploys anything.
@@ -464,7 +467,7 @@ jobs:
     # A long suite (FULL), and only after the build and the other suites passed. It was off on the private 8 GB runner (E2E-OFF, plan 08
     # Task 14: the runner was killed while the AppHost started); public repos get the 4-CPU, 16 GB runner (plan 08c Task 2).
     if: >-
-      ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' &&
+      ${{ !cancelled() && github.event_name != 'push' && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' &&
       (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
       needs.dotnet.result == 'success' && needs.web.result == 'success' }}
     runs-on: ubuntu-24.04
@@ -505,17 +508,10 @@ jobs:
 
       # KNOWN OPEN (plan 08 Task 14): on the private-repo runner (8 GB RAM: mongod saw 7 932 MB) the runner was killed a few minutes into
       # the system tests twice ("The runner has received a shutdown signal"), while the whole AppHost was starting; a 12 GB swap file
-      # filled the disk instead. Memory or disk exhaustion; the log below records both. Public repos get the 4-CPU, 16 GB runner, where the
-      # job is back on since go-public (plan 08c Task 2). There the stack still peaked at ~14.8 GB used with the runner's 4 GB swap ~3 GB
-      # full, and the runner was killed the same way in 2 of 4 runs; hence the extra swap file (the public runner has ~76 GB of free disk),
-      # the build servers stopped after the build, and the biggest processes in the log.
-      - name: Add an 8 GB swap file
-        run: |
-          sudo fallocate -l 8G /swapfile-ci
-          sudo chmod 600 /swapfile-ci
-          sudo mkswap /swapfile-ci
-          sudo swapon /swapfile-ci
-          free -m
+      # filled the disk instead. Memory or disk exhaustion; the log below records both. On the public 4-CPU, 16 GB runner (plan 08c Task 2)
+      # the stack still peaked at ~14.8 GB used with the runner's 4 GB swap ~3 GB full; the runner was killed the same way in 2 of 4 push
+      # runs, and with an extra 8 GB swap file it hung instead. Hence E2E-PUSH-OFF (top of this file), the build servers stopped after the
+      # build, and the biggest processes in the log.
       - name: Log memory and disk every 30 s (printed at the end)
         run: |
           cat > "$RUNNER_TEMP/memlog.sh" <<'SCRIPT'
