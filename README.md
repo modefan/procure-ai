@@ -161,7 +161,7 @@ what is committed.
 Every push to `main` that changes more than docs runs it in GitHub Actions (docs-only pushes skip CI): the build, the
 drift checks, the unit, architecture and Vitest suites, the chart checks, the container image builds, the Testcontainers
 integration tests and the AppHost tests; a green run publishes the images and deploys through GitOps. The system and Playwright
-end-to-end tests run weekly and on demand for now (the whole system is a tight fit on GitHub's 16 GB runner). Details: [docs/testing.md](docs/testing.md).
+end-to-end tests are run by hand (Actions → CI → Run workflow) until the stack fits the 16 GB runner. Details: [docs/testing.md](docs/testing.md).
 
 ## More documentation
 

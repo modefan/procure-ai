@@ -741,40 +741,21 @@ reinstall):
 
 ## Backup copies and recovery
 
-Everything the hosted setup needs that is not in a repo lives only on Dale's PC: the VM's SSH key, `known_hosts`, the Terraform state,
-`host.json` and the kubeconfig (`%USERPROFILE%\.procure-ai\hosted\`), the deploy keys (`...\deploy-keys\`), the CAs, the two
-user-secrets stores, the Contabo MFA recovery codes and DEMO PASSWORDS.txt. Losing the PC would leave only destructive paths (a
-reinstall to adopt the VM, the VNC console, new secrets for everything).
+Some of what the hosted setup needs is not in a repo and lives only on the operator's PC: the VM's SSH key, `known_hosts`, the Terraform
+state, `host.json` and the kubeconfig (`%USERPROFILE%\.procure-ai\hosted\`), the deploy keys, the CAs and the user-secrets stores.
+Losing the PC would leave only destructive paths (a reinstall to adopt the VM, the VNC console, new secrets for everything).
 
-**Backup copies** (Dale's decision 2026-11-08: plain files, no encryption, replacing ruling R4's encrypted archive):
-
-```powershell
-cd procure-ai-gitops
-./bootstrap/hosted/backup-hosted.ps1          # mirrors every item into both folders below, then compares every file by SHA-256
-./bootstrap/hosted/backup-hosted.ps1 -Check   # only compares: OK, MISMATCH, MISSING or EXTRA per file; exit 1 when not all OK
-```
-
-The copies go to `C:\Users\User\OneDrive\procure-ai secrets` (OneDrive, so off the PC) and `C:\Users\User\Documents\procure-ai secrets`,
-each with the same layout: `DEMO PASSWORDS.txt`, `hosted\` (without its run-time files: `tunnel.pid`, logs, WAL-test files),
-`deploy-keys\`, `local-ca\`, `user-secrets\procure-ai-hosted\`, `user-secrets\procure-ai-apphost\`, `contabo-recovery-codes.txt`
-(from `%USERPROFILE%\Downloads`) and a `README.txt` naming each item's original. A file the original no longer has is removed from the
-copy. The script prints names and counts only, never contents. **Run it after any change** to a secret, key, the Terraform state or
-DEMO PASSWORDS.txt (a reinstall, `new-secrets.ps1` generating a value, a new deploy key or token).
-
-Who can read the copies: before copying, the script gives each destination folder the same ACL as `%USERPROFILE%\.procure-ai`
-(`Set-CurrentUserOnlyAcl`: only Dale's Windows user, inheritance off at the folder, everything inside inheriting that one rule), and both
-modes check every file and subfolder and report any other identity (`ACCESS` lines, exit 1). OneDrive syncs as Dale's user, so syncing is
-unaffected. A destination inside a git repository is refused before anything is created. Accepted risk (Dale, 2026-11-08, explained to
-him): the OneDrive copy is unencrypted, so anyone who gets into Dale's Microsoft account can read every secret of the demo, and the
-Contabo MFA recovery codes sit in the same folder as the Contabo password.
+**Backup copies:** an off-PC backup copy of the secrets exists; its location and contents are in the operator's private runbook.
+`bootstrap/hosted/backup-hosted.ps1` (procure-ai-gitops) keeps it current: it reads the destinations and items from a private file
+outside every repository, mirrors them, then compares every file by SHA-256 (`-Check` only compares), and keeps each copy readable by
+the operator's Windows user only. It prints names and counts only, never contents. **Run it after any change** to a secret, key, the
+Terraform state or a credential (a reinstall, `new-secrets.ps1` generating a value, a new deploy key or token).
 
 **Recovering the hosted setup** (the VM still runs; the PC or the folder is lost):
 
-1. A PC with the tools of "Bringing it up", the env vars (the tokens are in DEMO PASSWORDS.txt), and both repos cloned.
-2. Copy each item from `OneDrive\procure-ai secrets` back to its original (the `README.txt` there lists them): `hosted\`,
-   `deploy-keys\` and `local-ca\` to `%USERPROFILE%\.procure-ai\`, `user-secrets\<id>\` to `%APPDATA%\Microsoft\UserSecrets\<id>\`,
-   DEMO PASSWORDS.txt to the Desktop. `new-hosted-cluster.ps1 -KubeconfigOnly` (step 4) sets the hosted folder back to current-user-only
-   permissions, which OpenSSH requires for the key.
+1. A PC with the tools of "Bringing it up", the env vars, and both repos cloned.
+2. Copy each item from the backup copy back to its original (the `README.txt` in the copy lists them). `new-hosted-cluster.ps1
+   -KubeconfigOnly` (step 4) sets the hosted folder back to current-user-only permissions, which OpenSSH requires for the key.
 3. With the SSH key back but the Terraform state lost (or too old): `./bootstrap/hosted/new-hosted-cluster.ps1 -Import -PlanOnly`, then
    without `-PlanOnly`. It finds the VM, its firewall, the SSH key secret and the three A records through the APIs and imports them into
    the state. **Nothing is reinstalled or recreated**: the plan guard refuses any create (except a DNS record that does not exist at
@@ -795,7 +776,7 @@ Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 
 
 | Item | Per month | USD | ZAR |
 |---|---|---|---|
-| Contabo Cloud VPS 8 (order 15654477, monthly term) | EUR 14.00 (0 % VAT on the invoice), Contabo's list price | 15.63 | R 258,50 |
+| Contabo Cloud VPS 8 (monthly term) | EUR 14.00 (0 % VAT on the invoice), Contabo's list price | 15.63 | R 258,50 |
 | Domain `daleabels.com` (Cloudflare Registrar, USD 11.17 a year, auto-renew, expires 2027-11-07) | one twelfth | 0.93 | R 15,40 |
 | Azure Foundry, **expected** (about 1.0 M tokens: the nightly re-seed of Acme and Globex, ~16 000 tokens a night, 0.5 M a month, and ~10 questions a day of ~1 800 tokens, 0.5 M a month) | gpt-5-mini $0.25 in / $2.00 out per 1 M, embeddings $0.022 per 1 M | 0.40-0.80 | R 7-13 |
 | Azure Foundry, **worst case under the caps** (every organisation at its daily cap every day, below) | 14 M tokens at $0.60 per 1 M | 8.40 | R 139 |

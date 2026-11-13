@@ -7,8 +7,9 @@ name: retention
 #   older than the newest 15 (e.g. a hand-pinned appRevision, or a platform image whose tag changes only when infra/ changes).
 # The image list comes from deploy/scripts/build-images.ps1 -List (one list for build, publish and retention). The packages are linked
 # to this repository (the images carry its org.opencontainers.image.source label), which gives GITHUB_TOKEN access to them. The GitOps
-# repo is read with a read-only deploy key, the secret GITOPS_READ_DEPLOY_KEY of the Environment `gitops-read` (main only; plan 08 Task 6,
-# carry-over 29): this workflow cannot write to the GitOps repo. Only publish.yml holds the write key (Environment `gitops`).
+# repo is public, so it is read without any key (plan 08c final review M4; the old read-only deploy key GITOPS_READ_DEPLOY_KEY and the
+# Environment `gitops-read` are removed after one green run): this workflow cannot write to the GitOps repo. Only publish.yml holds the
+# write key (Environment `gitops`).
 
 on:
   schedule:
@@ -33,7 +34,6 @@ jobs:
     name: Prune old image versions
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: gitops-read
     permissions:
       contents: read
       packages: write
@@ -52,7 +52,6 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/procure-ai-gitops
           ref: main
-          ssh-key: ${{ secrets.GITOPS_READ_DEPLOY_KEY }}
           persist-credentials: false
           fetch-depth: 0
           path: gitops

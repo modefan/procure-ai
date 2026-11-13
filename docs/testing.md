@@ -19,10 +19,10 @@ automatically) or the generated Angular clients differ from what is committed. E
 the root Markdown files or `docs/` runs everything (`.github/workflows/ci.yml`): the build, the drift checks, the unit and architecture
 tests, the Vitest specs, the chart checks with the AppHost's chart parity tests (the GitOps repo checked out beside it), the image
 builds and image tests, the Testcontainers integration tests and the AppHost tests. A green push run is followed by publishing (images
-and deploy). The system and Playwright end-to-end tests (after the other suites passed) run only in the weekly and hand-started runs for
-now (E2E-PUSH-OFF in `ci.yml`): on GitHub's 4-CPU, 16 GB runner the whole AppHost stack peaks near 15 GB, and the runner was killed in 2
-of 4 push runs. The same full run happens weekly when `main`
-has moved by more than docs, and on demand (`workflow_dispatch`, optionally narrowed to some projects, or only the fast suites with
+and deploy). The system and Playwright end-to-end tests (after the other suites passed) are run by hand (Actions → CI → Run workflow)
+until the stack fits the 16 GB runner (E2E-PUSH-OFF / E2E-DISPATCH-ONLY in `ci.yml`): on GitHub's 4-CPU, 16 GB runner the whole AppHost
+stack peaks near 15 GB, and the runner was killed in 2 of 4 push runs. The same run without the end-to-end tests happens weekly when
+`main` has moved by more than docs, and on demand (`workflow_dispatch`, optionally narrowed to some projects, or only the fast suites with
 `profile: push`). Until the repo went public (plan 08c), the private repo's free 2 000 Actions minutes a month ran only the fast suites
 on push, the long suites weekly, and the system and end-to-end tests not at all (the private 8 GB runner was killed while the whole
 AppHost started; public repos get a 16 GB runner). CI generates random, per-run secrets; nothing sensitive is stored in the repo.

@@ -3,13 +3,15 @@ name: CI
 # Which suites run when: the PUBLIC-REPO setting (plan 08c Task 2, go-public; public repos have unlimited standard-runner minutes and
 # the 4-CPU, 16 GB runner). Every push to main that changes more than docs (paths-ignore below; publish.yml follows CI, so a docs-only
 # push publishes nothing either), the weekly run (schedule, skipped when main has not moved since the last weekly run) and a hand-started
-# run (workflow_dispatch, any branch) all run everything: build, warnings as errors, client and generated-code drift, the fast suites
-# (unit and architecture tests, the Angular specs, the chart checks), and the long suites (the container image builds and image tests,
-# the Testcontainers integration tests, the AppHost tests, and the system and Playwright end-to-end tests). A hand-started run can be
-# narrowed with the `only` input, or run only the fast suites with `profile: push`.
-# E2E-PUSH-OFF (plan 08c Task 2 ruling): the system and end-to-end job runs weekly and by hand only, not on push, until the whole AppHost
-# stack fits the 16 GB runner: it was killed ("The runner has received a shutdown signal") in 2 of 4 push runs, and hung with an extra
-# swap file. Its memory log names the biggest processes for that fix.
+# run (workflow_dispatch, any branch) run the build, warnings as errors, client and generated-code drift, the fast suites (unit and
+# architecture tests, the Angular specs, the chart checks) and the long suites (the container image builds and image tests, the
+# Testcontainers integration tests, the AppHost tests). The system and Playwright end-to-end tests run ONLY in a hand-started run
+# (E2E-PUSH-OFF / E2E-DISPATCH-ONLY below). A hand-started run can be narrowed with the `only` input, or run only the fast suites with
+# `profile: push`.
+# E2E-PUSH-OFF, E2E-DISPATCH-ONLY (plan 08c Task 2 ruling, narrowed by the plan 08c final review I2): the system and end-to-end job is run
+# by hand only (Actions -> CI -> Run workflow), neither on push nor weekly, until the whole AppHost stack fits the 16 GB runner: it was
+# killed ("The runner has received a shutdown signal") in 2 of 4 push runs, and hung with an extra swap file. Its memory log names the
+# biggest processes for that fix. The weekly run keeps the other jobs (it catches new NuGet advisories without a push).
 # Until go-public the long suites and the end-to-end job were weekly or off (plan 08 ruling 14, Dale's minutes decision 2026-11-06,
 # E2E-OFF); measured minutes and the arithmetic: docs/testing.md and the plan 08 Task 14 report.
 # publish.yml only follows a green CI run of a *push* to main, so a weekly or hand-started run never publishes or deploys anything.
@@ -288,8 +290,8 @@ jobs:
     # Chart checks (plan 07 ruling 9) and the AppHost's chart parity guards (ChartParityTests, PlatformChartTests, ChartDebeziumTests;
     # plan 07 final review M3): no containers, every push. Tool versions pinned as on the PC
     # (plan 07 Task 2). The GitOps repo is checked out next to this one (procure-ai-gitops beside procure-ai, as on the PC), so the
-    # parity tests also render the umbrella with envs/local/ and envs/hosted/procure-ai.yaml; it is read with a read-only deploy key (repository secret
-    # GITOPS_READ_KEY_CI, deploy key "procure-ai CI charts job (read-only)"; no key is needed once the GitOps repo is public).
+    # parity tests also render the umbrella with envs/local/ and envs/hosted/procure-ai.yaml. The GitOps repo is public, so it is read
+    # without a key (plan 08c final review M4; the old read-only deploy key GITOPS_READ_KEY_CI is removed after one green run).
     name: Helm charts and chart parity
     needs: [weekly-gate]
     if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' }}
@@ -310,7 +312,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/procure-ai-gitops
-          ssh-key: ${{ secrets.GITOPS_READ_KEY_CI }}
           persist-credentials: false
           path: procure-ai-gitops
 
@@ -465,9 +466,11 @@ jobs:
     name: System and end-to-end tests
     needs: [weekly-gate, dotnet, web]
     # A long suite (FULL), and only after the build and the other suites passed. It was off on the private 8 GB runner (E2E-OFF, plan 08
-    # Task 14: the runner was killed while the AppHost started); public repos get the 4-CPU, 16 GB runner (plan 08c Task 2).
+    # Task 14: the runner was killed while the AppHost started); public repos get the 4-CPU, 16 GB runner (plan 08c Task 2), but the stack
+    # does not fit it yet. E2E-PUSH-OFF, E2E-DISPATCH-ONLY: only a hand-started run (workflow_dispatch) runs it, never a push or the weekly
+    # run, until the AppHost stack fits the 16 GB runner (top of this file).
     if: >-
-      ${{ !cancelled() && github.event_name != 'push' && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' &&
+      ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' &&
       (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
       needs.dotnet.result == 'success' && needs.web.result == 'success' }}
     runs-on: ubuntu-24.04
@@ -510,8 +513,8 @@ jobs:
       # the system tests twice ("The runner has received a shutdown signal"), while the whole AppHost was starting; a 12 GB swap file
       # filled the disk instead. Memory or disk exhaustion; the log below records both. On the public 4-CPU, 16 GB runner (plan 08c Task 2)
       # the stack still peaked at ~14.8 GB used with the runner's 4 GB swap ~3 GB full; the runner was killed the same way in 2 of 4 push
-      # runs, and with an extra 8 GB swap file it hung instead. Hence E2E-PUSH-OFF (top of this file), the build servers stopped after the
-      # build, and the biggest processes in the log.
+      # runs, and with an extra 8 GB swap file it hung instead. Hence E2E-PUSH-OFF / E2E-DISPATCH-ONLY (top of this file), the build
+      # servers stopped after the build, and the biggest processes in the log.
       - name: Log memory and disk every 30 s (printed at the end)
         run: |
           cat > "$RUNNER_TEMP/memlog.sh" <<'SCRIPT'
