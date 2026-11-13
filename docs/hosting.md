@@ -96,11 +96,8 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
 - **Nothing secret in a repo.** No Terraform state, kubeconfig, SSH key or Secret is in any repo. They live in
   `%USERPROFILE%\.procure-ai\hosted\` on Dale's PC (current user only) and are listed by name in DEMO PASSWORDS.txt. The hosted Secrets
   come from their own user-secrets store `procure-ai-hosted` (`new-secrets.ps1 -Environment hosted`), so the public demo shares no secret
-  with the local setup. The registry pull Secret uses a read-only GHCR token, not the GitHub CLI token. **That token expires on
-  2027-02-05** (`GhcrPullTokenExpires` in `bootstrap/common.ps1`; Test-HostBaseline warns 21 days before and fails after). While the
-  packages are private, an expired token makes the next deploy fail with ImagePullBackOff (running pods keep their cached images). Renew:
-  a new classic token with only `read:packages`, into DEMO PASSWORDS.txt and the user env var `GHCR_READ_TOKEN`, then
-  `new-secrets.ps1 -Environment hosted` and the new date in `common.ps1`. Not needed once the packages are public.
+  with the local setup. The GHCR images are public (since plan 08c Task 2), so the VM pulls them
+  anonymously: no registry pull Secret and no registry token on the cluster (the local cluster still uses one from `gh auth token`).
 - **Every generated secret is also in DEMO PASSWORDS.txt.** `new-secrets.ps1` copies every value of the user-secrets store it reads
   into DEMO PASSWORDS.txt on every run (section "procure-ai hosted (Contabo) secrets", or "procure-ai local: all AppHost user secrets"),
   so a generated or rotated value is never only in the store. The file is rewritten only when a value changed, through a temporary file,
@@ -109,8 +106,7 @@ Hetzner is in git history (`infra/hetzner`, before the move to `infra/hosted`).
 ## Bringing it up (from Dale's PC)
 
 Needs `terraform`, `kubectl`, `helm`, Windows OpenSSH, `gh` and the .NET SDK, plus these user env vars: `CONTABO_CLIENT_ID`,
-`CONTABO_CLIENT_SECRET`, `CONTABO_USER` and `CONTABO_PASSWORD` (Contabo API), `CLOUDFLARE_API_TOKEN` (DNS token for daleabels.com) and
-`GHCR_READ_TOKEN`.
+`CONTABO_CLIENT_SECRET`, `CONTABO_USER`, `CONTABO_PASSWORD` (Contabo API) and `CLOUDFLARE_API_TOKEN` (DNS token for daleabels.com).
 
 ```powershell
 cd procure-ai-gitops
