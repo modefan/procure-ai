@@ -21,6 +21,23 @@
   "otpPolicyLookAheadWindow": 1,
   "browserFlow": "operator browser",
   "directGrantFlow": "operator direct grant",
+  "clients": [
+    {
+      "clientId": "argocd",
+      "name": "Argo CD",
+      "description": "Argo CD's Keycloak sign-in (Dale 2026-11-13): public, code flow + PKCE; Argo CD gives role:admin only to the users dale and operator",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["https://argocd.daleabels.com/auth/callback", "https://argocd.daleabels.com/pkce/verify", "http://127.0.0.1:8080/auth/callback", "http://127.0.0.1:8080/pkce/verify"],
+      "webOrigins": ["https://argocd.daleabels.com", "http://127.0.0.1:8080"],
+      "attributes": { "pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://argocd.daleabels.com/*" }
+    }
+  ],
   "authenticationFlows": [
     {
       "alias": "operator direct grant",
@@ -54,7 +71,7 @@
     },
     {
       "alias": "operator browser",
-      "description": "Admin console sign-in (plan 08b Task 4): a session, or password AND one-time code (OTP Form REQUIRED).",
+      "description": "Admin console and Argo CD sign-in: a session, or user name and password (OTP Form DISABLED, Dale 2026-11-13).",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -77,7 +94,7 @@
     },
     {
       "alias": "operator browser forms",
-      "description": "Password, then the one-time code (both required)",
+      "description": "Password only; the one-time code is switched off (Dale 2026-11-13)",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -92,7 +109,7 @@
         {
           "authenticator": "auth-otp-form",
           "authenticatorFlow": false,
-          "requirement": "REQUIRED",
+          "requirement": "DISABLED",
           "priority": 20,
           "userSetupAllowed": false
         }

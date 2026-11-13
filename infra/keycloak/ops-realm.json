@@ -67,7 +67,7 @@
         {
           "authenticator": "auth-otp-form",
           "authenticatorFlow": false,
-          "requirement": "REQUIRED",
+          "requirement": "DISABLED",
           "priority": 20,
           "userSetupAllowed": false
         }
@@ -110,7 +110,7 @@
       "name": "Configure OTP",
       "providerId": "CONFIGURE_TOTP",
       "enabled": true,
-      "defaultAction": true,
+      "defaultAction": false,
       "priority": 10,
       "config": {}
     },

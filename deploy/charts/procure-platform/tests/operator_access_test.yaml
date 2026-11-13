@@ -235,7 +235,7 @@ tests:
         documentSelector: { path: kind, value: ConfigMap }
       - matchRegex:
           path: data["master-realm.json"]
-          pattern: '"authenticator": "auth-otp-form",\s*"authenticatorFlow": false,\s*"requirement": "REQUIRED"'
+          pattern: '"authenticator": "auth-otp-form",\s*"authenticatorFlow": false,\s*"requirement": "DISABLED"'
         documentSelector: { path: kind, value: ConfigMap }
       - matchRegex:
           path: data["master-realm.json"]

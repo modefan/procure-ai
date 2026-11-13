@@ -188,7 +188,8 @@ public sealed class RealmFileTests
         OpsRealm.GetProperty("maxFailureWaitSeconds").GetInt32().ShouldBe(900);
         var totp = OpsRealm.GetProperty("requiredActions").EnumerateArray().Single(a => a.GetProperty("alias").GetString() == "CONFIGURE_TOTP");
         totp.GetProperty("enabled").GetBoolean().ShouldBeTrue();
-        totp.GetProperty("defaultAction").GetBoolean().ShouldBeTrue();
+        // Dale 2026-11-13: two-factor sign-in switched off, so new users are no longer asked to set up an authenticator.
+        totp.GetProperty("defaultAction").GetBoolean().ShouldBeFalse();
         OpsRealm.GetProperty("otpPolicyType").GetString().ShouldBe("totp");
         OpsRealm.GetProperty("otpPolicyDigits").GetInt32().ShouldBe(6);
         OpsRealm.GetProperty("otpPolicyPeriod").GetInt32().ShouldBe(30);
@@ -213,7 +214,8 @@ public sealed class RealmFileTests
             .ToArray();
 
         Steps("ops browser").ShouldBe(["auth-cookie=ALTERNATIVE", "flow:ops browser forms=ALTERNATIVE"]);
-        Steps("ops browser forms").ShouldBe(["auth-username-password-form=REQUIRED", "auth-otp-form=REQUIRED"]);
+        // Dale 2026-11-13: the browser sign-in no longer asks for the one-time code.
+        Steps("ops browser forms").ShouldBe(["auth-username-password-form=REQUIRED", "auth-otp-form=DISABLED"]);
         Steps("ops direct grant").ShouldBe(
             ["direct-grant-validate-username=REQUIRED", "direct-grant-validate-password=REQUIRED", "direct-grant-validate-otp=REQUIRED"]);
         // No conditional step anywhere: nothing can make the code optional.
