@@ -52,7 +52,7 @@ export const TECHNOLOGY: readonly TechnologyGroup[] = [
   {
     title: 'Delivery and operations',
     items: [
-      { name: 'Helm and Argo CD (GitOps)', reason: 'The cluster is described in Git and synced by Argo CD, the way I deploy to Kubernetes at work; database migrations run as sync hooks.' },
+      { name: 'Helm and Argo CD (GitOps)', reason: 'The cluster is described in Git and synced by Argo CD (GitOps); database migrations run as sync hooks.' },
       { name: 'OpenTelemetry and the Aspire dashboard', reason: 'Logs, traces and metrics from every service, with one trace following a request across RabbitMQ.' },
       { name: '.NET Aspire and Testcontainers', reason: 'The whole system starts with one command locally, and integration tests run against real containers.' },
       { name: 'GitHub Actions and GHCR', reason: 'CI builds and checks client drift on every push and publishes the images.' },
