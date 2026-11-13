@@ -1,6 +1,6 @@
 # Tests and CI
 
-What is tested where, and how CI spends its minutes while the repo is private. Back to the [README](../README.md).
+What is tested where, and what CI runs. Back to the [README](../README.md).
 
 ## Tests and CI
 
@@ -15,12 +15,12 @@ whole AppHost and drives a request through approval, purchasing, invoicing and a
 gateway. The assistant's retrieval is measured on every run (hit@6 on 34 questions); its model-judged evaluation
 (`tests/ProcureAi.Assistant.Evaluation`, groundedness and relevance) needs a real provider and is run by hand. GitHub Actions builds with warnings as errors and fails
 the build if any of the services' OpenAPI documents (found by convention, so a new service is covered
-automatically) or the generated Angular clients differ from what is committed. **While the repo is private**, every Actions
-minute counts against the free 2 000 a month, so CI splits the suites (`.github/workflows/ci.yml`): every push that changes more than
-the root Markdown files or `docs/` runs the build, the drift checks, the unit and architecture tests, the Vitest specs and the chart checks with the AppHost's chart
-parity tests (the GitOps repo checked out beside it), about 15 billed minutes plus about 8 for publishing (images and deploy). The long suites (image
-builds and image tests, Testcontainers integration tests and the AppHost tests) run weekly when `main` has moved by more than docs
-and on demand (`workflow_dispatch`, optionally narrowed to some projects); the .NET suites alone take about 45 minutes. The system
-tests and the Playwright end-to-end tests are **off in CI until fixed**: the private repo's 8 GB runner was killed while the whole
-AppHost started, so they run locally before pushes for now. **When the repo goes public** (unlimited minutes, a 16 GB runner) the long
-suites move back to every push and the system and end-to-end tests are switched back on. CI generates random, per-run secrets; nothing sensitive is stored in the repo.
+automatically) or the generated Angular clients differ from what is committed. Every push to `main` that changes more than
+the root Markdown files or `docs/` runs everything (`.github/workflows/ci.yml`): the build, the drift checks, the unit and architecture
+tests, the Vitest specs, the chart checks with the AppHost's chart parity tests (the GitOps repo checked out beside it), the image
+builds and image tests, the Testcontainers integration tests, the AppHost tests, and the system and Playwright end-to-end tests (after
+the other suites passed). A green push run is followed by publishing (images and deploy). The same full run happens weekly when `main`
+has moved by more than docs, and on demand (`workflow_dispatch`, optionally narrowed to some projects, or only the fast suites with
+`profile: push`). Until the repo went public (plan 08c), the private repo's free 2 000 Actions minutes a month ran only the fast suites
+on push, the long suites weekly, and the system and end-to-end tests not at all (the private 8 GB runner was killed while the whole
+AppHost started; public repos get a 16 GB runner). CI generates random, per-run secrets; nothing sensitive is stored in the repo.

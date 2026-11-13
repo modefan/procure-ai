@@ -28,6 +28,9 @@ interface Highlight {
         approved requests become purchase orders for a simulated supplier, deliveries are received, invoices are three-way matched and the
         payment goes to a simulated ERP. An AI assistant answers policy questions with cited sources.
       </p>
+      <p class="mt-3 max-w-3xl text-base text-slate-700 sm:text-lg" data-testid="built-with">
+        Built with Claude Code: planned, written, tested and reviewed by AI agents under my direction, one reviewed task at a time.
+      </p>
       <div class="mt-5 flex flex-wrap gap-3">
         <a routerLink="/demos/procurement" class="btn-primary">Try the demo</a>
       </div>

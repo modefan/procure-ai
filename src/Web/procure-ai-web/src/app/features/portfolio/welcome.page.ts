@@ -14,10 +14,11 @@ import { SystemAvailability } from '../../core/system/system-availability';
     <section class="mx-auto max-w-4xl px-4 pt-10 pb-8 sm:pt-16">
       <p class="text-sm font-semibold tracking-wide text-indigo-700 uppercase">Portfolio</p>
       <h1 class="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-5xl">Hi, I'm Dale Abels</h1>
-      <p class="mt-5 max-w-2xl text-base text-slate-700 sm:text-lg">
+      <p class="mt-5 max-w-2xl text-base text-slate-700 sm:text-lg" data-testid="intro">
         I'm a .NET (C#) and Angular developer who builds microservices. I work the way enterprise teams do: Kubernetes with Argo CD GitOps,
         observability with OpenTelemetry, and security done properly (a BFF, OIDC). This site runs my demos live, so you can try them
-        instead of reading about them.
+        instead of reading about them. I built this site and its demos with Claude Code, Anthropic's AI coding agent: I set the
+        architecture, the standards and the review process, and directed every step.
       </p>
 
       <ul class="mt-6 flex flex-wrap gap-3" aria-label="Find me online" data-testid="profile-links">

@@ -1,19 +1,14 @@
 name: CI
 
-# Which suites run when: the PRIVATE-REPO setting (plan 08 ruling 14, Dale's minutes decision 2026-11-06). While the repo is private,
-# every job minute counts against the account's free 2 000 Actions minutes a month (each job rounded up to the whole minute), and the
-# account has a payment method, so an overflow could bill. Keep well under:
-#   - every push to main that changes more than docs (paths-ignore below; publish.yml follows CI, so a docs-only push publishes nothing
-#     either): build, warnings as errors, client and generated-code drift, and the fast suites (unit and architecture tests, the Angular
-#     specs, the chart checks with the AppHost's chart parity tests against the charts and the GitOps repo);
-#   - weekly (schedule, skipped when main has not moved since the last weekly run) and by hand (workflow_dispatch, any branch): all of
-#     that plus the long suites: the container image builds and image tests (publish.yml builds the same images after every push), the
-#     Testcontainers integration tests and the AppHost tests (model and infrastructure). The system and Playwright end-to-end tests are
-#     OFF (E2E-OFF, job e2e) until the private runner's kill is fixed; they come back at go-public. A hand-started run can be
-#     narrowed with the `only` input, or run the push profile with `profile: push`.
-# AT GO-PUBLIC (plan 08 Task 17; public repos have unlimited minutes): the long suites move back to every push. Set FULL below to "true"
-# for push too, drop the images job's condition and the paths-ignore, and keep the weekly schedule only if wanted.
-# Measured minutes and the arithmetic: docs/testing.md and the plan 08 Task 14 report.
+# Which suites run when: the PUBLIC-REPO setting (plan 08c Task 2, go-public; public repos have unlimited standard-runner minutes and
+# the 4-CPU, 16 GB runner). Every push to main that changes more than docs (paths-ignore below; publish.yml follows CI, so a docs-only
+# push publishes nothing either), the weekly run (schedule, skipped when main has not moved since the last weekly run) and a hand-started
+# run (workflow_dispatch, any branch) all run everything: build, warnings as errors, client and generated-code drift, the fast suites
+# (unit and architecture tests, the Angular specs, the chart checks), and the long suites (the container image builds and image tests,
+# the Testcontainers integration tests, the AppHost tests, and the system and Playwright end-to-end tests). A hand-started run can be
+# narrowed with the `only` input, or run only the fast suites with `profile: push`.
+# Until go-public the long suites and the end-to-end job were weekly or off (plan 08 ruling 14, Dale's minutes decision 2026-11-06,
+# E2E-OFF); measured minutes and the arithmetic: docs/testing.md and the plan 08 Task 14 report.
 # publish.yml only follows a green CI run of a *push* to main, so a weekly or hand-started run never publishes or deploys anything.
 
 on:
@@ -28,14 +23,14 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "full: everything, as the weekly run (default). push: only what a push runs."
+        description: "full: everything, as a push or the weekly run (default). push: only the fast suites (no long suites)."
         type: choice
         options: [full, push]
         default: full
       only:
         description: >-
           Run only these .NET test projects (space-separated names, e.g. ProcureAi.Suppliers.IntegrationTests). Empty: all of them.
-          ("e2e" selects the system and end-to-end tests, which are off while E2E-OFF.)
+          ("e2e" selects the system and end-to-end tests.)
         type: string
         default: ""
   schedule:
@@ -54,8 +49,8 @@ permissions:
 env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
-  # "true": run the long suites too (weekly and by hand); "false" on push (and for a hand-started `profile: push`) while the repo is private.
-  FULL: ${{ github.event_name != 'push' && inputs.profile != 'push' }}
+  # "true": run the long suites too (every push, weekly and by hand); "false" only for a hand-started `profile: push`.
+  FULL: ${{ inputs.profile != 'push' }}
 
 jobs:
   weekly-gate:
@@ -188,7 +183,7 @@ jobs:
             for l in $LONG; do [ "$name" = "$l" ] && long=true; done
             if [ -n "$ONLY" ] && ! printf ' %s ' "$ONLY" | grep -q " $name "; then continue; fi
             if [ "$long" = true ] && [ "$FULL" != true ]; then
-              summary+="$name: not run on push (long suite: weekly and by hand)"$'\n'
+              summary+="$name: not run (long suite; profile push)"$'\n'
               continue
             fi
             filter=()
@@ -433,10 +428,10 @@ jobs:
           --filter-class ProcureAi.AppHost.Tests.ChartDebeziumTests
 
   images:
-    # Long run only while private: publish.yml builds the same images after every push (a broken image fails publish).
-    name: Container images (build and test, no push; weekly)
+    # A long suite (FULL): publish.yml also builds the same images after every green push run, and pushes them.
+    name: Container images (build and test, no push)
     needs: [weekly-gate]
-    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' }}
+    if: ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     # Builds every image of deploy/scripts/build-images.ps1 to prove they build; nothing is pushed and no secret is needed
@@ -464,16 +459,14 @@ jobs:
         run: ./deploy/scripts/test-images.ps1 -Tag ci
 
   e2e:
-    name: System and end-to-end tests (off until fixed)
+    name: System and end-to-end tests
     needs: [weekly-gate, dotnet, web]
-    # E2E-OFF (plan 08 Task 14 review): switched off until the runner kill below is fixed; re-enabling it is part of go-public
-    # (plan 08 Task 17, the public 16 GB runner). Put the commented condition back to switch it on. When on: long suites only (FULL true),
-    # and only after the build and the other suites passed.
-    # The condition when on:
-    #   ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && github.event_name != 'push' && inputs.profile != 'push' &&
-    #   (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
-    #   needs.dotnet.result == 'success' && needs.web.result == 'success' }}
-    if: false # E2E-OFF
+    # A long suite (FULL), and only after the build and the other suites passed. It was off on the private 8 GB runner (E2E-OFF, plan 08
+    # Task 14: the runner was killed while the AppHost started); public repos get the 4-CPU, 16 GB runner (plan 08c Task 2).
+    if: >-
+      ${{ !cancelled() && needs.weekly-gate.result != 'failure' && needs.weekly-gate.outputs.skip != 'true' && inputs.profile != 'push' &&
+      (inputs.only == '' || inputs.only == null || contains(format(' {0} ', inputs.only), ' e2e ')) &&
+      needs.dotnet.result == 'success' && needs.web.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -512,8 +505,8 @@ jobs:
 
       # KNOWN OPEN (plan 08 Task 14): on the private-repo runner (8 GB RAM: mongod saw 7 932 MB) the runner was killed a few minutes into
       # the system tests twice ("The runner has received a shutdown signal"), while the whole AppHost was starting; a 12 GB swap file
-      # filled the disk instead. Memory or disk exhaustion; the log below records both once the job is switched back on (E2E-OFF
-      # above); public repos get the 4-CPU, 16 GB runner.
+      # filled the disk instead. Memory or disk exhaustion; the log below records both. Public repos get the 4-CPU, 16 GB runner, where the
+      # job is back on since go-public (plan 08c Task 2).
       - name: Log memory and disk every 30 s (printed at the end)
         run: |
           cat > "$RUNNER_TEMP/memlog.sh" <<'SCRIPT'

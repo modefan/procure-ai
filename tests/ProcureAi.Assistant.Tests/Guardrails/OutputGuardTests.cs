@@ -17,7 +17,7 @@ public sealed class OutputGuardTests
     [InlineData("github_pat_11ABCDEFG0123456789_abcdefghijklmnop", GuardReasons.ApiKey)]
     [InlineData("AKIAIOSFODNN7EXAMPLE", GuardReasons.ApiKey)]
     [InlineData("the secret is dGhpcyBpcyBhIHZlcnkgc2VjcmV0IHZhbHVlIGluZGVlZA", GuardReasons.ApiKey)]
-    [InlineData("Mail rita.naidoo@acme.co.za for help.", GuardReasons.Email)]
+    [InlineData("Mail rita.naidoo@acme.test for help.", GuardReasons.Email)]
     [InlineData("Call 082 555 1234 today.", GuardReasons.MobileNumber)]
     [InlineData("Call +27 82 555 1234 today.", GuardReasons.MobileNumber)]
     [InlineData("Call +27825551234.", GuardReasons.MobileNumber)]

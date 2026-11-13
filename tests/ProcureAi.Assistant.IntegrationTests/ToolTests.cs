@@ -197,14 +197,14 @@ public sealed class ToolTests(AssistantApp app)
     public async Task Tool_result_summary_with_a_secret_is_hidden()
     {
         var (tenant, token, conversation) = await NewConversationAsync();
-        app.Suppliers.SetSupplier(tenant, "acme", "Acme sales.manager@acme-supplies.co.za", true, new StubCatalogItem("A", "a", 10m));
+        app.Suppliers.SetSupplier(tenant, "acme", "Acme sales.manager@acme-supplies.test", true, new StubCatalogItem("A", "a", 10m));
 
         var result = await AskAsync(app.Client, token, conversation, "Tell me about the supplier acme");
 
         var toolResult = Single(result, "tool_result");
         toolResult.GetProperty("ok").GetBoolean().ShouldBeTrue();
         toolResult.GetProperty("summary").GetString().ShouldBe(AnswerStreamer.HiddenSummary);
-        result.Frames.ShouldAllBe(f => !f.Data.GetRawText().Contains("acme-supplies.co.za", StringComparison.Ordinal));
+        result.Frames.ShouldAllBe(f => !f.Data.GetRawText().Contains("acme-supplies.test", StringComparison.Ordinal));
         app.Suppliers.UserCallsOf(tenant).Single().Authorization.ShouldBe("Bearer " + token);
 
         var saved = await WaitForLastMessageAsync(app.Client, token, conversation, m => m.GetProperty("role").GetString() == "Assistant");

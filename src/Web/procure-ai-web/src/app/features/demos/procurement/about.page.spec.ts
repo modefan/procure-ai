@@ -46,6 +46,15 @@ describe('AboutPage', () => {
     expect(description!.querySelectorAll('li').length).toBeGreaterThanOrEqual(5);
   });
 
+  it('about_says_it_was_built_with_claude_code', () => {
+    const credit = render().querySelector('[data-testid="built-with"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
+    expect(credit).toContain('Claude Code');
+    expect(credit).toBe(
+      'Built with Claude Code: planned, written, tested and reviewed by AI agents under my direction, one reviewed task at a time.',
+    );
+  });
+
   it('about_lists_technology_groups', () => {
     const element = render();
 

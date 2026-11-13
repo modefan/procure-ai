@@ -1,6 +1,6 @@
 # ProcureAI
 
-[![CI](https://github.com/modefan/procure-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/modefan/procure-ai/actions/workflows/ci.yml)
+[![CI](https://github.com/modefan/procure-ai/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/modefan/procure-ai/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush)
 
 **A multi-tenant procurement system for South African companies, built to show enterprise .NET and Angular practice end to end.**
 Employees raise purchase requests in Rand, a rules-driven approval chain reserves the budget and routes the request, approved
@@ -11,7 +11,11 @@ BFF at a YARP gateway, Debezium change data capture for a three-layer audit, an 
 Kubernetes deployment by Argo CD.
 
 > **Live demo: <https://procure.daleabels.com>.** It also runs locally with [one command](#run-it-locally) or on a
-> [local Kubernetes cluster](#run-it-on-kubernetes).
+> [local Kubernetes cluster](#run-it-on-kubernetes). Its deployment (Argo CD desired state, Helm values, bootstrap and
+> Terraform) is in [procure-ai-gitops](https://github.com/modefan/procure-ai-gitops). More about me and my other demos:
+> <https://daleabels.com>.
+
+Built with Claude Code: planned, written, tested and reviewed by AI agents under my direction, one reviewed task at a time.
 
 **No sign-up needed:** the Procurement demo's start page (<https://procure.daleabels.com/demos/procurement>, or
 `/demos/procurement` locally) has **Try a demo role** buttons for Requester Tom, Manager Maria, Department head, Finance
@@ -154,9 +158,9 @@ end-to-end tests (the full flow above, live updates, presence, conflicts, forbid
 admin screens). CI builds with warnings as errors and fails when an OpenAPI document or a generated Angular client drifts from
 what is committed.
 
-**While the repo is private**, every Actions minute counts against the free 2 000 a month, so CI runs the build, drift checks,
-unit, architecture and Vitest suites and the chart checks on every push, and the long suites weekly and on demand; the system and
-Playwright tests run locally before each push until the repo is public. Details: [docs/testing.md](docs/testing.md).
+Every push to `main` runs all of it in GitHub Actions: the build, the drift checks, the unit, architecture and Vitest suites, the
+chart checks, the container image builds, the Testcontainers integration tests, the AppHost tests and the system and Playwright
+end-to-end tests; a green run publishes the images and deploys through GitOps. Details: [docs/testing.md](docs/testing.md).
 
 ## More documentation
 

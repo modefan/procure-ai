@@ -177,7 +177,7 @@ public sealed class GuardrailChatClientTests
     [Theory]
     [InlineData("8001015009087", 5)] // a South African ID number
     [InlineData("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyaXRhIn0.c2lnbmF0dXJl", 12)] // a JWT
-    [InlineData("rita.naidoo@acme.co.za", 9)] // an email address
+    [InlineData("rita.naidoo@acme.test", 9)] // an email address
     [InlineData("082 555 1234", 4)] // a South African mobile number
     [InlineData("sk-abcdefghijklmnopqrstuvwxyz123456", 10)] // an OpenAI-style key
     public async Task Split_secret_never_leaves_the_guard(string secret, int split)

@@ -1,0 +1,36 @@
+# gitleaks configuration: the default rules plus narrow allowlists for known false positives in this repo's history.
+# Each entry needs its rule, its path and (where the value is fixed) its exact value, so a real secret in the same file still fails.
+# Scan: docker run --rm -v "<repo>:/repo:ro" zricethezav/gitleaks:v8.30.1 git /repo --redact --log-opts="--all"
+
+[extend]
+useDefault = true
+
+# deploy/scripts/build-images.ps1: `'keycloak' = 'infra/keycloak'` is a Dockerfile folder path, not a key.
+[[allowlists]]
+description = "Image build folders in build-images.ps1"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^deploy/scripts/build-images\.ps1$''']
+regexes = ['''^infra/[a-z]+$''']
+
+# Output-guard tests feed a made-up JWT ({"sub":"rita"}, signature "signature") to the guard that must block it.
+[[allowlists]]
+description = "Made-up JWT used as output-guard test input"
+targetRules = ["jwt"]
+condition = "AND"
+paths = ['''^tests/ProcureAi\.Assistant\.Tests/Guardrails/(OutputGuardTests|GuardrailChatClientTests)\.cs$''']
+regexes = ['''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJyaXRhIn0\.c2lnbmF0dXJl''']
+
+# Output-guard tests feed a truncated private-key header (no key material) to the guard that must block it.
+[[allowlists]]
+description = "Truncated private-key header used as output-guard test input"
+targetRules = ["private-key"]
+paths = ['''^tests/ProcureAi\.Assistant\.Tests/Guardrails/OutputGuardTests\.cs$''']
+
+# Webhook HMAC tests use fixed, obviously fake signing keys.
+[[allowlists]]
+description = "Fake HMAC keys in webhook signature tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/ProcureAi\.BuildingBlocks\.Tests/Webhooks/(WebhookSignatureTests|SignedWebhookFilterTests)\.cs$''']
+regexes = ['''^(test|supplier)-secret-0123456789-0123456789$''']

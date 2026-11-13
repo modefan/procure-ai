@@ -57,6 +57,16 @@ describe('WelcomePage', () => {
     expect(links[0].getAttribute('rel')).toBe('noopener');
   });
 
+  it('welcome_intro_says_the_site_was_built_with_claude_code', () => {
+    const intro = render().querySelector('[data-testid="intro"]')?.textContent?.replace(/\s+/g, ' ') ?? '';
+
+    expect(intro).toContain('Claude Code');
+    expect(intro).toContain(
+      "I built this site and its demos with Claude Code, Anthropic's AI coding agent: I set the architecture, the standards and the " +
+        'review process, and directed every step.',
+    );
+  });
+
   it('welcome_shows_private_source_text_until_repos_public', () => {
     expect(render().textContent).toContain('Source code: private for now, available on request');
 
