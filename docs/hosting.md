@@ -680,8 +680,8 @@ also restores it): its self-heal restores `procure-ai`'s sync policy from the ap
 
 ## Watching the demo: uptime and certificate
 
-`procure-ai-gitops/.github/workflows/uptime.yml` runs **once a day** (07:17 South African time) while the repos are private, about 30 of
-the 2 000 private Actions minutes a month (plan 08 fix wave ruling R2); going public moves it to every 30 minutes. It fails, and GitHub
+`procure-ai-gitops/.github/workflows/uptime.yml` runs **every 30 minutes** (at :07 and :37, off the full hour). It ran once a day
+while the repos were private, to save private Actions minutes (plan 08 fix wave ruling R2); public repos run Actions for free. It fails, and GitHub
 e-mails Dale, when the gateway's readiness, the web app, Keycloak's realm or Access (the demo switch) does not answer, or when the
 certificate of `procure`, `auth` or `dashboard.daleabels.com` has **fewer than 21 days** left. cert-manager renews at 30 days, so that
 failure means renewal has been failing for 9 days and there is still a week before browsers refuse the site (HSTS: no click-through).
@@ -803,7 +803,7 @@ Expected monthly cost (plan 08 Task 13, 2026-11-08). Rates: ECB 2026-11-06, USD 
 | Domain `daleabels.com` (Cloudflare Registrar, USD 11.17 a year, auto-renew, expires 2027-11-07) | one twelfth | 0.93 | R 15,40 |
 | Azure Foundry, **expected** (about 1.0 M tokens: the nightly re-seed of Acme and Globex, ~16 000 tokens a night, 0.5 M a month, and ~10 questions a day of ~1 800 tokens, 0.5 M a month) | gpt-5-mini $0.25 in / $2.00 out per 1 M, embeddings $0.022 per 1 M | 0.40-0.80 | R 7-13 |
 | Azure Foundry, **worst case under the caps** (every organisation at its daily cap every day, below) | 14 M tokens at $0.60 per 1 M | 8.40 | R 139 |
-| GitHub (repos, Actions inside the free 2 000 private minutes, of which the daily uptime check takes about 30; free once public), GHCR images | free | 0 | 0 |
+| GitHub (public repos: Actions, incl. the uptime check every 30 minutes, are free), GHCR images | free | 0 | 0 |
 | Cloudflare DNS, Let's Encrypt certificate, cert-manager | free | 0 | 0 |
 | Contabo firewall, SSH key secret, IPv4 and IPv6 (included with the VPS) | free | 0 | 0 |
 | **Total, expected** | | **about 17.00-17.40** | **about R 281-287** |

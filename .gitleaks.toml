@@ -21,11 +21,15 @@ condition = "AND"
 paths = ['''^tests/ProcureAi\.Assistant\.Tests/Guardrails/(OutputGuardTests|GuardrailChatClientTests)\.cs$''']
 regexes = ['''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJyaXRhIn0\.c2lnbmF0dXJl''']
 
-# Output-guard tests feed a truncated private-key header (no key material) to the guard that must block it.
+# Output-guard tests feed a truncated private-key header (no key material) to the guard that must block it. The match must contain the
+# truncation ("MIIEow" right before the test's closing quote), so a real key pasted into the same file still fails.
 [[allowlists]]
 description = "Truncated private-key header used as output-guard test input"
 targetRules = ["private-key"]
+condition = "AND"
 paths = ['''^tests/ProcureAi\.Assistant\.Tests/Guardrails/OutputGuardTests\.cs$''']
+regexTarget = "match"
+regexes = ['''-----BEGIN RSA PRIVATE KEY-----\\nMIIEow", GuardReasons\.PrivateKey\)\]''']
 
 # Webhook HMAC tests use fixed, obviously fake signing keys.
 [[allowlists]]
