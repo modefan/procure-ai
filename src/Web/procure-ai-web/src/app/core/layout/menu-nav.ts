@@ -14,7 +14,7 @@ export function opensNewTab(url: string): boolean {
   imports: [RouterLink],
   template: `
     <a routerLink="/" class="flex min-w-0 items-center gap-2.5 rounded-md">
-      <span aria-hidden="true" class="grid size-8 shrink-0 place-items-center rounded-md bg-indigo-700 text-xs font-bold tracking-wide text-white">DA</span>
+      <img src="avatar.png" alt="" aria-hidden="true" width="32" height="32" class="size-8 shrink-0 rounded-md object-cover" />
       <span class="min-w-0 leading-tight" [class.max-sm:sr-only]="compact()">
         <span class="block truncate text-sm font-semibold text-slate-900">Dale Abels</span>
         <span class="block truncate text-xs text-slate-500">Demo portfolio</span>
