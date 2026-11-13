@@ -75,7 +75,7 @@ import { InvoicesStore, InvoiceStatusFilter } from './invoices.store';
             <table class="w-full table-fixed text-left text-sm">
               <caption class="sr-only">Invoices, page {{ store.page() }} of {{ store.pageCount() }}</caption>
               <colgroup>
-                <col class="w-40" />
+                <col class="w-64" />
                 <col />
                 <col class="w-28" />
                 <col class="w-36" />
@@ -95,7 +95,7 @@ import { InvoicesStore, InvoiceStatusFilter } from './invoices.store';
               <tbody class="divide-y divide-slate-100">
                 @for (invoice of store.entities(); track invoice.id) {
                   <tr class="hover:bg-slate-50" [attr.data-invoice]="invoice.id">
-                    <td class="truncate px-4 py-3 font-medium">
+                    <td class="px-4 py-3 font-medium break-all">
                       <a [routerLink]="['/app/invoices', invoice.id]" class="text-indigo-700 hover:underline" [title]="invoice.supplierInvoiceNumber">{{ invoice.supplierInvoiceNumber }}</a>
                     </td>
                     <td class="truncate px-4 py-3 text-slate-800" [title]="supplierName(invoice)">{{ supplierName(invoice) }}</td>
@@ -113,7 +113,7 @@ import { InvoicesStore, InvoiceStatusFilter } from './invoices.store';
             @for (invoice of store.entities(); track invoice.id) {
               <li class="card p-4">
                 <div class="flex items-center justify-between gap-3">
-                  <a [routerLink]="['/app/invoices', invoice.id]" class="min-w-0 truncate font-semibold text-indigo-700 hover:underline">{{ invoice.supplierInvoiceNumber }}</a>
+                  <a [routerLink]="['/app/invoices', invoice.id]" class="min-w-0 break-all font-semibold text-indigo-700 hover:underline">{{ invoice.supplierInvoiceNumber }}</a>
                   <span class="font-semibold whitespace-nowrap tabular-nums text-slate-900">{{ invoice.totalInclVatText }}</span>
                 </div>
                 <p class="mt-1 truncate text-slate-800" [title]="supplierName(invoice)">{{ supplierName(invoice) }}</p>
