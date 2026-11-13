@@ -182,7 +182,7 @@ ignore certificate errors.
 | Keycloak | 26.8.1, production mode (`start --optimized`, realm baked into `infra/keycloak`) |
 | keycloak-config-cli | 6.5.1, the build for Keycloak 26.5.5 (`keycloakConfig.image`; move to a 26.8 build once one is published) |
 | Debezium Server | 3.7.0.Final (`infra/debezium`) |
-| OpenTelemetry Collector chart / Aspire dashboard | 0.178.2 / 13.6.2 (with nginx-unprivileged 1.30.6 in its pod, plan 08b) |
+| OpenTelemetry Collector chart / Aspire dashboard | 0.178.2 / 13.6.5 (with nginx-unprivileged 1.30.6 in its pod, plan 08b) |
 | Helm (chart checks) | 3.20 with helm-unittest 1.2.1 and kubeconform 0.8.0 (CI job `charts`) |
 
 ## Bootstrap a cluster

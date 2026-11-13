@@ -39,7 +39,7 @@ appNamespace: procure
 
 dashboard:
   # Current Aspire release (MCR mcr.microsoft.com/dotnet/aspire-dashboard), pinned; the AppHost uses Aspire 13.6.x too.
-  image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6.2
+  image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6.5
   imagePullPolicy: IfNotPresent
   # The image's app user (chiseled .NET images: APP_UID 1654).
   uid: 1654
