@@ -34,7 +34,7 @@ what happens when. Pass new ones with `-Cuts`. Keep the GIF under 5 MB.
 
 ## 3. The screenshots
 
-[`tools/readme/screenshots.js`](../tools/readme/screenshots.js) signs in with the demo buttons, opens each screen in a light theme at
+[`tools/readme/screenshots.js`](../tools/readme/screenshots.js) takes the public Welcome and About pages, signs in with the demo buttons on `/demos/procurement`, opens each screen in a light theme at
 1440 x 900 and saves `docs/screenshots/<name>.png`. It needs `playwright-core` (for example the copy inside the global `@playwright/cli`)
 and a Chromium:
 

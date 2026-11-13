@@ -54,6 +54,10 @@ A client-side Angular 22 app (no SSR: every page after login is per user), Tailw
 SignalStore for state, and API clients generated from each service's OpenAPI document. Money is Rand, shown the
 South African way (`R 86 940,00`). What each role sees comes from permissions, not role names.
 
+The app sits in a portfolio frame with a left menu: a public **Welcome** page (`/`), the **Procurement demo** start page with the
+demo-role buttons (`/demos/procurement`), **How it is built** (`/demos/procurement/about`: diagram and technology), and under
+"Under the hood" links to the API (Swagger) and the Aspire dashboard. The signed-in app lives under `/app/...`.
+
 | Screen | Who | What it shows |
 |---|---|---|
 | Dashboard | everyone | tiles for what the user may see (approvals waiting, my open requests, budget used, invoices with a mismatch), recent activity, who is online |

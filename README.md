@@ -13,7 +13,7 @@ Kubernetes deployment by Argo CD.
 > **Live demo: <https://procure.daleabels.com>.** It also runs locally with [one command](#run-it-locally) or on a
 > [local Kubernetes cluster](#run-it-on-kubernetes).
 
-**No sign-up needed:** the welcome page has **Try a demo role** buttons (on the live demo and locally) (Requester Tom, Manager Maria, Department head, Finance
+**No sign-up needed:** open the **Procurement demo** from the welcome page; its start page has **Try a demo role** buttons (on the live demo and locally) (Requester Tom, Manager Maria, Department head, Finance
 Thandi, Admin, Globex manager Ben); one click signs you in as that person. Thandi works for two companies: through the normal
 Keycloak login she gets Keycloak's organization picker between the email and the password, while her button starts straight in
 Acme. All users and the seeded data: [docs/demo.md](docs/demo.md).
@@ -62,8 +62,10 @@ layer rule is broken. The services, the approval saga and the order-to-payment f
 
 ## Screenshots
 
-| Dashboard (live, who is online) | Request detail: workflow, "Maria Naidoo is also viewing" |
+| Welcome: the portfolio start page | ProcureAI: how it is built |
 |---|---|
+| ![Welcome](docs/screenshots/welcome.png) | ![How it is built](docs/screenshots/about.png) |
+| **Dashboard (live, who is online)** | **Request detail: workflow, "Maria Naidoo is also viewing"** |
 | ![Dashboard](docs/screenshots/dashboard.png) | ![Request detail](docs/screenshots/request-detail.png) |
 | **Three-way match: why an invoice does not match** | **Policy assistant: a tool step, a quoted table, sources** |
 | ![Invoice match](docs/screenshots/invoice-match.png) | ![Assistant](docs/screenshots/assistant.png) |

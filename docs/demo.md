@@ -4,7 +4,7 @@ Who you can sign in as, how the one-click demo login works, the seeded data, the
 
 ## Demo users
 
-**One click:** the welcome page shows **Try a demo role** buttons. Each signs you in as one demo user, no password typed.
+**One click:** the welcome page links to the Procurement demo (`/demos/procurement`), whose start page shows **Try a demo role** buttons. Each signs you in as one demo user, no password typed.
 Or sign in through Keycloak as usual; the demo password is the `keycloak-demo-password` parameter set in [Run it locally](local-run.md) (on Kubernetes the cluster Secrets are made from the same values).
 
 | Button | User | Tenant | Role |
@@ -35,7 +35,7 @@ browser flow), and then creates exactly the session the normal code-flow login c
 same `__Host-` cookie, claims, refresh and logout. The browser only ever sends a key from the configured list (`DemoLogin:Users`
 in the gateway's appsettings); the username and password come from the gateway's configuration. The password grant is deprecated
 in OAuth 2.1, so it is used for these listed demo users only and is **off by default** (`DemoLogin:Enabled`): when off, both
-`/bff/demo-login` endpoints answer 404 and the welcome page shows no buttons. The AppHost switches it on and generates the demo
+`/bff/demo-login` endpoints answer 404 and the Procurement demo page shows no buttons. The AppHost switches it on and generates the demo
 client's secret on the first run (AppHost user secret `Parameters:keycloak-demo-login-secret`).
 
 ### Demo data

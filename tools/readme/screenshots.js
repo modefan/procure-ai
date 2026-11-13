@@ -13,7 +13,7 @@ const labels = { tom: 'Requester (Tom)', maria: 'Manager (Maria)', thandi: 'Fina
 async function login(browser, who) {
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await ctx.newPage();
-  await page.goto(BASE);
+  await page.goto(BASE + '/demos/procurement');
   await page.getByTestId('demo-login').getByRole('button').filter({ has: page.getByTestId('demo-label').getByText(labels[who], { exact: true }) }).click({ timeout: T });
   await page.waitForURL(/\/app\/dashboard$/, { timeout: T });
   await page.getByTestId('user-menu').waitFor({ timeout: T });
@@ -36,6 +36,12 @@ const want = (n) => only.length === 0 || only.includes(n);
     const thandi = await login(browser, 'thandi');
     const admin = await login(browser, 'admin');
 
+    if (want('welcome') || want('about')) {
+      const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+      const pub = await ctx.newPage();
+      if (want('welcome')) { await pub.goto(BASE + '/'); await settle(pub, 2000); await shot(pub, 'welcome'); }
+      if (want('about')) { await pub.goto(BASE + '/demos/procurement/about'); await settle(pub, 2000); await shot(pub, 'about'); }
+    }
     if (want('dashboard')) { await maria.goto(BASE + '/app/dashboard'); await settle(maria, 4000); await shot(maria, 'dashboard'); }
     if (want('approvals')) { await maria.goto(BASE + '/app/approvals'); await settle(maria); await shot(maria, 'approvals', 400); }
     if (want('request-detail')) {
