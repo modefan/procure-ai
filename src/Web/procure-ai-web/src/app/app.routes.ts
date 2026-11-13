@@ -20,6 +20,11 @@ export const routes: Routes = [
     title: 'ProcureAI',
     loadComponent: () => import('./features/demos/procurement/procurement.page').then((m) => m.ProcurementPage),
   },
+  {
+    path: 'demos/procurement/about',
+    title: 'How it is built',
+    loadComponent: () => import('./features/demos/procurement/about.page').then((m) => m.AboutPage),
+  },
   { path: 'login', title: 'Log in', component: AuthRedirectPage, canActivate: [guestGuard], data: { action: 'login' } },
   { path: 'register', title: 'Register', component: AuthRedirectPage, canActivate: [registrationGuard, guestGuard], data: { action: 'register' } },
   {
