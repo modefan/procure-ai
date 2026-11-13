@@ -81,10 +81,14 @@ public sealed partial class ChartParityTests
         name.StartsWith("ForwardedHeaders__KnownProxies__", StringComparison.Ordinal)
         || name.StartsWith("ForwardedHeaders__KnownNetworks__", StringComparison.Ordinal);
 
-    /// <summary>The Angular dev server's own settings under the AppHost (<c>ng serve --port</c>, Node heap); the cluster serves the build with nginx.</summary>
+    /// <summary>
+    /// The Angular dev server's own settings under the AppHost (<c>ng serve --port</c>, Node heap), and the gateway's request limit raised for
+    /// that dev server's many small requests; the cluster serves the build with nginx and keeps the gateway's default limit.
+    /// </summary>
     private static readonly Dictionary<string, string[]> AppHostOnly = new(StringComparer.Ordinal)
     {
         ["web"] = ["PORT", "NODE_OPTIONS"],
+        ["gateway"] = ["RateLimiting__PermitLimit"],
     };
 
     [Fact]

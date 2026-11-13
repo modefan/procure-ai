@@ -316,6 +316,11 @@ web.WithArgs(context =>
 var gateway = builder.AddProject<Projects.ProcureAi_Gateway>(ResourceNames.Gateway)
     .WithHttpsEndpoint(name: "https")
     .WithEnvironment("DevPanel__Enabled", "true")
+    // The per-client request limit (RateLimiting:PermitLimit, 200 a second in appsettings and in the cluster) is far too low for the
+    // Angular dev server behind the gateway: it serves every lazy chunk and an @ng/component hot-reload probe per component as requests of
+    // their own, and every browser of a test run is the one client 127.0.0.1. One page load went over it on the CI runner (429 on chunks,
+    // a blank page; plan 08c Task 2). The cluster serves the built app with nginx and keeps the 200.
+    .WithEnvironment("RateLimiting__PermitLimit", "5000")
     .WithExternalHttpEndpoints()
     .WithReference(redis)
     .WithReference(requestsApi)

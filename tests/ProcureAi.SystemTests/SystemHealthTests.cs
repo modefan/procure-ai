@@ -27,7 +27,7 @@ public sealed class SystemHealthTests(SystemFixture system)
             resources.ShouldContain(r => r.Name == expected);
         }
 
-        // Run-to-completion resources (the <name>-migrate steps, the web app's npm install) must have finished with exit code 0;
+        // Run-to-completion resources (the <name>-migrate steps, the web app's npm install, the one-shot setup containers) must have finished with exit code 0;
         // everything else must be running and healthy (the services' /health/ready comes from the same ServiceDefaults).
         foreach (var resource in resources)
         {
@@ -43,7 +43,8 @@ public sealed class SystemHealthTests(SystemFixture system)
                 continue;
             }
 
-            snapshot.State?.Text.ShouldBe(KnownResourceStates.Finished, $"{resource.Name} state");
+            // A project or executable that ran to completion ends Finished; a one-shot container (postgres-roles, mongo-users) ends Exited.
+            snapshot.State?.Text.ShouldBe(resource is ContainerResource ? KnownResourceStates.Exited : KnownResourceStates.Finished, $"{resource.Name} state");
             snapshot.ExitCode.ShouldBe(0, $"{resource.Name} exit code");
         }
 
