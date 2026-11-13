@@ -162,8 +162,11 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         private readonly ConcurrentQueue<string> _urls = new();
         private readonly ConcurrentQueue<Task<(string Url, string? Body)>> _scripts = new();
 
+        private readonly IAPIRequestContext _request;
+
         public NetworkLog(IPage page)
         {
+            _request = page.Context.APIRequest;
             page.Request += (_, request) => _urls.Enqueue(request.Url);
             page.Response += (_, response) =>
             {
@@ -179,7 +182,7 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         public async Task<IReadOnlyList<(string Url, string? Body)>> ScriptsAsync() =>
             [.. await Task.WhenAll(_scripts.ToArray())];
 
-        private static async Task<(string Url, string? Body)> ReadAsync(IResponse response)
+        private async Task<(string Url, string? Body)> ReadAsync(IResponse response)
         {
             try
             {
@@ -187,7 +190,23 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
             }
             catch (PlaywrightException)
             {
-                return (response.Url, null); // reported by the caller: an unreadable script must fail the negative check
+                // The browser drops a response body when the page navigates away (here: the redirect to Keycloak) before it was read;
+                // seen on CI for two public chunks. A built chunk's URL is content-hashed, so fetching the same URL again (same
+                // context: cookies, certificate settings) returns the same JavaScript and the check still reads it.
+                return (response.Url, await RefetchAsync(response.Url));
+            }
+        }
+
+        private async Task<string?> RefetchAsync(string url)
+        {
+            try
+            {
+                var again = await _request.GetAsync(url);
+                return again.Ok ? await again.TextAsync() : null;
+            }
+            catch (PlaywrightException)
+            {
+                return null; // reported by the caller: an unreadable script must fail the negative check
             }
         }
     }
