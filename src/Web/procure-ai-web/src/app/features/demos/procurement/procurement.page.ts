@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth.store';
 import { AppConfigService } from '../../../core/config/app-config';
 import { DemoLogin, DemoLoginUser } from '../../../core/auth/demo-login';
+import { MAINTENANCE_PATH, SystemAvailability } from '../../../core/system/system-availability';
 
 interface FeatureTile {
   title: string;
@@ -12,6 +13,8 @@ interface FeatureTile {
 /**
  * The Procurement demo's front page (lazy; the app itself loads only after sign-in). Signed out, it offers "Try a demo role" when the
  * gateway's demo login is on (its user list answers; a 404 hides the section) and, as a small secondary link, the normal Keycloak login.
+ * While the demo is switched off it stays readable but asks the gateway nothing (it would answer 503 and open the maintenance page):
+ * a short "paused" note links to the maintenance page (which has the contact link) instead of the demo roles and the login.
  */
 @Component({
   selector: 'app-procurement-page',
@@ -36,7 +39,12 @@ interface FeatureTile {
       }
     </section>
 
-    @if (demoUsers().length > 0) {
+    @if (paused()) {
+      <p class="mx-auto max-w-4xl px-4 pb-10 text-center text-sm text-slate-600" role="status" data-testid="demo-paused">
+        The demo is paused right now.
+        <a [routerLink]="maintenancePath" class="font-semibold text-indigo-700 underline underline-offset-2">How to get it switched on</a>
+      </p>
+    } @else if (demoUsers().length > 0) {
       <section class="mx-auto max-w-4xl px-4 pb-10" aria-labelledby="demo-login-title" data-testid="demo-login">
         <div class="card">
           <h2 id="demo-login-title" class="text-lg font-semibold text-slate-900">Try a demo role</h2>
@@ -70,7 +78,7 @@ interface FeatureTile {
       </section>
     }
 
-    @if (!auth.isLoggedIn()) {
+    @if (!auth.isLoggedIn() && !paused()) {
       <p class="mx-auto max-w-4xl px-4 pb-10 text-center text-sm text-slate-600">
         Have a Keycloak account?
         <a routerLink="/login" class="font-semibold text-indigo-700 underline underline-offset-2" data-testid="log-in-link">Log in</a>
@@ -97,6 +105,11 @@ export class ProcurementPage {
   protected readonly auth = inject(AuthStore);
   private readonly demoLogin = inject(DemoLogin);
   private readonly appConfig = inject(AppConfigService);
+  private readonly availability = inject(SystemAvailability);
+
+  /** The demo is switched off: no demo roles, no login, only the "paused" note. */
+  protected readonly paused = this.availability.disabled;
+  protected readonly maintenancePath = MAINTENANCE_PATH;
 
   /** "Register" only where the identity provider allows self-registration (runtime config, off by default). */
   protected readonly registrationEnabled = computed(() => this.appConfig.config().registration.enabled);
@@ -116,8 +129,9 @@ export class ProcurementPage {
   ];
 
   constructor() {
-    // Who is signed in is known before the first page (app initializer); only a signed-out visitor is offered demo roles.
-    if (!this.auth.isLoggedIn()) {
+    // Who is signed in is known before the first page (app initializer); only a signed-out visitor is offered demo roles, and only while
+    // the demo is on (switched off, the gateway refuses the call with a 503).
+    if (!this.auth.isLoggedIn() && !this.availability.disabled()) {
       void this.demoLogin.users().then((users) => this.demoUsers.set(users));
     }
   }

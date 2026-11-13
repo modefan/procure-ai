@@ -1,7 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting, TestRequest } from '@angular/common/http/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
+import { SystemAvailability } from '../../../core/system/system-availability';
 import { ProcurementPage } from './procurement.page';
 import { AuthStore } from '../../../core/auth/auth.store';
 import { AppConfigService } from '../../../core/config/app-config';
@@ -151,6 +152,27 @@ describe('ProcurementPage', () => {
     await render({ userId: 'u1', name: 'Tom', tenantId: 'acme', roles: [], permissions: [] });
 
     http.expectNone('/bff/demo-login/users');
+  });
+
+  it('procurement_page_while_switched_off_asks_nothing_and_shows_the_paused_note', async () => {
+    // While off the app initializer skips the session check, so nobody counts as signed in.
+    TestBed.inject(SystemAvailability).markDisabled(null);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+
+    const fixture = TestBed.createComponent(ProcurementPage);
+    await fixture.whenStable();
+    const element = fixture.nativeElement as HTMLElement;
+
+    http.expectNone('/bff/demo-login/users');
+    http.expectNone('/bff/user');
+    http.verify();
+    expect(navigate).not.toHaveBeenCalled();
+    const note = element.querySelector('[data-testid="demo-paused"]');
+    expect(note?.textContent).toContain('The demo is paused');
+    expect(note?.querySelector('a')?.getAttribute('href')).toBe('/maintenance');
+    expect(element.querySelector('[data-testid="demo-login"]')).toBeNull();
+    expect(element.querySelector('[data-testid="log-in-link"]')).toBeNull();
+    expect(actions(element)).toContain('How it is built');
   });
 
   it('a demo button posts only the key, then opens the dashboard with a full page load', async () => {

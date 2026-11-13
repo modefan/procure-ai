@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AppConfigService } from '../../core/config/app-config';
+import { SystemAvailability } from '../../core/system/system-availability';
 
 /**
  * The public front door of the portfolio: who Dale is, where to find him, and a card per demo. Everything comes from the runtime
@@ -33,6 +34,11 @@ import { AppConfigService } from '../../core/config/app-config';
 
     <section class="mx-auto max-w-4xl px-4 pb-16" aria-labelledby="demos-title">
       <h2 id="demos-title" class="text-lg font-semibold text-slate-900">Live demos</h2>
+      @if (paused()) {
+        <p class="mt-1 text-sm text-slate-600" role="status" data-testid="demos-paused">
+          The demos are paused right now to save hosting costs; you can still read how they are built.
+        </p>
+      }
       <ul class="mt-4 grid gap-4 sm:grid-cols-2">
         @for (demo of demos(); track demo.key) {
           <li class="card flex flex-col" data-testid="demo-card">
@@ -63,4 +69,6 @@ export class WelcomePage {
   protected readonly demos = computed(() => this.portfolio().demos);
   protected readonly links = computed(() => this.portfolio().links);
   protected readonly reposPublic = computed(() => this.portfolio().reposPublic);
+  /** The demo is switched off: a calm one-line note; the page itself needs nothing from the server. */
+  protected readonly paused = inject(SystemAvailability).disabled;
 }

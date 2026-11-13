@@ -28,7 +28,7 @@ export const TECHNOLOGY: readonly TechnologyGroup[] = [
       { name: 'Postgres with pgvector', reason: 'One database per service; relational data, jsonb documents and vector search for the AI assistant in one engine.' },
       { name: 'MongoDB', reason: 'The supplier catalog and chat history are documents that publish no events, which is what MongoDB suits.' },
       { name: 'Redis with FusionCache', reason: 'Sessions, presence, a 1-second micro-cache on every GET and the distributed locks behind request coalescing.' },
-      { name: 'Debezium and Marten', reason: 'Debezium reads the Postgres WAL and MongoDB change streams, so a change made outside the app is flagged in the Audit service.' },
+      { name: 'Debezium and Marten', reason: 'Debezium reads the Postgres WAL and MongoDB change streams, so a change made outside the app is flagged; Marten stores the Audit service\'s events in Postgres.' },
     ],
   },
   {

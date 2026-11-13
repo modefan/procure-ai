@@ -48,6 +48,8 @@ describe('MenuDrawer', () => {
 
     expect(dialog().hasAttribute('open')).toBe(true);
     expect(dialog().getAttribute('aria-label')).toBe('Menu');
+    // The nav inside is named like the sidebar's ("Main"), not like the dialog around it, so one selector finds it at every width.
+    expect(dialog().querySelector('nav')?.getAttribute('aria-label')).toBe('Main');
     const focusable = [...dialog().querySelectorAll<HTMLElement>('a[href], button')];
     expect(focusable.length).toBeGreaterThan(2);
     const [first, last] = [focusable[0], focusable.at(-1)!];

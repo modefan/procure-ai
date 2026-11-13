@@ -91,6 +91,19 @@ describe('Frame', () => {
       return { el: fixture.nativeElement as HTMLElement, calls: urls.filter((url) => /\/(bff|api|hubs)\b/.test(url)) };
     };
 
+    it('the skip link focuses the page without navigating (no /#main reload of Welcome)', async () => {
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+      const { el } = await sessionCalls();
+      const skip = el.querySelector<HTMLAnchorElement>('[data-testid=skip-link]')!;
+
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      skip.dispatchEvent(click);
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(el.querySelector('#main'));
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
     it('frame_makes_no_session_calls_while_disabled', async () => {
       signIn(['requests.read', 'requests.approve']);
       TestBed.inject(SystemAvailability).markDisabled(null);

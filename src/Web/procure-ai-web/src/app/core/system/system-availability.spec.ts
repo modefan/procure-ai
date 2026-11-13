@@ -137,6 +137,30 @@ describe('startUp (the app initializer)', () => {
     expect(deps.auth.load).not.toHaveBeenCalled();
   });
 
+  it.each(['', '/', '/demos/procurement', '/demos/procurement/', '/demos/procurement/about', '/demos/procurement/about?x=1#top'])(
+    'off on the public page %j: the address stays, and nobody is asked who is signed in',
+    async (path) => {
+      const { deps, order } = setUp(false, path);
+
+      await startUp(deps);
+
+      expect(order).toEqual(['config', 'check']);
+      expect(deps.location.replaceState).not.toHaveBeenCalled();
+      expect(deps.auth.load).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['/app/requests', '/app', '/login', '/register', '/forbidden', '/no-such-page', '/demos/other'])(
+    'off on %j (needs the running system, or unknown): the maintenance page',
+    async (path) => {
+      const { deps } = setUp(false, path);
+
+      await startUp(deps);
+
+      expect(deps.location.replaceState).toHaveBeenCalledWith(MAINTENANCE_PATH);
+    },
+  );
+
   it('off on the maintenance address already: the address stays', async () => {
     const { deps } = setUp(false, MAINTENANCE_PATH);
 

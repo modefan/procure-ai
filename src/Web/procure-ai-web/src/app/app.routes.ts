@@ -35,7 +35,7 @@ export const routes: Routes = [
   },
   { path: 'forbidden', title: 'No access', component: ForbiddenPage },
   { path: 'unavailable', title: 'Unavailable', component: UnavailablePage },
-  // While the demo is switched off the app shows only this page (App renders it without the shell).
+  // While the demo is switched off every page that needs the running system leads here (the public pages stay; see startUp).
   {
     path: 'maintenance',
     title: 'Switched off',

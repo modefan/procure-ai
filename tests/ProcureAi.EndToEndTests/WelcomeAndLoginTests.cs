@@ -16,7 +16,7 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
     private const string AppChunkMarker = "No purchase requests yet";
 
     [Fact]
-    public async Task Welcome_shows_login_but_no_register_when_logged_out()
+    public async Task Procurement_demo_page_shows_login_but_no_register_when_logged_out()
     {
         fixture.RequireReady();
         await using var context = await fixture.NewContextAsync();

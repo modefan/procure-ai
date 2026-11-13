@@ -30,7 +30,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1
           </button>
         </div>
         <div class="p-3">
-          <app-menu-nav label="Menu" idPrefix="drawer" />
+          <app-menu-nav label="Main" idPrefix="drawer" />
         </div>
       }
     </dialog>

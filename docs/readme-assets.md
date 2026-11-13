@@ -50,3 +50,17 @@ Remove-Item Env:ARGOCD_PASSWORD
 Look at every image before committing it: no personal data (the demo users are fictitious; the Argo CD application tree shows commit
 authors, so it is not used), nothing clipped, amounts on one line. The older screenshots (`dev-panel.png`, `invoice-scan.png`,
 `reconnecting.png`) were taken under the AppHost at 1100 to 1280 px and are only used in the docs pages.
+
+## 4. The architecture diagrams
+
+The info page's two SVGs (`src/Web/procure-ai-web/public/diagrams/`) are drawn once, at authoring time, with
+`@mermaid-js/mermaid-cli@12.2.0` (run through `npx`, never a dependency of the app): the wide one from the README's mermaid block as it
+is, the phone one from [`tools/readme/diagrams/architecture-narrow.mmd`](../tools/readme/diagrams/architecture-narrow.mmd). Regenerate
+both after changing either source (run in `tools/readme/diagrams`, with the README block saved as `wide.mmd`):
+
+```powershell
+npx -y @mermaid-js/mermaid-cli@12.2.0 -i wide.mmd -o ../../../src/Web/procure-ai-web/public/diagrams/procure-ai-architecture.svg -c mermaid-wide.json -p puppeteer.json -b transparent
+npx -y @mermaid-js/mermaid-cli@12.2.0 -i architecture-narrow.mmd -o ../../../src/Web/procure-ai-web/public/diagrams/procure-ai-architecture-narrow.svg -c mermaid-narrow.json -p puppeteer.json -b transparent
+```
+
+With these files both commands give the committed SVGs byte for byte. Check a new SVG has no `<script>` and no `foreignObject`.

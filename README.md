@@ -13,8 +13,9 @@ Kubernetes deployment by Argo CD.
 > **Live demo: <https://procure.daleabels.com>.** It also runs locally with [one command](#run-it-locally) or on a
 > [local Kubernetes cluster](#run-it-on-kubernetes).
 
-**No sign-up needed:** open the **Procurement demo** from the welcome page; its start page has **Try a demo role** buttons (on the live demo and locally) (Requester Tom, Manager Maria, Department head, Finance
-Thandi, Admin, Globex manager Ben); one click signs you in as that person. Thandi works for two companies: through the normal
+**No sign-up needed:** the Procurement demo's start page (<https://procure.daleabels.com/demos/procurement>, or
+`/demos/procurement` locally) has **Try a demo role** buttons for Requester Tom, Manager Maria, Department head, Finance
+Thandi, Admin and Globex manager Ben; one click signs you in as that person. Thandi works for two companies: through the normal
 Keycloak login she gets Keycloak's organization picker between the email and the password, while her button starts straight in
 Acme. All users and the seeded data: [docs/demo.md](docs/demo.md).
 

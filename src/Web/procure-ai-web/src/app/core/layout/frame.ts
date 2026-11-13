@@ -32,6 +32,8 @@ const SIDEBAR_MIN_WIDTH = 1024;
   template: `
     <a
       href="#main"
+      data-testid="skip-link"
+      (click)="skipToMain($event)"
       class="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:shadow"
     >
       Skip to content
@@ -144,6 +146,15 @@ export class Frame {
         });
       }
     });
+  }
+
+  /**
+   * The skip link moves focus to the page without navigating: with `<base href="/">` its `#main` would resolve to `/#main` and load Welcome
+   * from any other page. A link's click also fires for Enter, so keyboard users get the same.
+   */
+  protected skipToMain(event: Event): void {
+    event.preventDefault();
+    document.getElementById('main')?.focus();
   }
 
   protected onResize(): void {

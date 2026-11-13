@@ -1,0 +1,16 @@
+%% The phone version of the README's architecture diagram (public/diagrams/procure-ai-architecture-narrow.svg in the Angular app):
+%% business services grouped, one database node, bigger text. The wide SVG is the README's mermaid block as it is.
+%% How both are regenerated: docs/readme-assets.md, section "The architecture diagrams".
+flowchart TB
+    Browser["Angular 22 app"] -->|"cookie, SignalR"| GW["Gateway: YARP + BFF"]
+    GW <-->|"OIDC + PKCE"| KC["Keycloak"]
+    GW -->|"JWT"| Svc["Business services: Requests, Access, Budgets, Approvals, Purchasing, Invoicing, Suppliers"]
+    Svc <-->|"tools, as the user"| Asst["Assistant: RAG, tools, scan"]
+    Asst <--> Model["AI model provider"]
+    Svc <-->|"outbox + inbox"| MQ{{"RabbitMQ"}}
+    Svc --> DB[("Postgres + pgvector, MongoDB")]
+    DB -->|"WAL, change streams"| DBZ["Debezium Server"]
+    DBZ -->|"CDC events"| MQ
+    MQ --> Audit["Audit: Marten"]
+    MQ --> Notif["Notifications (SignalR)"]
+    Notif --> Redis[("Redis")]

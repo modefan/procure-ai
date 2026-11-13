@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { WelcomePage } from './welcome.page';
 import { AppConfigService } from '../../core/config/app-config';
+import { SystemAvailability } from '../../core/system/system-availability';
 
 describe('WelcomePage', () => {
   beforeEach(() => {
@@ -64,6 +65,16 @@ describe('WelcomePage', () => {
     const config = TestBed.inject(AppConfigService).config;
     config.set({ ...config(), portfolio: { ...config().portfolio, reposPublic: true } });
     expect(render().textContent).not.toContain('private for now');
+  });
+
+  it('welcome_shows_a_paused_note_only_while_the_demo_is_switched_off', () => {
+    expect(render().querySelector('[data-testid="demos-paused"]')).toBeNull();
+
+    TestBed.inject(SystemAvailability).markDisabled(null);
+    const element = render();
+
+    expect(element.querySelector('[data-testid="demos-paused"]')?.textContent).toContain('paused');
+    expect(element.querySelectorAll('[data-testid="demo-card"]')).toHaveLength(1);
   });
 
   it('welcome_has_no_email_or_phone', () => {

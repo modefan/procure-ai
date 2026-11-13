@@ -67,6 +67,7 @@ describe('AboutPage', () => {
     }
     expect(element.textContent).toContain('Wolverine');
     expect(element.textContent).toContain('Debezium');
+    expect(element.textContent).toContain("Marten stores the Audit service's events in Postgres");
   });
 
   it('about_links_dashboard_and_swagger', () => {
@@ -74,6 +75,15 @@ describe('AboutPage', () => {
 
     expect(link(element, 'Live observability dashboard')?.getAttribute('href')).toBe('https://dash.example/');
     expect(link(element, 'API documentation (Swagger)')?.getAttribute('href')).toBe('/swagger');
+    // Like the menu: the dashboard (another host) opens in a new tab, Swagger (a path of this site) in place.
+    expect(link(element, 'Live observability dashboard')?.getAttribute('target')).toBe('_blank');
+    expect(link(element, 'API documentation (Swagger)')?.hasAttribute('target')).toBe(false);
+  });
+
+  it('about_opens_an_absolute_swagger_address_in_a_new_tab_like_the_menu', () => {
+    const element = render({ swaggerUrl: 'https://api.example/swagger' });
+
+    expect(link(element, 'API documentation (Swagger)')?.getAttribute('target')).toBe('_blank');
   });
 
   it('about_hides_dashboard_and_swagger_links_when_not_configured', () => {

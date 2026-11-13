@@ -61,4 +61,19 @@ describe('merge (live and cache settings)', () => {
     expect(merge(environment, { maintenance: { checkTimeoutMs: 0 } }).maintenance.checkTimeoutMs).toBe(4000);
     expect(merge(environment, { maintenance: { checkTimeoutMs: '9' } }).maintenance.checkTimeoutMs).toBe(4000);
   });
+
+  it('portfolio demos and links: an empty list, or one with only bad entries, keeps the defaults', () => {
+    const { demos, links } = environment.portfolio;
+    expect(demos.length).toBeGreaterThan(0);
+    expect(links.length).toBeGreaterThan(0);
+
+    expect(merge(environment, { portfolio: { demos: [], links: [] } }).portfolio).toMatchObject({ demos, links });
+    expect(
+      merge(environment, { portfolio: { demos: [{ key: 'x', name: 'X', pitch: '', startUrl: 'javascript:alert(1)', infoUrl: '', external: false }], links: [{ label: 'Bad', url: 'http://x' }] } })
+        .portfolio,
+    ).toMatchObject({ demos, links });
+
+    const other = { key: 'other', name: 'Other', pitch: 'p', startUrl: 'https://other.example/', infoUrl: '', external: true };
+    expect(merge(environment, { portfolio: { demos: [other, { key: 'bad' }] } }).portfolio.demos).toEqual([other]);
+  });
 });

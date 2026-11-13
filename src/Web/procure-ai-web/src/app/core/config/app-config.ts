@@ -194,8 +194,9 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
       checkTimeoutMs: positive(maintenance['checkTimeoutMs'], defaults.maintenance.checkTimeoutMs),
     },
     portfolio: {
-      demos: Array.isArray(portfolio['demos']) ? portfolio['demos'].filter(isDemo) : defaults.portfolio.demos,
-      links: Array.isArray(portfolio['links']) ? portfolio['links'].filter(isLink) : defaults.portfolio.links,
+      // A list that is empty once the bad entries are dropped keeps the defaults: the Welcome page and the menu are never left bare.
+      demos: nonEmpty(portfolio['demos'], isDemo, defaults.portfolio.demos),
+      links: nonEmpty(portfolio['links'], isLink, defaults.portfolio.links),
       reposPublic: typeof portfolio['reposPublic'] === 'boolean' ? portfolio['reposPublic'] : defaults.portfolio.reposPublic,
       swaggerUrl:
         portfolio['swaggerUrl'] === '' || isPageUrl(portfolio['swaggerUrl']) ? (portfolio['swaggerUrl'] as string) : defaults.portfolio.swaggerUrl,
@@ -231,6 +232,12 @@ const isDemo = (value: unknown): value is PortfolioDemo => {
 /** A profile link: a label and an https address. */
 const isLink = (value: unknown): value is PortfolioLink =>
   isRecord(value) && isText((value as Record<string, unknown>)['label']) && /^https:\/\/\S+$/i.test(String((value as Record<string, unknown>)['url']));
+
+/** The valid entries of a list, or the fallback when it is no list or none is valid. */
+const nonEmpty = <T>(value: unknown, valid: (entry: unknown) => entry is T, fallback: T[]): T[] => {
+  const entries = Array.isArray(value) ? value.filter(valid) : [];
+  return entries.length > 0 ? entries : fallback;
+};
 
 const isRecord = (value: unknown): value is object => typeof value === 'object' && value !== null && !Array.isArray(value);
 const level = (value: unknown, fallback: LogLevel): LogLevel =>

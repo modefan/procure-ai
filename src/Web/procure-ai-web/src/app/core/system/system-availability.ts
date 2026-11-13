@@ -39,7 +39,7 @@ const ON: AvailabilityAnswer = { enabled: true, message: null };
 
 /**
  * Is the demo switched on? Access holds the switch (`GET /api/v1/system/availability`, anonymous); the gateway refuses the browser's other
- * calls while it is off. While `disabled()` the app shows only the maintenance page: no shell, no session check, no live connection.
+ * calls while it is off. While `disabled()` the app shows only the public pages and the maintenance page: no session check, no live connection.
  */
 @Service()
 export class SystemAvailability {
@@ -113,15 +113,29 @@ export interface StartUpDeps {
 }
 
 /**
- * The app initializer: config.json first, then the switch. Off: the address becomes the maintenance page before the first navigation, and
- * nothing else is asked (no session check, so no live connection either). On: a stale maintenance address goes to the welcome page, and the
- * gateway is asked who is signed in, as before.
+ * The pages that work while the demo is switched off: they need nothing from the gateway (Welcome, the Procurement front page in its
+ * "paused" state, the info page). A first load of any other address (the app, the sign-in triggers, error and unknown pages) becomes the
+ * maintenance page.
+ */
+export const PUBLIC_WHILE_OFF: readonly string[] = ['/', '/demos/procurement', '/demos/procurement/about'];
+
+/** True for an address that stays readable while the demo is off (see {@link PUBLIC_WHILE_OFF}); query, fragment and a trailing slash are ignored. */
+export function isPublicWhileOff(path: string): boolean {
+  const bare = path.split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+  return PUBLIC_WHILE_OFF.includes(bare);
+}
+
+/**
+ * The app initializer: config.json first, then the switch. Off: an address that needs the running system becomes the maintenance page
+ * before the first navigation (the public pages stay), and nothing else is asked (no session check, so no live connection either). On: a
+ * stale maintenance address goes to the welcome page, and the gateway is asked who is signed in, as before.
  */
 export async function startUp({ config, availability, auth, location }: StartUpDeps): Promise<void> {
   await config.load();
-  const atMaintenance = location.path().split(/[?#]/)[0] === MAINTENANCE_PATH;
+  const path = location.path();
+  const atMaintenance = path.split(/[?#]/)[0] === MAINTENANCE_PATH;
   if (!(await availability.check())) {
-    if (!atMaintenance) {
+    if (!atMaintenance && !isPublicWhileOff(path)) {
       location.replaceState(MAINTENANCE_PATH);
     }
     return;

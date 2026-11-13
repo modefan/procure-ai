@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AppConfigService } from '../../../core/config/app-config';
+import { opensNewTab } from '../../../core/layout/menu-nav';
 import { DIAGRAM_ALT, DIAGRAM_STEPS, TECHNOLOGY } from './technology';
 
 const REPO = 'https://github.com/modefan/procure-ai';
@@ -89,10 +90,10 @@ interface Highlight {
         <h2 id="links-title" class="text-xl font-semibold text-slate-900">See it for yourself</h2>
         <ul class="mt-4 flex flex-wrap gap-3" data-testid="about-links">
           @if (dashboardUrl()) {
-            <li><a [href]="dashboardUrl()" target="_blank" rel="noopener" class="btn-secondary">Live observability dashboard</a></li>
+            <li><a [href]="dashboardUrl()" [attr.target]="newTab(dashboardUrl()) ? '_blank' : null" [attr.rel]="newTab(dashboardUrl()) ? 'noopener' : null" class="btn-secondary">Live observability dashboard</a></li>
           }
           @if (swaggerUrl()) {
-            <li><a [href]="swaggerUrl()" target="_blank" rel="noopener" class="btn-secondary">API documentation (Swagger)</a></li>
+            <li><a [href]="swaggerUrl()" [attr.target]="newTab(swaggerUrl()) ? '_blank' : null" [attr.rel]="newTab(swaggerUrl()) ? 'noopener' : null" class="btn-secondary">API documentation (Swagger)</a></li>
           }
           @if (reposPublic()) {
             <li><a [href]="repo" target="_blank" rel="noopener" class="btn-secondary">Source code on GitHub</a></li>
@@ -111,6 +112,8 @@ export class AboutPage {
   private readonly appConfig = inject(AppConfigService);
 
   protected readonly repo = REPO;
+  /** Same rule as the menu: another host (the dashboard) opens in a new tab, a path of this site (Swagger) in place. */
+  protected readonly newTab = opensNewTab;
   protected readonly technology = TECHNOLOGY;
   protected readonly diagramAlt = DIAGRAM_ALT;
   protected readonly diagramSteps = DIAGRAM_STEPS;

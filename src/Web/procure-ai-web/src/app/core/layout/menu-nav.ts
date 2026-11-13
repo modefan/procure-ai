@@ -3,6 +3,11 @@ import { Component, inject, input } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { Menu, MenuItem } from './menu';
 
+/** Another host opens in a new tab; a path of this site (Swagger) loads in place. The menu and the info page share this rule. */
+export function opensNewTab(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
 /** The site's name in the sidebar, the drawer and the phone's top bar; it links to Welcome. */
 @Component({
   selector: 'app-brand',
@@ -82,7 +87,7 @@ export class Brand {
   `,
 })
 export class MenuNav {
-  /** The nav's accessible name ("Main" in the sidebar; "Menu" in the drawer). */
+  /** The nav's accessible name: "Main" in the sidebar and in the drawer (the drawer's dialog itself is "Menu"). */
   readonly label = input.required<string>();
   /** Keeps the section heading ids unique when two navs are on the page. */
   readonly idPrefix = input('menu');
@@ -95,6 +100,6 @@ export class MenuNav {
 
   /** Another host (the Aspire dashboard, an external demo): a new tab. A path of this site (Swagger) loads in place. */
   protected newTab(item: MenuItem): boolean {
-    return /^https?:\/\//i.test(item.url);
+    return opensNewTab(item.url);
   }
 }
