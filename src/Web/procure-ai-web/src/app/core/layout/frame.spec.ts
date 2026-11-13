@@ -189,7 +189,7 @@ describe('Frame', () => {
       expect(link.getAttribute('aria-label')).toBe('Approvals, 3 waiting');
     });
 
-    it('the Aspire dashboard link opens in a new tab and says so; Swagger is a plain full page load', async () => {
+    it('the Aspire dashboard and Swagger links open in a new tab', async () => {
       TestBed.inject(AppConfigService).config.update((c) => ({ ...c, observability: { dashboardUrl: 'https://dashboard.example.org' } }));
       const { el } = await render();
       const links = [...el.querySelectorAll('nav[aria-label=Main] a')];
@@ -198,8 +198,8 @@ describe('Frame', () => {
       expect(dashboard.getAttribute('rel')).toBe('noopener noreferrer');
       expect(text(dashboard)).toBe('Aspire dashboard(opens in a new tab)');
       const swagger = links.find((a) => a.getAttribute('href') === '/swagger')!;
-      expect(text(swagger)).toBe('API (Swagger)');
-      expect(swagger.getAttribute('target')).toBeNull();
+      expect(text(swagger)).toBe('API (Swagger)(opens in a new tab)');
+      expect(swagger.getAttribute('target')).toBe('_blank');
     });
 
     it('the phone menu button opens the drawer with the same menu, and a navigation closes it', async () => {

@@ -84,9 +84,9 @@ describe('AboutPage', () => {
 
     expect(link(element, 'Live observability dashboard')?.getAttribute('href')).toBe('https://dash.example/');
     expect(link(element, 'API documentation (Swagger)')?.getAttribute('href')).toBe('/swagger');
-    // Like the menu: the dashboard (another host) opens in a new tab, Swagger (a path of this site) in place.
+    // Like the menu: the dashboard (another host) and Swagger both open in a new tab.
     expect(link(element, 'Live observability dashboard')?.getAttribute('target')).toBe('_blank');
-    expect(link(element, 'API documentation (Swagger)')?.hasAttribute('target')).toBe(false);
+    expect(link(element, 'API documentation (Swagger)')?.getAttribute('target')).toBe('_blank');
   });
 
   it('about_opens_an_absolute_swagger_address_in_a_new_tab_like_the_menu', () => {

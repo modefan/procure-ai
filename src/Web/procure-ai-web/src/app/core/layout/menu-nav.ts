@@ -5,7 +5,7 @@ import { Menu, MenuItem } from './menu';
 
 /** Another host opens in a new tab; a path of this site (Swagger) loads in place. The menu and the info page share this rule. */
 export function opensNewTab(url: string): boolean {
-  return /^https?:\/\//i.test(url);
+  return /^https?:\/\//i.test(url) || /^\/swagger(\/|$)/i.test(url);
 }
 
 /** The site's name in the sidebar, the drawer and the phone's top bar; it links to Welcome. */
@@ -98,7 +98,7 @@ export class MenuNav {
     return `${this.idPrefix()}-group-${item.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   }
 
-  /** Another host (the Aspire dashboard, an external demo): a new tab. A path of this site (Swagger) loads in place. */
+  /** Another host (the Aspire dashboard, an external demo) and Swagger: a new tab. */
   protected newTab(item: MenuItem): boolean {
     return opensNewTab(item.url);
   }
