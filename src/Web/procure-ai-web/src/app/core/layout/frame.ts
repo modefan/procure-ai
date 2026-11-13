@@ -38,12 +38,14 @@ const SIDEBAR_MIN_WIDTH = 1024;
     </a>
 
     <div class="min-h-dvh lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
-      <aside class="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-slate-200 bg-white lg:flex">
-        <div class="flex h-14 shrink-0 items-center px-4">
-          <app-brand />
-        </div>
-        <div class="px-3 pt-3 pb-6">
-          <app-menu-nav label="Main" idPrefix="side" />
+      <aside class="hidden border-r border-slate-200 bg-white lg:block">
+        <div class="sticky top-0 flex h-dvh flex-col overflow-y-auto">
+          <div class="flex h-14 shrink-0 items-center px-4">
+            <app-brand />
+          </div>
+          <div class="px-3 pt-3 pb-6">
+            <app-menu-nav label="Main" idPrefix="side" />
+          </div>
         </div>
       </aside>
 
