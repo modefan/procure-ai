@@ -43,7 +43,7 @@ public sealed class ForbiddenTests(AppFixture fixture)
         // Tom logs out (the app stays loaded: no reload) ...
         await page.GetByTestId("user-menu").ClickAsync();
         await page.GetByRole(AriaRole.Menuitem, new() { Name = "Log out", Exact = true }).ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Welcome to ProcureAI" })).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Hi, I'm Dale Abels" })).ToBeVisibleAsync(new() { Timeout = Pages.Timeout });
         (await page.ContentAsync()).ShouldNotContain(title);
         await Assertions.Expect(Pages.LiveIndicator(page)).ToHaveCountAsync(0);
 

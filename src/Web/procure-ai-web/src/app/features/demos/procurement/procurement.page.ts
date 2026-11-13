@@ -1,8 +1,8 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AuthStore } from '../../core/auth/auth.store';
-import { AppConfigService } from '../../core/config/app-config';
-import { DemoLogin, DemoLoginUser } from '../../core/auth/demo-login';
+import { AuthStore } from '../../../core/auth/auth.store';
+import { AppConfigService } from '../../../core/config/app-config';
+import { DemoLogin, DemoLoginUser } from '../../../core/auth/demo-login';
 
 interface FeatureTile {
   title: string;
@@ -10,11 +10,11 @@ interface FeatureTile {
 }
 
 /**
- * Screen 1: the public landing page. Part of the small public bundle; the app itself loads only after sign-in. Signed out, it
- * also offers "Try a demo role" when the gateway's demo login is on (its user list answers; a 404 hides the section).
+ * The Procurement demo's front page (lazy; the app itself loads only after sign-in). Signed out, it offers "Try a demo role" when the
+ * gateway's demo login is on (its user list answers; a 404 hides the section) and, as a small secondary link, the normal Keycloak login.
  */
 @Component({
-  selector: 'app-welcome-page',
+  selector: 'app-procurement-page',
   imports: [RouterLink],
   template: `
     <section class="mx-auto max-w-3xl px-4 pt-12 pb-10 text-center sm:pt-20">
@@ -27,12 +27,8 @@ interface FeatureTile {
       <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
         @if (auth.isLoggedIn()) {
           <a routerLink="/app/dashboard" class="btn-primary">Go to dashboard</a>
-        } @else {
-          <a routerLink="/login" class="btn-primary">Log in</a>
-          @if (registrationEnabled()) {
-            <a routerLink="/register" class="btn-secondary">Register</a>
-          }
         }
+        <a routerLink="/demos/procurement/about" class="btn-secondary">How it is built</a>
       </div>
 
       @if (auth.isLoggedIn()) {
@@ -74,6 +70,17 @@ interface FeatureTile {
       </section>
     }
 
+    @if (!auth.isLoggedIn()) {
+      <p class="mx-auto max-w-4xl px-4 pb-10 text-center text-sm text-slate-600">
+        Have a Keycloak account?
+        <a routerLink="/login" class="font-semibold text-indigo-700 underline underline-offset-2" data-testid="log-in-link">Log in</a>
+        @if (registrationEnabled()) {
+          <span aria-hidden="true"> · </span>
+          <a routerLink="/register" class="font-semibold text-indigo-700 underline underline-offset-2">Register</a>
+        }
+      </p>
+    }
+
     <section class="mx-auto max-w-6xl px-4 pb-16" aria-label="What you can do">
       <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         @for (tile of tiles; track tile.title) {
@@ -86,7 +93,7 @@ interface FeatureTile {
     </section>
   `,
 })
-export class WelcomePage {
+export class ProcurementPage {
   protected readonly auth = inject(AuthStore);
   private readonly demoLogin = inject(DemoLogin);
   private readonly appConfig = inject(AppConfigService);

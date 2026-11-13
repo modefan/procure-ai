@@ -22,7 +22,10 @@ public sealed class WelcomeAndLoginTests(AppFixture fixture)
         await using var context = await fixture.NewContextAsync();
         var page = await context.NewPageAsync();
 
+        // The Welcome page: who Dale is and a card per demo, which leads to the Procurement demo page.
         await page.GotoAsync(fixture.GatewayUrl.ToString());
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Hi, I'm Dale Abels" })).ToBeVisibleAsync();
+        await page.GetByTestId("demo-card").GetByRole(AriaRole.Link, new() { Name = "Try it" }).ClickAsync();
 
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Welcome to ProcureAI" })).ToBeVisibleAsync();
         var main = page.Locator("main");

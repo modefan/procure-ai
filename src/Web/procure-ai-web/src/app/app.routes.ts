@@ -6,11 +6,20 @@ import { AuthRedirectPage } from './features/auth/auth-redirect.page';
 import { ForbiddenPage } from './features/errors/forbidden.page';
 import { NotFoundPage } from './features/errors/not-found.page';
 import { UnavailablePage } from './features/errors/unavailable.page';
-import { WelcomePage } from './features/welcome/welcome.page';
 
 export const routes: Routes = [
-  // The public bundle: welcome, the two sign-in triggers and the error pages.
-  { path: '', pathMatch: 'full', title: 'Welcome', component: WelcomePage },
+  // The public pages: Welcome and the Procurement demo's front page (both lazy), the two sign-in triggers and the error pages.
+  {
+    path: '',
+    pathMatch: 'full',
+    title: 'Welcome',
+    loadComponent: () => import('./features/portfolio/welcome.page').then((m) => m.WelcomePage),
+  },
+  {
+    path: 'demos/procurement',
+    title: 'ProcureAI',
+    loadComponent: () => import('./features/demos/procurement/procurement.page').then((m) => m.ProcurementPage),
+  },
   { path: 'login', title: 'Log in', component: AuthRedirectPage, canActivate: [guestGuard], data: { action: 'login' } },
   { path: 'register', title: 'Register', component: AuthRedirectPage, canActivate: [registrationGuard, guestGuard], data: { action: 'register' } },
   {

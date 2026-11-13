@@ -48,16 +48,16 @@ internal static class Pages
     };
 
     /// <summary>
-    /// Signs in the way a reviewer does: the welcome page's demo button for <paramref name="key"/> (no Keycloak page, so Thandi, who is in
+    /// Signs in the way a reviewer does: the Procurement demo page's demo button for <paramref name="key"/> (no Keycloak page, so Thandi, who is in
     /// two companies, gets no organization picker), then waits for the dashboard and, when <paramref name="path"/> is given, opens it.
     /// </summary>
     public static async Task DemoLogInAsync(AppFixture fixture, IPage page, string key, string? path = null)
     {
         // The gateway allows 10 demo logins a minute per client IP (RateLimiting:DemoEntry) and a whole run signs in more often than that:
-        // when the welcome page says the sign-in failed, wait for the next window and click again (twice at most).
+        // when the demo page says the sign-in failed, wait for the next window and click again (twice at most).
         for (var attempt = 1; ; attempt++)
         {
-            await page.GotoAsync(fixture.GatewayUrl.ToString());
+            await page.GotoAsync(new Uri(fixture.GatewayUrl, "demos/procurement").ToString());
             var section = page.GetByTestId("demo-login");
             await section.GetByRole(AriaRole.Button).Filter(new() { Has = page.GetByTestId("demo-label").GetByText(DemoRoles[key], new() { Exact = true }) })
                 .ClickAsync(new() { Timeout = Timeout });

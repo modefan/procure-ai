@@ -2,19 +2,19 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting, TestRequest } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
-import { WelcomePage } from './welcome.page';
-import { AuthStore } from '../../core/auth/auth.store';
-import { AppConfigService } from '../../core/config/app-config';
-import { BrowserLocation } from '../../core/browser/browser-location';
+import { ProcurementPage } from './procurement.page';
+import { AuthStore } from '../../../core/auth/auth.store';
+import { AppConfigService } from '../../../core/config/app-config';
+import { BrowserLocation } from '../../../core/browser/browser-location';
 
-describe('WelcomePage', () => {
+describe('ProcurementPage', () => {
   let http: HttpTestingController;
   let assign: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     assign = vi.fn();
     TestBed.configureTestingModule({
-      imports: [WelcomePage],
+      imports: [ProcurementPage],
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
@@ -49,7 +49,7 @@ describe('WelcomePage', () => {
       request.flush(null, { status: 401, statusText: 'Unauthorized' });
     }
     await load;
-    const fixture = TestBed.createComponent(WelcomePage);
+    const fixture = TestBed.createComponent(ProcurementPage);
     if (!user) {
       demo(await vi.waitFor(() => http.expectOne('/bff/demo-login/users')));
     }
@@ -69,6 +69,29 @@ describe('WelcomePage', () => {
     expect(actions(element)).toContain('Log in');
     expect(actions(element)).not.toContain('Register');
     expect(actions(element)).not.toContain('Go to dashboard');
+  });
+
+  it('procurement_page_keeps_demo_buttons_and_log_in_link', async () => {
+    const { element } = await render(null, (request) => request.flush(demoUsers));
+
+    expect(demoButtons(element)).toHaveLength(6);
+    const login = element.querySelector<HTMLAnchorElement>('[data-testid="log-in-link"]');
+    expect(login?.parentElement?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Have a Keycloak account? Log in');
+    expect(login?.getAttribute('href')).toBe('/login');
+    // The demo buttons come before the secondary link.
+    const section = element.querySelector('[data-testid="demo-login"]')!;
+    expect(section.compareDocumentPosition(login!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const about = Array.from(element.querySelectorAll('a')).find((a) => a.textContent?.trim() === 'How it is built');
+    expect(about?.getAttribute('href')).toBe('/demos/procurement/about');
+  });
+
+  it('signed_in_procurement_page_offers_go_to_dashboard', async () => {
+    const { element } = await render({ userId: 'u1', name: 'Tom', tenantId: 'acme', roles: [], permissions: [] });
+
+    const go = Array.from(element.querySelectorAll('a')).find((a) => a.textContent?.trim() === 'Go to dashboard');
+    expect(go?.getAttribute('href')).toBe('/app/dashboard');
+    expect(element.querySelector('[data-testid="log-in-link"]')).toBeNull();
+    expect(element.textContent).toContain('Signed in as Tom');
   });
 
   it('shows Register when the runtime config turns registration on', async () => {
