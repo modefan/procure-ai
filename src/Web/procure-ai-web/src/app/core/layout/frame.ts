@@ -9,9 +9,9 @@ import { DevPanelStore } from '../dev-panel/dev-panel.store';
 import { LiveConnection } from '../live/live-connection';
 import { NotificationsStore } from '../live/notifications.store';
 import { CacheRegistry } from '../state/cache-registry';
-import { SystemAvailability } from '../system/system-availability';
 import { MenuDrawer } from './menu-drawer';
 import { Brand, MenuNav } from './menu-nav';
+import { SessionState } from './session-state';
 import { TopBar } from './top-bar';
 
 /** How long the toast of a refused company switch stays up. */
@@ -101,7 +101,6 @@ export class Frame {
   protected readonly auth = inject(AuthStore);
   protected readonly caches = inject(CacheRegistry);
   protected readonly live = inject(LiveConnection);
-  private readonly availability = inject(SystemAvailability);
   private readonly devPanel = inject(DevPanelStore);
   private readonly notifications = inject(NotificationsStore);
   private readonly approvals = inject(ApprovalsStore);
@@ -109,7 +108,7 @@ export class Frame {
   /** The phone drawer is open. */
   protected readonly drawerOpen = signal(false);
   /** Somebody is signed in and the demo is on: the only state in which the frame makes session calls. */
-  protected readonly session = computed(() => this.auth.isLoggedIn() && !this.availability.disabled());
+  protected readonly session = inject(SessionState).active;
   /** The "Behind the scenes" sheet is on screen: enabled in the config, opened by the user, and a session is there. */
   protected readonly devPanelShown = computed(() => this.session() && this.devPanel.active());
   /** Room at the bottom of the page so the open sheet does not cover its end. */

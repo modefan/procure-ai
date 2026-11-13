@@ -203,9 +203,12 @@ export function merge(defaults: AppConfig, loaded: unknown): AppConfig {
   };
 }
 
-/** An address the menu may link to: a path of this site (`/x`, not `//host`) or an https/http address. Never javascript: and the like. */
+/**
+ * An address the menu may link to: a path of this site (`/x`; not `//host` and no backslash at all, since browsers read a leading `/\` as
+ * protocol-relative too) or an https/http address. Never javascript: and the like.
+ */
 export const isPageUrl = (value: unknown): value is string =>
-  typeof value === 'string' && (/^\/(?!\/)\S*$/.test(value) || /^https?:\/\/\S+$/i.test(value));
+  typeof value === 'string' && (/^\/(?![\/\\])[^\s\\]*$/.test(value) || /^https?:\/\/\S+$/i.test(value));
 
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
 

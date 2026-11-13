@@ -55,10 +55,26 @@ export class MenuDrawer {
         if (element.open) {
           element.close();
         }
-        this.returnFocus?.focus();
-        this.returnFocus = null;
+        this.restoreFocus();
       }
     });
+  }
+
+  /**
+   * Focus goes back to what opened the drawer. When that is hidden now (the window grew past 1024 px, which closes the drawer, and the menu
+   * button is `lg:hidden`), focus would be lost, so it goes to the page instead.
+   */
+  private restoreFocus(): void {
+    const opener = this.returnFocus;
+    this.returnFocus = null;
+    if (!opener) {
+      return;
+    }
+    if (isShown(opener)) {
+      opener.focus();
+    } else {
+      document.getElementById('main')?.focus();
+    }
   }
 
   /** A click on the dark area around the drawer (the dialog element itself, not its content) closes it. */
@@ -94,4 +110,17 @@ export class MenuDrawer {
   private focusables(): HTMLElement[] {
     return [...this.dialog().nativeElement.querySelectorAll<HTMLElement>(FOCUSABLE)];
   }
+}
+
+/** In the page and not hidden by `display: none` on itself or an ancestor. */
+function isShown(element: HTMLElement): boolean {
+  if (!element.isConnected) {
+    return false;
+  }
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    if (getComputedStyle(node).display === 'none') {
+      return false;
+    }
+  }
+  return true;
 }

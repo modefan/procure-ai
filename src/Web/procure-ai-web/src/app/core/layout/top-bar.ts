@@ -1,8 +1,7 @@
-import { Component, computed, inject, input, output } from '@angular/core';
-import { AuthStore } from '../auth/auth.store';
-import { SystemAvailability } from '../system/system-availability';
+import { Component, inject, input, output } from '@angular/core';
 import { Brand } from './menu-nav';
 import { SessionMenu } from './session-menu';
+import { SessionState } from './session-state';
 
 /**
  * The slim bar above the page. Below 1024 px it holds the menu button and the name; signed in (with the demo on) it holds the session
@@ -42,9 +41,6 @@ export class TopBar {
   /** The menu button was pressed. */
   readonly openMenu = output<void>();
 
-  private readonly auth = inject(AuthStore);
-  private readonly availability = inject(SystemAvailability);
-
   /** Somebody is signed in and the demo is on: only then the session widgets (and their calls) exist. */
-  protected readonly session = computed(() => this.auth.isLoggedIn() && !this.availability.disabled());
+  protected readonly session = inject(SessionState).active;
 }

@@ -51,6 +51,8 @@ describe('Frame', () => {
   const signIn = (permissions: string[], roles = ['requester']) =>
     user.set({ userId: 'u1', name: 'Tom Mokoena', tenantId: 'acme', roles, permissions });
 
+  afterEach(() => vi.restoreAllMocks());
+
   beforeEach(() => {
     user.set(null);
     state.set('connected');
@@ -174,14 +176,14 @@ describe('Frame', () => {
       expect(link.getAttribute('aria-label')).toBe('Approvals, 3 waiting');
     });
 
-    it('the Dashboard (Aspire) link opens in a new tab and says so; Swagger is a plain full page load', async () => {
+    it('the Aspire dashboard link opens in a new tab and says so; Swagger is a plain full page load', async () => {
       TestBed.inject(AppConfigService).config.update((c) => ({ ...c, observability: { dashboardUrl: 'https://dashboard.example.org' } }));
       const { el } = await render();
       const links = [...el.querySelectorAll('nav[aria-label=Main] a')];
       const dashboard = links.find((a) => a.getAttribute('href') === 'https://dashboard.example.org')!;
       expect(dashboard.getAttribute('target')).toBe('_blank');
       expect(dashboard.getAttribute('rel')).toBe('noopener noreferrer');
-      expect(text(dashboard)).toContain('opens in a new tab');
+      expect(text(dashboard)).toBe('Aspire dashboard(opens in a new tab)');
       const swagger = links.find((a) => a.getAttribute('href') === '/swagger')!;
       expect(text(swagger)).toBe('API (Swagger)');
       expect(swagger.getAttribute('target')).toBeNull();
@@ -326,6 +328,5 @@ describe('Frame', () => {
 
     expect(before).toBe(1);
     expect(list).toHaveBeenCalledTimes(1);
-    vi.restoreAllMocks();
   });
 });

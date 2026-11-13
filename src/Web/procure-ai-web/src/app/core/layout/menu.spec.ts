@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { environment } from '../../../environments/environment';
 import { ApprovalsStore } from '../../features/approvals/approvals.store';
 import { AuthStore } from '../auth/auth.store';
-import { AppConfigService, merge } from '../config/app-config';
+import { AppConfigService, isPageUrl, merge } from '../config/app-config';
 import { SystemAvailability } from '../system/system-availability';
 import { Menu, MenuItem, MenuSection } from './menu';
 
@@ -77,7 +77,7 @@ describe('Menu', () => {
 
     dashboardUrl('https://dashboard.example.org');
     const withDashboard = menu();
-    expect(labels(withDashboard).at(-1)).toBe('Dashboard');
+    expect(labels(withDashboard).at(-1)).toBe('Aspire dashboard');
     expect(withDashboard[2].items.at(-1)).toMatchObject({ url: 'https://dashboard.example.org', external: true });
   });
 
@@ -115,7 +115,7 @@ describe('Menu', () => {
     user.set({ permissions: ADMIN });
     TestBed.inject(SystemAvailability).markDisabled(null);
 
-    expect(labels(menu())).toEqual(['Welcome', 'ProcureAI', 'How it is built', 'API (Swagger)', 'Dashboard']);
+    expect(labels(menu())).toEqual(['Welcome', 'ProcureAI', 'How it is built', 'API (Swagger)', 'Aspire dashboard']);
   });
 
   it('demos come from config: an external demo has no sub-items, unsafe urls are dropped', () => {
@@ -142,5 +142,23 @@ describe('Menu', () => {
     const desk = menu()[1].items[1];
     expect(desk).toMatchObject({ label: 'SupportDesk', url: 'https://desk.example.org', external: true });
     expect(desk.children ?? []).toEqual([]);
+  });
+
+  it('a site path never starts like a protocol-relative address (// or /\\) and has no backslash', () => {
+    expect(isPageUrl('/swagger')).toBe(true);
+    expect(isPageUrl('/demos/procurement/about')).toBe(true);
+    expect(isPageUrl('https://dashboard.example.org')).toBe(true);
+    expect(isPageUrl('//evil.org')).toBe(false);
+    expect(isPageUrl('/\\evil.org')).toBe(false);
+    expect(isPageUrl('/a\\b')).toBe(false);
+    expect(merge(environment, { portfolio: { swaggerUrl: '/\\evil.org' } }).portfolio.swaggerUrl).toBe('/swagger');
+  });
+
+  it('the Aspire dashboard is called "Aspire dashboard", so a signed-in user does not see two "Dashboard" items', () => {
+    dashboardUrl('https://dashboard.example.org');
+    user.set({ permissions: TOM });
+    const all = labels(menu());
+    expect(all.filter((label) => label === 'Dashboard')).toHaveLength(1);
+    expect(all.at(-1)).toBe('Aspire dashboard');
   });
 });

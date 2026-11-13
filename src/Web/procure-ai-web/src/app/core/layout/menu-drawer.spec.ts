@@ -9,6 +9,7 @@ import { MenuDrawer } from './menu-drawer';
   imports: [MenuDrawer],
   template: `
     <button type="button" id="opener" (click)="open.set(true)">Menu</button>
+    <main id="main" tabindex="-1"></main>
     <app-menu-drawer [(open)]="open" />
   `,
 })
@@ -86,5 +87,28 @@ describe('MenuDrawer', () => {
     dialog.click();
     fixture.detectChanges();
     expect(fixture.componentInstance.open()).toBe(false);
+  });
+
+  it('closing because the window grew (the menu button is hidden then) sends focus to the page, not to the hidden button', async () => {
+    const fixture = TestBed.createComponent(Host);
+    document.body.appendChild(fixture.nativeElement);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const opener = el.querySelector<HTMLButtonElement>('#opener')!;
+    opener.focus();
+    opener.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    // What lg:hidden does to the menu button at 1024 px and wider; the frame closes the drawer on that resize.
+    opener.hidden = true;
+    opener.style.display = 'none';
+    fixture.componentInstance.open.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(document.activeElement).toBe(el.querySelector('#main'));
+    fixture.nativeElement.remove();
   });
 });

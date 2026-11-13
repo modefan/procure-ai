@@ -2,7 +2,7 @@ import { computed, inject, Service, Signal } from '@angular/core';
 import { ApprovalsStore } from '../../features/approvals/approvals.store';
 import { AuthStore } from '../auth/auth.store';
 import { AppConfigService, isPageUrl, PortfolioDemo } from '../config/app-config';
-import { SystemAvailability } from '../system/system-availability';
+import { SessionState } from './session-state';
 
 /** One entry of the left menu. A group heading (e.g. "Admin") has an empty url and only children. */
 export interface MenuItem {
@@ -55,19 +55,19 @@ const ADMIN_PAGES: AppPage[] = [
 
 /**
  * The left menu (the sidebar and the phone drawer show the same one): Welcome; the demos from `portfolio.demos`; "Under the hood" with
- * Swagger and the Aspire dashboard last. Signed in with the demo on, the procurement entry also lists the pages this user may open. It reads
+ * Swagger and the Aspire dashboard last (named so: the app has a Dashboard page too). Signed in with the demo on, the procurement entry also lists the pages this user may open. It reads
  * only signals the app already has (no call of its own), so it is the same while the demo is off, minus the signed-in pages.
  */
 @Service()
 export class Menu {
   private readonly config = inject(AppConfigService);
   private readonly auth = inject(AuthStore);
-  private readonly availability = inject(SystemAvailability);
+  private readonly session = inject(SessionState).active;
   private readonly approvals = inject(ApprovalsStore);
 
   readonly sections: Signal<MenuSection[]> = computed(() => {
     const { portfolio, observability } = this.config.config();
-    const session = this.auth.isLoggedIn() && !this.availability.disabled();
+    const session = this.session();
     const sections: MenuSection[] = [{ label: null, items: [{ label: 'Welcome', url: '/', external: false }] }];
 
     const demos = portfolio.demos.map((demo) => this.demoItem(demo, session));
@@ -81,7 +81,7 @@ export class Menu {
     }
     const dashboard = observability.dashboardUrl.trim();
     if (isPageUrl(dashboard)) {
-      tools.push({ label: 'Dashboard', url: dashboard, external: true });
+      tools.push({ label: 'Aspire dashboard', url: dashboard, external: true });
     }
     if (tools.length > 0) {
       sections.push({ label: 'Under the hood', items: tools });

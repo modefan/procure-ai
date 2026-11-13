@@ -47,7 +47,7 @@ export class Brand {
 
     <ng-template #entry let-item>
       @if (!item.url) {
-        <span class="side-group">{{ item.label }}</span>
+        <span class="side-group" [id]="groupId(item)">{{ item.label }}</span>
       } @else if (item.external) {
         <a class="side-link" [href]="item.url" [attr.target]="newTab(item) ? '_blank' : null" [attr.rel]="newTab(item) ? 'noopener noreferrer' : null">
           <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
@@ -72,7 +72,7 @@ export class Brand {
         </a>
       }
       @if (item.children?.length) {
-        <ul class="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-slate-200 pl-2">
+        <ul class="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-slate-200 pl-2" [attr.aria-labelledby]="item.url ? null : groupId(item)">
           @for (child of item.children; track child.label + child.url) {
             <li><ng-container *ngTemplateOutlet="entry; context: { $implicit: child }" /></li>
           }
@@ -87,6 +87,11 @@ export class MenuNav {
   /** Keeps the section heading ids unique when two navs are on the page. */
   readonly idPrefix = input('menu');
   protected readonly menu = inject(Menu);
+
+  /** The id of a group heading (an item without a url), which names its list of children. */
+  protected groupId(item: MenuItem): string {
+    return `${this.idPrefix()}-group-${item.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  }
 
   /** Another host (the Aspire dashboard, an external demo): a new tab. A path of this site (Swagger) loads in place. */
   protected newTab(item: MenuItem): boolean {
